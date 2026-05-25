@@ -1,6 +1,7 @@
 # Mobiler
 
 [![CI](https://github.com/mobiler/mobiler/actions/workflows/ci.yml/badge.svg)](https://github.com/mobiler/mobiler/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/mobiler.svg)](https://crates.io/crates/mobiler)
 
 > **React Native, but Rust + Compose.** Write your mobile app's logic *and* its UI in Rust, and render to real native widgets.
 
