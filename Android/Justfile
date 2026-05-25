@@ -1,0 +1,28 @@
+default: build
+
+# build the shared library so codegen can inspect it
+build-shared:
+    cargo build -p shared --features uniffi
+
+# generate Kotlin types and uniffi bindings into Android/generated/
+typegen: build-shared
+    RUST_LOG=info cargo run \
+        --package shared \
+        --bin codegen \
+        --features codegen,facet_typegen \
+        -- \
+            --language kotlin \
+            --output-dir generated
+
+# build the Android debug APK (regenerates types first)
+build: typegen
+    ./gradlew --no-daemon :app:assembleDebug
+
+# install on connected device/emulator
+install: build
+    ./gradlew --no-daemon :app:installDebug
+
+# remove all build artifacts
+clean:
+    ./gradlew --no-daemon clean
+    rm -rf generated

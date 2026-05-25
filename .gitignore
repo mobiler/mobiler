@@ -1,0 +1,21 @@
+/target
+**/*.rs.bk
+
+# Android
+/Android/.gradle/
+/Android/build/
+/Android/local.properties
+/Android/.idea/
+/Android/**/build/
+/Android/captures/
+/Android/generated/
+*.iml
+.kotlin/
+
+# Local Claude Code settings (per-machine)
+.claude/settings.local.json
+
+# Internal working notes — kept local, not published
+/idea.md
+/start.md
+/NOTES.md
