@@ -5,38 +5,75 @@
 //! ([`mobiler_ui`]). You never touch the wire protocol (`Action`, tokens) — the
 //! native shell stays generic and is built once for every app.
 //!
-//! ```ignore
-//! #[derive(Serialize, Deserialize)] enum Msg { Increment }
-//! #[derive(Default)] struct Model { count: i32 }
-//! #[derive(Default)] struct Counter;
-//! impl MobilerApp for Counter {
-//!     type Event = Msg;
-//!     type Model = Model;
-//!     fn update(&self, e: Msg, m: &mut Model) { match e { Msg::Increment => m.count += 1 } }
-//!     fn view(&self, m: &Model) -> Widget {
-//!         column(vec![text(format!("Count: {}", m.count)), button("＋", Msg::Increment)])
-//!     }
-//! }
-//! pub type App = MobilerShell<Counter>;
-//! ```
+//! Device APIs are **capabilities**: the core emits an [`Effect`], the shell
+//! fulfils it natively. The [`Effect::Plugin`] variant is an opaque envelope, so
+//! adding a plugin never changes the wire ABI — only the shell's native plugin
+//! registry. Use [`Cx::notify`] to fire a (result-less) plugin call.
 
 use std::marker::PhantomData;
 
 use crux_core::{
     App, Command,
+    capability::Operation,
     macros::effect,
     render::{RenderOperation, render},
 };
-use serde::{Serialize, de::DeserializeOwned};
+use facet::Facet;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{Action, InputValue, Widget};
 
-/// Built-in capabilities the generic shell can fulfil. (Just `Render` for now;
-/// device-API plugins extend this set — and need a custom shell build.)
+/// Built-in capabilities the generic shell can fulfil.
+///
+/// `Render` redraws the UI; `Plugin` is the **opaque extensibility point** —
+/// `{plugin, op, input}` is dispatched by name to a native plugin in the shell's
+/// registry. Because it's opaque, adding a plugin changes neither this enum nor
+/// the generated bindings: only native registration differs (free generic shell
+/// vs. custom build for premium plugins).
 #[effect(facet_typegen)]
 #[derive(Debug)]
 pub enum Effect {
     Render(RenderOperation),
+    Plugin(PluginOperation),
+}
+
+/// A call to a named native plugin. `input`/output are opaque (plugin-specific)
+/// JSON, keeping the wire ABI stable.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PluginOperation {
+    pub plugin: String,
+    pub op: String,
+    pub input: String,
+}
+
+/// The result of a plugin call (for request/response capabilities).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PluginResponse {
+    pub ok: bool,
+    pub output: String,
+}
+
+impl Operation for PluginOperation {
+    type Output = PluginResponse;
+}
+
+/// Effects an app requests during `update`. (Prototype: fire-and-forget plugin
+/// calls. Request/response — `cx.plugin(name, op, input, |resp| Msg)` returning
+/// the result as a typed event — is the next increment, via `request_from_shell`.)
+#[derive(Default)]
+pub struct Cx {
+    notifications: Vec<PluginOperation>,
+}
+
+impl Cx {
+    /// Fire-and-forget call to a native plugin (no result awaited).
+    pub fn notify(&mut self, plugin: impl Into<String>, op: impl Into<String>, input: impl Into<String>) {
+        self.notifications.push(PluginOperation {
+            plugin: plugin.into(),
+            op: op.into(),
+            input: input.into(),
+        });
+    }
 }
 
 /// What a Mobiler app implements. Write typed domain events; Mobiler serializes
@@ -47,11 +84,10 @@ pub trait MobilerApp: Default {
     /// Your app state.
     type Model: Default;
 
-    /// Handle a domain event (fired by a button, etc.).
-    fn update(&self, event: Self::Event, model: &mut Self::Model);
+    /// Handle a domain event. Use `cx` to call device-API plugins.
+    fn update(&self, event: Self::Event, model: &mut Self::Model, cx: &mut Cx);
 
-    /// Handle an input-widget change (text field / switch / slider), routed by
-    /// the widget's `id`. Defaults to ignoring it.
+    /// Handle an input-widget change (text field / switch / slider), by `id`.
     fn input(&self, id: &str, value: InputValue, model: &mut Self::Model) {
         let _ = (id, value, model);
     }
@@ -61,7 +97,6 @@ pub trait MobilerApp: Default {
 }
 
 /// Crux adapter: turns a [`MobilerApp`] into an app that speaks the fixed ABI.
-/// Target `MobilerShell<YourApp>` from your FFI/codegen.
 pub struct MobilerShell<A>(PhantomData<fn() -> A>);
 
 impl<A> Default for MobilerShell<A> {
@@ -78,18 +113,24 @@ impl<A: MobilerApp> App for MobilerShell<A> {
 
     fn update(&self, action: Action, model: &mut Self::Model) -> Command<Effect, Action> {
         let app = A::default();
+        let mut cx = Cx::default();
         match action {
             Action::Fired { token } => {
-                // Decode the opaque token back into a typed domain event.
-                // Unknown/foreign tokens are ignored — that tolerance is exactly
-                // what lets one shell run any app.
                 if let Ok(event) = serde_json::from_str::<A::Event>(&token) {
-                    app.update(event, model);
+                    app.update(event, model, &mut cx);
                 }
             }
             Action::Input { id, value } => app.input(&id, value, model),
         }
-        render()
+        // Each requested plugin call becomes a fire-and-forget shell notification;
+        // always re-render afterwards.
+        let mut commands: Vec<Command<Effect, Action>> = cx
+            .notifications
+            .into_iter()
+            .map(|op| Command::notify_shell(op).build())
+            .collect();
+        commands.push(render());
+        Command::all(commands)
     }
 
     fn view(&self, model: &Self::Model) -> Widget {

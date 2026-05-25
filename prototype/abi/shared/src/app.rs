@@ -1,4 +1,4 @@
-use mobiler_core::{InputValue, MobilerApp, MobilerShell, Widget, button, column, text, text_field};
+use mobiler_core::{Cx, InputValue, MobilerApp, MobilerShell, Widget, button, column, text, text_field};
 use serde::{Deserialize, Serialize};
 
 /// The app's typed domain events. Mobiler serializes these into opaque tokens
@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
     Increment,
+    Greet,
+    TryMissing,
 }
 
 #[derive(Default)]
@@ -21,9 +23,20 @@ impl MobilerApp for Counter {
     type Event = Msg;
     type Model = Model;
 
-    fn update(&self, event: Msg, model: &mut Model) {
+    fn update(&self, event: Msg, model: &mut Model, cx: &mut Cx) {
         match event {
             Msg::Increment => model.count += 1,
+            // A device-API capability call. The shell's "toast" plugin shows it.
+            Msg::Greet => {
+                let who = if model.name.is_empty() {
+                    "there".to_string()
+                } else {
+                    model.name.clone()
+                };
+                cx.notify("toast", "show", format!("Hello, {who}! 👋"));
+            }
+            // A plugin the generic shell doesn't bundle → graceful no-op + log.
+            Msg::TryMissing => cx.notify("confetti", "burst", ""),
         }
     }
 
@@ -46,6 +59,8 @@ impl MobilerApp for Counter {
             button("Increment", Msg::Increment),
             text_field("name", "Your name", model.name.clone()),
             text(greeting),
+            button("Say hello (toast plugin)", Msg::Greet),
+            button("Try a missing plugin", Msg::TryMissing),
         ])
     }
 }
@@ -62,7 +77,8 @@ mod test {
     fn increment_via_typed_event() {
         let app = Counter;
         let mut model = Model::default();
-        app.update(Msg::Increment, &mut model);
+        let mut cx = Cx::default();
+        app.update(Msg::Increment, &mut model, &mut cx);
         assert_eq!(model.count, 1);
     }
 
