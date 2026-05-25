@@ -22,11 +22,11 @@ and a codegen helper for adding new widgets.
 | Path | What |
 |------|------|
 | `mobiler/` | The `mobiler` CLI (crate + embedded `templates/` scaffold) |
-| `shared/` | Crux core for the showcase demo app (a todo / projects app) |
-| `Android/` | The generic Compose shell that renders the showcase |
+| `demos/todo/` | Showcase demo app (a todo / projects app) — a standalone Mobiler project with its own Cargo workspace, just like `mobiler new` produces |
 
-> This is currently a **monorepo**. The demo (`shared/` + `Android/`) will be moved
-> under `demos/` and may later be extracted into its own repository.
+> **Monorepo** for now. Each demo under `demos/` is a self-contained project (its own
+> workspace, not a member of the CLI's), so any of them can later be extracted into
+> its own repository.
 
 ## Quick start
 
