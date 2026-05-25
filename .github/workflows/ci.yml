@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-clippy:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The mobiler CLI (root workspace)
+          - name: cli
+            dir: "."
+          # The showcase demo — its own standalone workspace
+          - name: demo-todo
+            dir: demos/todo
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs the toolchain + components + targets pinned by rust-toolchain.toml
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.dir }}
+
+      # Non-gating: pedantic warnings are surfaced in the log but do not fail the
+      # build. clippy still fails on errors / failed compilation.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
