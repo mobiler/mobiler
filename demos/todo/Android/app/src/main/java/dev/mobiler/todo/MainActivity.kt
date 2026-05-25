@@ -1,4 +1,4 @@
-package dev.mobiler.coffee
+package dev.mobiler.todo
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -69,20 +69,20 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
-import dev.mobiler.coffee.ui.theme.CoffeeTheme
-import dev.mobiler.coffee.shared.types.Action
-import dev.mobiler.coffee.shared.types.BoxAlign
-import dev.mobiler.coffee.shared.types.ButtonStyle
-import dev.mobiler.coffee.shared.types.CardStyle
-import dev.mobiler.coffee.shared.types.Icon as WidgetIcon
-import dev.mobiler.coffee.shared.types.ImageRatio
-import dev.mobiler.coffee.shared.types.ImageShape
-import dev.mobiler.coffee.shared.types.InputValue
-import dev.mobiler.coffee.shared.types.ProjectColor
-import dev.mobiler.coffee.shared.types.Spacing
-import dev.mobiler.coffee.shared.types.TextStyle as ModelTextStyle
-import dev.mobiler.coffee.shared.types.Tone
-import dev.mobiler.coffee.shared.types.Widget
+import dev.mobiler.todo.ui.theme.TodoTheme
+import dev.mobiler.todo.shared.types.Action
+import dev.mobiler.todo.shared.types.BoxAlign
+import dev.mobiler.todo.shared.types.ButtonStyle
+import dev.mobiler.todo.shared.types.CardStyle
+import dev.mobiler.todo.shared.types.Icon as WidgetIcon
+import dev.mobiler.todo.shared.types.ImageRatio
+import dev.mobiler.todo.shared.types.ImageShape
+import dev.mobiler.todo.shared.types.InputValue
+import dev.mobiler.todo.shared.types.ProjectColor
+import dev.mobiler.todo.shared.types.Spacing
+import dev.mobiler.todo.shared.types.TextStyle as ModelTextStyle
+import dev.mobiler.todo.shared.types.Tone
+import dev.mobiler.todo.shared.types.Widget
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,7 +97,7 @@ fun App(core: Core = viewModel()) {
     val view = core.view
     // Theme is data: a Scaffold carries dark_mode, decided by the Rust core.
     val dark = (view as? Widget.Scaffold)?.darkMode ?: isSystemInDarkTheme()
-    CoffeeTheme(darkTheme = dark) {
+    TodoTheme(darkTheme = dark) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (view is Widget.Scaffold) {
                 // Scaffold provides its own bars + scrollable body.

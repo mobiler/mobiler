@@ -3,11 +3,11 @@ use crux_core::{
     bridge::{Bridge, EffectId},
 };
 
-use crate::{Counter, Event, app::snapshot_buffer};
+use crate::App;
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct CoreFFI {
-    core: Bridge<Counter>,
+    core: Bridge<App>,
 }
 
 impl Default for CoreFFI {
@@ -60,28 +60,5 @@ impl CoreFFI {
             Ok(()) => view_model,
             Err(e) => panic!("{e}"),
         }
-    }
-
-    /// Bincode-serialized snapshot of the current Model.
-    /// The shell persists this and feeds it back via `import_state` on relaunch.
-    /// Returns an empty Vec if no update has run yet (e.g. fresh app, before any event).
-    #[must_use]
-    pub fn export_state(&self) -> Vec<u8> {
-        snapshot_buffer().lock().unwrap().clone()
-    }
-
-    /// Restore Model from a previously-exported snapshot. Returns false on schema
-    /// mismatch (e.g. saved state from an older app version); shell should treat
-    /// that as "no saved state" and continue with the default Model.
-    pub fn import_state(&self, data: &[u8]) -> bool {
-        // Bridge owns the model, so we can't replace it directly. Route through
-        // a synthetic Event::LoadFromSnapshot that the Counter::update handler knows
-        // how to apply.
-        let event = Event::LoadFromSnapshot(data.to_vec());
-        let Ok(event_bytes) = bincode::serialize(&event) else {
-            return false;
-        };
-        let mut effects = Vec::new();
-        self.core.update(&event_bytes, &mut effects).is_ok()
     }
 }

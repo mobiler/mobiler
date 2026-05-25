@@ -87,7 +87,7 @@ impl MobilerApp for Coffee {
         }
     }
 
-    fn input(&self, id: &str, value: InputValue, model: &mut Model) {
+    fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
         if id == "sweetness" {
             if let InputValue::Int(v) = value {
                 model.sweetness = v as i32;
@@ -174,7 +174,7 @@ mod test {
         app.update(Msg::IncQty, &mut model, &mut Cx::default());
         app.update(Msg::IncQty, &mut model, &mut Cx::default());
         assert_eq!(model.quantity, 3);
-        app.input("sweetness", InputValue::Int(80), &mut model);
+        app.input("sweetness", InputValue::Int(80), &mut model, &mut Cx::default());
         assert_eq!(model.sweetness, 80);
         app.update(Msg::CloseProduct, &mut model, &mut Cx::default());
         assert!(model.open_product.is_none());

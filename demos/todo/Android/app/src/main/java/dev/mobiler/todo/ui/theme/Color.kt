@@ -1,4 +1,4 @@
-package dev.mobiler.app.ui.theme
+package dev.mobiler.todo.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

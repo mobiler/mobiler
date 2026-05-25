@@ -162,7 +162,17 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
-        ) { widget.children.forEach { Render(it, send) } }
+        ) {
+            // Let greedy inputs (which fill width) share the row with trailing
+            // controls (buttons/chips/icons) instead of pushing them off-screen.
+            widget.children.forEach { child ->
+                when (child) {
+                    is Widget.TextField, is Widget.Checkbox, is Widget.Column ->
+                        Box(modifier = Modifier.weight(1f)) { Render(child, send) }
+                    else -> Render(child, send)
+                }
+            }
+        }
 
         is Widget.Column -> Column(
             modifier = Modifier.fillMaxWidth(),

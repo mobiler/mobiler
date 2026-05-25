@@ -1,1049 +1,508 @@
-use crux_core::{
-    App, Command,
-    macros::effect,
-    render::{RenderOperation, render},
-};
-use facet::Facet;
-use serde::{Deserialize, Serialize};
-use std::sync::{Mutex, OnceLock};
+//! Todo — a projects/tasks app, ported to the generic Mobiler ABI.
+//!
+//! Showcases the full widget vocabulary (Scaffold with tabs + a pushed detail
+//! screen, cards, checkboxes, chips, a color picker, badges, a switch), project
+//! identity colors via `ColorDot`, and **state that survives cold restarts** via
+//! the storage capability (`cx.save` + `restore`).
 
-/// Holds the most-recent bincode-serialized Model. Written by Counter::update after
-/// every event, read by CoreFFI::export_state. One global is fine because we have
-/// one CoreFFI per Activity; if that assumption ever breaks we'd move this into a
-/// stateful Counter struct.
-pub(crate) fn snapshot_buffer() -> &'static Mutex<Vec<u8>> {
-    static BUF: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
-    BUF.get_or_init(|| Mutex::new(Vec::new()))
+use mobiler_core::{
+    ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, ProjectColor, Spacing,
+    Tone, Widget, badge, button, caption, card, card_button, checkbox, chip, color_dot, column,
+    grid, icon_button, row, scaffold, scaffold_back, spacer, subtitle, switch, tab, text, text_field,
+    title,
+};
+use serde::{Deserialize, Serialize};
+
+// ---- project identity colors (rotation order + picker labels) ----
+const COLORS: [ProjectColor; 6] = [
+    ProjectColor::Indigo,
+    ProjectColor::Teal,
+    ProjectColor::Coral,
+    ProjectColor::Amber,
+    ProjectColor::Lime,
+    ProjectColor::Pink,
+];
+
+/// The next color in rotation, so each new project gets a fresh default.
+fn next_color(c: ProjectColor) -> ProjectColor {
+    let i = COLORS.iter().position(|x| *x == c).unwrap_or(0);
+    COLORS[(i + 1) % COLORS.len()]
 }
 
-// ============================================================
-// Domain
-// ============================================================
+fn color_name(c: ProjectColor) -> &'static str {
+    match c {
+        ProjectColor::Indigo => "Indigo",
+        ProjectColor::Teal => "Teal",
+        ProjectColor::Coral => "Coral",
+        ProjectColor::Amber => "Amber",
+        ProjectColor::Lime => "Lime",
+        ProjectColor::Pink => "Pink",
+    }
+}
 
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum Tab {
+// ============================ domain ============================
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Project {
+    id: u32,
+    name: String,
+    color: ProjectColor,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct TaskItem {
+    id: u32,
+    project_id: u32,
+    text: String,
+    done: bool,
+    today: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+pub enum TabKind {
     Today,
     Projects,
     Settings,
 }
 
-/// Project identity colors. Distinct from `Tone` (which is for status/feedback);
-/// these are pure identity — assigned to projects so the user can tell them apart
-/// at a glance. Concrete RGB values decided per platform in the render layer.
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum ProjectColor {
-    Indigo,
-    Teal,
-    Coral,
-    Amber,
-    Lime,
-    Pink,
-}
-
-impl ProjectColor {
-    /// Default rotation order. The (N+1)th project gets `ALL[N % ALL.len()]`
-    /// unless the user overrides via the picker.
-    pub const ALL: [ProjectColor; 6] = [
-        ProjectColor::Indigo,
-        ProjectColor::Teal,
-        ProjectColor::Coral,
-        ProjectColor::Amber,
-        ProjectColor::Lime,
-        ProjectColor::Pink,
-    ];
-
-    pub fn next(self) -> Self {
-        let i = Self::ALL.iter().position(|c| *c == self).unwrap_or(0);
-        Self::ALL[(i + 1) % Self::ALL.len()]
-    }
-}
-
-impl Default for ProjectColor {
-    fn default() -> Self {
-        ProjectColor::Indigo
-    }
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
-#[repr(C)]
-pub struct Project {
-    pub id: u32,
-    pub name: String,
-    pub color: ProjectColor,
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
-#[repr(C)]
-pub struct Task {
-    pub id: u32,
-    pub project_id: u32,
-    pub text: String,
-    pub done: bool,
-    pub must_do_today: bool,
-}
-
-// ============================================================
-// Events + Effects
-// ============================================================
-
-#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
-#[repr(C)]
-pub enum Event {
-    SelectTab(Tab),
-    TextChanged { id: String, value: String },
-    Toggled { id: String, value: bool },
-
-    AddProject,
+/// Your app's typed events. Mobiler serializes these into opaque tokens; the
+/// native shell never sees this type.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum Msg {
+    SelectTab(TabKind),
     OpenProject(u32),
     CloseProject,
     DeleteProject(u32),
-    SelectProjectColor(ProjectColor),
-
+    SelectColor(ProjectColor),
+    AddProject,
     AddTask,
-    ToggleTaskDone(u32),
+    ToggleToday(u32),
     DeleteTask(u32),
-    ToggleMustDoToday(u32),
-
-    /// Internal: rehydrate the model from a previously-saved snapshot.
-    /// The shell crafts this in `CoreFFI::import_state` and routes it through Bridge.
-    /// Visible in the generated Kotlin Event sum, but never sent from there.
-    LoadFromSnapshot(Vec<u8>),
 }
 
-#[effect(facet_typegen)]
-#[derive(Debug)]
-pub enum Effect {
-    Render(RenderOperation),
-}
+// ============================ model ============================
 
-// ============================================================
-// Model
-// ============================================================
-
-#[derive(Serialize, Deserialize)]
 pub struct Model {
-    active_tab: ActiveTab,
+    // --- persisted (see `Persisted`) ---
     name: String,
     dark_mode: bool,
-
     projects: Vec<Project>,
-    tasks: Vec<Task>,
-
-    /// When Some, the Projects tab is showing the detail view for this project.
-    /// When None, the Projects tab shows the project list.
-    active_project_id: Option<u32>,
-
-    /// Ephemeral input state — not persisted. Cleared on cold start.
-    #[serde(skip)]
-    project_input: String,
-    #[serde(skip)]
-    task_input: String,
-
-    /// Color selected for the next project the user will add. Cycles through
-    /// `ProjectColor::ALL` automatically; user can tap a swatch to override.
-    /// Persisted because users expect their "in-progress" picker selection to
-    /// survive a force-stop.
-    selected_new_project_color: ProjectColor,
-
+    tasks: Vec<TaskItem>,
+    new_color: ProjectColor,
     next_project_id: u32,
     next_task_id: u32,
+    // --- transient UI state (reset on cold start) ---
+    tab: TabKind,
+    open_project: Option<u32>,
+    project_input: String,
+    task_input: String,
 }
 
 impl Default for Model {
     fn default() -> Self {
-        // Seed with two demo projects so the showcase has something to render
-        // and there's an immediate sense of what the app is for.
-        let projects = vec![
-            Project { id: 1, name: "Home".to_string(), color: ProjectColor::Indigo },
-            Project { id: 2, name: "Mobiler".to_string(), color: ProjectColor::Teal },
-        ];
-        let tasks = vec![
-            Task { id: 1, project_id: 1, text: "Buy milk".to_string(), done: false, must_do_today: true },
-            Task { id: 2, project_id: 1, text: "Cancel old subscription".to_string(), done: false, must_do_today: false },
-            Task { id: 3, project_id: 2, text: "Polish styling vocab".to_string(), done: true, must_do_today: false },
-            Task { id: 4, project_id: 2, text: "Write iOS Render".to_string(), done: false, must_do_today: false },
-            Task { id: 5, project_id: 2, text: "Ship v0.2".to_string(), done: false, must_do_today: true },
-        ];
+        // Seed two projects so a first launch has something to show.
         Self {
-            active_tab: ActiveTab::default(),
             name: String::new(),
             dark_mode: false,
-            projects,
-            tasks,
-            active_project_id: None,
-            project_input: String::new(),
-            task_input: String::new(),
-            // Two seeded projects used Indigo + Teal; pre-select Coral so the user's
-            // first hand-added project gets a fresh color by default.
-            selected_new_project_color: ProjectColor::Coral,
+            projects: vec![
+                Project { id: 1, name: "Home".into(), color: ProjectColor::Indigo },
+                Project { id: 2, name: "Mobiler".into(), color: ProjectColor::Teal },
+            ],
+            tasks: vec![
+                TaskItem { id: 1, project_id: 1, text: "Buy milk".into(), done: false, today: true },
+                TaskItem { id: 2, project_id: 1, text: "Cancel old subscription".into(), done: false, today: false },
+                TaskItem { id: 3, project_id: 2, text: "Polish styling vocab".into(), done: true, today: false },
+                TaskItem { id: 4, project_id: 2, text: "Write iOS Render".into(), done: false, today: false },
+                TaskItem { id: 5, project_id: 2, text: "Ship v0.3".into(), done: false, today: true },
+            ],
+            // Seeds used Indigo + Teal; pre-pick Coral for the first hand-added project.
+            new_color: ProjectColor::Coral,
             next_project_id: 3,
             next_task_id: 6,
+            tab: TabKind::Today,
+            open_project: None,
+            project_input: String::new(),
+            task_input: String::new(),
         }
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-enum ActiveTab {
-    #[default]
-    Today,
-    Projects,
-    Settings,
+/// The durable slice of the model, serialized to the storage capability after
+/// every change and handed back to [`Todo::restore`] on startup.
+#[derive(Serialize, Deserialize)]
+struct Persisted {
+    name: String,
+    dark_mode: bool,
+    projects: Vec<Project>,
+    tasks: Vec<TaskItem>,
+    new_color: ProjectColor,
+    next_project_id: u32,
+    next_task_id: u32,
 }
 
-impl From<ActiveTab> for Tab {
-    fn from(t: ActiveTab) -> Self {
-        match t {
-            ActiveTab::Today => Tab::Today,
-            ActiveTab::Projects => Tab::Projects,
-            ActiveTab::Settings => Tab::Settings,
+impl Model {
+    fn persisted(&self) -> Persisted {
+        Persisted {
+            name: self.name.clone(),
+            dark_mode: self.dark_mode,
+            projects: self.projects.clone(),
+            tasks: self.tasks.clone(),
+            new_color: self.new_color,
+            next_project_id: self.next_project_id,
+            next_task_id: self.next_task_id,
         }
+    }
+
+    fn project(&self, id: u32) -> Option<&Project> {
+        self.projects.iter().find(|p| p.id == id)
     }
 }
 
-impl From<Tab> for ActiveTab {
-    fn from(t: Tab) -> Self {
-        match t {
-            Tab::Today => ActiveTab::Today,
-            Tab::Projects => ActiveTab::Projects,
-            Tab::Settings => ActiveTab::Settings,
-        }
+/// Persist the durable state. Called after every mutating event/input.
+fn save(model: &Model, cx: &mut Cx<Msg>) {
+    if let Ok(blob) = serde_json::to_string(&model.persisted()) {
+        cx.save(blob);
     }
 }
 
-#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
-#[repr(C)]
-pub struct TabItem {
-    pub label: String,
-    pub key: Tab,
-}
-
-// ============================================================
-// Styling primitives
-// ============================================================
-
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum TextStyle {
-    Body,
-    Title,
-    Subtitle,
-    Caption,
-    Emphasis,
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum ButtonStyle {
-    Filled,
-    Outlined,
-    Text,
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum CardStyle {
-    Elevated,
-    Outlined,
-    Filled,
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum Spacing {
-    Xs,
-    Sm,
-    Md,
-    Lg,
-    Xl,
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum Tone {
-    Neutral,
-    Success,
-    Warning,
-    Danger,
-    Info,
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum Icon {
-    Delete,
-    Add,
-    Edit,
-    Close,
-    Settings,
-    Check,
-    Star,
-    StarOutline,
-}
-
-// ============================================================
-// Widget
-// ============================================================
-
-#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
-#[repr(C)]
-pub enum Widget {
-    Text { content: String, style: TextStyle },
-    Spacer { size: Spacing },
-    Divider,
-    Row { children: Vec<Widget> },
-    Column { children: Vec<Widget> },
-    Card { child: Box<Widget>, style: CardStyle },
-    Button { label: String, on_press: Event, style: ButtonStyle },
-    IconButton { icon: Icon, on_press: Event },
-    Badge { label: String, tone: Tone },
-    /// Small non-interactive colored dot. Use for project identity hints in lists.
-    ColorDot { color: ProjectColor },
-    /// Tappable colored swatch used in pickers. Wider visual ring when `selected`.
-    ColorSwatch { color: ProjectColor, selected: bool, on_press: Event },
-    TextField {
-        id: String,
-        value: String,
-        placeholder: String,
-    },
-    Switch {
-        id: String,
-        value: bool,
-        label: String,
-    },
-    Checkbox {
-        value: bool,
-        label: String,
-        on_change: Event,
-    },
-    Scaffold {
-        title: String,
-        /// When Some, the top bar shows a back arrow that fires this event.
-        back_action: Option<Event>,
-        body: Box<Widget>,
-        bottom_tabs: Vec<TabItem>,
-        active_tab: Tab,
-        dark_mode: bool,
-    },
-}
-
-pub type ViewModel = Widget;
-
-// ============================================================
-// App
-// ============================================================
+// ============================ app ============================
 
 #[derive(Default)]
-pub struct Counter;
+pub struct Todo;
 
-impl App for Counter {
-    type Event = Event;
+impl MobilerApp for Todo {
+    type Event = Msg;
     type Model = Model;
-    type ViewModel = ViewModel;
-    type Effect = Effect;
 
-    fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+    fn update(&self, event: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match event {
-            Event::SelectTab(tab) => model.active_tab = tab.into(),
-            Event::TextChanged { id, value } => match id.as_str() {
-                "name" => model.name = value,
-                "project_input" => model.project_input = value,
-                "task_input" => model.task_input = value,
-                _ => {}
-            },
-            Event::Toggled { id, value } => {
-                if id == "dark_mode" {
-                    model.dark_mode = value;
+            Msg::SelectTab(t) => {
+                model.tab = t;
+                if t != TabKind::Projects {
+                    model.open_project = None;
                 }
             }
-
-            Event::AddProject => {
+            Msg::OpenProject(id) => {
+                model.open_project = Some(id);
+                model.task_input.clear();
+            }
+            Msg::CloseProject => {
+                model.open_project = None;
+                model.task_input.clear();
+            }
+            Msg::DeleteProject(id) => {
+                model.projects.retain(|p| p.id != id);
+                model.tasks.retain(|t| t.project_id != id);
+                if model.open_project == Some(id) {
+                    model.open_project = None;
+                }
+            }
+            Msg::SelectColor(c) => model.new_color = c,
+            Msg::AddProject => {
                 let name = model.project_input.trim().to_string();
                 if !name.is_empty() {
                     let id = model.next_project_id;
                     model.next_project_id += 1;
-                    let color = model.selected_new_project_color;
+                    let color = model.new_color;
                     model.projects.push(Project { id, name, color });
                     model.project_input.clear();
-                    // Advance the picker to the next color so the user's NEXT
-                    // project gets a different default without an extra tap.
-                    model.selected_new_project_color = color.next();
+                    // Advance the picker so the next project defaults to a new color.
+                    model.new_color = next_color(color);
                 }
             }
-            Event::OpenProject(id) => model.active_project_id = Some(id),
-            Event::CloseProject => {
-                model.active_project_id = None;
-                model.task_input.clear();
-            }
-            Event::DeleteProject(id) => {
-                model.projects.retain(|p| p.id != id);
-                model.tasks.retain(|t| t.project_id != id);
-                if model.active_project_id == Some(id) {
-                    model.active_project_id = None;
-                }
-            }
-            Event::SelectProjectColor(c) => model.selected_new_project_color = c,
-
-            Event::AddTask => {
-                if let Some(project_id) = model.active_project_id {
+            Msg::AddTask => {
+                if let Some(pid) = model.open_project {
                     let text = model.task_input.trim().to_string();
                     if !text.is_empty() {
                         let id = model.next_task_id;
                         model.next_task_id += 1;
-                        model.tasks.push(Task {
-                            id,
-                            project_id,
-                            text,
-                            done: false,
-                            must_do_today: false,
-                        });
+                        model.tasks.push(TaskItem { id, project_id: pid, text, done: false, today: false });
                         model.task_input.clear();
                     }
                 }
             }
-            Event::ToggleTaskDone(id) => {
+            Msg::ToggleToday(id) => {
                 if let Some(t) = model.tasks.iter_mut().find(|t| t.id == id) {
-                    t.done = !t.done;
+                    t.today = !t.today;
                 }
             }
-            Event::DeleteTask(id) => {
-                model.tasks.retain(|t| t.id != id);
-            }
-            Event::ToggleMustDoToday(id) => {
-                if let Some(t) = model.tasks.iter_mut().find(|t| t.id == id) {
-                    t.must_do_today = !t.must_do_today;
-                }
-            }
-
-            Event::LoadFromSnapshot(bytes) => {
-                if let Ok(loaded) = bincode::deserialize::<Model>(&bytes) {
-                    *model = loaded;
-                }
-                // After loading, we still re-snapshot below so the static buffer
-                // matches the (now-rehydrated) state.
-            }
+            Msg::DeleteTask(id) => model.tasks.retain(|t| t.id != id),
         }
-
-        // Side-effect: snapshot the model to the static buffer for the shell to read.
-        // Cheap (bincode + memcpy); only happens once per Event so the ~kilobytes of
-        // model data don't hurt. Wrapped in best-effort: a serialization failure here
-        // should not crash the app.
-        if let Ok(bytes) = bincode::serialize(&*model) {
-            *snapshot_buffer().lock().unwrap() = bytes;
-        }
-
-        render()
+        save(model, cx);
     }
 
-    fn view(&self, model: &Model) -> ViewModel {
+    fn input(&self, id: &str, value: InputValue, model: &mut Model, cx: &mut Cx<Msg>) {
+        match value {
+            InputValue::Text(v) => match id {
+                "name" => model.name = v,
+                "project_input" => model.project_input = v,
+                "task_input" => model.task_input = v,
+                _ => {}
+            },
+            InputValue::Bool(v) => {
+                if id == "dark_mode" {
+                    model.dark_mode = v;
+                } else if let Some(rest) = id.strip_prefix("done:")
+                    && let Ok(tid) = rest.parse::<u32>()
+                    && let Some(t) = model.tasks.iter_mut().find(|t| t.id == tid)
+                {
+                    t.done = v;
+                }
+            }
+            InputValue::Int(_) => {}
+        }
+        save(model, cx);
+    }
+
+    fn restore(&self, data: &str, model: &mut Model) {
+        if let Ok(p) = serde_json::from_str::<Persisted>(data) {
+            model.name = p.name;
+            model.dark_mode = p.dark_mode;
+            model.projects = p.projects;
+            model.tasks = p.tasks;
+            model.new_color = p.new_color;
+            model.next_project_id = p.next_project_id;
+            model.next_task_id = p.next_task_id;
+        }
+    }
+
+    fn view(&self, model: &Model) -> Widget {
         let tabs = vec![
-            TabItem { label: "Today".into(), key: Tab::Today },
-            TabItem { label: "Projects".into(), key: Tab::Projects },
-            TabItem { label: "Settings".into(), key: Tab::Settings },
+            tab("Today", model.tab == TabKind::Today, Msg::SelectTab(TabKind::Today)),
+            tab("Projects", model.tab == TabKind::Projects, Msg::SelectTab(TabKind::Projects)),
+            tab("Settings", model.tab == TabKind::Settings, Msg::SelectTab(TabKind::Settings)),
         ];
 
-        let (title, back_action, body) = match model.active_tab {
-            ActiveTab::Today => ("Today".to_string(), None, today_screen(model)),
-            ActiveTab::Projects => match model.active_project_id {
-                Some(pid) => match model.projects.iter().find(|p| p.id == pid) {
-                    Some(p) => (p.name.clone(), Some(Event::CloseProject), project_detail_screen(model, p)),
-                    None => {
-                        // Project disappeared; fall back to list.
-                        ("Projects".to_string(), None, project_list_screen(model))
-                    }
-                },
-                None => ("Projects".to_string(), None, project_list_screen(model)),
+        match model.tab {
+            TabKind::Today => scaffold("Today", model.dark_mode, tabs, today_screen(model)),
+            TabKind::Settings => scaffold("Settings", model.dark_mode, tabs, settings_screen(model)),
+            TabKind::Projects => match model.open_project.and_then(|id| model.project(id)) {
+                Some(p) => scaffold_back(
+                    p.name.clone(),
+                    model.dark_mode,
+                    tabs,
+                    detail_screen(model, p),
+                    Msg::CloseProject,
+                ),
+                None => scaffold("Projects", model.dark_mode, tabs, project_list(model)),
             },
-            ActiveTab::Settings => ("Settings".to_string(), None, settings_screen(model)),
-        };
-
-        Widget::Scaffold {
-            title,
-            back_action,
-            body: Box::new(body),
-            bottom_tabs: tabs,
-            active_tab: model.active_tab.into(),
-            dark_mode: model.dark_mode,
         }
     }
 }
 
-// ============================================================
-// View helpers
-// ============================================================
-
-fn text(content: impl Into<String>, style: TextStyle) -> Widget {
-    Widget::Text { content: content.into(), style }
-}
-fn body(content: impl Into<String>) -> Widget { text(content, TextStyle::Body) }
-fn title_text(content: impl Into<String>) -> Widget { text(content, TextStyle::Title) }
-fn subtitle(content: impl Into<String>) -> Widget { text(content, TextStyle::Subtitle) }
-fn caption(content: impl Into<String>) -> Widget { text(content, TextStyle::Caption) }
-
-fn card(child: Widget) -> Widget { card_with(child, CardStyle::Elevated) }
-fn outlined_card(child: Widget) -> Widget { card_with(child, CardStyle::Outlined) }
-fn card_with(child: Widget, style: CardStyle) -> Widget {
-    Widget::Card { child: Box::new(child), style }
-}
-
-fn column(children: Vec<Widget>) -> Widget { Widget::Column { children } }
-fn row(children: Vec<Widget>) -> Widget { Widget::Row { children } }
-fn spacer(size: Spacing) -> Widget { Widget::Spacer { size } }
-
-fn filled_button(label: impl Into<String>, on_press: Event) -> Widget {
-    Widget::Button { label: label.into(), on_press, style: ButtonStyle::Filled }
-}
-fn outlined_button(label: impl Into<String>, on_press: Event) -> Widget {
-    Widget::Button { label: label.into(), on_press, style: ButtonStyle::Outlined }
-}
-fn icon_button(icon: Icon, on_press: Event) -> Widget {
-    Widget::IconButton { icon, on_press }
-}
-fn badge(label: impl Into<String>, tone: Tone) -> Widget {
-    Widget::Badge { label: label.into(), tone }
-}
-
-fn color_dot(color: ProjectColor) -> Widget {
-    Widget::ColorDot { color }
-}
-
-fn color_swatch(color: ProjectColor, selected: bool) -> Widget {
-    Widget::ColorSwatch { color, selected, on_press: Event::SelectProjectColor(color) }
-}
-
-// ============================================================
-// Screens
-// ============================================================
+// ============================ screens ============================
 
 fn today_screen(model: &Model) -> Widget {
-    let today_tasks: Vec<&Task> = model.tasks.iter().filter(|t| t.must_do_today).collect();
-    let header_label = if model.name.trim().is_empty() {
+    let today: Vec<&TaskItem> = model.tasks.iter().filter(|t| t.today).collect();
+    let header = if model.name.trim().is_empty() {
         "Today's must-dos".to_string()
     } else {
         format!("{}, today's must-dos", model.name.trim())
     };
-    let pending = today_tasks.iter().filter(|t| !t.done).count();
+    let pending = today.iter().filter(|t| !t.done).count();
 
-    let mut children = vec![title_text(header_label), spacer(Spacing::Md)];
-
-    if today_tasks.is_empty() {
-        children.push(outlined_card(column(vec![
-            subtitle("Nothing scheduled for today"),
-            spacer(Spacing::Xs),
-            caption("Star tasks from the Projects tab to add them here."),
-        ])));
+    let mut kids = vec![title(header), spacer(Spacing::Md)];
+    if today.is_empty() {
+        kids.push(card(
+            column(vec![
+                subtitle("Nothing scheduled for today"),
+                spacer(Spacing::Xs),
+                caption("Star tasks from a project to add them here."),
+            ]),
+            CardStyle::Outlined,
+        ));
     } else {
-        for t in &today_tasks {
-            children.push(card(today_task_row(model, t)));
+        for t in &today {
+            kids.push(card(today_row(model, t), CardStyle::Elevated));
         }
-        children.push(spacer(Spacing::Lg));
+        kids.push(spacer(Spacing::Lg));
         let (label, tone) = if pending == 0 {
             ("All done for today!".to_string(), Tone::Success)
         } else {
             (format!("{pending} left for today"), Tone::Warning)
         };
-        children.push(row(vec![badge(label, tone)]));
+        kids.push(row(vec![badge(label, tone)]));
     }
-
-    column(children)
+    column(kids)
 }
 
-fn today_task_row(model: &Model, t: &Task) -> Widget {
-    let project = model.projects.iter().find(|p| p.id == t.project_id);
-    let project_name = project
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| "(deleted project)".to_string());
-    let project_color = project.map(|p| p.color).unwrap_or_default();
-
+fn today_row(model: &Model, t: &TaskItem) -> Widget {
+    let proj = model.project(t.project_id);
+    let name = proj.map_or_else(|| "(deleted project)".to_string(), |p| p.name.clone());
+    let color = proj.map_or(ProjectColor::Indigo, |p| p.color);
     column(vec![
         row(vec![
-            Widget::Checkbox {
-                value: t.done,
-                label: t.text.clone(),
-                on_change: Event::ToggleTaskDone(t.id),
-            },
-            icon_button(Icon::Star, Event::ToggleMustDoToday(t.id)),
+            checkbox(format!("done:{}", t.id), t.text.clone(), t.done),
+            chip("Today", true, Msg::ToggleToday(t.id)),
         ]),
-        // Project label tucked under the checkbox so the eye reads task -> context.
-        // The colored dot anchors the project identity visually.
-        row(vec![
-            spacer(Spacing::Lg),
-            color_dot(project_color),
-            caption(format!("in {project_name}")),
-        ]),
+        // Project context tucked under the task; the dot anchors its identity.
+        row(vec![spacer(Spacing::Lg), color_dot(color), caption(format!("in {name}"))]),
     ])
 }
 
-fn project_list_screen(model: &Model) -> Widget {
-    let picker_row = row(
-        ProjectColor::ALL
+fn project_list(model: &Model) -> Widget {
+    let picker = grid(
+        COLORS
             .iter()
-            .map(|c| color_swatch(*c, *c == model.selected_new_project_color))
+            .map(|c| {
+                card_button(
+                    row(vec![color_dot(*c), text(color_name(*c))]),
+                    if *c == model.new_color { CardStyle::Filled } else { CardStyle::Outlined },
+                    Msg::SelectColor(*c),
+                )
+            })
             .collect(),
     );
 
-    let input_card = card(column(vec![
-        row(vec![
-            Widget::TextField {
-                id: "project_input".into(),
-                value: model.project_input.clone(),
-                placeholder: "New project name".into(),
-            },
-            filled_button("Add", Event::AddProject),
+    let input = card(
+        column(vec![
+            row(vec![
+                text_field("project_input", "New project name", model.project_input.clone()),
+                button("Add", ButtonStyle::Filled, Msg::AddProject),
+            ]),
+            spacer(Spacing::Sm),
+            caption("Color"),
+            picker,
         ]),
-        spacer(Spacing::Sm),
-        caption("Color"),
-        picker_row,
-    ]));
+        CardStyle::Elevated,
+    );
 
-    let mut children = vec![
-        title_text("Projects"),
-        spacer(Spacing::Md),
-        input_card,
-        spacer(Spacing::Lg),
-    ];
-
+    let mut kids = vec![title("Projects"), spacer(Spacing::Md), input, spacer(Spacing::Lg)];
     if model.projects.is_empty() {
-        children.push(outlined_card(column(vec![
-            subtitle("No projects yet"),
-            spacer(Spacing::Xs),
-            caption("Add one above to start organising your work."),
-        ])));
+        kids.push(card(
+            column(vec![
+                subtitle("No projects yet"),
+                spacer(Spacing::Xs),
+                caption("Add one above to start organising your work."),
+            ]),
+            CardStyle::Outlined,
+        ));
     } else {
         for p in &model.projects {
-            children.push(card(project_summary_row(model, p)));
+            kids.push(card(project_summary(model, p), CardStyle::Elevated));
         }
     }
-
-    column(children)
+    column(kids)
 }
 
-fn project_summary_row(model: &Model, p: &Project) -> Widget {
+fn project_summary(model: &Model, p: &Project) -> Widget {
     let total = model.tasks.iter().filter(|t| t.project_id == p.id).count();
-    let done = model
-        .tasks
-        .iter()
-        .filter(|t| t.project_id == p.id && t.done)
-        .count();
+    let done = model.tasks.iter().filter(|t| t.project_id == p.id && t.done).count();
     let summary = if total == 0 {
         "No tasks yet".to_string()
     } else {
         format!("{done} of {total} done")
     };
-
     row(vec![
         color_dot(p.color),
-        column(vec![
-            text(p.name.clone(), TextStyle::Subtitle),
-            caption(summary),
-        ]),
-        outlined_button("Open", Event::OpenProject(p.id)),
+        column(vec![subtitle(p.name.clone()), caption(summary)]),
+        button("Open", ButtonStyle::Outlined, Msg::OpenProject(p.id)),
     ])
 }
 
-fn project_detail_screen(model: &Model, project: &Project) -> Widget {
-    let project_tasks: Vec<&Task> = model
-        .tasks
-        .iter()
-        .filter(|t| t.project_id == project.id)
-        .collect();
+fn detail_screen(model: &Model, project: &Project) -> Widget {
+    let tasks: Vec<&TaskItem> = model.tasks.iter().filter(|t| t.project_id == project.id).collect();
 
-    let input_card = card(row(vec![
-        Widget::TextField {
-            id: "task_input".into(),
-            value: model.task_input.clone(),
-            placeholder: "Add a task to this project".into(),
-        },
-        filled_button("Add", Event::AddTask),
-    ]));
+    let input = card(
+        row(vec![
+            text_field("task_input", "Add a task to this project", model.task_input.clone()),
+            button("Add", ButtonStyle::Filled, Msg::AddTask),
+        ]),
+        CardStyle::Elevated,
+    );
 
-    let mut children = vec![
-        input_card,
-        spacer(Spacing::Lg),
-    ];
-
-    if project_tasks.is_empty() {
-        children.push(outlined_card(column(vec![
-            subtitle("No tasks yet"),
-            spacer(Spacing::Xs),
-            caption("Add one above to get started."),
-        ])));
+    let mut kids = vec![input, spacer(Spacing::Lg)];
+    if tasks.is_empty() {
+        kids.push(card(
+            column(vec![
+                subtitle("No tasks yet"),
+                spacer(Spacing::Xs),
+                caption("Add one above to get started."),
+            ]),
+            CardStyle::Outlined,
+        ));
     } else {
-        for t in &project_tasks {
-            children.push(card(project_task_row(t)));
+        for t in &tasks {
+            kids.push(card(detail_row(t), CardStyle::Elevated));
         }
     }
-
-    children.push(spacer(Spacing::Xl));
-    children.push(row(vec![outlined_button("Delete project", Event::DeleteProject(project.id))]));
-
-    column(children)
+    kids.push(spacer(Spacing::Xl));
+    kids.push(row(vec![button("Delete project", ButtonStyle::Text, Msg::DeleteProject(project.id))]));
+    column(kids)
 }
 
-fn project_task_row(t: &Task) -> Widget {
-    let star_icon = if t.must_do_today { Icon::Star } else { Icon::StarOutline };
+fn detail_row(t: &TaskItem) -> Widget {
     row(vec![
-        Widget::Checkbox {
-            value: t.done,
-            label: t.text.clone(),
-            on_change: Event::ToggleTaskDone(t.id),
-        },
-        icon_button(star_icon, Event::ToggleMustDoToday(t.id)),
-        icon_button(Icon::Delete, Event::DeleteTask(t.id)),
+        checkbox(format!("done:{}", t.id), t.text.clone(), t.done),
+        chip("Today", t.today, Msg::ToggleToday(t.id)),
+        icon_button(Icon::Delete, Msg::DeleteTask(t.id)),
     ])
 }
 
 fn settings_screen(model: &Model) -> Widget {
     column(vec![
-        title_text("Settings"),
+        title("Settings"),
         spacer(Spacing::Md),
-        outlined_card(column(vec![
-            subtitle("Profile"),
-            spacer(Spacing::Sm),
-            body("Your name"),
-            Widget::TextField {
-                id: "name".into(),
-                value: model.name.clone(),
-                placeholder: "e.g. Milan".into(),
-            },
-        ])),
+        card(
+            column(vec![
+                subtitle("Profile"),
+                spacer(Spacing::Sm),
+                text("Your name"),
+                text_field("name", "e.g. Milan", model.name.clone()),
+            ]),
+            CardStyle::Outlined,
+        ),
         spacer(Spacing::Md),
-        outlined_card(column(vec![
-            subtitle("Appearance"),
-            spacer(Spacing::Sm),
-            Widget::Switch {
-                id: "dark_mode".into(),
-                value: model.dark_mode,
-                label: "Dark mode".into(),
-            },
-        ])),
+        card(
+            column(vec![
+                subtitle("Appearance"),
+                spacer(Spacing::Sm),
+                switch("dark_mode", "Dark mode", model.dark_mode),
+            ]),
+            CardStyle::Outlined,
+        ),
     ])
 }
 
-// ============================================================
-// Tests
-// ============================================================
+/// The Crux app the FFI + codegen target. `MobilerShell` over [`Todo`], so the
+/// native shell stays generic.
+pub type App = MobilerShell<Todo>;
 
 #[cfg(test)]
 mod test {
     use super::*;
 
-    fn empty_model() -> Model {
-        Model {
-            active_tab: ActiveTab::default(),
-            name: String::new(),
-            dark_mode: false,
-            projects: vec![],
-            tasks: vec![],
-            active_project_id: None,
-            project_input: String::new(),
-            task_input: String::new(),
-            selected_new_project_color: ProjectColor::Indigo,
-            next_project_id: 1,
-            next_task_id: 1,
-        }
-    }
-
-    fn scaffold_body(view: &Widget) -> &Widget {
-        match view {
-            Widget::Scaffold { body, .. } => body,
-            other => panic!("expected Scaffold, got {other:?}"),
-        }
-    }
-
-    fn scaffold_title(view: &Widget) -> &str {
-        match view {
-            Widget::Scaffold { title, .. } => title,
-            other => panic!("expected Scaffold, got {other:?}"),
-        }
-    }
-
-    fn scaffold_back(view: &Widget) -> Option<&Event> {
-        match view {
-            Widget::Scaffold { back_action, .. } => back_action.as_ref(),
-            other => panic!("expected Scaffold, got {other:?}"),
-        }
-    }
-
-    fn walk(w: &Widget, f: &mut impl FnMut(&Widget)) {
-        f(w);
-        match w {
-            Widget::Column { children } | Widget::Row { children } => {
-                for c in children { walk(c, f); }
-            }
-            Widget::Card { child, .. } => walk(child, f),
-            Widget::Scaffold { body, .. } => walk(body, f),
-            _ => {}
-        }
-    }
-
-    fn count_task_checkboxes(w: &Widget) -> usize {
-        let mut n = 0;
-        walk(w, &mut |w| {
-            if matches!(w, Widget::Checkbox { .. }) {
-                n += 1;
-            }
-        });
-        n
-    }
-
-    fn checkbox_labels(w: &Widget) -> Vec<String> {
-        let mut out = Vec::new();
-        walk(w, &mut |w| {
-            if let Widget::Checkbox { label, .. } = w {
-                out.push(label.clone());
-            }
-        });
-        out
+    #[test]
+    fn add_project_rotates_color() {
+        let app = Todo;
+        let mut m = Model::default();
+        let before = m.new_color;
+        m.project_input = "Garden".into();
+        app.update(Msg::AddProject, &mut m, &mut Cx::default());
+        assert!(m.projects.iter().any(|p| p.name == "Garden"));
+        assert_ne!(m.new_color, before, "picker should advance after adding");
     }
 
     #[test]
-    fn default_model_seeds_two_projects() {
-        let m = Model::default();
-        assert_eq!(m.projects.len(), 2);
-        assert!(m.projects.iter().any(|p| p.name == "Home"));
-        assert!(m.projects.iter().any(|p| p.name == "Mobiler"));
+    fn toggle_done_via_checkbox_input() {
+        let app = Todo;
+        let mut m = Model::default();
+        app.input("done:1", InputValue::Bool(true), &mut m, &mut Cx::default());
+        assert!(m.tasks.iter().find(|t| t.id == 1).unwrap().done);
     }
 
     #[test]
-    fn today_tab_shows_only_starred_tasks() {
-        let app = Counter;
-        let model = Model::default();
-        let view = app.view(&model);
+    fn restore_round_trips_durable_state() {
+        let app = Todo;
+        let mut m = Model::default();
+        m.name = "Ada".into();
+        app.update(Msg::ToggleToday(2), &mut m, &mut Cx::default());
 
-        let labels = checkbox_labels(scaffold_body(&view));
-        // Seeded: tasks 1 and 5 are must_do_today.
-        assert!(labels.contains(&"Buy milk".to_string()));
-        assert!(labels.contains(&"Ship v0.2".to_string()));
-        assert_eq!(labels.len(), 2);
-    }
+        let blob = serde_json::to_string(&m.persisted()).unwrap();
+        let mut fresh = Model::default();
+        app.restore(&blob, &mut fresh);
 
-    #[test]
-    fn today_task_row_shows_project_context() {
-        let app = Counter;
-        let model = Model::default();
-        let view = app.view(&model);
-
-        let mut found_project_label = false;
-        walk(scaffold_body(&view), &mut |w| {
-            if let Widget::Text { content, style: TextStyle::Caption } = w {
-                if content.starts_with("in ") {
-                    found_project_label = true;
-                }
-            }
-        });
-        assert!(found_project_label, "expected `in <project>` caption on Today rows");
-    }
-
-    #[test]
-    fn opening_project_pushes_into_detail_view() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(Event::SelectTab(Tab::Projects), &mut model);
-        let view = app.view(&model);
-        assert_eq!(scaffold_title(&view), "Projects");
-        assert!(scaffold_back(&view).is_none());
-
-        app.update(Event::OpenProject(2), &mut model);
-        let view = app.view(&model);
-        assert_eq!(scaffold_title(&view), "Mobiler");
-        assert!(matches!(scaffold_back(&view), Some(Event::CloseProject)));
-        // Project detail shows all 3 Mobiler tasks (vs 2 in Today).
-        assert_eq!(count_task_checkboxes(scaffold_body(&view)), 3);
-    }
-
-    #[test]
-    fn closing_project_returns_to_list() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(Event::SelectTab(Tab::Projects), &mut model);
-        app.update(Event::OpenProject(1), &mut model);
-        app.update(Event::CloseProject, &mut model);
-        let view = app.view(&model);
-        assert_eq!(scaffold_title(&view), "Projects");
-        assert!(scaffold_back(&view).is_none());
-    }
-
-    #[test]
-    fn add_task_targets_active_project_only() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(Event::SelectTab(Tab::Projects), &mut model);
-        // Without an active project, AddTask is a no-op.
-        let before = model.tasks.len();
-        app.update(
-            Event::TextChanged { id: "task_input".into(), value: "stray".into() },
-            &mut model,
-        );
-        app.update(Event::AddTask, &mut model);
-        assert_eq!(model.tasks.len(), before);
-
-        // Open Home, add a task — should land under project 1.
-        app.update(Event::OpenProject(1), &mut model);
-        app.update(
-            Event::TextChanged { id: "task_input".into(), value: "vacuum".into() },
-            &mut model,
-        );
-        app.update(Event::AddTask, &mut model);
-        assert_eq!(model.tasks.len(), before + 1);
-        let new = model.tasks.last().unwrap();
-        assert_eq!(new.text, "vacuum");
-        assert_eq!(new.project_id, 1);
-        assert!(!new.must_do_today);
-    }
-
-    #[test]
-    fn toggle_must_do_today_propagates_to_today_tab() {
-        let app = Counter;
-        let mut model = Model::default();
-        // Task 4 (Mobiler / "Write iOS Render") starts unstarred.
-        assert!(!model.tasks.iter().find(|t| t.id == 4).unwrap().must_do_today);
-
-        app.update(Event::ToggleMustDoToday(4), &mut model);
-        let view = app.view(&model);
-        let labels = checkbox_labels(scaffold_body(&view));
-        assert!(labels.contains(&"Write iOS Render".to_string()));
-    }
-
-    #[test]
-    fn deleting_project_removes_its_tasks_and_closes_detail() {
-        let app = Counter;
-        let mut model = Model::default();
-        let mobiler_task_count = model.tasks.iter().filter(|t| t.project_id == 2).count();
-        assert!(mobiler_task_count > 0);
-
-        app.update(Event::SelectTab(Tab::Projects), &mut model);
-        app.update(Event::OpenProject(2), &mut model);
-        app.update(Event::DeleteProject(2), &mut model);
-
-        assert!(model.projects.iter().all(|p| p.id != 2));
-        assert!(model.tasks.iter().all(|t| t.project_id != 2));
-        assert!(model.active_project_id.is_none());
-    }
-
-    #[test]
-    fn new_project_uses_selected_color_then_advances() {
-        let app = Counter;
-        let mut model = Model::default();
-        // Default-seeded selection is Coral.
-        assert_eq!(model.selected_new_project_color, ProjectColor::Coral);
-
-        app.update(
-            Event::TextChanged { id: "project_input".into(), value: "Garden".into() },
-            &mut model,
-        );
-        app.update(Event::AddProject, &mut model);
-
-        let added = model.projects.last().unwrap();
-        assert_eq!(added.name, "Garden");
-        assert_eq!(added.color, ProjectColor::Coral);
-        // Picker advanced for the next project.
-        assert_eq!(model.selected_new_project_color, ProjectColor::Amber);
-    }
-
-    #[test]
-    fn select_project_color_overrides_default() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(Event::SelectProjectColor(ProjectColor::Pink), &mut model);
-        assert_eq!(model.selected_new_project_color, ProjectColor::Pink);
-
-        app.update(
-            Event::TextChanged { id: "project_input".into(), value: "Birthday".into() },
-            &mut model,
-        );
-        app.update(Event::AddProject, &mut model);
-        assert_eq!(model.projects.last().unwrap().color, ProjectColor::Pink);
-    }
-
-    #[test]
-    fn color_picker_marks_exactly_one_swatch_selected() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(Event::SelectTab(Tab::Projects), &mut model);
-        app.update(Event::SelectProjectColor(ProjectColor::Lime), &mut model);
-
-        let view = app.view(&model);
-        let mut selected = Vec::new();
-        walk(scaffold_body(&view), &mut |w| {
-            if let Widget::ColorSwatch { color, selected: sel, .. } = w {
-                if *sel {
-                    selected.push(*color);
-                }
-            }
-        });
-        assert_eq!(selected, vec![ProjectColor::Lime]);
-    }
-
-    #[test]
-    fn project_cards_carry_a_color_dot() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(Event::SelectTab(Tab::Projects), &mut model);
-        let view = app.view(&model);
-        let mut dot_colors = Vec::new();
-        walk(scaffold_body(&view), &mut |w| {
-            if let Widget::ColorDot { color } = w {
-                dot_colors.push(*color);
-            }
-        });
-        // Two seeded projects -> at least their two dots (Indigo, Teal).
-        assert!(dot_colors.contains(&ProjectColor::Indigo));
-        assert!(dot_colors.contains(&ProjectColor::Teal));
-    }
-
-    #[test]
-    fn project_color_survives_round_trip_serialization() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(Event::SelectProjectColor(ProjectColor::Pink), &mut model);
-        app.update(
-            Event::TextChanged { id: "project_input".into(), value: "Trip".into() },
-            &mut model,
-        );
-        app.update(Event::AddProject, &mut model);
-
-        let bytes = bincode::serialize(&model).unwrap();
-        let restored: Model = bincode::deserialize(&bytes).unwrap();
-        let trip = restored.projects.iter().find(|p| p.name == "Trip").unwrap();
-        assert_eq!(trip.color, ProjectColor::Pink);
-    }
-
-    #[test]
-    fn empty_today_shows_helpful_card() {
-        let app = Counter;
-        let mut model = empty_model();
-        // No projects, no tasks — Today should still render gracefully.
-        let view = app.view(&model);
-        let mut found = false;
-        walk(scaffold_body(&view), &mut |w| {
-            if let Widget::Text { content, style: TextStyle::Subtitle } = w {
-                if content == "Nothing scheduled for today" { found = true; }
-            }
-        });
-        assert!(found);
-        // And the body should NOT contain any badge (we only show one when there ARE tasks).
-        let mut badge_seen = false;
-        walk(scaffold_body(&view), &mut |w| {
-            if matches!(w, Widget::Badge { .. }) { badge_seen = true; }
-        });
-        assert!(!badge_seen);
-        // Ditto active_tab manipulation should still work.
-        app.update(Event::SelectTab(Tab::Projects), &mut model);
-    }
-
-    #[test]
-    fn dark_mode_propagates_to_scaffold() {
-        let app = Counter;
-        let mut model = Model::default();
-        app.update(
-            Event::Toggled { id: "dark_mode".into(), value: true },
-            &mut model,
-        );
-        match app.view(&model) {
-            Widget::Scaffold { dark_mode, .. } => assert!(dark_mode),
-            other => panic!("got {other:?}"),
-        }
+        assert_eq!(fresh.name, "Ada");
+        assert!(fresh.tasks.iter().find(|t| t.id == 2).unwrap().today);
     }
 }

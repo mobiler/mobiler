@@ -38,7 +38,7 @@ impl MobilerApp for {{NAME}}App {
         }
     }
 
-    fn input(&self, id: &str, value: InputValue, model: &mut Model) {
+    fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
         match (id, value) {
             ("name", InputValue::Text(v)) => model.name = v,
             ("notify", InputValue::Bool(v)) => model.notify = v,
@@ -95,7 +95,7 @@ mod test {
     fn input_sets_name() {
         let app = {{NAME}}App;
         let mut model = Model::default();
-        app.input("name", InputValue::Text("Ada".to_string()), &mut model);
+        app.input("name", InputValue::Text("Ada".to_string()), &mut model, &mut Cx::default());
         assert_eq!(model.name, "Ada");
     }
 }

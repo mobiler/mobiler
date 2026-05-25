@@ -110,8 +110,8 @@ pub trait MobilerApp: Default {
 
     fn update(&self, event: Self::Event, model: &mut Self::Model, cx: &mut Cx<Self::Event>);
 
-    fn input(&self, id: &str, value: InputValue, model: &mut Self::Model) {
-        let _ = (id, value, model);
+    fn input(&self, id: &str, value: InputValue, model: &mut Self::Model, cx: &mut Cx<Self::Event>) {
+        let _ = (id, value, model, cx);
     }
 
     /// Restore persisted state on startup. `data` is whatever you last passed to
@@ -147,7 +147,7 @@ impl<A: MobilerApp> App for MobilerShell<A> {
                     app.update(event, model, &mut cx);
                 }
             }
-            Action::Input { id, value } => app.input(&id, value, model),
+            Action::Input { id, value } => app.input(&id, value, model, &mut cx),
             Action::Restore { data } => app.restore(&data, model),
         }
         let mut commands: Vec<Command<Effect, Action>> = Vec::new();
@@ -274,4 +274,11 @@ pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E)
 #[must_use]
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     Widget::Scaffold { title: title.into(), body: Box::new(body), tabs, back: None, dark_mode }
+}
+
+/// Like [`scaffold`], but the top bar shows a back arrow firing `back` (e.g. for
+/// a detail screen pushed over a tab).
+#[must_use]
+pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
+    Widget::Scaffold { title: title.into(), body: Box::new(body), tabs, back: Some(tok(back)), dark_mode }
 }
