@@ -2,6 +2,7 @@ package dev.mobiler.abi
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
@@ -11,22 +12,33 @@ import androidx.lifecycle.AndroidViewModel
 import dev.mobiler.abi.shared.CoreFfi
 import dev.mobiler.abi.shared.types.Action
 import dev.mobiler.abi.shared.types.Effect
+import dev.mobiler.abi.shared.types.PluginResponse
+import dev.mobiler.abi.shared.types.Requests
 import dev.mobiler.abi.shared.types.Widget
 
 /**
- * A native capability plugin. The fixed `Effect.Plugin{plugin, op, input}`
- * envelope is dispatched by name to one of these — so adding a plugin never
- * touches the wire ABI or the generated bindings, only this registry.
+ * A native capability plugin. The opaque `{plugin, op, input}` envelope is
+ * dispatched by name to one of these — adding a plugin never touches the wire
+ * ABI or the generated bindings, only this registry. Returns a [PluginResponse]
+ * (ignored for fire-and-forget calls, sent back to the core for request/response).
  */
 interface MobilerPlugin {
-    fun handle(op: String, input: String)
+    fun handle(op: String, input: String): PluginResponse
 }
 
-/** Official, bundled plugin — shipped in the generic shell (free tier). */
+/** Official, bundled plugin (free tier): fire-and-forget toast. */
 class ToastPlugin(private val context: Context) : MobilerPlugin {
-    override fun handle(op: String, input: String) {
-        Log.i("Mobiler", "toast plugin: op=$op input=$input")
+    override fun handle(op: String, input: String): PluginResponse {
         Toast.makeText(context, input, Toast.LENGTH_SHORT).show()
+        return PluginResponse(true, "")
+    }
+}
+
+/** Official, bundled plugin: request/response device info. */
+class DevicePlugin : MobilerPlugin {
+    override fun handle(op: String, input: String): PluginResponse = when (op) {
+        "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
+        else -> PluginResponse(false, "unknown op '$op'")
     }
 }
 
@@ -39,30 +51,40 @@ class Core(application: Application) : AndroidViewModel(application) {
     // (e.g. premium plugins); the generic shell ships only the official ones.
     private val plugins: Map<String, MobilerPlugin> = mapOf(
         "toast" to ToastPlugin(application),
+        "device" to DevicePlugin(),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))
         private set
 
     fun update(action: Action) {
-        val effects = core.update(action.bincodeSerialize())
-        val requests = dev.mobiler.abi.shared.types.Requests.bincodeDeserialize(effects).value
+        process(core.update(action.bincodeSerialize()))
+    }
+
+    private fun process(effectBytes: ByteArray) {
+        val requests = Requests.bincodeDeserialize(effectBytes).value
         for (request in requests) {
             when (val effect = request.effect) {
                 is Effect.Render -> view = Widget.bincodeDeserialize(core.view())
-                is Effect.Plugin -> dispatch(effect.value)
+                // Fire-and-forget: dispatch, ignore the result, don't resolve.
+                is Effect.PluginNotify -> dispatch(effect.value.plugin, effect.value.op, effect.value.input)
+                // Request/response: dispatch, resolve the core with the response,
+                // then process the effects that resolution produces.
+                is Effect.Plugin -> {
+                    val resp = dispatch(effect.value.plugin, effect.value.op, effect.value.input)
+                    process(core.resolve(request.id, resp.bincodeSerialize()))
+                }
             }
         }
     }
 
-    private fun dispatch(op: dev.mobiler.abi.shared.types.PluginOperation) {
-        val plugin = plugins[op.plugin]
-        if (plugin != null) {
-            plugin.handle(op.op, op.input)
-        } else {
-            // Graceful: an app using this plugin needs a custom build that
-            // registers it. This is exactly the free-shell vs. custom-build line.
-            Log.w("Mobiler", "plugin '${op.plugin}' not available in this build")
+    private fun dispatch(plugin: String, op: String, input: String): PluginResponse {
+        val p = plugins[plugin]
+        if (p == null) {
+            // An app using this plugin needs a custom build that registers it.
+            Log.w("Mobiler", "plugin '$plugin' not available in this build")
+            return PluginResponse(false, "plugin '$plugin' not available in this build")
         }
+        return p.handle(op, input)
     }
 }
