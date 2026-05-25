@@ -23,7 +23,6 @@ cd myapp
 mobiler dev             # build the Rust core, generate Kotlin types,
                         # build the APK, install, and launch
 mobiler watch           # same as dev, re-running on every change
-mobiler add-widget Slider --field value:f32   # add a Widget variant + Compose arm
 ```
 
 ## Links

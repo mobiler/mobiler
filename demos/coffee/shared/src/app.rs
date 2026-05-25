@@ -1,38 +1,23 @@
-use crux_core::{
-    App, Command,
-    macros::effect,
-    render::{RenderOperation, render},
+use mobiler_core::{
+    BoxAlign, ButtonStyle, CardStyle, Cx, ImageRatio, ImageShape, InputValue, MobilerApp,
+    MobilerShell, Widget, button, card, card_button, chip, column, image, row, slider, stack,
+    stepper, text, title,
 };
-use facet::Facet;
 use serde::{Deserialize, Serialize};
 
-/// Coffee hero photo (Unsplash CDN, no API key needed).
-const HERO_IMAGE: &str =
-    "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200&q=80";
+const HERO: &str = "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200&q=80";
 
-#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
-#[repr(C)]
-pub enum Event {
-    /// Tapping a category chip (or "Get Started").
+/// Coffee demo, ported onto MobilerApp (was: per-app-typegen `demos/coffee`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum Msg {
     SelectCategory(String),
-    /// Open a product's detail screen (index into the product list).
     OpenProduct(u32),
-    /// Back from detail to the storefront.
     CloseProduct,
-    /// A slider moved; `id` identifies which one.
-    SliderChanged { id: String, value: i32 },
     IncQty,
     DecQty,
 }
 
-#[effect(facet_typegen)]
-#[derive(Debug)]
-pub enum Effect {
-    Render(RenderOperation),
-}
-
-/// A coffee product. Lives only in the Rust model; `view` turns it into Widgets.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct Product {
     name: &'static str,
     price: &'static str,
@@ -46,9 +31,7 @@ pub struct Model {
     products: Vec<Product>,
     categories: Vec<&'static str>,
     selected_category: String,
-    /// Some(index) shows that product's detail screen; None shows the storefront.
     open_product: Option<usize>,
-    /// Detail-screen controls.
     sweetness: i32,
     quantity: i32,
 }
@@ -61,7 +44,7 @@ impl Default for Model {
                 Product { name: "Flat White", price: "$3.53", rating: "4.6", category: "Latte", image: "https://loremflickr.com/400/400/coffee?lock=2", description: "Velvety microfoam over a double shot of espresso." },
                 Product { name: "Espresso", price: "$2.20", rating: "4.9", category: "Espresso", image: "https://loremflickr.com/400/400/espresso?lock=3", description: "A concentrated, full-bodied single origin shot." },
                 Product { name: "Cappuccino", price: "$3.80", rating: "4.5", category: "Espresso", image: "https://loremflickr.com/400/400/cappuccino?lock=4", description: "Equal parts espresso, steamed milk and airy foam." },
-                Product { name: "Cold Brew", price: "$4.10", rating: "4.7", category: "Cold", image: "https://loremflickr.com/400/400/coldbrew?lock=5", description: "Steeped for 18 hours for a smooth, low-acidity cup." },
+                Product { name: "Cold Brew", price: "$4.10", rating: "4.7", category: "Cold", image: "https://loremflickr.com/400/400/coldbrew?lock=5", description: "Steeped 18 hours for a smooth, low-acidity cup." },
                 Product { name: "Iced Latte", price: "$4.20", rating: "4.4", category: "Cold", image: "https://loremflickr.com/400/400/icedcoffee?lock=6", description: "Chilled espresso and milk over ice." },
             ],
             categories: vec!["All", "Latte", "Espresso", "Cold"],
@@ -74,8 +57,7 @@ impl Default for Model {
 }
 
 impl Model {
-    /// (index, product) pairs matching the selected category ("All" = everything).
-    fn visible_products(&self) -> Vec<(usize, &Product)> {
+    fn visible(&self) -> Vec<(usize, &Product)> {
         self.products
             .iter()
             .enumerate()
@@ -84,206 +66,117 @@ impl Model {
     }
 }
 
-/// How an image's corners are treated. Concrete radii decided in the render layer.
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum ImageShape {
-    Square,
-    Rounded,
-    Circle,
-}
-
-/// Aspect-ratio token for images (concrete ratio decided in the render layer).
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum ImageRatio {
-    Wide,
-    Square,
-    Tall,
-}
-
-/// Where a `Box`'s overlaid content sits within the stack.
-#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub enum BoxAlign {
-    TopStart,
-    TopEnd,
-    Center,
-    BottomStart,
-    BottomCenter,
-    BottomEnd,
-}
-
-#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
-#[repr(C)]
-pub enum Widget {
-    Text { content: String },
-    Button { label: String, on_press: Event },
-    Row { children: Vec<Widget> },
-    Column { children: Vec<Widget> },
-    /// Card; tappable when `on_press` is set.
-    Card { child: Box<Widget>, on_press: Option<Event> },
-    Chip { label: String, selected: bool, on_press: Event },
-    Grid { children: Vec<Widget> },
-    Image { source: String, shape: ImageShape, ratio: ImageRatio },
-    Box { children: Vec<Widget>, align: BoxAlign, scrim: bool },
-    /// Continuous 0..=`max` slider; emits `SliderChanged { id, value }`.
-    Slider { id: String, value: i32, max: i32 },
-    /// Numeric stepper with −/+ controls carrying their own events.
-    Stepper { value: i32, on_decrement: Event, on_increment: Event },
-}
-
-pub type ViewModel = Widget;
-
 #[derive(Default)]
-pub struct CoffeeApp;
+pub struct Coffee;
 
-impl App for CoffeeApp {
-    type Event = Event;
+impl MobilerApp for Coffee {
+    type Event = Msg;
     type Model = Model;
-    type ViewModel = ViewModel;
-    type Effect = Effect;
 
-    fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+    fn update(&self, event: Msg, model: &mut Model, _cx: &mut Cx<Msg>) {
         match event {
-            Event::SelectCategory(category) => model.selected_category = category,
-            Event::OpenProduct(index) => {
-                model.open_product = Some(index as usize);
-                model.quantity = 1;
+            Msg::SelectCategory(c) => model.selected_category = c,
+            Msg::OpenProduct(i) => {
+                model.open_product = Some(i as usize);
                 model.sweetness = 50;
+                model.quantity = 1;
             }
-            Event::CloseProduct => model.open_product = None,
-            Event::SliderChanged { id, value } => {
-                if id == "sweetness" {
-                    model.sweetness = value.clamp(0, 100);
-                }
-            }
-            Event::IncQty => model.quantity += 1,
-            Event::DecQty => model.quantity = (model.quantity - 1).max(1),
+            Msg::CloseProduct => model.open_product = None,
+            Msg::IncQty => model.quantity += 1,
+            Msg::DecQty => model.quantity = (model.quantity - 1).max(1),
         }
-        render()
     }
 
-    fn view(&self, model: &Model) -> ViewModel {
+    fn input(&self, id: &str, value: InputValue, model: &mut Model) {
+        if id == "sweetness" {
+            if let InputValue::Int(v) = value {
+                model.sweetness = v as i32;
+            }
+        }
+    }
+
+    fn view(&self, model: &Model) -> Widget {
         match model.open_product.and_then(|i| model.products.get(i)) {
-            Some(product) => detail_view(product, model),
-            None => storefront_view(model),
+            Some(product) => detail(product, model),
+            None => storefront(model),
         }
     }
 }
 
-fn storefront_view(model: &Model) -> Widget {
-    let hero = Widget::Box {
-        align: BoxAlign::BottomStart,
-        scrim: true,
-        children: vec![
-            Widget::Image { source: HERO_IMAGE.to_string(), shape: ImageShape::Rounded, ratio: ImageRatio::Wide },
-            Widget::Column {
-                children: vec![
-                    Widget::Text { content: "Fall in Love with Coffee".to_string() },
-                    Widget::Button { label: "Get Started".to_string(), on_press: Event::SelectCategory("All".to_string()) },
-                ],
-            },
+fn storefront(model: &Model) -> Widget {
+    let hero = stack(
+        BoxAlign::BottomStart,
+        true,
+        vec![
+            image(HERO, ImageShape::Rounded, ImageRatio::Wide),
+            column(vec![title("Fall in Love with Coffee"), button("Get Started", ButtonStyle::Filled, Msg::SelectCategory("All".to_string()))]),
         ],
-    };
-
-    let chips = Widget::Row {
-        children: model
-            .categories
-            .iter()
-            .map(|c| Widget::Chip {
-                label: (*c).to_string(),
-                selected: model.selected_category.as_str() == *c,
-                on_press: Event::SelectCategory((*c).to_string()),
-            })
-            .collect(),
-    };
-
-    let grid = Widget::Grid {
-        children: model.visible_products().iter().map(|(i, p)| product_card(*i, p)).collect(),
-    };
-
-    Widget::Column { children: vec![hero, chips, grid] }
+    );
+    let chips = row(
+        model.categories.iter().map(|c| {
+            chip((*c).to_string(), model.selected_category.as_str() == *c, Msg::SelectCategory((*c).to_string()))
+        }).collect(),
+    );
+    let products = mobiler_core::grid(model.visible().iter().map(|(i, p)| product_card(*i, p)).collect());
+    column(vec![hero, chips, products])
 }
 
 fn product_card(index: usize, p: &Product) -> Widget {
-    Widget::Card {
-        on_press: Some(Event::OpenProduct(index as u32)),
-        child: Box::new(Widget::Column {
-            children: vec![
-                Widget::Image { source: p.image.to_string(), shape: ImageShape::Rounded, ratio: ImageRatio::Square },
-                Widget::Text { content: p.name.to_string() },
-                Widget::Row {
-                    children: vec![
-                        Widget::Text { content: p.price.to_string() },
-                        Widget::Text { content: format!("★ {}", p.rating) },
-                    ],
-                },
-            ],
-        }),
-    }
+    card_button(
+        column(vec![
+            image(p.image, ImageShape::Rounded, ImageRatio::Square),
+            text(p.name),
+            row(vec![text(p.price), text(format!("★ {}", p.rating))]),
+        ]),
+        CardStyle::Filled,
+        Msg::OpenProduct(index as u32),
+    )
 }
 
-fn detail_view(p: &Product, model: &Model) -> Widget {
-    Widget::Column {
-        children: vec![
-            Widget::Button { label: "← Back".to_string(), on_press: Event::CloseProduct },
-            Widget::Image { source: p.image.to_string(), shape: ImageShape::Rounded, ratio: ImageRatio::Wide },
-            Widget::Text { content: p.name.to_string() },
-            Widget::Text { content: format!("★ {}    {}", p.rating, p.price) },
-            Widget::Text { content: p.description.to_string() },
-            Widget::Text { content: format!("Sweetness: {}%", model.sweetness) },
-            Widget::Slider { id: "sweetness".to_string(), value: model.sweetness, max: 100 },
-            Widget::Row {
-                children: vec![
-                    Widget::Text { content: "Quantity".to_string() },
-                    Widget::Stepper { value: model.quantity, on_decrement: Event::DecQty, on_increment: Event::IncQty },
-                ],
-            },
-            Widget::Button { label: format!("Add {} to cart · {}", model.quantity, p.price), on_press: Event::CloseProduct },
-        ],
-    }
+fn detail(p: &Product, model: &Model) -> Widget {
+    column(vec![
+        button("← Back", ButtonStyle::Text, Msg::CloseProduct),
+        image(p.image, ImageShape::Rounded, ImageRatio::Wide),
+        title(p.name),
+        text(format!("★ {}    {}", p.rating, p.price)),
+        text(p.description),
+        mobiler_core::caption(format!("Sweetness: {}%", model.sweetness)),
+        slider("sweetness", model.sweetness, 100),
+        row(vec![text("Quantity"), stepper(model.quantity, Msg::DecQty, Msg::IncQty)]),
+        button(format!("Add {} to cart · {}", model.quantity, p.price), ButtonStyle::Filled, Msg::CloseProduct),
+        card(text("Tip: tap a product on the storefront to open this screen."), CardStyle::Outlined),
+    ])
 }
+
+/// The Crux app the FFI + codegen target.
+pub type App = MobilerShell<Coffee>;
 
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
-    fn defaults_to_storefront_all_products() {
-        let model = Model::default();
-        assert!(model.open_product.is_none());
-        assert_eq!(model.selected_category, "All");
-        assert_eq!(model.visible_products().len(), model.products.len());
-    }
-
-    #[test]
-    fn selecting_category_filters_products() {
-        let app = CoffeeApp;
+    fn filters_by_category() {
+        let app = Coffee;
         let mut model = Model::default();
-        app.update(Event::SelectCategory("Latte".to_string()), &mut model).expect_only_render();
-        let visible = model.visible_products();
+        app.update(Msg::SelectCategory("Latte".to_string()), &mut model, &mut Cx::default());
+        let visible = model.visible();
         assert!(!visible.is_empty());
         assert!(visible.iter().all(|(_, p)| p.category == "Latte"));
     }
 
     #[test]
-    fn open_close_and_detail_controls() {
-        let app = CoffeeApp;
+    fn open_close_and_qty() {
+        let app = Coffee;
         let mut model = Model::default();
-        app.update(Event::OpenProduct(2), &mut model).expect_only_render();
+        app.update(Msg::OpenProduct(2), &mut model, &mut Cx::default());
         assert_eq!(model.open_product, Some(2));
-        assert_eq!(model.quantity, 1);
-
-        app.update(Event::IncQty, &mut model);
-        app.update(Event::IncQty, &mut model);
-        app.update(Event::DecQty, &mut model);
-        assert_eq!(model.quantity, 2);
-
-        app.update(Event::SliderChanged { id: "sweetness".to_string(), value: 80 }, &mut model);
+        app.update(Msg::IncQty, &mut model, &mut Cx::default());
+        app.update(Msg::IncQty, &mut model, &mut Cx::default());
+        assert_eq!(model.quantity, 3);
+        app.input("sweetness", InputValue::Int(80), &mut model);
         assert_eq!(model.sweetness, 80);
-
-        app.update(Event::CloseProduct, &mut model);
+        app.update(Msg::CloseProduct, &mut model, &mut Cx::default());
         assert!(model.open_product.is_none());
     }
 }
