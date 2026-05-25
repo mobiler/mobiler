@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Mobiler — Rust + Compose mobile framework CLI"
+repository = "https://github.com/mobiler/mobiler"
+homepage = "https://github.com/mobiler/mobiler"
+readme = "README.md"
+keywords = ["mobile", "android", "compose", "crux", "cross-platform"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "mobiler"
