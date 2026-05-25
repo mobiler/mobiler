@@ -112,10 +112,16 @@ fn write_dir(dir: &Dir<'_>, out_root: &Path, subs: &Subs, written: &mut usize) -
     Ok(())
 }
 
-/// Apply path-level placeholders. Currently just `__PACKAGE_PATH__`.
+/// Apply path-level transforms:
+/// - `__PACKAGE_PATH__` is replaced with the package's directory form.
+/// - A trailing `.tmpl` is stripped. Template manifests are stored as
+///   `Cargo.toml.tmpl` so `cargo package` doesn't treat `templates/` as a nested
+///   package and drop it from the published crate; they scaffold back to
+///   `Cargo.toml`.
 fn templated_path(rel: &Path, subs: &Subs) -> PathBuf {
     let as_str = rel.to_string_lossy();
     let replaced = as_str.replace("__PACKAGE_PATH__", &subs.package_path);
+    let replaced = replaced.strip_suffix(".tmpl").unwrap_or(&replaced);
     PathBuf::from(replaced)
 }
 
@@ -216,7 +222,8 @@ fn display_name_from(name: &str) -> String {
 
 #[cfg(test)]
 mod test {
-    use super::display_name_from;
+    use super::{Subs, display_name_from, templated_path};
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn pascal_case_conversion() {
@@ -225,6 +232,39 @@ mod test {
         assert_eq!(display_name_from("my_app"), "MyApp");
         assert_eq!(display_name_from("Counter"), "Counter");
         assert_eq!(display_name_from("foo-bar-baz"), "FooBarBaz");
+    }
+
+    fn subs() -> Subs {
+        Subs {
+            name: "Todos".into(),
+            package: "dev.mobiler.todos".into(),
+            package_path: "dev/mobiler/todos".into(),
+            package_shared: "dev.mobiler.todos.shared".into(),
+            package_shared_types: "dev.mobiler.todos.shared.types".into(),
+            ndk_version: "30.0.14904198".into(),
+        }
+    }
+
+    #[test]
+    fn templated_path_strips_tmpl_suffix() {
+        let s = subs();
+        // Template manifests scaffold back to real manifests.
+        assert_eq!(templated_path(Path::new("Cargo.toml.tmpl"), &s), PathBuf::from("Cargo.toml"));
+        assert_eq!(
+            templated_path(Path::new("shared/Cargo.toml.tmpl"), &s),
+            PathBuf::from("shared/Cargo.toml")
+        );
+    }
+
+    #[test]
+    fn templated_path_expands_package_path() {
+        let s = subs();
+        assert_eq!(
+            templated_path(Path::new("Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt"), &s),
+            PathBuf::from("Android/app/src/main/java/dev/mobiler/todos/MainActivity.kt")
+        );
+        // Non-template files are left untouched.
+        assert_eq!(templated_path(Path::new("shared/src/app.rs"), &s), PathBuf::from("shared/src/app.rs"));
     }
 }
 
