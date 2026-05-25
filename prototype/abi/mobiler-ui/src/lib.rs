@@ -79,6 +79,16 @@ pub enum ImageRatio { Wide, Square, Tall }
 #[repr(C)]
 pub enum BoxAlign { TopStart, TopEnd, Center, BottomStart, BottomCenter, BottomEnd }
 
+/// A bottom-navigation tab. `selected` marks the active one; tapping sends
+/// `on_select`.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
+#[repr(C)]
+pub struct Tab {
+    pub label: String,
+    pub selected: bool,
+    pub on_select: ActionToken,
+}
+
 // ------------------------------- widgets -------------------------------
 
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
@@ -112,4 +122,14 @@ pub enum Widget {
     Slider { id: String, value: i32, max: i32 },
     /// Numeric stepper with −/+ controls carrying their own events.
     Stepper { value: i32, on_decrement: ActionToken, on_increment: ActionToken },
+    /// App shell: a top bar (`title` + optional `back`), a scrollable `body`,
+    /// and bottom-nav `tabs`. `dark_mode` is theme-as-data — the shell themes
+    /// the whole app from it.
+    Scaffold {
+        title: String,
+        body: Box<Widget>,
+        tabs: Vec<Tab>,
+        back: Option<ActionToken>,
+        dark_mode: bool,
+    },
 }

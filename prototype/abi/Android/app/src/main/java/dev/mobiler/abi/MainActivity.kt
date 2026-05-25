@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -31,18 +33,24 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -78,27 +86,33 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            AbiTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    App()
-                }
-            }
-        }
+        setContent { App() }
     }
 }
 
 @Composable
 fun App(core: Core = viewModel()) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Render(core.view) { action -> core.update(action) }
+    val view = core.view
+    // Theme is data: a Scaffold carries dark_mode, decided by the Rust core.
+    val dark = (view as? Widget.Scaffold)?.darkMode ?: isSystemInDarkTheme()
+    AbiTheme(darkTheme = dark) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            if (view is Widget.Scaffold) {
+                // Scaffold provides its own bars + scrollable body.
+                Render(view) { action -> core.update(action) }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Render(view) { action -> core.update(action) }
+                }
+            }
+        }
     }
 }
 
@@ -108,6 +122,7 @@ fun App(core: Core = viewModel()) {
  * renders any Mobiler app. Style *intent* (TextStyle, Tone, …) is decided in
  * Rust; the concrete look (fonts, colors, dp) is decided here.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Render(widget: Widget, send: (Action) -> Unit) {
     when (widget) {
@@ -225,6 +240,49 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             OutlinedButton(onClick = { send(Action.Fired(widget.onDecrement)) }) { Text("−") }
             Text(text = "${widget.value}", style = MaterialTheme.typography.titleMedium)
             OutlinedButton(onClick = { send(Action.Fired(widget.onIncrement)) }) { Text("+") }
+        }
+
+        is Widget.Scaffold -> Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text(widget.title) },
+                    navigationIcon = {
+                        val back = widget.back
+                        if (back != null) {
+                            IconButton(onClick = { send(Action.Fired(back)) }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                )
+            },
+            bottomBar = {
+                if (widget.tabs.isNotEmpty()) {
+                    NavigationBar {
+                        widget.tabs.forEach { t ->
+                            NavigationBarItem(
+                                selected = t.selected,
+                                onClick = { send(Action.Fired(t.onSelect)) },
+                                label = { Text(t.label) },
+                                icon = {},
+                            )
+                        }
+                    }
+                }
+            },
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Render(widget.body, send)
+            }
         }
     }
 }

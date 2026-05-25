@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
     Action, BoxAlign, ButtonStyle, CardStyle, Icon, ImageRatio, ImageShape, InputValue, Spacing,
-    TextStyle, Tone, Widget,
+    Tab, TextStyle, Tone, Widget,
 };
 
 // ============================ capabilities ============================
@@ -239,4 +239,17 @@ pub fn slider(id: impl Into<String>, value: i32, max: i32) -> Widget {
 #[must_use]
 pub fn stepper<E: Serialize>(value: i32, on_decrement: E, on_increment: E) -> Widget {
     Widget::Stepper { value, on_decrement: tok(on_decrement), on_increment: tok(on_increment) }
+}
+
+/// A bottom-nav tab carrying a typed selection event.
+#[must_use]
+pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E) -> Tab {
+    Tab { label: label.into(), selected, on_select: tok(on_select) }
+}
+
+/// App shell: top bar + bottom-nav `tabs` + scrollable `body`. `dark_mode` is
+/// theme-as-data (the shell themes the whole app from it).
+#[must_use]
+pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
+    Widget::Scaffold { title: title.into(), body: Box::new(body), tabs, back: None, dark_mode }
 }
