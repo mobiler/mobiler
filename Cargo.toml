@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["mobiler"]
+members = ["mobiler", "mobiler-ui", "mobiler-core"]
 
 [workspace.package]
 edition = "2024"
@@ -9,3 +9,5 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
+crux_core = "0.18.0"
+serde = "1.0.228"
