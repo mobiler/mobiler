@@ -26,7 +26,7 @@ jobs:
       run:
         working-directory: ${{ matrix.dir }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Installs the toolchain + components + targets pinned by rust-toolchain.toml
       - name: Install Rust toolchain
