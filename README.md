@@ -25,11 +25,19 @@ and a codegen helper for adding new widgets.
 | Path | What |
 |------|------|
 | `mobiler/` | The `mobiler` CLI (crate + embedded `templates/` scaffold) |
-| `demos/todo/` | Showcase demo app (a todo / projects app) — a standalone Mobiler project with its own Cargo workspace, just like `mobiler new` produces |
+| `demos/todo/` | Todo / projects showcase — see [demo README](demos/todo/) |
+| `demos/coffee/` | Coffee-shop storefront (images, grid, chips) — see [demo README](demos/coffee/) |
 
 > **Monorepo** for now. Each demo under `demos/` is a self-contained project (its own
-> workspace, not a member of the CLI's), so any of them can later be extracted into
-> its own repository.
+> workspace, not a member of the CLI's), just like `mobiler new` produces — so any of
+> them can later be extracted into its own repository.
+
+## Demos
+
+| [Todo](demos/todo/) | [Coffee](demos/coffee/) |
+|:---:|:---:|
+| <img src="demos/todo/screenshots/today.png" width="200" alt="Todo"> | <img src="demos/coffee/screenshots/storefront.png" width="200" alt="Coffee"> |
+| Lists, cards, checkboxes, per-project colors, dark mode | Network images, hero overlay, category-filtered product grid, terracotta brand |
 
 ## Quick start
 
