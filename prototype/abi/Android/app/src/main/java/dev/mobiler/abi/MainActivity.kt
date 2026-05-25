@@ -163,10 +163,24 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) { widget.children.forEach { Render(it, send) } }
 
-        is Widget.Card -> when (widget.style) {
-            CardStyle.ELEVATED -> Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) { CardBody(widget.child, send) }
-            CardStyle.OUTLINED -> OutlinedCard(modifier = Modifier.fillMaxWidth()) { CardBody(widget.child, send) }
-            CardStyle.FILLED -> Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) { CardBody(widget.child, send) }
+        is Widget.Card -> {
+            val mod = Modifier.fillMaxWidth()
+            val op = widget.onPress
+            when (widget.style) {
+                CardStyle.OUTLINED ->
+                    if (op != null) OutlinedCard(onClick = { send(Action.Fired(op)) }, modifier = mod) { CardBody(widget.child, send) }
+                    else OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
+                CardStyle.FILLED -> {
+                    val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, colors = colors) { CardBody(widget.child, send) }
+                    else Card(modifier = mod, colors = colors) { CardBody(widget.child, send) }
+                }
+                CardStyle.ELEVATED -> {
+                    val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                    else Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                }
+            }
         }
 
         is Widget.Box -> Box(contentAlignment = boxAlignFor(widget.align)) {

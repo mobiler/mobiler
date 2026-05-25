@@ -104,7 +104,8 @@ pub enum Widget {
     // Layout
     Row { children: Vec<Widget> },
     Column { children: Vec<Widget> },
-    Card { child: Box<Widget>, style: CardStyle },
+    /// Card; tappable when `on_press` is set.
+    Card { child: Box<Widget>, style: CardStyle, on_press: Option<ActionToken> },
     /// Z-stack: children layered back-to-front, positioned by `align`. With
     /// `scrim`, the first child is a background image, darkened for legibility,
     /// and the rest render on top in light content.

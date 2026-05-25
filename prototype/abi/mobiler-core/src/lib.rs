@@ -197,7 +197,12 @@ pub fn row(children: Vec<Widget>) -> Widget { Widget::Row { children } }
 pub fn column(children: Vec<Widget>) -> Widget { Widget::Column { children } }
 #[must_use]
 pub fn card(child: Widget, style: CardStyle) -> Widget {
-    Widget::Card { child: Box::new(child), style }
+    Widget::Card { child: Box::new(child), style, on_press: None }
+}
+/// A tappable card carrying a typed press event.
+#[must_use]
+pub fn card_button<E: Serialize>(child: Widget, style: CardStyle, on_press: E) -> Widget {
+    Widget::Card { child: Box::new(child), style, on_press: Some(tok(on_press)) }
 }
 /// Z-stack/overlay (the `Box` widget). With `scrim`, the first child is a
 /// darkened background and the rest render on top.

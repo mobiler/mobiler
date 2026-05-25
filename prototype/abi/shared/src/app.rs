@@ -1,199 +1,182 @@
 use mobiler_core::{
-    ButtonStyle, CardStyle, Cx, Icon, ImageRatio, ImageShape, InputValue, MobilerApp, MobilerShell,
-    Tone, Widget, badge, button, caption, card, checkbox, chip, column, divider, grid, icon_button,
-    image, row, scaffold, slider, spacer, stack, stepper, subtitle, switch, tab, text, text_field,
-    title,
+    BoxAlign, ButtonStyle, CardStyle, Cx, ImageRatio, ImageShape, InputValue, MobilerApp,
+    MobilerShell, Widget, button, card, card_button, chip, column, image, row, slider, stack,
+    stepper, text, title,
 };
-use mobiler_core::{BoxAlign, Spacing};
 use serde::{Deserialize, Serialize};
 
 const HERO: &str = "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200&q=80";
 
-/// Typed domain events — serialized into opaque tokens; the shell never sees them.
+/// Coffee demo, ported onto MobilerApp (was: per-app-typegen `demos/coffee`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
-    Bump,
-    Inc,
-    Dec,
-    Greet,
-    TryMissing,
-    GetDevice,
-    DeviceLoaded(String),
-    SelectTab(String),
+    SelectCategory(String),
+    OpenProduct(u32),
+    CloseProduct,
+    IncQty,
+    DecQty,
 }
 
-#[derive(Default)]
+#[derive(Clone)]
+struct Product {
+    name: &'static str,
+    price: &'static str,
+    rating: &'static str,
+    category: &'static str,
+    image: &'static str,
+    description: &'static str,
+}
+
 pub struct Model {
-    count: i32,
-    qty: i32,
-    level: i32,
-    name: String,
-    notify: bool,
-    agree: bool,
-    device: String,
-    tab: String,
-    dark: bool,
+    products: Vec<Product>,
+    categories: Vec<&'static str>,
+    selected_category: String,
+    open_product: Option<usize>,
+    sweetness: i32,
+    quantity: i32,
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Self {
+            products: vec![
+                Product { name: "Caffè Mocha", price: "$4.53", rating: "4.8", category: "Latte", image: "https://loremflickr.com/400/400/coffee?lock=1", description: "Espresso with steamed milk and a touch of chocolate." },
+                Product { name: "Flat White", price: "$3.53", rating: "4.6", category: "Latte", image: "https://loremflickr.com/400/400/coffee?lock=2", description: "Velvety microfoam over a double shot of espresso." },
+                Product { name: "Espresso", price: "$2.20", rating: "4.9", category: "Espresso", image: "https://loremflickr.com/400/400/espresso?lock=3", description: "A concentrated, full-bodied single origin shot." },
+                Product { name: "Cappuccino", price: "$3.80", rating: "4.5", category: "Espresso", image: "https://loremflickr.com/400/400/cappuccino?lock=4", description: "Equal parts espresso, steamed milk and airy foam." },
+                Product { name: "Cold Brew", price: "$4.10", rating: "4.7", category: "Cold", image: "https://loremflickr.com/400/400/coldbrew?lock=5", description: "Steeped 18 hours for a smooth, low-acidity cup." },
+                Product { name: "Iced Latte", price: "$4.20", rating: "4.4", category: "Cold", image: "https://loremflickr.com/400/400/icedcoffee?lock=6", description: "Chilled espresso and milk over ice." },
+            ],
+            categories: vec!["All", "Latte", "Espresso", "Cold"],
+            selected_category: "All".to_string(),
+            open_product: None,
+            sweetness: 50,
+            quantity: 1,
+        }
+    }
+}
+
+impl Model {
+    fn visible(&self) -> Vec<(usize, &Product)> {
+        self.products
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| self.selected_category == "All" || p.category == self.selected_category.as_str())
+            .collect()
+    }
 }
 
 #[derive(Default)]
-pub struct Gallery;
+pub struct Coffee;
 
-impl MobilerApp for Gallery {
+impl MobilerApp for Coffee {
     type Event = Msg;
     type Model = Model;
 
-    fn update(&self, event: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
+    fn update(&self, event: Msg, model: &mut Model, _cx: &mut Cx<Msg>) {
         match event {
-            Msg::Bump => model.count += 1,
-            Msg::Inc => model.qty += 1,
-            Msg::Dec => model.qty = (model.qty - 1).max(0),
-            Msg::Greet => {
-                let who = if model.name.is_empty() { "there".to_string() } else { model.name.clone() };
-                cx.notify("toast", "show", format!("Hello, {who}! 👋"));
+            Msg::SelectCategory(c) => model.selected_category = c,
+            Msg::OpenProduct(i) => {
+                model.open_product = Some(i as usize);
+                model.sweetness = 50;
+                model.quantity = 1;
             }
-            Msg::TryMissing => cx.notify("confetti", "burst", ""),
-            Msg::GetDevice => cx.plugin("device", "model", "", |resp| {
-                Msg::DeviceLoaded(if resp.ok { resp.output } else { format!("error: {}", resp.output) })
-            }),
-            Msg::DeviceLoaded(name) => model.device = name,
-            Msg::SelectTab(t) => model.tab = t,
+            Msg::CloseProduct => model.open_product = None,
+            Msg::IncQty => model.quantity += 1,
+            Msg::DecQty => model.quantity = (model.quantity - 1).max(1),
         }
     }
 
     fn input(&self, id: &str, value: InputValue, model: &mut Model) {
-        match (id, value) {
-            ("name", InputValue::Text(v)) => model.name = v,
-            ("notify", InputValue::Bool(v)) => model.notify = v,
-            ("agree", InputValue::Bool(v)) => model.agree = v,
-            ("dark", InputValue::Bool(v)) => model.dark = v,
-            ("level", InputValue::Int(v)) => model.level = v as i32,
-            _ => {}
+        if id == "sweetness" {
+            if let InputValue::Int(v) = value {
+                model.sweetness = v as i32;
+            }
         }
     }
 
     fn view(&self, model: &Model) -> Widget {
-        let active = if model.tab.is_empty() { "gallery" } else { model.tab.as_str() };
-        let body = match active {
-            "settings" => settings_body(model),
-            _ => gallery_body(model),
-        };
-        scaffold(
-            "Mobiler",
-            model.dark,
-            vec![
-                tab("Gallery", active == "gallery", Msg::SelectTab("gallery".to_string())),
-                tab("Settings", active == "settings", Msg::SelectTab("settings".to_string())),
-            ],
-            body,
-        )
+        match model.open_product.and_then(|i| model.products.get(i)) {
+            Some(product) => detail(product, model),
+            None => storefront(model),
+        }
     }
 }
 
-fn gallery_body(model: &Model) -> Widget {
-    let greeting = if model.name.is_empty() {
-        "Type your name above…".to_string()
-    } else {
-        format!("Hello, {}!", model.name)
-    };
-    column(vec![
-        // Hero: image with overlaid text + scrim (Box).
-        stack(
-            BoxAlign::BottomStart,
-            true,
-            vec![
-                image(HERO, ImageShape::Rounded, ImageRatio::Wide),
-                column(vec![subtitle("Rust + Compose"), text("UI in Rust, native widgets.")]),
-            ],
-        ),
-        spacer(Spacing::Sm),
-        subtitle("Buttons & icons"),
-        row(vec![
-            button("Filled", ButtonStyle::Filled, Msg::Bump),
-            button("Outlined", ButtonStyle::Outlined, Msg::Bump),
-            button("Text", ButtonStyle::Text, Msg::Bump),
-        ]),
-        row(vec![
-            icon_button(Icon::Add, Msg::Bump),
-            icon_button(Icon::Edit, Msg::Bump),
-            icon_button(Icon::Delete, Msg::Bump),
-            badge(format!("bumped {}×", model.count), Tone::Info),
-        ]),
-        divider(),
-        subtitle("Badges"),
-        row(vec![
-            badge("Neutral", Tone::Neutral),
-            badge("Success", Tone::Success),
-            badge("Warning", Tone::Warning),
-            badge("Danger", Tone::Danger),
-        ]),
-        divider(),
-        subtitle("Card & grid"),
-        card(column(vec![subtitle("Card title"), text("Cards group content.")]), CardStyle::Elevated),
-        grid(vec![
-            card(column(vec![image("https://picsum.photos/seed/m1/400", ImageShape::Rounded, ImageRatio::Square), caption("One")]), CardStyle::Filled),
-            card(column(vec![image("https://picsum.photos/seed/m2/400", ImageShape::Rounded, ImageRatio::Square), caption("Two")]), CardStyle::Filled),
-        ]),
-        divider(),
-        subtitle("Inputs"),
-        text_field("name", "Your name", model.name.clone()),
-        text(greeting),
-        switch("notify", "Notifications", model.notify),
-        checkbox("agree", "I agree to the terms", model.agree),
-        caption(format!("Level: {}%", model.level)),
-        slider("level", model.level, 100),
-        row(vec![text(format!("Quantity: {}", model.qty)), stepper(model.qty, Msg::Dec, Msg::Inc)]),
-        row(vec![chip("All", true, Msg::Bump), chip("Popular", false, Msg::Bump), chip("New", false, Msg::Bump)]),
-        divider(),
-        subtitle("Capabilities (toast)"),
-        row(vec![
-            button("Toast", ButtonStyle::Outlined, Msg::Greet),
-            button("Missing plugin", ButtonStyle::Outlined, Msg::TryMissing),
-        ]),
-        spacer(Spacing::Lg),
-    ])
+fn storefront(model: &Model) -> Widget {
+    let hero = stack(
+        BoxAlign::BottomStart,
+        true,
+        vec![
+            image(HERO, ImageShape::Rounded, ImageRatio::Wide),
+            column(vec![title("Fall in Love with Coffee"), button("Get Started", ButtonStyle::Filled, Msg::SelectCategory("All".to_string()))]),
+        ],
+    );
+    let chips = row(
+        model.categories.iter().map(|c| {
+            chip((*c).to_string(), model.selected_category.as_str() == *c, Msg::SelectCategory((*c).to_string()))
+        }).collect(),
+    );
+    let products = mobiler_core::grid(model.visible().iter().map(|(i, p)| product_card(*i, p)).collect());
+    column(vec![hero, chips, products])
 }
 
-fn settings_body(model: &Model) -> Widget {
+fn product_card(index: usize, p: &Product) -> Widget {
+    card_button(
+        column(vec![
+            image(p.image, ImageShape::Rounded, ImageRatio::Square),
+            text(p.name),
+            row(vec![text(p.price), text(format!("★ {}", p.rating))]),
+        ]),
+        CardStyle::Filled,
+        Msg::OpenProduct(index as u32),
+    )
+}
+
+fn detail(p: &Product, model: &Model) -> Widget {
     column(vec![
-        subtitle("Settings"),
-        switch("dark", "Dark mode", model.dark),
-        caption("Dark mode is theme-as-data — toggled in Rust, themed by the shell."),
-        divider(),
-        subtitle("Device (request/response capability)"),
-        text(if model.device.is_empty() { "Device: (tap below)".to_string() } else { format!("Device: {}", model.device) }),
-        button("Get device model", ButtonStyle::Filled, Msg::GetDevice),
-        spacer(Spacing::Lg),
+        button("← Back", ButtonStyle::Text, Msg::CloseProduct),
+        image(p.image, ImageShape::Rounded, ImageRatio::Wide),
+        title(p.name),
+        text(format!("★ {}    {}", p.rating, p.price)),
+        text(p.description),
+        mobiler_core::caption(format!("Sweetness: {}%", model.sweetness)),
+        slider("sweetness", model.sweetness, 100),
+        row(vec![text("Quantity"), stepper(model.quantity, Msg::DecQty, Msg::IncQty)]),
+        button(format!("Add {} to cart · {}", model.quantity, p.price), ButtonStyle::Filled, Msg::CloseProduct),
+        card(text("Tip: tap a product on the storefront to open this screen."), CardStyle::Outlined),
     ])
 }
 
 /// The Crux app the FFI + codegen target.
-pub type App = MobilerShell<Gallery>;
+pub type App = MobilerShell<Coffee>;
 
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
-    fn events_update_model() {
-        let app = Gallery;
+    fn filters_by_category() {
+        let app = Coffee;
         let mut model = Model::default();
-        app.update(Msg::Bump, &mut model, &mut Cx::default());
-        app.update(Msg::SelectTab("settings".into()), &mut model, &mut Cx::default());
-        app.update(Msg::DeviceLoaded("Pixel".into()), &mut model, &mut Cx::default());
-        assert_eq!(model.count, 1);
-        assert_eq!(model.tab, "settings");
-        assert_eq!(model.device, "Pixel");
+        app.update(Msg::SelectCategory("Latte".to_string()), &mut model, &mut Cx::default());
+        let visible = model.visible();
+        assert!(!visible.is_empty());
+        assert!(visible.iter().all(|(_, p)| p.category == "Latte"));
     }
 
     #[test]
-    fn inputs_route_by_id() {
-        let app = Gallery;
+    fn open_close_and_qty() {
+        let app = Coffee;
         let mut model = Model::default();
-        app.input("name", InputValue::Text("Ada".into()), &mut model);
-        app.input("dark", InputValue::Bool(true), &mut model);
-        app.input("level", InputValue::Int(42), &mut model);
-        assert_eq!(model.name, "Ada");
-        assert!(model.dark);
-        assert_eq!(model.level, 42);
+        app.update(Msg::OpenProduct(2), &mut model, &mut Cx::default());
+        assert_eq!(model.open_product, Some(2));
+        app.update(Msg::IncQty, &mut model, &mut Cx::default());
+        app.update(Msg::IncQty, &mut model, &mut Cx::default());
+        assert_eq!(model.quantity, 3);
+        app.input("sweetness", InputValue::Int(80), &mut model);
+        assert_eq!(model.sweetness, 80);
+        app.update(Msg::CloseProduct, &mut model, &mut Cx::default());
+        assert!(model.open_product.is_none());
     }
 }
