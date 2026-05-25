@@ -19,9 +19,11 @@ jobs:
           # The mobiler CLI (root workspace)
           - name: cli
             dir: "."
-          # The showcase demo — its own standalone workspace
+          # Demos — each its own standalone workspace
           - name: demo-todo
             dir: demos/todo
+          - name: demo-coffee
+            dir: demos/coffee
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
