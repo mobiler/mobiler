@@ -3,11 +3,11 @@ use crux_core::{
     bridge::{Bridge, EffectId},
 };
 
-use crate::{{NAME}}App;
+use crate::App;
 
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct CoreFFI {
-    core: Bridge<{{NAME}}App>,
+    core: Bridge<App>,
 }
 
 impl Default for CoreFFI {

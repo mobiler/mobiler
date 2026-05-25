@@ -5,11 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -32,18 +33,24 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,13 +69,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import {{PACKAGE}}.ui.theme.{{NAME}}Theme
+import {{PACKAGE_SHARED_TYPES}}.Action
 import {{PACKAGE_SHARED_TYPES}}.BoxAlign
 import {{PACKAGE_SHARED_TYPES}}.ButtonStyle
 import {{PACKAGE_SHARED_TYPES}}.CardStyle
-import {{PACKAGE_SHARED_TYPES}}.Event
 import {{PACKAGE_SHARED_TYPES}}.Icon as WidgetIcon
 import {{PACKAGE_SHARED_TYPES}}.ImageRatio
 import {{PACKAGE_SHARED_TYPES}}.ImageShape
+import {{PACKAGE_SHARED_TYPES}}.InputValue
 import {{PACKAGE_SHARED_TYPES}}.Spacing
 import {{PACKAGE_SHARED_TYPES}}.TextStyle as ModelTextStyle
 import {{PACKAGE_SHARED_TYPES}}.Tone
@@ -77,42 +85,46 @@ import {{PACKAGE_SHARED_TYPES}}.Widget
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge() // transparent system bars + icon contrast that adapts to light/dark
-        setContent {
-            {{NAME}}Theme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
+        enableEdgeToEdge()
+        setContent { App() }
+    }
+}
+
+@Composable
+fun App(core: Core = viewModel()) {
+    val view = core.view
+    // Theme is data: a Scaffold carries dark_mode, decided by the Rust core.
+    val dark = (view as? Widget.Scaffold)?.darkMode ?: isSystemInDarkTheme()
+    {{NAME}}Theme(darkTheme = dark) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            if (view is Widget.Scaffold) {
+                // Scaffold provides its own bars + scrollable body.
+                Render(view) { action -> core.update(action) }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    App()
+                    Render(view) { action -> core.update(action) }
                 }
             }
         }
     }
 }
 
-@Composable
-fun App(core: Core = viewModel()) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Render(core.view) { event -> core.update(event) }
-    }
-}
-
 /**
- * Generic Render — maps Widget variants to Compose. Style *intent* (TextStyle,
- * ButtonStyle, CardStyle, Tone, Spacing, Icon, ImageShape/Ratio, BoxAlign) is
- * decided in Rust; the concrete look (fonts, colors, dp, shapes) is decided here.
- * This file only changes when a brand-new Widget kind is added.
+ * The ENTIRE shell. It knows only the fixed Mobiler ABI — `Widget` (what to
+ * draw) + `Action` (what to send back). No app-specific types; this exact code
+ * renders any Mobiler app. Style *intent* (TextStyle, Tone, …) is decided in
+ * Rust; the concrete look (fonts, colors, dp) is decided here.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Render(widget: Widget, send: (Event) -> Unit) {
+fun Render(widget: Widget, send: (Action) -> Unit) {
     when (widget) {
         is Widget.Text -> Text(
             text = widget.content,
@@ -126,21 +138,14 @@ fun Render(widget: Widget, send: (Event) -> Unit) {
             model = widget.source,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(ratioFor(widget.ratio))
-                .clip(shapeFor(widget.shape)),
+            modifier = Modifier.fillMaxWidth().aspectRatio(ratioFor(widget.ratio)).clip(shapeFor(widget.shape)),
         )
 
         is Widget.Badge -> {
             val (bg, fg) = toneColors(widget.tone)
             Box(
-                modifier = Modifier
-                    .background(color = bg, shape = RoundedCornerShape(50))
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-            ) {
-                Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg)
-            }
+                modifier = Modifier.background(color = bg, shape = RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
+            ) { Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg) }
         }
 
         is Widget.Divider -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -151,43 +156,43 @@ fun Render(widget: Widget, send: (Event) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
-        ) {
-            widget.children.forEach { RowItem(it, send) }
-        }
+        ) { widget.children.forEach { Render(it, send) } }
 
         is Widget.Column -> Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            widget.children.forEach { Render(it, send) }
-        }
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) { widget.children.forEach { Render(it, send) } }
 
-        is Widget.Card -> when (widget.style) {
-            CardStyle.ELEVATED -> Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            ) { CardBody(widget.child, send) }
-            CardStyle.OUTLINED -> OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-                CardBody(widget.child, send)
+        is Widget.Card -> {
+            val mod = Modifier.fillMaxWidth()
+            val op = widget.onPress
+            when (widget.style) {
+                CardStyle.OUTLINED ->
+                    if (op != null) OutlinedCard(onClick = { send(Action.Fired(op)) }, modifier = mod) { CardBody(widget.child, send) }
+                    else OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
+                CardStyle.FILLED -> {
+                    val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, colors = colors) { CardBody(widget.child, send) }
+                    else Card(modifier = mod, colors = colors) { CardBody(widget.child, send) }
+                }
+                CardStyle.ELEVATED -> {
+                    val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                    else Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                }
             }
-            CardStyle.FILLED -> Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            ) { CardBody(widget.child, send) }
         }
 
         is Widget.Box -> Box(contentAlignment = boxAlignFor(widget.align)) {
             val kids = widget.children
             if (widget.scrim && kids.size > 1) {
-                Render(kids.first(), send) // background (e.g. hero image)
+                Render(kids.first(), send)
                 Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.40f)))
                 CompositionLocalProvider(LocalContentColor provides Color.White) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                        kids.drop(1).forEach { child -> Render(child, send) }
-                    }
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { kids.drop(1).forEach { Render(it, send) } }
                 }
             } else {
-                kids.forEach { child -> Render(child, send) }
+                kids.forEach { Render(it, send) }
             }
         }
 
@@ -201,28 +206,24 @@ fun Render(widget: Widget, send: (Event) -> Unit) {
         }
 
         is Widget.Button -> when (widget.style) {
-            ButtonStyle.FILLED -> Button(onClick = { send(widget.onPress) }) { Text(widget.label) }
-            ButtonStyle.OUTLINED -> OutlinedButton(onClick = { send(widget.onPress) }) { Text(widget.label) }
-            ButtonStyle.TEXT -> TextButton(onClick = { send(widget.onPress) }) { Text(widget.label) }
+            ButtonStyle.FILLED -> Button(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
+            ButtonStyle.OUTLINED -> OutlinedButton(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
+            ButtonStyle.TEXT -> TextButton(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
         }
 
-        is Widget.IconButton -> IconButton(onClick = { send(widget.onPress) }) {
-            Icon(
-                imageVector = iconFor(widget.icon),
-                contentDescription = widget.icon.name.lowercase(),
-                tint = iconTintFor(widget.icon),
-            )
+        is Widget.IconButton -> IconButton(onClick = { send(Action.Fired(widget.onPress)) }) {
+            Icon(imageVector = iconFor(widget.icon), contentDescription = widget.icon.name.lowercase(), tint = iconTintFor(widget.icon))
         }
 
         is Widget.Chip -> FilterChip(
             selected = widget.selected,
-            onClick = { send(widget.onPress) },
+            onClick = { send(Action.Fired(widget.onPress)) },
             label = { Text(widget.label) },
         )
 
         is Widget.TextField -> OutlinedTextField(
             value = widget.value,
-            onValueChange = { newValue -> send(Event.TextChanged(id = widget.id, value = newValue)) },
+            onValueChange = { send(Action.Input(widget.id, InputValue.Text(it))) },
             placeholder = { Text(widget.placeholder) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -234,42 +235,73 @@ fun Render(widget: Widget, send: (Event) -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(text = widget.label, modifier = Modifier.weight(1f))
-            Switch(
-                checked = widget.value,
-                onCheckedChange = { newValue -> send(Event.Toggled(id = widget.id, value = newValue)) },
-            )
+            Switch(checked = widget.value, onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) })
         }
 
-        is Widget.Checkbox -> Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                checked = widget.value,
-                onCheckedChange = { newValue -> send(Event.Toggled(id = widget.id, value = newValue)) },
-            )
+        is Widget.Checkbox -> Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = widget.value, onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) })
             Text(text = widget.label, modifier = Modifier.weight(1f))
         }
 
         is Widget.Slider -> Slider(
             value = widget.value.toFloat(),
-            onValueChange = { newValue -> send(Event.SliderChanged(id = widget.id, value = newValue.toInt())) },
+            onValueChange = { send(Action.Input(widget.id, InputValue.Int(it.toLong()))) },
             valueRange = 0f..widget.max.toFloat(),
             modifier = Modifier.fillMaxWidth(),
         )
 
-        is Widget.Stepper -> Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            OutlinedButton(onClick = { send(widget.onDecrement) }) { Text("−") }
+        is Widget.Stepper -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { send(Action.Fired(widget.onDecrement)) }) { Text("−") }
             Text(text = "${widget.value}", style = MaterialTheme.typography.titleMedium)
-            OutlinedButton(onClick = { send(widget.onIncrement) }) { Text("+") }
+            OutlinedButton(onClick = { send(Action.Fired(widget.onIncrement)) }) { Text("+") }
+        }
+
+        is Widget.Scaffold -> Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text(widget.title) },
+                    navigationIcon = {
+                        val back = widget.back
+                        if (back != null) {
+                            IconButton(onClick = { send(Action.Fired(back)) }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                )
+            },
+            bottomBar = {
+                if (widget.tabs.isNotEmpty()) {
+                    NavigationBar {
+                        widget.tabs.forEach { t ->
+                            NavigationBarItem(
+                                selected = t.selected,
+                                onClick = { send(Action.Fired(t.onSelect)) },
+                                label = { Text(t.label) },
+                                icon = {},
+                            )
+                        }
+                    }
+                }
+            },
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Render(widget.body, send)
+            }
         }
     }
 }
 
-// ---------- Style-token mappings (the ONLY place that decides concrete looks) ----------
+// ---------- Style-token mappings (the only place that decides concrete looks) ----------
 
 @Composable
 private fun typographyFor(style: ModelTextStyle): androidx.compose.ui.text.TextStyle = when (style) {
@@ -310,8 +342,6 @@ private fun iconTintFor(icon: WidgetIcon): Color = when (icon) {
     else -> LocalContentColor.current
 }
 
-/// (background, foreground) for a semantic tone — pulled from the theme so dark
-/// mode comes for free.
 @Composable
 private fun toneColors(tone: Tone): Pair<Color, Color> {
     val cs = MaterialTheme.colorScheme
@@ -346,27 +376,6 @@ private fun boxAlignFor(align: BoxAlign): Alignment = when (align) {
 }
 
 @Composable
-private fun CardBody(child: Widget, send: (Event) -> Unit) {
-    Box(modifier = Modifier.padding(16.dp)) {
-        Render(child, send)
-    }
-}
-
-@Composable
-private fun RowScope.RowItem(widget: Widget, send: (Event) -> Unit) {
-    when (widget) {
-        is Widget.TextField -> OutlinedTextField(
-            value = widget.value,
-            onValueChange = { send(Event.TextChanged(id = widget.id, value = it)) },
-            placeholder = { Text(widget.placeholder) },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-        )
-        is Widget.Text -> Text(
-            text = widget.content,
-            style = typographyFor(widget.style),
-            color = colorFor(widget.style),
-        )
-        else -> Render(widget, send)
-    }
+private fun CardBody(child: Widget, send: (Action) -> Unit) {
+    Box(modifier = Modifier.padding(16.dp)) { Render(child, send) }
 }

@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
 
-mod add_widget;
 mod dev;
 mod doctor;
 mod new;
@@ -43,14 +42,6 @@ enum Command {
         #[arg(long)]
         no_run: bool,
     },
-    /// Add a new Widget variant + matching Compose Render arm.
-    AddWidget {
-        /// Variant name in PascalCase (e.g. Slider, Image, Snackbar).
-        name: String,
-        /// Struct fields as `name:Type`, repeatable. Omit for a unit variant.
-        #[arg(long = "field", value_name = "name:Type")]
-        fields: Vec<String>,
-    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -72,13 +63,6 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Watch { no_install, no_run } => match watch::run(no_install, no_run) {
-            Ok(()) => std::process::ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("error: {e:#}");
-                std::process::ExitCode::FAILURE
-            }
-        },
-        Command::AddWidget { name, fields } => match add_widget::run(&name, &fields) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");
