@@ -1,14 +1,9 @@
 //! Mobiler runtime — the developer-facing API.
 //!
-//! Implement [`MobilerApp`] with your **typed** events, model, and view. Mobiler
-//! wraps it in [`MobilerShell`], a Crux app that speaks the fixed UI ABI
-//! ([`mobiler_ui`]). You never touch the wire protocol (`Action`, tokens).
-//!
-//! Device APIs are **capabilities** dispatched to native plugins. From `update`,
-//! via the [`Cx`]:
-//! - [`Cx::notify`] — fire-and-forget (e.g. a toast).
-//! - [`Cx::plugin`] — request/response: the plugin's [`PluginResponse`] comes
-//!   back to your `update` as a typed event you choose.
+//! Implement [`MobilerApp`] with your **typed** events, model, and view (built
+//! from the [builders](#functions)). Mobiler wraps it in [`MobilerShell`], a
+//! Crux app speaking the fixed UI ABI ([`mobiler_ui`]); you never touch the wire
+//! protocol. Device APIs are capabilities via [`Cx`].
 
 use std::marker::PhantomData;
 
@@ -21,11 +16,14 @@ use crux_core::{
 use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-pub use mobiler_ui::{Action, InputValue, Widget};
+pub use mobiler_ui::{
+    Action, BoxAlign, ButtonStyle, CardStyle, Icon, ImageRatio, ImageShape, InputValue, Spacing,
+    TextStyle, Tone, Widget,
+};
 
-/// Built-in capabilities the generic shell fulfils. `Render` redraws the UI;
-/// the two `Plugin*` variants are opaque envelopes dispatched by name to a
-/// native plugin registry, so adding a plugin never changes the wire ABI.
+// ============================ capabilities ============================
+
+/// Built-in capabilities the generic shell fulfils.
 #[effect(facet_typegen)]
 #[derive(Debug)]
 pub enum Effect {
@@ -36,7 +34,6 @@ pub enum Effect {
     Plugin(PluginCall),
 }
 
-/// Fire-and-forget plugin call.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PluginNotify {
     pub plugin: String,
@@ -47,7 +44,6 @@ impl Operation for PluginNotify {
     type Output = ();
 }
 
-/// Request/response plugin call.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PluginCall {
     pub plugin: String,
@@ -58,8 +54,6 @@ impl Operation for PluginCall {
     type Output = PluginResponse;
 }
 
-/// The result of a request/response plugin call. `output` is opaque
-/// (plugin-specific) — typically JSON, or an error message when `!ok`.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PluginResponse {
     pub ok: bool,
@@ -68,7 +62,7 @@ pub struct PluginResponse {
 
 type Continuation<E> = Box<dyn FnOnce(PluginResponse) -> E + Send>;
 
-/// Effects an app requests during `update`, generic over the app's event type so
+/// Effects an app requests during `update`, generic over the app event type so
 /// continuations stay fully typed.
 pub struct Cx<E> {
     notifications: Vec<PluginNotify>,
@@ -82,7 +76,7 @@ impl<E> Default for Cx<E> {
 }
 
 impl<E> Cx<E> {
-    /// Fire-and-forget call to a native plugin (no result awaited).
+    /// Fire-and-forget call to a native plugin.
     pub fn notify(&mut self, plugin: impl Into<String>, op: impl Into<String>, input: impl Into<String>) {
         self.notifications.push(PluginNotify { plugin: plugin.into(), op: op.into(), input: input.into() });
     }
@@ -101,27 +95,24 @@ impl<E> Cx<E> {
     }
 }
 
+// ============================ the app trait ============================
+
 /// What a Mobiler app implements. Write typed domain events; Mobiler serializes
 /// them into opaque tokens behind the scenes.
 pub trait MobilerApp: Default {
-    /// Your typed domain events (serialized into opaque action tokens).
     type Event: Serialize + DeserializeOwned + Send + 'static;
-    /// Your app state.
     type Model: Default;
 
-    /// Handle a domain event. Use `cx` to call device-API plugins.
     fn update(&self, event: Self::Event, model: &mut Self::Model, cx: &mut Cx<Self::Event>);
 
-    /// Handle an input-widget change (text field / switch / slider), by `id`.
     fn input(&self, id: &str, value: InputValue, model: &mut Self::Model) {
         let _ = (id, value, model);
     }
 
-    /// Build the widget tree from the current model.
     fn view(&self, model: &Self::Model) -> Widget;
 }
 
-/// Crux adapter: turns a [`MobilerApp`] into an app that speaks the fixed ABI.
+/// Crux adapter: turns a [`MobilerApp`] into an app speaking the fixed ABI.
 pub struct MobilerShell<A>(PhantomData<fn() -> A>);
 
 impl<A> Default for MobilerShell<A> {
@@ -147,14 +138,11 @@ impl<A: MobilerApp> App for MobilerShell<A> {
             }
             Action::Input { id, value } => app.input(&id, value, model),
         }
-
         let mut commands: Vec<Command<Effect, Action>> = Vec::new();
         for op in cx.notifications {
             commands.push(Command::notify_shell(op).build());
         }
         for (op, then) in cx.requests {
-            // The plugin's response resumes the core as a typed event, carried
-            // back as an opaque Action token (same mechanism as button presses).
             commands.push(Command::request_from_shell(op).then_send(move |response: PluginResponse| {
                 Action::Fired { token: serde_json::to_string(&then(response)).expect("serialize event") }
             }));
@@ -168,32 +156,87 @@ impl<A: MobilerApp> App for MobilerShell<A> {
     }
 }
 
-// ---- Widget builders: take TYPED events, serialize them into opaque tokens ----
+// ============================ widget builders ============================
+// Action-carrying builders take a TYPED event and serialize it into a token.
 
-#[must_use]
-pub fn text(content: impl Into<String>) -> Widget {
-    Widget::Text { content: content.into() }
+fn tok<E: Serialize>(event: E) -> String {
+    serde_json::to_string(&event).expect("serialize event")
 }
 
 #[must_use]
-pub fn column(children: Vec<Widget>) -> Widget {
-    Widget::Column { children }
+pub fn styled(content: impl Into<String>, style: TextStyle) -> Widget {
+    Widget::Text { content: content.into(), style }
 }
-
-/// A button whose press carries a typed domain event (serialized to a token).
 #[must_use]
-pub fn button<E: Serialize>(label: impl Into<String>, on_press: E) -> Widget {
-    Widget::Button {
-        label: label.into(),
-        on_press: serde_json::to_string(&on_press).expect("serialize event"),
-    }
-}
+pub fn text(content: impl Into<String>) -> Widget { styled(content, TextStyle::Body) }
+#[must_use]
+pub fn title(content: impl Into<String>) -> Widget { styled(content, TextStyle::Title) }
+#[must_use]
+pub fn subtitle(content: impl Into<String>) -> Widget { styled(content, TextStyle::Subtitle) }
+#[must_use]
+pub fn caption(content: impl Into<String>) -> Widget { styled(content, TextStyle::Caption) }
+#[must_use]
+pub fn emphasis(content: impl Into<String>) -> Widget { styled(content, TextStyle::Emphasis) }
 
+#[must_use]
+pub fn image(source: impl Into<String>, shape: ImageShape, ratio: ImageRatio) -> Widget {
+    Widget::Image { source: source.into(), shape, ratio }
+}
+#[must_use]
+pub fn badge(label: impl Into<String>, tone: Tone) -> Widget {
+    Widget::Badge { label: label.into(), tone }
+}
+#[must_use]
+pub fn divider() -> Widget { Widget::Divider }
+#[must_use]
+pub fn spacer(size: Spacing) -> Widget { Widget::Spacer { size } }
+
+#[must_use]
+pub fn row(children: Vec<Widget>) -> Widget { Widget::Row { children } }
+#[must_use]
+pub fn column(children: Vec<Widget>) -> Widget { Widget::Column { children } }
+#[must_use]
+pub fn card(child: Widget, style: CardStyle) -> Widget {
+    Widget::Card { child: Box::new(child), style }
+}
+/// Z-stack/overlay (the `Box` widget). With `scrim`, the first child is a
+/// darkened background and the rest render on top.
+#[must_use]
+pub fn stack(align: BoxAlign, scrim: bool, children: Vec<Widget>) -> Widget {
+    Widget::Box { children, align, scrim }
+}
+#[must_use]
+pub fn grid(children: Vec<Widget>) -> Widget { Widget::Grid { children } }
+
+#[must_use]
+pub fn button<E: Serialize>(label: impl Into<String>, style: ButtonStyle, on_press: E) -> Widget {
+    Widget::Button { label: label.into(), style, on_press: tok(on_press) }
+}
+#[must_use]
+pub fn icon_button<E: Serialize>(icon: Icon, on_press: E) -> Widget {
+    Widget::IconButton { icon, on_press: tok(on_press) }
+}
+#[must_use]
+pub fn chip<E: Serialize>(label: impl Into<String>, selected: bool, on_press: E) -> Widget {
+    Widget::Chip { label: label.into(), selected, on_press: tok(on_press) }
+}
 #[must_use]
 pub fn text_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
-    Widget::TextField {
-        id: id.into(),
-        placeholder: placeholder.into(),
-        value: value.into(),
-    }
+    Widget::TextField { id: id.into(), placeholder: placeholder.into(), value: value.into() }
+}
+#[must_use]
+pub fn switch(id: impl Into<String>, label: impl Into<String>, value: bool) -> Widget {
+    Widget::Switch { id: id.into(), label: label.into(), value }
+}
+#[must_use]
+pub fn checkbox(id: impl Into<String>, label: impl Into<String>, value: bool) -> Widget {
+    Widget::Checkbox { id: id.into(), label: label.into(), value }
+}
+#[must_use]
+pub fn slider(id: impl Into<String>, value: i32, max: i32) -> Widget {
+    Widget::Slider { id: id.into(), value, max }
+}
+#[must_use]
+pub fn stepper<E: Serialize>(value: i32, on_decrement: E, on_increment: E) -> Widget {
+    Widget::Stepper { value, on_decrement: tok(on_decrement), on_increment: tok(on_increment) }
 }

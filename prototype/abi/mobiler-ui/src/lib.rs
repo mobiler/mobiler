@@ -1,20 +1,23 @@
 //! Mobiler's fixed UI wire ABI.
 //!
 //! These types are the **stable contract** between any Mobiler app's Rust core
-//! and the native shell. Because they never change per app, a single shell can
-//! be built once and render *any* Mobiler app — the shell only ever knows these
+//! and the native shell. Because they never change per app, a single shell is
+//! built once and renders *any* Mobiler app — the shell only ever knows these
 //! types, never an app's domain events or widgets.
 //!
 //! - The core emits a [`Widget`] tree (the `ViewModel`).
 //! - The shell sends back an [`Action`] (the `Event`).
 //! - App domain events ride inside actions as opaque [`ActionToken`]s that the
 //!   shell round-trips without interpreting.
+//!
+//! Style is expressed as **intent tokens** (e.g. [`TextStyle`], [`Tone`]); the
+//! shell maps each to a concrete look (font, color, dp), so dark mode and theme
+//! come for free on the native side.
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// An opaque, serialized app event (e.g. JSON of the app's domain action).
-/// The shell carries it verbatim and echoes it back on activation.
 pub type ActionToken = String;
 
 /// A value produced by an input widget at runtime.
@@ -30,20 +33,83 @@ pub enum InputValue {
 #[derive(Facet, Serialize, Deserialize, Clone, Debug)]
 #[repr(C)]
 pub enum Action {
-    /// An action widget (button, etc.) fired; `token` is the opaque app event.
+    /// An action widget (button/etc.) fired; `token` is the opaque app event.
     Fired { token: ActionToken },
     /// A value-carrying input changed; `id` names the widget.
     Input { id: String, value: InputValue },
 }
 
+// ---------------------------- style tokens ----------------------------
+
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum TextStyle { Body, Title, Subtitle, Caption, Emphasis }
+
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum ButtonStyle { Filled, Outlined, Text }
+
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CardStyle { Elevated, Outlined, Filled }
+
+/// Semantic status color (distinct from brand/identity color).
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum Tone { Neutral, Success, Warning, Danger, Info }
+
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum Spacing { Xs, Sm, Md, Lg, Xl }
+
+/// A small, finite icon set (maps to Material icons in the shell).
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum Icon { Delete, Add, Edit, Close, Settings, Check, Star }
+
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum ImageShape { Square, Rounded, Circle }
+
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum ImageRatio { Wide, Square, Tall }
+
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum BoxAlign { TopStart, TopEnd, Center, BottomStart, BottomCenter, BottomEnd }
+
+// ------------------------------- widgets -------------------------------
+
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
-///
-/// (Prototype subset — the production ABI carries the full widget vocabulary.)
 #[derive(Facet, Serialize, Deserialize, Clone, Debug)]
 #[repr(C)]
 pub enum Widget {
-    Text { content: String },
+    // Content
+    Text { content: String, style: TextStyle },
+    Image { source: String, shape: ImageShape, ratio: ImageRatio },
+    Badge { label: String, tone: Tone },
+    Divider,
+    Spacer { size: Spacing },
+    // Layout
+    Row { children: Vec<Widget> },
     Column { children: Vec<Widget> },
-    Button { label: String, on_press: ActionToken },
+    Card { child: Box<Widget>, style: CardStyle },
+    /// Z-stack: children layered back-to-front, positioned by `align`. With
+    /// `scrim`, the first child is a background image, darkened for legibility,
+    /// and the rest render on top in light content.
+    Box { children: Vec<Widget>, align: BoxAlign, scrim: bool },
+    /// Fixed 2-column grid; children flow left-to-right, top-to-bottom.
+    Grid { children: Vec<Widget> },
+    // Input
+    Button { label: String, style: ButtonStyle, on_press: ActionToken },
+    IconButton { icon: Icon, on_press: ActionToken },
+    Chip { label: String, selected: bool, on_press: ActionToken },
     TextField { id: String, placeholder: String, value: String },
+    Switch { id: String, label: String, value: bool },
+    Checkbox { id: String, label: String, value: bool },
+    /// Continuous 0..=`max` slider; emits `Input { id, Int }`.
+    Slider { id: String, value: i32, max: i32 },
+    /// Numeric stepper with −/+ controls carrying their own events.
+    Stepper { value: i32, on_decrement: ActionToken, on_increment: ActionToken },
 }
