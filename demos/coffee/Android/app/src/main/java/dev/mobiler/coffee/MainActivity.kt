@@ -3,6 +3,7 @@ package dev.mobiler.coffee
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,7 @@ import dev.mobiler.coffee.shared.types.Widget
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge() // transparent system bars + icon contrast that adapts to light/dark
         setContent {
             CoffeeTheme {
                 Surface(

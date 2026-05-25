@@ -11,10 +11,13 @@ use serde::{Deserialize, Serialize};
 pub enum Event {
     /// Generic demo action (wired to the starter's buttons/chips).
     Increment,
+    Decrement,
     /// A text field changed; `id` identifies which one.
     TextChanged { id: String, value: String },
     /// A switch/checkbox toggled; `id` identifies which one.
     Toggled { id: String, value: bool },
+    /// A slider moved; `id` identifies which one.
+    SliderChanged { id: String, value: i32 },
 }
 
 #[effect(facet_typegen)]
@@ -26,6 +29,7 @@ pub enum Effect {
 #[derive(Default)]
 pub struct Model {
     count: i32,
+    level: i32,
     name: String,
     notify: bool,
     agree: bool,
@@ -155,6 +159,10 @@ pub enum Widget {
     TextField { id: String, placeholder: String, value: String },
     Switch { id: String, label: String, value: bool },
     Checkbox { id: String, label: String, value: bool },
+    /// Continuous 0..=`max` slider; emits `SliderChanged { id, value }`.
+    Slider { id: String, value: i32, max: i32 },
+    /// Numeric stepper with −/+ controls carrying their own events.
+    Stepper { value: i32, on_decrement: Event, on_increment: Event },
 }
 
 pub type ViewModel = Widget;
@@ -171,6 +179,7 @@ impl App for {{NAME}}App {
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
         match event {
             Event::Increment => model.count += 1,
+            Event::Decrement => model.count -= 1,
             Event::TextChanged { id, value } => {
                 if id == "name" {
                     model.name = value;
@@ -181,6 +190,11 @@ impl App for {{NAME}}App {
                 "agree" => model.agree = value,
                 _ => {}
             },
+            Event::SliderChanged { id, value } => {
+                if id == "level" {
+                    model.level = value.clamp(0, 100);
+                }
+            }
         }
         render()
     }
@@ -260,6 +274,16 @@ impl App for {{NAME}}App {
                         Widget::Chip { label: "All".to_string(), selected: true, on_press: Event::Increment },
                         Widget::Chip { label: "Popular".to_string(), selected: false, on_press: Event::Increment },
                         Widget::Chip { label: "New".to_string(), selected: false, on_press: Event::Increment },
+                    ],
+                },
+                divider(),
+                subtitle("Slider & stepper"),
+                caption(&format!("Level: {}%", model.level)),
+                Widget::Slider { id: "level".to_string(), value: model.level, max: 100 },
+                Widget::Row {
+                    children: vec![
+                        body("Count"),
+                        Widget::Stepper { value: model.count, on_decrement: Event::Decrement, on_increment: Event::Increment },
                     ],
                 },
                 spacer(Spacing::Lg),

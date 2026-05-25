@@ -3,6 +3,7 @@ package {{PACKAGE}}
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -74,6 +77,7 @@ import {{PACKAGE_SHARED_TYPES}}.Widget
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge() // transparent system bars + icon contrast that adapts to light/dark
         setContent {
             {{NAME}}Theme {
                 Surface(
@@ -92,6 +96,7 @@ fun App(core: Core = viewModel()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -244,6 +249,22 @@ fun Render(widget: Widget, send: (Event) -> Unit) {
                 onCheckedChange = { newValue -> send(Event.Toggled(id = widget.id, value = newValue)) },
             )
             Text(text = widget.label, modifier = Modifier.weight(1f))
+        }
+
+        is Widget.Slider -> Slider(
+            value = widget.value.toFloat(),
+            onValueChange = { newValue -> send(Event.SliderChanged(id = widget.id, value = newValue.toInt())) },
+            valueRange = 0f..widget.max.toFloat(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        is Widget.Stepper -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            OutlinedButton(onClick = { send(widget.onDecrement) }) { Text("−") }
+            Text(text = "${widget.value}", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = { send(widget.onIncrement) }) { Text("+") }
         }
     }
 }
