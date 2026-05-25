@@ -23,6 +23,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -98,14 +100,37 @@ fun Render(widget: Widget, send: (Event) -> Unit) {
         ) {
             widget.children.forEach { child -> Render(child, send) }
         }
-        is Widget.Card -> Card(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.padding(8.dp)) { Render(widget.child, send) }
+        is Widget.Card -> {
+            val onPress = widget.onPress
+            if (onPress != null) {
+                Card(onClick = { send(onPress) }, modifier = Modifier.fillMaxWidth()) {
+                    Box(modifier = Modifier.padding(8.dp)) { Render(widget.child, send) }
+                }
+            } else {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Box(modifier = Modifier.padding(8.dp)) { Render(widget.child, send) }
+                }
+            }
         }
         is Widget.Chip -> FilterChip(
             selected = widget.selected,
             onClick = { send(widget.onPress) },
             label = { Text(widget.label) },
         )
+        is Widget.Slider -> Slider(
+            value = widget.value.toFloat(),
+            onValueChange = { send(Event.SliderChanged(id = widget.id, value = it.toInt())) },
+            valueRange = 0f..widget.max.toFloat(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        is Widget.Stepper -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            OutlinedButton(onClick = { send(widget.onDecrement) }) { Text("−") }
+            Text(text = "${widget.value}", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = { send(widget.onIncrement) }) { Text("+") }
+        }
         is Widget.Grid -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             widget.children.chunked(2).forEach { rowItems ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
