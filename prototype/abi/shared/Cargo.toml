@@ -19,7 +19,7 @@ name = "codegen"
 required-features = ["codegen"]
 
 [features]
-facet_typegen = ["crux_core/facet_typegen"]
+facet_typegen = ["crux_core/facet_typegen", "mobiler-core/facet_typegen"]
 uniffi = ["dep:uniffi"]
 codegen = [
     "crux_core/cli",
@@ -34,8 +34,7 @@ codegen = [
 facet = { version = "=0.44", features = ["chrono"] }
 crux_core.workspace = true
 serde = { workspace = true, features = ["derive"] }
-serde_json = "1"
-mobiler-ui = { path = "../mobiler-ui" }
+mobiler-core = { path = "../mobiler-core" }
 
 clap = { version = "4.6.1", optional = true, features = ["derive"] }
 log = { version = "0.4.29", optional = true }

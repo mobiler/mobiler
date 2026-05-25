@@ -1,30 +1,11 @@
-use crux_core::{
-    App, Command,
-    macros::effect,
-    render::{RenderOperation, render},
-};
-use mobiler_ui::{Action, InputValue, Widget};
+use mobiler_core::{InputValue, MobilerApp, MobilerShell, Widget, button, column, text, text_field};
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// The app's TYPED domain events (Option A). These never cross the FFI as types
-// — they are serialized into opaque string tokens that the shell round-trips.
-// The shell knows nothing about `Msg`.
-// ---------------------------------------------------------------------------
+/// The app's typed domain events. Mobiler serializes these into opaque tokens
+/// behind the scenes — the shell never sees this type.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-enum Msg {
+pub enum Msg {
     Increment,
-}
-
-/// Serialize a typed domain event into an opaque action token.
-fn token(msg: &Msg) -> String {
-    serde_json::to_string(msg).expect("serialize Msg")
-}
-
-#[effect(facet_typegen)]
-#[derive(Debug)]
-pub enum Effect {
-    Render(RenderOperation),
 }
 
 #[derive(Default)]
@@ -33,91 +14,63 @@ pub struct Model {
     name: String,
 }
 
-/// The core speaks the fixed Mobiler ABI: it receives [`Action`] and returns a
-/// [`Widget`] tree. Neither is app-specific, so the shell is generic.
-pub type ViewModel = Widget;
-
 #[derive(Default)]
-pub struct AbiApp;
+pub struct Counter;
 
-impl App for AbiApp {
-    type Event = Action;
+impl MobilerApp for Counter {
+    type Event = Msg;
     type Model = Model;
-    type ViewModel = ViewModel;
-    type Effect = Effect;
 
-    fn update(&self, event: Action, model: &mut Model) -> Command<Effect, Action> {
+    fn update(&self, event: Msg, model: &mut Model) {
         match event {
-            // An action widget fired: decode the opaque token back into a typed
-            // domain event and handle it.
-            Action::Fired { token } => match serde_json::from_str::<Msg>(&token) {
-                Ok(Msg::Increment) => model.count += 1,
-                Err(_) => {} // unknown/foreign token — ignore
-            },
-            // A value-carrying input changed, routed by id.
-            Action::Input { id, value } => {
-                if id == "name" {
-                    if let InputValue::Text(text) = value {
-                        model.name = text;
-                    }
-                }
-            }
+            Msg::Increment => model.count += 1,
         }
-        render()
     }
 
-    fn view(&self, model: &Model) -> ViewModel {
+    fn input(&self, id: &str, value: InputValue, model: &mut Model) {
+        if id == "name" {
+            if let InputValue::Text(text) = value {
+                model.name = text;
+            }
+        }
+    }
+
+    fn view(&self, model: &Model) -> Widget {
         let greeting = if model.name.is_empty() {
             "Type your name above…".to_string()
         } else {
             format!("Hello, {}!", model.name)
         };
-        Widget::Column {
-            children: vec![
-                Widget::Text { content: format!("Count: {}", model.count) },
-                Widget::Button { label: "Increment".to_string(), on_press: token(&Msg::Increment) },
-                Widget::TextField {
-                    id: "name".to_string(),
-                    placeholder: "Your name".to_string(),
-                    value: model.name.clone(),
-                },
-                Widget::Text { content: greeting },
-            ],
-        }
+        column(vec![
+            text(format!("Count: {}", model.count)),
+            button("Increment", Msg::Increment),
+            text_field("name", "Your name", model.name.clone()),
+            text(greeting),
+        ])
     }
 }
+
+/// The Crux app the FFI + codegen target. It's `MobilerShell` over our app, so
+/// its `Event`/`ViewModel` are the fixed ABI types → the shell is generic.
+pub type App = MobilerShell<Counter>;
 
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
-    fn fired_token_increments() {
-        let app = AbiApp;
+    fn increment_via_typed_event() {
+        let app = Counter;
         let mut model = Model::default();
-        app.update(Action::Fired { token: token(&Msg::Increment) }, &mut model)
-            .expect_only_render();
+        app.update(Msg::Increment, &mut model);
         assert_eq!(model.count, 1);
     }
 
     #[test]
     fn input_updates_name() {
-        let app = AbiApp;
+        let app = Counter;
         let mut model = Model::default();
-        app.update(
-            Action::Input { id: "name".to_string(), value: InputValue::Text("Ada".to_string()) },
-            &mut model,
-        )
-        .expect_only_render();
+        app.input("name", InputValue::Text("Ada".to_string()), &mut model);
         assert_eq!(model.name, "Ada");
-    }
-
-    #[test]
-    fn foreign_token_is_ignored() {
-        let app = AbiApp;
-        let mut model = Model::default();
-        // A token this app doesn't understand must not panic the core.
-        app.update(Action::Fired { token: "\"SomethingElse\"".to_string() }, &mut model);
-        assert_eq!(model.count, 0);
     }
 }
