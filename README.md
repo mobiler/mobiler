@@ -17,14 +17,18 @@ native Material 3 widgets. Taps and input flow back into the Rust core across th
 (uniffi + bincode). You write the app once, in Rust; the native shell stays generic.
 
 The `mobiler` CLI scaffolds a project and drives the whole loop — Rust core → Kotlin
-type generation → Gradle APK → install and launch on a device — plus a file watcher
-and a codegen helper for adding new widgets.
+type generation → Gradle APK → install and launch on a device — plus a file watcher.
+The widget vocabulary and runtime live in the `mobiler-ui` / `mobiler-core` crates,
+so the native shell is **generic**: built once from a fixed ABI and reused for every
+app, never regenerated per app.
 
 ## Repository layout
 
 | Path | What |
 |------|------|
 | `mobiler/` | The `mobiler` CLI (crate + embedded `templates/` scaffold) |
+| `mobiler-ui/` | The fixed UI wire ABI — app-agnostic `Widget` tree + `Action` protocol |
+| `mobiler-core/` | The runtime — the `MobilerApp` trait, Crux shell adapter, typed widget builders, capabilities |
 | `demos/todo/` | Todo / projects showcase — see [demo README](demos/todo/) |
 | `demos/coffee/` | Coffee-shop storefront (images, grid, chips) — see [demo README](demos/coffee/) |
 
@@ -60,7 +64,7 @@ cargo run -p mobiler -- dev      # or `watch` to rebuild on every change
 ```
 
 Once `mobiler` is on your `PATH`, the commands are simply `mobiler new`,
-`mobiler dev`, `mobiler watch`, `mobiler add-widget`, and `mobiler doctor`.
+`mobiler dev`, `mobiler watch`, and `mobiler doctor`.
 
 ## License
 

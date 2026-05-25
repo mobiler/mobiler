@@ -1,3 +1,3 @@
 [bindings.kotlin]
-package_name = "dev.mobiler.shared"
+package_name = "dev.mobiler.todo.shared"
 cdylib_name = "shared"

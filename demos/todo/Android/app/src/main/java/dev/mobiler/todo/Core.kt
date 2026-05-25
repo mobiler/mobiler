@@ -1,4 +1,4 @@
-package dev.mobiler.coffee
+package dev.mobiler.todo
 
 import android.app.Application
 import android.content.Context
@@ -9,12 +9,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
-import dev.mobiler.coffee.shared.CoreFfi
-import dev.mobiler.coffee.shared.types.Action
-import dev.mobiler.coffee.shared.types.Effect
-import dev.mobiler.coffee.shared.types.PluginResponse
-import dev.mobiler.coffee.shared.types.Requests
-import dev.mobiler.coffee.shared.types.Widget
+import dev.mobiler.todo.shared.CoreFfi
+import dev.mobiler.todo.shared.types.Action
+import dev.mobiler.todo.shared.types.Effect
+import dev.mobiler.todo.shared.types.PluginResponse
+import dev.mobiler.todo.shared.types.Requests
+import dev.mobiler.todo.shared.types.Widget
 
 /**
  * A native capability plugin. The opaque `{plugin, op, input}` envelope is

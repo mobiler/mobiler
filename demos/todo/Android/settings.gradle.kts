@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Mobiler"
+rootProject.name = "Todo"
 include(":app")
 include(":shared")

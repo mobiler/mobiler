@@ -31,8 +31,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun CoffeeTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Off by default so the terracotta brand shows instead of the device's
-    // wallpaper-derived dynamic palette.
+    // Off by default so the terracotta brand shows instead of the device palette.
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {

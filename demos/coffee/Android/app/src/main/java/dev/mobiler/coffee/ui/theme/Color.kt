@@ -2,9 +2,8 @@ package dev.mobiler.coffee.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Warm "terracotta / espresso" brand palette. A single brand hue drives the
-// Material 3 scheme; everything else (buttons, accents, containers) derives from
-// it. This is the only "theming" the coffee demo does — semantics stay in Rust.
+// Warm "terracotta / espresso" brand palette. One brand hue drives the Material 3
+// scheme; everything else (buttons, accents, containers) derives from it.
 
 // Light
 val Terracotta = Color(0xFFA85C32)

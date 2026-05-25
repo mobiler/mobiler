@@ -4,8 +4,6 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-# Demo core — never published to a registry.
-publish = false
 
 [lints.clippy]
 pedantic = "warn"
@@ -21,7 +19,7 @@ name = "codegen"
 required-features = ["codegen"]
 
 [features]
-facet_typegen = ["crux_core/facet_typegen"]
+facet_typegen = ["crux_core/facet_typegen", "mobiler-core/facet_typegen"]
 uniffi = ["dep:uniffi"]
 codegen = [
     "crux_core/cli",
@@ -33,10 +31,11 @@ codegen = [
 ]
 
 [dependencies]
-facet = { version = "=0.44", features = ["chrono"] }
 crux_core.workspace = true
 serde = { workspace = true, features = ["derive"] }
-bincode = "1.3"
+serde_json = "1"
+# In-repo demo: use the local runtime. Published apps depend on `mobiler-core = "0.3.0"`.
+mobiler-core = { path = "../../../mobiler-core" }
 
 clap = { version = "4.6.1", optional = true, features = ["derive"] }
 log = { version = "0.4.29", optional = true }
