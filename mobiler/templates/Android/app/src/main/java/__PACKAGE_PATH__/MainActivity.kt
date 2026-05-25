@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -77,6 +78,7 @@ import {{PACKAGE_SHARED_TYPES}}.Icon as WidgetIcon
 import {{PACKAGE_SHARED_TYPES}}.ImageRatio
 import {{PACKAGE_SHARED_TYPES}}.ImageShape
 import {{PACKAGE_SHARED_TYPES}}.InputValue
+import {{PACKAGE_SHARED_TYPES}}.ProjectColor
 import {{PACKAGE_SHARED_TYPES}}.Spacing
 import {{PACKAGE_SHARED_TYPES}}.TextStyle as ModelTextStyle
 import {{PACKAGE_SHARED_TYPES}}.Tone
@@ -147,6 +149,10 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 modifier = Modifier.background(color = bg, shape = RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
             ) { Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg) }
         }
+
+        is Widget.ColorDot -> Box(
+            modifier = Modifier.size(12.dp).clip(CircleShape).background(projectColorOf(widget.color)),
+        )
 
         is Widget.Divider -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
@@ -352,6 +358,17 @@ private fun toneColors(tone: Tone): Pair<Color, Color> {
         Tone.DANGER -> cs.errorContainer to cs.onErrorContainer
         Tone.INFO -> cs.tertiaryContainer to cs.onTertiaryContainer
     }
+}
+
+// Concrete RGB for each project-identity color (same in light + dark — these are
+// saturated identity colors, not theme surfaces).
+private fun projectColorOf(color: ProjectColor): Color = when (color) {
+    ProjectColor.INDIGO -> Color(0xFF5C6BC0)
+    ProjectColor.TEAL -> Color(0xFF26A69A)
+    ProjectColor.CORAL -> Color(0xFFFF7043)
+    ProjectColor.AMBER -> Color(0xFFFFB300)
+    ProjectColor.LIME -> Color(0xFF9CCC65)
+    ProjectColor.PINK -> Color(0xFFEC407A)
 }
 
 private fun shapeFor(shape: ImageShape): Shape = when (shape) {

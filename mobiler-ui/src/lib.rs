@@ -37,6 +37,8 @@ pub enum Action {
     Fired { token: ActionToken },
     /// A value-carrying input changed; `id` names the widget.
     Input { id: String, value: InputValue },
+    /// Persisted state handed back to the core on startup (empty string if none).
+    Restore { data: String },
 }
 
 // ---------------------------- style tokens ----------------------------
@@ -79,6 +81,12 @@ pub enum ImageRatio { Wide, Square, Tall }
 #[repr(C)]
 pub enum BoxAlign { TopStart, TopEnd, Center, BottomStart, BottomCenter, BottomEnd }
 
+/// Project-identity colors (distinct from semantic `Tone`). Concrete RGB decided
+/// in the render layer.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum ProjectColor { Indigo, Teal, Coral, Amber, Lime, Pink }
+
 /// A bottom-navigation tab. `selected` marks the active one; tapping sends
 /// `on_select`.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug)]
@@ -99,6 +107,8 @@ pub enum Widget {
     Text { content: String, style: TextStyle },
     Image { source: String, shape: ImageShape, ratio: ImageRatio },
     Badge { label: String, tone: Tone },
+    /// Small non-interactive colored dot — a project/identity hint.
+    ColorDot { color: ProjectColor },
     Divider,
     Spacer { size: Spacing },
     // Layout

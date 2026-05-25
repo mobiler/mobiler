@@ -17,8 +17,8 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, CardStyle, Icon, ImageRatio, ImageShape, InputValue, Spacing,
-    Tab, TextStyle, Tone, Widget,
+    Action, BoxAlign, ButtonStyle, CardStyle, Icon, ImageRatio, ImageShape, InputValue,
+    ProjectColor, Spacing, Tab, TextStyle, Tone, Widget,
 };
 
 // ============================ capabilities ============================
@@ -93,6 +93,11 @@ impl<E> Cx<E> {
         self.requests
             .push((PluginCall { plugin: plugin.into(), op: op.into(), input: input.into() }, Box::new(then)));
     }
+
+    /// Persist `data` (handed back to [`MobilerApp::restore`] on next startup).
+    pub fn save(&mut self, data: impl Into<String>) {
+        self.notify("storage", "save", data);
+    }
 }
 
 // ============================ the app trait ============================
@@ -107,6 +112,12 @@ pub trait MobilerApp: Default {
 
     fn input(&self, id: &str, value: InputValue, model: &mut Self::Model) {
         let _ = (id, value, model);
+    }
+
+    /// Restore persisted state on startup. `data` is whatever you last passed to
+    /// `cx.save` (or empty if nothing was saved). Default: ignore.
+    fn restore(&self, data: &str, model: &mut Self::Model) {
+        let _ = (data, model);
     }
 
     fn view(&self, model: &Self::Model) -> Widget;
@@ -137,6 +148,7 @@ impl<A: MobilerApp> App for MobilerShell<A> {
                 }
             }
             Action::Input { id, value } => app.input(&id, value, model),
+            Action::Restore { data } => app.restore(&data, model),
         }
         let mut commands: Vec<Command<Effect, Action>> = Vec::new();
         for op in cx.notifications {
@@ -185,6 +197,11 @@ pub fn image(source: impl Into<String>, shape: ImageShape, ratio: ImageRatio) ->
 #[must_use]
 pub fn badge(label: impl Into<String>, tone: Tone) -> Widget {
     Widget::Badge { label: label.into(), tone }
+}
+/// A small colored identity dot.
+#[must_use]
+pub fn color_dot(color: ProjectColor) -> Widget {
+    Widget::ColorDot { color }
 }
 #[must_use]
 pub fn divider() -> Widget { Widget::Divider }

@@ -42,6 +42,16 @@ class DevicePlugin : MobilerPlugin {
     }
 }
 
+/** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
+class StoragePlugin(private val context: Context) : MobilerPlugin {
+    private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
+    override fun handle(op: String, input: String): PluginResponse = when (op) {
+        "save" -> { prefs.edit().putString("state", input).apply(); PluginResponse(true, "") }
+        "load" -> PluginResponse(true, prefs.getString("state", "") ?: "")
+        else -> PluginResponse(false, "unknown op '$op'")
+    }
+}
+
 // Bridge between the (generic) shell and the Rust core. Speaks ONLY the fixed
 // Mobiler ABI: sends an `Action`, receives a `Widget` tree + capability effects.
 class Core(application: Application) : AndroidViewModel(application) {
@@ -52,10 +62,17 @@ class Core(application: Application) : AndroidViewModel(application) {
     private val plugins: Map<String, MobilerPlugin> = mapOf(
         "toast" to ToastPlugin(application),
         "device" to DevicePlugin(),
+        "storage" to StoragePlugin(application),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))
         private set
+
+    init {
+        // Hand any persisted state back to the core before the first frame.
+        val saved = application.getSharedPreferences("mobiler", Context.MODE_PRIVATE).getString("state", "") ?: ""
+        if (saved.isNotEmpty()) update(Action.Restore(saved))
+    }
 
     fun update(action: Action) {
         process(core.update(action.bincodeSerialize()))
