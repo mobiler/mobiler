@@ -1,0 +1,19 @@
+# Full-stack todo demo — its own workspace (like the other demos). Members are
+# added as the demo grows: domain + server now; core/mobile + web-widgets next.
+[workspace]
+resolver = "2"
+members = ["domain", "server", "todo-core"]
+# `mobile` + `web-widgets` are their own workspaces (native FFI / WASM); separate.
+exclude = ["mobile", "web-widgets", "web-json"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+domain = { path = "domain" }
+todo-core = { path = "todo-core" }
+# The Mobiler runtime, from the repo (this demo lives inside the mobiler repo).
+mobiler-core = { path = "../../mobiler-core" }

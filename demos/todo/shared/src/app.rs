@@ -6,9 +6,9 @@
 //! the storage capability (`cx.save` + `restore`).
 
 use mobiler_core::{
-    ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, ProjectColor, Spacing,
-    Tone, Widget, badge, button, caption, card, card_button, checkbox, chip, color_dot, column,
-    grid, icon_button, row, scaffold, scaffold_back, spacer, subtitle, switch, tab, text, text_field,
+    ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, Nav, ProjectColor,
+    Spacing, Tone, Widget, badge, button, caption, card, card_button, checkbox, chip, color_dot,
+    column, grid, icon_button, nav_scaffold, row, spacer, subtitle, switch, tab, text, text_field,
     title,
 };
 use serde::{Deserialize, Serialize};
@@ -65,13 +65,24 @@ pub enum TabKind {
     Settings,
 }
 
+/// Screens the nav stack can hold. `Today`/`Projects`/`Settings` are the
+/// bottom-nav roots; `ProjectDetail` is pushed on top of `Projects`. Its
+/// serialization is the route key the shell uses to drive transitions.
+#[derive(Serialize, Clone, Copy, Debug)]
+enum Route {
+    Today,
+    Projects,
+    Settings,
+    ProjectDetail(u32),
+}
+
 /// Your app's typed events. Mobiler serializes these into opaque tokens; the
 /// native shell never sees this type.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
     SelectTab(TabKind),
     OpenProject(u32),
-    CloseProject,
+    Back,
     DeleteProject(u32),
     SelectColor(ProjectColor),
     AddProject,
@@ -92,8 +103,7 @@ pub struct Model {
     next_project_id: u32,
     next_task_id: u32,
     // --- transient UI state (reset on cold start) ---
-    tab: TabKind,
-    open_project: Option<u32>,
+    nav: Nav<Route>,
     project_input: String,
     task_input: String,
 }
@@ -119,8 +129,7 @@ impl Default for Model {
             new_color: ProjectColor::Coral,
             next_project_id: 3,
             next_task_id: 6,
-            tab: TabKind::Today,
-            open_project: None,
+            nav: Nav::new(Route::Today),
             project_input: String::new(),
             task_input: String::new(),
         }
@@ -177,24 +186,27 @@ impl MobilerApp for Todo {
     fn update(&self, event: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match event {
             Msg::SelectTab(t) => {
-                model.tab = t;
-                if t != TabKind::Projects {
-                    model.open_project = None;
-                }
+                let root = match t {
+                    TabKind::Today => Route::Today,
+                    TabKind::Projects => Route::Projects,
+                    TabKind::Settings => Route::Settings,
+                };
+                model.nav.reset(root);
             }
             Msg::OpenProject(id) => {
-                model.open_project = Some(id);
+                model.nav.push(Route::ProjectDetail(id));
                 model.task_input.clear();
             }
-            Msg::CloseProject => {
-                model.open_project = None;
+            Msg::Back => {
+                model.nav.pop();
                 model.task_input.clear();
             }
             Msg::DeleteProject(id) => {
                 model.projects.retain(|p| p.id != id);
                 model.tasks.retain(|t| t.project_id != id);
-                if model.open_project == Some(id) {
-                    model.open_project = None;
+                // If we're viewing the deleted project's detail, pop back to the list.
+                if matches!(model.nav.current(), Route::ProjectDetail(d) if *d == id) {
+                    model.nav.pop();
                 }
             }
             Msg::SelectColor(c) => model.new_color = c,
@@ -211,7 +223,7 @@ impl MobilerApp for Todo {
                 }
             }
             Msg::AddTask => {
-                if let Some(pid) = model.open_project {
+                if let Route::ProjectDetail(pid) = *model.nav.current() {
                     let text = model.task_input.trim().to_string();
                     if !text.is_empty() {
                         let id = model.next_task_id;
@@ -267,26 +279,23 @@ impl MobilerApp for Todo {
     }
 
     fn view(&self, model: &Model) -> Widget {
+        let cur = model.nav.current();
         let tabs = vec![
-            tab("Today", model.tab == TabKind::Today, Msg::SelectTab(TabKind::Today)),
-            tab("Projects", model.tab == TabKind::Projects, Msg::SelectTab(TabKind::Projects)),
-            tab("Settings", model.tab == TabKind::Settings, Msg::SelectTab(TabKind::Settings)),
+            tab("Today", matches!(cur, Route::Today), Msg::SelectTab(TabKind::Today)),
+            tab("Projects", matches!(cur, Route::Projects | Route::ProjectDetail(_)), Msg::SelectTab(TabKind::Projects)),
+            tab("Settings", matches!(cur, Route::Settings), Msg::SelectTab(TabKind::Settings)),
         ];
 
-        match model.tab {
-            TabKind::Today => scaffold("Today", model.dark_mode, tabs, today_screen(model)),
-            TabKind::Settings => scaffold("Settings", model.dark_mode, tabs, settings_screen(model)),
-            TabKind::Projects => match model.open_project.and_then(|id| model.project(id)) {
-                Some(p) => scaffold_back(
-                    p.name.clone(),
-                    model.dark_mode,
-                    tabs,
-                    detail_screen(model, p),
-                    Msg::CloseProject,
-                ),
-                None => scaffold("Projects", model.dark_mode, tabs, project_list(model)),
+        let (title, body) = match cur {
+            Route::Today => ("Today".to_string(), today_screen(model)),
+            Route::Projects => ("Projects".to_string(), project_list(model)),
+            Route::Settings => ("Settings".to_string(), settings_screen(model)),
+            Route::ProjectDetail(id) => match model.project(*id) {
+                Some(p) => (p.name.clone(), detail_screen(model, p)),
+                None => ("Projects".to_string(), project_list(model)),
             },
-        }
+        };
+        nav_scaffold(title, model.dark_mode, tabs, body, &model.nav, Msg::Back)
     }
 }
 

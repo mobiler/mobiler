@@ -58,5 +58,7 @@ dependencies {
     // Async image loading (Coil 3 + OkHttp network fetcher)
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
+    // HTTP capability (Core.kt HttpPlugin)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

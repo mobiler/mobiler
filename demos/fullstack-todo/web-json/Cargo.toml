@@ -1,0 +1,19 @@
+[package]
+name = "web-json"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# The OTHER reuse strategy: an idiomatic Leptos app with its OWN UI that shares
+# only the `domain` crate (types + intents) and talks the same JSON API. No crux,
+# no todo-core, no Widget tree — the data layer is shared, the UI diverges.
+#
+# Standalone workspace (built with trunk), separate from the native demo workspace.
+[workspace]
+
+[dependencies]
+domain = { path = "../domain" }
+leptos = { version = "0.7", features = ["csr"] }
+gloo-net = { version = "0.6", features = ["http", "json"] }
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
