@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Todos — Leptos (JSON)</title>
+  <link data-trunk rel="rust" data-wasm-opt="0" />
+  <style>
+    /* A deliberately DIFFERENT look from web-widgets: teal accent, tighter
+       TodoMVC-style list — to show the UI diverges while the data layer is shared. */
+    :root {
+      --bg:#0f1720; --panel:#16212e; --line:#26323f; --ink:#e7eef5;
+      --muted:#8aa0b2; --accent:#2dd4bf; --accent-ink:#04221d; --danger:#f87171;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink);
+           font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .wrap { max-width:540px; margin:0 auto; padding:48px 20px; }
+    h1 { font-size:40px; font-weight:800; letter-spacing:-.02em; margin:0 0 4px;
+         color:var(--accent); }
+    .sub { color:var(--muted); font-size:14px; margin:0 0 24px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:16px;
+             overflow:hidden; }
+    .new { display:flex; gap:0; border-bottom:1px solid var(--line); }
+    .new input { flex:1; background:transparent; border:0; color:var(--ink);
+                 padding:16px 18px; font-size:16px; outline:none; }
+    .new button { background:var(--accent); color:var(--accent-ink); border:0;
+                  padding:0 22px; font-weight:700; cursor:pointer; font-size:15px; }
+    ul { list-style:none; margin:0; padding:0; }
+    li { display:flex; align-items:center; gap:14px; padding:14px 18px;
+         border-bottom:1px solid var(--line); }
+    li:last-child { border-bottom:0; }
+    li input[type=checkbox] { width:20px; height:20px; accent-color:var(--accent); }
+    .txt { flex:1; font-size:16px; }
+    .done .txt { color:var(--muted); text-decoration:line-through; }
+    .del { background:none; border:0; color:var(--danger); cursor:pointer;
+           font-size:18px; opacity:.6; }
+    .del:hover { opacity:1; }
+    .foot { display:flex; align-items:center; justify-content:space-between;
+            padding:12px 18px; color:var(--muted); font-size:13px; }
+    .pills { display:flex; gap:6px; }
+    .pill { background:transparent; border:1px solid var(--line); color:var(--muted);
+            border-radius:999px; padding:4px 12px; cursor:pointer; font-size:13px; }
+    .pill.on { border-color:var(--accent); color:var(--accent); }
+    .empty { padding:28px 18px; text-align:center; color:var(--muted); }
+  </style>
+</head>
+<body></body>
+</html>

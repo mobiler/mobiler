@@ -4,7 +4,7 @@
 resolver = "2"
 members = ["domain", "server", "todo-core"]
 # `mobile` + `web-widgets` are their own workspaces (native FFI / WASM); separate.
-exclude = ["mobile", "web-widgets"]
+exclude = ["mobile", "web-widgets", "web-json"]
 
 [workspace.package]
 edition = "2024"
