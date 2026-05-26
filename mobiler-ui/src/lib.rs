@@ -130,7 +130,7 @@ pub enum Widget {
     IconButton { icon: Icon, on_press: ActionToken },
     Chip { label: String, selected: bool, on_press: ActionToken },
     TextField { id: String, placeholder: String, value: String },
-    Switch { id: String, label: String, value: bool },
+    Toggle { id: String, label: String, value: bool },
     Checkbox { id: String, label: String, value: bool },
     /// Continuous 0..=`max` slider; emits `Input { id, Int }`.
     Slider { id: String, value: i32, max: i32 },

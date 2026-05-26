@@ -357,8 +357,8 @@ pub fn text_field(id: impl Into<String>, placeholder: impl Into<String>, value: 
     Widget::TextField { id: id.into(), placeholder: placeholder.into(), value: value.into() }
 }
 #[must_use]
-pub fn switch(id: impl Into<String>, label: impl Into<String>, value: bool) -> Widget {
-    Widget::Switch { id: id.into(), label: label.into(), value }
+pub fn toggle(id: impl Into<String>, label: impl Into<String>, value: bool) -> Widget {
+    Widget::Toggle { id: id.into(), label: label.into(), value }
 }
 #[must_use]
 pub fn checkbox(id: impl Into<String>, label: impl Into<String>, value: bool) -> Widget {

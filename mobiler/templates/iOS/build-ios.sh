@@ -21,19 +21,22 @@ BUNDLE_ID="{{PACKAGE}}"
 rustup target add "$SIM_TARGET"
 rm -rf "$GEN"; mkdir -p "$GEN/lib"
 
-# 1) Rust core (uniffi) as a static lib for the simulator.
+# 1) Rust core (uniffi) as a static lib for the simulator (linked into the app).
 ( cd "$SHARED" && cargo build --release --features uniffi --target "$SIM_TARGET" )
-cp "$SHARED/target/$SIM_TARGET/release/libshared.a" "$GEN/lib/"
+cp "$APP_ROOT/target/$SIM_TARGET/release/libshared.a" "$GEN/lib/"
 
-# 2) Swift ABI types (SharedTypes package) + uniffi Swift FFI bindings.
-#    Mirrors the Kotlin codegen, which emits both — needs the lib from step 1.
-#    VERIFY-ON-MAC: confirm `shared.swift` + the FFI modulemap land under $GEN.
+# 2) A host build of the core so uniffi's bindgen can introspect the library
+#    (it reads target/debug/libshared, not the simulator static lib above).
+( cd "$APP_ROOT" && cargo build -p shared --features uniffi )
+
+# 3) Swift ABI types (SharedTypes package) + uniffi Swift FFI bindings.
+#    Mirrors the Kotlin codegen, which emits both — needs the host lib from step 2.
 ( cd "$SHARED" && cargo run --bin codegen --features codegen -- --language swift --output-dir "$GEN" )
 
-# 3) Generate the Xcode project from project.yml.
+# 4) Generate the Xcode project from project.yml.
 ( cd "$IOS_DIR" && xcodegen generate )
 
-# 4) Build for the simulator (no signing).
+# 5) Build for the simulator (no signing).
 ( cd "$IOS_DIR" && xcodebuild -project "$SCHEME.xcodeproj" -scheme "$SCHEME" \
     -sdk iphonesimulator -configuration Debug -derivedDataPath build \
     CODE_SIGNING_ALLOWED=NO build )
