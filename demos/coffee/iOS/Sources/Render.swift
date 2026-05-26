@@ -1,0 +1,362 @@
+import SwiftUI
+import SharedTypes
+
+// The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
+// (what to draw) + `Action` (what to send back). No app-specific types; this exact
+// code renders any Mobiler app. Style *intent* (TextStyle, Tone, …) is decided in
+// Rust; the concrete look (fonts, colors, dp) is decided here — the iOS twin of the
+// Compose `Render`. Recursion is type-erased through `AnyView`.
+
+func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) -> AnyView {
+    switch widget {
+
+    // MARK: content
+    case .text(let content, let style):
+        return AnyView(Text(content).modifier(TextStyleMod(style)))
+
+    case .image(let source, let shape, let ratio):
+        return AnyView(
+            AsyncImage(url: URL(string: source)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: { Color.gray.opacity(0.15) }
+            .aspectRatio(aspect(ratio), contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .clipShape(imageShape(shape))
+        )
+
+    case .badge(let label, let tone):
+        let (bg, fg) = toneColors(tone)
+        return AnyView(
+            Text(label).font(.footnote.weight(.semibold))
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background(bg).foregroundColor(fg).clipShape(Capsule())
+        )
+
+    case .colorDot(let color):
+        return AnyView(Circle().fill(projectColor(color)).frame(width: 12, height: 12))
+
+    case .divider:
+        return AnyView(Divider())
+
+    case .spacer(let size):
+        return AnyView(Color.clear.frame(height: spacing(size)))
+
+    // MARK: layout
+    case .row(let children):
+        return AnyView(HStack(spacing: 8) { childViews(children, send) })
+
+    case .column(let children):
+        return AnyView(VStack(alignment: .leading, spacing: 6) { childViews(children, send) })
+
+    case .card(let child, let style, let onPress):
+        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)))
+        if let token = onPress {
+            return AnyView(Button(action: { send(.fired(token: token)) }) { body }.buttonStyle(.plain))
+        }
+        return body
+
+    case .box(let children, let align, let scrim):
+        return AnyView(
+            ZStack(alignment: boxAlign(align)) {
+                if scrim, let first = children.first {
+                    render(first, send)
+                    Color.black.opacity(0.4)
+                    VStack(alignment: .leading) { childViews(Array(children.dropFirst()), send) }
+                        .padding().foregroundColor(.white)
+                } else {
+                    childViews(children, send)
+                }
+            }
+        )
+
+    case .grid(let children):
+        return AnyView(
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                childViews(children, send)
+            }
+        )
+
+    // MARK: input / actions
+    case .button(let label, let style, let onPress):
+        return AnyView(Button(label) { send(.fired(token: onPress)) }.modifier(ButtonStyleMod(style)))
+
+    case .iconButton(let icon, let onPress):
+        return AnyView(
+            Button(action: { send(.fired(token: onPress)) }) {
+                Image(systemName: sfSymbol(icon)).foregroundColor(iconTint(icon))
+            }.buttonStyle(.plain)
+        )
+
+    case .chip(let label, let selected, let onPress):
+        return AnyView(
+            Button(action: { send(.fired(token: onPress)) }) {
+                Text(label).font(.subheadline)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(selected ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
+                    .foregroundColor(selected ? Color.accentColor : .primary)
+                    .overlay(Capsule().stroke(selected ? Color.accentColor : .clear))
+                    .clipShape(Capsule())
+            }.buttonStyle(.plain)
+        )
+
+    case .textField(let id, let placeholder, let value):
+        return AnyView(
+            TextField(placeholder, text: Binding(
+                get: { value },
+                set: { send(.input(id: id, value: .text($0))) }
+            ))
+            .textFieldStyle(.roundedBorder)
+        )
+
+    case .toggle(let id, let label, let value):
+        return AnyView(
+            Toggle(label, isOn: Binding(
+                get: { value },
+                set: { send(.input(id: id, value: .bool($0))) }
+            ))
+        )
+
+    case .checkbox(let id, let label, let value):
+        // iOS has no native checkbox; a leading toggle-style control + label.
+        return AnyView(
+            Button(action: { send(.input(id: id, value: .bool(!value))) }) {
+                HStack(spacing: 10) {
+                    Image(systemName: value ? "checkmark.square.fill" : "square")
+                        .foregroundColor(value ? .accentColor : .secondary)
+                    Text(label).foregroundColor(.primary)
+                    Spacer()
+                }
+            }.buttonStyle(.plain)
+        )
+
+    case .slider(let id, let value, let max):
+        return AnyView(
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { send(.input(id: id, value: .int(Int64($0.rounded())))) }
+                ),
+                in: 0...Double(max)
+            )
+        )
+
+    case .stepper(let value, let onDecrement, let onIncrement):
+        return AnyView(
+            HStack(spacing: 12) {
+                Button("−") { send(.fired(token: onDecrement)) }.buttonStyle(.bordered)
+                Text("\(value)").font(.title3)
+                Button("+") { send(.fired(token: onIncrement)) }.buttonStyle(.bordered)
+            }
+        )
+
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let route, let depth):
+        return AnyView(ScaffoldView(
+            title: title, content: body, tabs: tabs, back: back,
+            darkMode: darkMode, route: route, depth: depth, send: send
+        ))
+    }
+}
+
+/// Renders a `[Widget]` as sibling views (children of a stack/grid).
+@ViewBuilder
+private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Action) -> Void) -> some View {
+    ForEach(Array(children.enumerated()), id: \.offset) { _, child in
+        render(child, send)
+    }
+}
+
+// MARK: - Scaffold (top bar + scrollable body + bottom tabs + theme-as-data)
+
+private struct ScaffoldView: View {
+    let title: String
+    let content: SharedTypes.Widget
+    let tabs: [SharedTypes.Tab]
+    let back: String?
+    let darkMode: Bool
+    let route: String
+    let depth: UInt32
+    let send: (Action) -> Void
+
+    // Remember the depth of the previous route so a route change knows its
+    // direction (push vs pop). Updated after each route settles.
+    @State private var prevDepth: UInt32 = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                if let back = back {
+                    Button(action: { send(.fired(token: back)) }) {
+                        Image(systemName: "chevron.left")
+                    }
+                }
+                Spacer()
+                Text(title).font(.headline)
+                Spacer()
+                // keep the title centered when a back button is present
+                if back != nil { Image(systemName: "chevron.left").hidden() }
+            }
+            .padding()
+
+            Divider()
+
+            // The body is keyed by `route`, so a push/pop swaps the whole screen
+            // (with a slide+fade; lateral move crossfades); a same-route update
+            // just re-renders in place. The iOS twin of Android's AnimatedContent.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) { render(self.content, send) }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .id(route)
+            .transition(navTransition)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if !tabs.isEmpty {
+                Divider()
+                HStack {
+                    ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                        Button(action: { send(.fired(token: tab.onSelect)) }) {
+                            Text(tab.label)
+                                .fontWeight(tab.selected ? .semibold : .regular)
+                                .foregroundColor(tab.selected ? .accentColor : .secondary)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .padding(.vertical, 10)
+            }
+        }
+        .preferredColorScheme(darkMode ? .dark : .light)
+        .animation(.easeInOut(duration: 0.28), value: route)
+        // Edge-swipe to go back — the iOS idiom for Android's system BackHandler.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .local).onEnded { value in
+                guard let back = back else { return }
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                if value.startLocation.x < 32, value.translation.width > 90, horizontal {
+                    send(.fired(token: back))
+                }
+            }
+        )
+        // After each route settles, record its depth for the next transition.
+        .task(id: route) { prevDepth = depth }
+    }
+
+    private var navTransition: AnyTransition {
+        if depth == prevDepth { return .opacity }          // lateral move → crossfade
+        let forward = depth > prevDepth                     // push vs pop
+        return .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
+        )
+    }
+}
+
+// MARK: - Style-token → concrete look (the only place that decides looks)
+
+private struct TextStyleMod: ViewModifier {
+    let style: TextStyle
+    init(_ s: TextStyle) { style = s }
+    func body(content: Content) -> some View {
+        switch style {
+        case .title: return AnyView(content.font(.largeTitle.bold()))
+        case .subtitle: return AnyView(content.font(.title3.weight(.semibold)))
+        case .caption: return AnyView(content.font(.footnote).foregroundColor(.secondary))
+        case .emphasis: return AnyView(content.font(.body.weight(.semibold)))
+        case .body: return AnyView(content.font(.body))
+        }
+    }
+}
+
+private struct ButtonStyleMod: ViewModifier {
+    let style: SharedTypes.ButtonStyle
+    init(_ s: SharedTypes.ButtonStyle) { style = s }
+    func body(content: Content) -> some View {
+        switch style {
+        case .filled: return AnyView(content.buttonStyle(.borderedProminent))
+        case .outlined: return AnyView(content.buttonStyle(.bordered))
+        case .text: return AnyView(content.buttonStyle(.borderless))
+        }
+    }
+}
+
+private struct CardMod: ViewModifier {
+    let style: CardStyle
+    init(_ s: CardStyle) { style = s }
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14)
+        switch style {
+        case .elevated:
+            return AnyView(content.background(shape.fill(Color(.secondarySystemBackground)))
+                .shadow(color: .black.opacity(0.08), radius: 4, y: 2))
+        case .filled:
+            return AnyView(content.background(shape.fill(Color(.tertiarySystemBackground))))
+        case .outlined:
+            return AnyView(content.overlay(shape.stroke(Color.gray.opacity(0.3))))
+        }
+    }
+}
+
+private func spacing(_ s: Spacing) -> CGFloat {
+    switch s { case .xs: return 4; case .sm: return 8; case .md: return 12; case .lg: return 16; case .xl: return 24 }
+}
+
+private func toneColors(_ tone: Tone) -> (Color, Color) {
+    switch tone {
+    case .neutral: return (Color.gray.opacity(0.15), .secondary)
+    case .success: return (Color.green.opacity(0.15), .green)
+    case .warning: return (Color.orange.opacity(0.15), .orange)
+    case .danger: return (Color.red.opacity(0.15), .red)
+    case .info: return (Color.accentColor.opacity(0.15), .accentColor)
+    }
+}
+
+private func projectColor(_ c: ProjectColor) -> Color {
+    switch c {
+    case .indigo: return Color(red: 0.36, green: 0.42, blue: 0.75)
+    case .teal: return Color(red: 0.15, green: 0.65, blue: 0.60)
+    case .coral: return Color(red: 1.0, green: 0.44, blue: 0.26)
+    case .amber: return Color(red: 1.0, green: 0.70, blue: 0.0)
+    case .lime: return Color(red: 0.61, green: 0.80, blue: 0.40)
+    case .pink: return Color(red: 0.93, green: 0.25, blue: 0.48)
+    }
+}
+
+private func sfSymbol(_ icon: Icon) -> String {
+    switch icon {
+    case .delete: return "trash"
+    case .add: return "plus"
+    case .edit: return "pencil"
+    case .close: return "xmark"
+    case .settings: return "gearshape"
+    case .check: return "checkmark"
+    case .star: return "star.fill"
+    }
+}
+
+private func iconTint(_ icon: Icon) -> Color {
+    switch icon { case .star: return .accentColor; default: return .primary }
+}
+
+private func imageShape(_ s: ImageShape) -> AnyShape {
+    switch s {
+    case .square: return AnyShape(Rectangle())
+    case .rounded: return AnyShape(RoundedRectangle(cornerRadius: 16))
+    case .circle: return AnyShape(Circle())
+    }
+}
+
+private func aspect(_ r: ImageRatio) -> CGFloat {
+    switch r { case .wide: return 16.0 / 10.0; case .square: return 1.0; case .tall: return 3.0 / 4.0 }
+}
+
+private func boxAlign(_ a: BoxAlign) -> Alignment {
+    switch a {
+    case .topStart: return .topLeading
+    case .topEnd: return .topTrailing
+    case .center: return .center
+    case .bottomStart: return .bottomLeading
+    case .bottomCenter: return .bottom
+    case .bottomEnd: return .bottomTrailing
+    }
+}

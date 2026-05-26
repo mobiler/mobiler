@@ -1,0 +1,43 @@
+# XcodeGen spec → Mobiler.xcodeproj (project-as-code, so the build is scriptable
+# and reproducible — no hand-edited .pbxproj). `build-ios.sh` runs `xcodegen
+# generate` then `xcodebuild`.
+#
+# VERIFY-ON-MAC: the fiddly part is linking the Rust static lib + its uniffi FFI
+# (the modulemap / header / search paths). The settings below are the standard
+# Crux-iOS shape; expect to adjust paths on the first MacinCloud build.
+name: Coffee
+options:
+  bundleIdPrefix: dev.mobiler.coffee
+  deploymentTarget:
+    iOS: "16.0"
+
+packages:
+  # The facet-generated ABI types (Widget/Action/Effect/...), emitted by
+  # `codegen --language swift` into generated/SharedTypes.
+  SharedTypes:
+    path: generated/SharedTypes
+
+targets:
+  Coffee:
+    type: application
+    platform: iOS
+    sources:
+      - Sources                       # App.swift, Core.swift, Render.swift
+      - generated/shared.swift         # uniffi Swift wrapper (generated)
+    dependencies:
+      - package: SharedTypes
+    info:
+      path: Sources/Info.plist
+      properties:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee
+        SWIFT_VERSION: "5.9"
+        # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
+        LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
+        OTHER_LDFLAGS: ["-lshared"]
+        # uniffi FFI modulemap so `shared.swift` finds the C symbols.
+        SWIFT_INCLUDE_PATHS: ["$(PROJECT_DIR)/generated"]
+        # Simulator-only for now; no code signing needed.
+        CODE_SIGNING_ALLOWED: "NO"
