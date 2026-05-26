@@ -150,7 +150,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         )
 
     case .scaffold(let title, let body, let tabs, let back, let darkMode, _, _):
-        return AnyView(ScaffoldView(title: title, body: body, tabs: tabs, back: back, darkMode: darkMode, send: send))
+        return AnyView(ScaffoldView(title: title, content: body, tabs: tabs, back: back, darkMode: darkMode, send: send))
     }
 }
 
@@ -166,7 +166,7 @@ private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Act
 
 private struct ScaffoldView: View {
     let title: String
-    let body: SharedTypes.Widget
+    let content: SharedTypes.Widget
     let tabs: [SharedTypes.Tab]
     let back: String?
     let darkMode: Bool
@@ -191,7 +191,7 @@ private struct ScaffoldView: View {
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) { render(self.body, send) }
+                VStack(alignment: .leading, spacing: 6) { render(self.content, send) }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
