@@ -253,7 +253,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
 
-        is Widget.Switch -> Row(
+        is Widget.Toggle -> Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,

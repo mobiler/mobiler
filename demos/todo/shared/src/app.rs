@@ -1,14 +1,14 @@
 //! Todo — a projects/tasks app, ported to the generic Mobiler ABI.
 //!
 //! Showcases the full widget vocabulary (Scaffold with tabs + a pushed detail
-//! screen, cards, checkboxes, chips, a color picker, badges, a switch), project
+//! screen, cards, checkboxes, chips, a color picker, badges, a toggle), project
 //! identity colors via `ColorDot`, and **state that survives cold restarts** via
 //! the storage capability (`cx.save` + `restore`).
 
 use mobiler_core::{
     ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, Nav, ProjectColor,
     Spacing, Tone, Widget, badge, button, caption, card, card_button, checkbox, chip, color_dot,
-    column, grid, icon_button, nav_scaffold, row, spacer, subtitle, switch, tab, text, text_field,
+    column, grid, icon_button, nav_scaffold, row, spacer, subtitle, toggle, tab, text, text_field,
     title,
 };
 use serde::{Deserialize, Serialize};
@@ -466,7 +466,7 @@ fn settings_screen(model: &Model) -> Widget {
             column(vec![
                 subtitle("Appearance"),
                 spacer(Spacing::Sm),
-                switch("dark_mode", "Dark mode", model.dark_mode),
+                toggle("dark_mode", "Dark mode", model.dark_mode),
             ]),
             CardStyle::Outlined,
         ),
