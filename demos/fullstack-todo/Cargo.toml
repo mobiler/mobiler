@@ -1,0 +1,14 @@
+# Full-stack todo demo — its own workspace (like the other demos). Members are
+# added as the demo grows: domain + server now; core/mobile + web-widgets next.
+[workspace]
+resolver = "2"
+members = ["domain", "server"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+domain = { path = "domain" }
