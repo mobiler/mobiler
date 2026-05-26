@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Reproducible iOS (simulator) build for a Mobiler app — macOS only, no Xcode UI.
+# This is deliberately a single non-interactive script because it IS the unit a
+# cloud build worker will run (Build Service, P0).
+#
+# Prereqs on the Mac:  Xcode + CLT, rustup, xcodegen (`brew install xcodegen`).
+# Simulator build → no code signing, no Apple account.
+#
+# VERIFY-ON-MAC notes are inline; expect to adjust step 2/3 paths on first run.
+
+IOS_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "$IOS_DIR/.." && pwd)"
+SHARED="$APP_ROOT/shared"
+GEN="$IOS_DIR/generated"
+SIM_TARGET="${SIM_TARGET:-aarch64-apple-ios-sim}"   # Apple Silicon sim; x86_64-apple-ios on Intel
+SCHEME="{{NAME}}"
+BUNDLE_ID="{{PACKAGE}}"
+
+rustup target add "$SIM_TARGET"
+rm -rf "$GEN"; mkdir -p "$GEN/lib"
+
+# 1) Rust core (uniffi) as a static lib for the simulator.
+( cd "$SHARED" && cargo build --release --features uniffi --target "$SIM_TARGET" )
+cp "$SHARED/target/$SIM_TARGET/release/libshared.a" "$GEN/lib/"
+
+# 2) Swift ABI types (SharedTypes package) + uniffi Swift FFI bindings.
+#    Mirrors the Kotlin codegen, which emits both — needs the lib from step 1.
+#    VERIFY-ON-MAC: confirm `shared.swift` + the FFI modulemap land under $GEN.
+( cd "$SHARED" && cargo run --bin codegen --features codegen -- --language swift --output-dir "$GEN" )
+
+# 3) Generate the Xcode project from project.yml.
+( cd "$IOS_DIR" && xcodegen generate )
+
+# 4) Build for the simulator (no signing).
+( cd "$IOS_DIR" && xcodebuild -project "$SCHEME.xcodeproj" -scheme "$SCHEME" \
+    -sdk iphonesimulator -configuration Debug -derivedDataPath build \
+    CODE_SIGNING_ALLOWED=NO build )
+
+APP="$IOS_DIR/build/Build/Products/Debug-iphonesimulator/$SCHEME.app"
+echo "✅ Built: $APP"
+echo
+echo "Run on a simulator + screenshot:"
+echo "  xcrun simctl boot 'iPhone 15' 2>/dev/null || true"
+echo "  xcrun simctl install booted '$APP'"
+echo "  xcrun simctl launch booted '$BUNDLE_ID'"
+echo "  sleep 3 && xcrun simctl io booted screenshot ios.png"
