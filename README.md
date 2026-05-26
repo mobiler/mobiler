@@ -5,9 +5,10 @@
 
 > **Build mobile apps in Rust — the logic *and* the UI — rendered to real native widgets.**
 
-**Status: experimental (v0.4.0).** Android (native Jetpack Compose) is the shipped
-shell; the *same* app core also renders on the **web** (Leptos/WASM — see the
-full-stack demo), and an **iOS** (SwiftUI) shell is in progress. APIs may still change.
+**Status: experimental (v0.6.0).** Android (native Jetpack Compose) and **iOS**
+(SwiftUI) shells both render the same app core, which also runs on the **web**
+(Leptos/WASM — see the full-stack demo). iOS is verified on the simulator. APIs may
+still change.
 
 ## What it is
 
@@ -21,8 +22,8 @@ The shell is **generic**: it's built once from a fixed wire ABI and renders *any
 Mobiler app — no per-app native code, no per-app UI codegen. That's the whole idea:
 
 - **Android** → Jetpack Compose → Material 3 (shipped)
+- **iOS** → SwiftUI (simulator-verified)
 - **Web** → DOM via Leptos/WASM (the `mobiler-web` shell — demonstrated in `demos/fullstack-todo`)
-- **iOS** → SwiftUI (in progress)
 
 …all driven by the same Rust core.
 
@@ -103,8 +104,16 @@ your app's types.
 
 ## Demos
 
-The full-stack demo is the clearest illustration — the **same Rust core** rendered
-natively on Android and as a web app, both backed by one server:
+**Same core, native on every platform.** The `coffee` storefront — one Rust core,
+the *same* `Widget` tree — rendered by the stock Android shell and the stock iOS
+shell, no per-platform UI code:
+
+| Android (Jetpack Compose) | iOS (SwiftUI) |
+|:---:|:---:|
+| <img src="demos/coffee/screenshots/storefront.png" width="220" alt="coffee on Android"> | <img src="demos/coffee/screenshots/ios.png" width="220" alt="coffee on iOS"> |
+
+And the full-stack demo shows that same core rendered natively **and** as a web app,
+both backed by one Axum server:
 
 | Android (Compose) | Web (Widget→DOM) |
 |:---:|:---:|
@@ -121,13 +130,17 @@ emulator or device.
 ```bash
 cargo install mobiler        # or, from this repo: cargo build -p mobiler
 mobiler doctor               # check your host has everything
-mobiler new myapp            # scaffold an app (Rust core + generic Android shell)
+mobiler new myapp            # scaffold an app (Rust core + generic native shells)
 cd myapp
 mobiler dev                  # build core → generate types → build APK → install + launch
 #   mobiler watch            # …and rebuild on every change
 ```
 
 Edit `shared/src/app.rs` (your `MobilerApp`) and re-run `mobiler dev`.
+
+On a Mac, the scaffold also includes an iOS shell — `bash iOS/build-ios.sh` builds
+it for the simulator (needs Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen);
+no Apple account or signing required).
 
 ## License
 
