@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 description = "Mobiler's fixed UI wire ABI — app-agnostic Widget tree + Action protocol"
 repository = "https://github.com/mobiler/mobiler"
+readme = "README.md"
 
 [dependencies]
 facet = { version = "=0.44", features = ["chrono"] }

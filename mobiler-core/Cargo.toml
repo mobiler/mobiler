@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 description = "Mobiler runtime: the MobilerApp trait + Crux shell adapter over the fixed UI ABI"
 repository = "https://github.com/mobiler/mobiler"
+readme = "README.md"
 
 [features]
 # Enables the typegen `Export` impl on `Effect` (turned on by the codegen build).
