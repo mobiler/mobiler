@@ -168,6 +168,71 @@ impl<A: MobilerApp> App for MobilerShell<A> {
     }
 }
 
+// ============================ navigation ============================
+
+/// A navigation stack the app holds in its `Model`. The **core owns the stack**
+/// (single source of truth); the framework reads its `route`/`depth` to drive
+/// the shell's push/pop transitions and back button.
+///
+/// `R` is your screen-route type (typically a small enum). Hold it in the model,
+/// mutate it in `update` (`push`/`pop`/`reset`), match `current()` in `view`, and
+/// build the shell with [`nav_scaffold`]. Wire a `Msg::Back` (or similar) event to
+/// `pop` so the back affordance works.
+///
+/// ```ignore
+/// #[derive(Clone, Serialize)] enum Route { List, Detail(u32) }
+/// // model.nav: Nav<Route> = Nav::new(Route::List);
+/// // update: Msg::Open(id) => model.nav.push(Route::Detail(id)),
+/// //         Msg::Back      => model.nav.pop(),
+/// // view:   nav_scaffold(title, dark, tabs, body, &model.nav, Msg::Back)
+/// ```
+#[derive(Clone, Debug)]
+pub struct Nav<R> {
+    stack: Vec<R>,
+}
+
+impl<R: Clone + Serialize> Nav<R> {
+    /// A stack containing a single root route.
+    #[must_use]
+    pub fn new(root: R) -> Self {
+        Self { stack: vec![root] }
+    }
+    /// Push a new screen onto the stack.
+    pub fn push(&mut self, route: R) {
+        self.stack.push(route);
+    }
+    /// Pop the top screen (no-op at the root).
+    pub fn pop(&mut self) {
+        if self.stack.len() > 1 {
+            self.stack.pop();
+        }
+    }
+    /// Replace the whole stack with a fresh root (e.g. switching bottom-nav tabs).
+    pub fn reset(&mut self, root: R) {
+        self.stack = vec![root];
+    }
+    /// The current (top) route — what `view` should render.
+    #[must_use]
+    pub fn current(&self) -> &R {
+        self.stack.last().expect("nav stack is never empty")
+    }
+    /// Stack depth (root = 1).
+    #[must_use]
+    pub fn depth(&self) -> u32 {
+        self.stack.len() as u32
+    }
+    /// Whether there is a screen to pop back to.
+    #[must_use]
+    pub fn can_go_back(&self) -> bool {
+        self.stack.len() > 1
+    }
+    /// Stable identity of the current route (its serialization), used by the shell
+    /// to decide when to animate a transition.
+    fn route_key(&self) -> String {
+        serde_json::to_string(self.current()).expect("serialize route")
+    }
+}
+
 // ============================ widget builders ============================
 // Action-carrying builders take a TYPED event and serialize it into a token.
 
@@ -273,12 +338,44 @@ pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E)
 /// theme-as-data (the shell themes the whole app from it).
 #[must_use]
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
-    Widget::Scaffold { title: title.into(), body: Box::new(body), tabs, back: None, dark_mode }
+    let title = title.into();
+    // route defaults to the title; root depth = 1.
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, depth: 1 }
 }
 
-/// Like [`scaffold`], but the top bar shows a back arrow firing `back` (e.g. for
-/// a detail screen pushed over a tab).
+/// Like [`scaffold`], but the top bar (and the system back button) navigate back
+/// via `back` — e.g. a detail screen pushed over a tab (treated as depth 2).
+/// For multi-level stacks, drive navigation with [`Nav`] + [`nav_scaffold`].
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
-    Widget::Scaffold { title: title.into(), body: Box::new(body), tabs, back: Some(tok(back)), dark_mode }
+    let title = title.into();
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, depth: 2 }
+}
+
+/// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
+/// serialization) and `depth` (stack depth) so the shell animates transitions,
+/// and shows a back affordance (top-bar arrow + system back button) firing
+/// `on_back` whenever the stack can pop.
+#[must_use]
+pub fn nav_scaffold<R, E>(
+    title: impl Into<String>,
+    dark_mode: bool,
+    tabs: Vec<Tab>,
+    body: Widget,
+    nav: &Nav<R>,
+    on_back: E,
+) -> Widget
+where
+    R: Clone + Serialize,
+    E: Serialize,
+{
+    Widget::Scaffold {
+        title: title.into(),
+        body: Box::new(body),
+        tabs,
+        back: if nav.can_go_back() { Some(tok(on_back)) } else { None },
+        dark_mode,
+        route: nav.route_key(),
+        depth: nav.depth(),
+    }
 }

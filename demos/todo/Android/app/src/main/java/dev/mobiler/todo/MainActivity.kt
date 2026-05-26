@@ -2,8 +2,16 @@ package dev.mobiler.todo
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -272,46 +280,75 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             OutlinedButton(onClick = { send(Action.Fired(widget.onIncrement)) }) { Text("+") }
         }
 
-        is Widget.Scaffold -> Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = { Text(widget.title) },
-                    navigationIcon = {
-                        val back = widget.back
-                        if (back != null) {
-                            IconButton(onClick = { send(Action.Fired(back)) }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+        is Widget.Scaffold -> {
+            // Hardware/gesture back pops the nav stack (fires the core's back
+            // event). At the root (back == null) the system back exits the app.
+            val back = widget.back
+            if (back != null) {
+                BackHandler { send(Action.Fired(back)) }
+            }
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    CenterAlignedTopAppBar(
+                        title = { Text(widget.title) },
+                        navigationIcon = {
+                            if (back != null) {
+                                IconButton(onClick = { send(Action.Fired(back)) }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                }
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                    )
+                },
+                bottomBar = {
+                    if (widget.tabs.isNotEmpty()) {
+                        NavigationBar {
+                            widget.tabs.forEach { t ->
+                                NavigationBarItem(
+                                    selected = t.selected,
+                                    onClick = { send(Action.Fired(t.onSelect)) },
+                                    label = { Text(t.label) },
+                                    icon = {},
+                                )
                             }
                         }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-                )
-            },
-            bottomBar = {
-                if (widget.tabs.isNotEmpty()) {
-                    NavigationBar {
-                        widget.tabs.forEach { t ->
-                            NavigationBarItem(
-                                selected = t.selected,
-                                onClick = { send(Action.Fired(t.onSelect)) },
-                                label = { Text(t.label) },
-                                icon = {},
-                            )
+                    }
+                },
+            ) { padding ->
+                // Animate the body when the route changes: slide for push/pop
+                // (direction from depth), crossfade for a lateral move at the same
+                // depth. Same route = a data update → no transition (contentKey).
+                AnimatedContent(
+                    targetState = widget,
+                    contentKey = { it.route },
+                    transitionSpec = {
+                        val dur = 280
+                        when {
+                            targetState.depth > initialState.depth ->
+                                (slideInHorizontally(tween(dur)) { it } + fadeIn(tween(dur))) togetherWith
+                                    (slideOutHorizontally(tween(dur)) { -it / 3 } + fadeOut(tween(dur)))
+                            targetState.depth < initialState.depth ->
+                                (slideInHorizontally(tween(dur)) { -it / 3 } + fadeIn(tween(dur))) togetherWith
+                                    (slideOutHorizontally(tween(dur)) { it } + fadeOut(tween(dur)))
+                            else ->
+                                fadeIn(tween(dur)) togetherWith fadeOut(tween(dur))
                         }
+                    },
+                    label = "nav",
+                ) { screen ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding)
+                            .padding(horizontal = 16.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Render(screen.body, send)
                     }
                 }
-            },
-        ) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Render(widget.body, send)
             }
         }
     }

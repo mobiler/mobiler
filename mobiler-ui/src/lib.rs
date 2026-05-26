@@ -136,11 +136,18 @@ pub enum Widget {
     /// App shell: a top bar (`title` + optional `back`), a scrollable `body`,
     /// and bottom-nav `tabs`. `dark_mode` is theme-as-data — the shell themes
     /// the whole app from it.
+    ///
+    /// `route` + `depth` drive navigation: the shell animates the body when
+    /// `route` (the current screen's identity) changes — slide for push/pop
+    /// (direction from whether `depth` grew or shrank), crossfade for a lateral
+    /// move at the same depth — and wires the system back button to `back`.
     Scaffold {
         title: String,
         body: Box<Widget>,
         tabs: Vec<Tab>,
         back: Option<ActionToken>,
         dark_mode: bool,
+        route: String,
+        depth: u32,
     },
 }
