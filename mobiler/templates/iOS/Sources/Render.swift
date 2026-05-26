@@ -149,8 +149,11 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, _, _):
-        return AnyView(ScaffoldView(title: title, content: body, tabs: tabs, back: back, darkMode: darkMode, send: send))
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let route, let depth):
+        return AnyView(ScaffoldView(
+            title: title, content: body, tabs: tabs, back: back,
+            darkMode: darkMode, route: route, depth: depth, send: send
+        ))
     }
 }
 
@@ -170,7 +173,13 @@ private struct ScaffoldView: View {
     let tabs: [SharedTypes.Tab]
     let back: String?
     let darkMode: Bool
+    let route: String
+    let depth: UInt32
     let send: (Action) -> Void
+
+    // Remember the depth of the previous route so a route change knows its
+    // direction (push vs pop). Updated after each route settles.
+    @State private var prevDepth: UInt32 = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -190,11 +199,17 @@ private struct ScaffoldView: View {
 
             Divider()
 
+            // The body is keyed by `route`, so a push/pop swaps the whole screen
+            // (with a slide+fade; lateral move crossfades); a same-route update
+            // just re-renders in place. The iOS twin of Android's AnimatedContent.
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) { render(self.content, send) }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .id(route)
+            .transition(navTransition)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if !tabs.isEmpty {
                 Divider()
@@ -212,6 +227,28 @@ private struct ScaffoldView: View {
             }
         }
         .preferredColorScheme(darkMode ? .dark : .light)
+        .animation(.easeInOut(duration: 0.28), value: route)
+        // Edge-swipe to go back — the iOS idiom for Android's system BackHandler.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .local).onEnded { value in
+                guard let back = back else { return }
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                if value.startLocation.x < 32, value.translation.width > 90, horizontal {
+                    send(.fired(token: back))
+                }
+            }
+        )
+        // After each route settles, record its depth for the next transition.
+        .task(id: route) { prevDepth = depth }
+    }
+
+    private var navTransition: AnyTransition {
+        if depth == prevDepth { return .opacity }          // lateral move → crossfade
+        let forward = depth > prevDepth                     // push vs pop
+        return .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
+        )
     }
 }
 

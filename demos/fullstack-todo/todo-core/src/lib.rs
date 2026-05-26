@@ -14,10 +14,11 @@ use mobiler_core::{
 use serde::{Deserialize, Serialize};
 
 // The API base differs per platform: the Android emulator reaches the host
-// machine via 10.0.2.2; the browser (WASM) reaches it via localhost.
-#[cfg(target_arch = "wasm32")]
+// machine via the special alias 10.0.2.2; the browser (WASM) and the iOS
+// simulator both reach it via localhost (the sim shares the host's network).
+#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
 const BASE: &str = "http://localhost:3000";
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 const BASE: &str = "http://10.0.2.2:3000";
 
 fn todos_url() -> String {
