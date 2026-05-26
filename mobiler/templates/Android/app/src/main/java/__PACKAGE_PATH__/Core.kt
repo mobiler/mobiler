@@ -9,6 +9,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import {{PACKAGE_SHARED}}.CoreFfi
 import {{PACKAGE_SHARED_TYPES}}.Action
 import {{PACKAGE_SHARED_TYPES}}.Effect
@@ -19,16 +28,17 @@ import {{PACKAGE_SHARED_TYPES}}.Widget
 /**
  * A native capability plugin. The opaque `{plugin, op, input}` envelope is
  * dispatched by name to one of these — adding a plugin never touches the wire
- * ABI or the generated bindings, only this registry. Returns a [PluginResponse]
- * (ignored for fire-and-forget calls, sent back to the core for request/response).
+ * ABI or the generated bindings, only this registry. `handle` is `suspend`, so
+ * capabilities can do real async work (network, disk) off the main thread;
+ * fire-and-forget calls ignore the result, request/response calls send it back.
  */
 interface MobilerPlugin {
-    fun handle(op: String, input: String): PluginResponse
+    suspend fun handle(op: String, input: String): PluginResponse
 }
 
 /** Official, bundled plugin (free tier): fire-and-forget toast. */
 class ToastPlugin(private val context: Context) : MobilerPlugin {
-    override fun handle(op: String, input: String): PluginResponse {
+    override suspend fun handle(op: String, input: String): PluginResponse {
         Toast.makeText(context, input, Toast.LENGTH_SHORT).show()
         return PluginResponse(true, "")
     }
@@ -36,7 +46,7 @@ class ToastPlugin(private val context: Context) : MobilerPlugin {
 
 /** Official, bundled plugin: request/response device info. */
 class DevicePlugin : MobilerPlugin {
-    override fun handle(op: String, input: String): PluginResponse = when (op) {
+    override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
         else -> PluginResponse(false, "unknown op '$op'")
     }
@@ -45,10 +55,33 @@ class DevicePlugin : MobilerPlugin {
 /** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
 class StoragePlugin(private val context: Context) : MobilerPlugin {
     private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
-    override fun handle(op: String, input: String): PluginResponse = when (op) {
+    override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "save" -> { prefs.edit().putString("state", input).apply(); PluginResponse(true, "") }
         "load" -> PluginResponse(true, prefs.getString("state", "") ?: "")
         else -> PluginResponse(false, "unknown op '$op'")
+    }
+}
+
+/**
+ * Official, bundled plugin: HTTP (paired with cx.http/get/post/patch/delete in
+ * Rust). `op` is the method; `input` is `{"url": ..., "body": ...}`. Runs on the
+ * IO dispatcher; returns the response body with `ok` = success (2xx).
+ */
+class HttpPlugin : MobilerPlugin {
+    private val client = OkHttpClient()
+    override suspend fun handle(op: String, input: String): PluginResponse = withContext(Dispatchers.IO) {
+        try {
+            val obj = JSONObject(input)
+            val url = obj.getString("url")
+            val bodyStr = if (obj.has("body") && !obj.isNull("body")) obj.getString("body") else null
+            val reqBody = bodyStr?.toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).method(op, reqBody).build()
+            client.newCall(request).execute().use { resp ->
+                PluginResponse(resp.isSuccessful, resp.body?.string() ?: "")
+            }
+        } catch (e: Exception) {
+            PluginResponse(false, e.message ?: "http error")
+        }
     }
 }
 
@@ -63,6 +96,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "toast" to ToastPlugin(application),
         "device" to DevicePlugin(),
         "storage" to StoragePlugin(application),
+        "http" to HttpPlugin(),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))
@@ -75,18 +109,21 @@ class Core(application: Application) : AndroidViewModel(application) {
     }
 
     fun update(action: Action) {
-        process(core.update(action.bincodeSerialize()))
+        // Effects resolve on a coroutine so async capabilities (http) don't block
+        // the main thread. In-flight request/response calls are tracked by the core
+        // via request ids, so interleaved updates are fine.
+        viewModelScope.launch { process(core.update(action.bincodeSerialize())) }
     }
 
-    private fun process(effectBytes: ByteArray) {
+    private suspend fun process(effectBytes: ByteArray) {
         val requests = Requests.bincodeDeserialize(effectBytes).value
         for (request in requests) {
             when (val effect = request.effect) {
                 is Effect.Render -> view = Widget.bincodeDeserialize(core.view())
                 // Fire-and-forget: dispatch, ignore the result, don't resolve.
                 is Effect.PluginNotify -> dispatch(effect.value.plugin, effect.value.op, effect.value.input)
-                // Request/response: dispatch, resolve the core with the response,
-                // then process the effects that resolution produces.
+                // Request/response: dispatch (awaiting any async work), resolve the
+                // core with the response, then process the effects that produces.
                 is Effect.Plugin -> {
                     val resp = dispatch(effect.value.plugin, effect.value.op, effect.value.input)
                     process(core.resolve(request.id, resp.bincodeSerialize()))
@@ -95,7 +132,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun dispatch(plugin: String, op: String, input: String): PluginResponse {
+    private suspend fun dispatch(plugin: String, op: String, input: String): PluginResponse {
         val p = plugins[plugin]
         if (p == null) {
             // An app using this plugin needs a custom build that registers it.

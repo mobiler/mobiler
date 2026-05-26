@@ -98,6 +98,44 @@ impl<E> Cx<E> {
     pub fn save(&mut self, data: impl Into<String>) {
         self.notify("storage", "save", data);
     }
+
+    /// Perform an HTTP request via the shell's built-in `http` capability. When it
+    /// completes, `then(response)` produces the typed event delivered back to
+    /// `update` — `response.output` is the body, `response.ok` is success (2xx).
+    /// Rides the request/response plugin mechanism, so it resolves asynchronously.
+    pub fn http(
+        &mut self,
+        method: impl Into<String>,
+        url: impl Into<String>,
+        body: Option<String>,
+        then: impl FnOnce(PluginResponse) -> E + Send + 'static,
+    ) {
+        #[derive(Serialize)]
+        struct HttpReq {
+            url: String,
+            body: Option<String>,
+        }
+        let input = serde_json::to_string(&HttpReq { url: url.into(), body })
+            .expect("serialize http request");
+        self.plugin("http", method, input, then);
+    }
+
+    /// `GET url`, delivering the response to `then`.
+    pub fn get(&mut self, url: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.http("GET", url, None, then);
+    }
+    /// `POST url` with a JSON `body`, delivering the response to `then`.
+    pub fn post(&mut self, url: impl Into<String>, body: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.http("POST", url, Some(body.into()), then);
+    }
+    /// `PATCH url` with a JSON `body`, delivering the response to `then`.
+    pub fn patch(&mut self, url: impl Into<String>, body: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.http("PATCH", url, Some(body.into()), then);
+    }
+    /// `DELETE url`, delivering the response to `then`.
+    pub fn delete(&mut self, url: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.http("DELETE", url, None, then);
+    }
 }
 
 // ============================ the app trait ============================
