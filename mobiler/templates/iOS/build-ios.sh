@@ -15,6 +15,7 @@ APP_ROOT="$(cd "$IOS_DIR/.." && pwd)"
 SHARED="$APP_ROOT/shared"
 GEN="$IOS_DIR/generated"
 SIM_TARGET="${SIM_TARGET:-aarch64-apple-ios-sim}"   # Apple Silicon sim; x86_64-apple-ios on Intel
+ARCH="${SIM_TARGET%%-*}"; [ "$ARCH" = "aarch64" ] && ARCH=arm64   # the slice the static lib provides
 SCHEME="{{NAME}}"
 BUNDLE_ID="{{PACKAGE}}"
 
@@ -45,7 +46,7 @@ cp "$GEN/sharedFFI.modulemap" "$GEN/module.modulemap"
 # 5) Build for the simulator (no signing).
 ( cd "$IOS_DIR" && xcodebuild -project "$SCHEME.xcodeproj" -scheme "$SCHEME" \
     -sdk iphonesimulator -configuration Debug -derivedDataPath build \
-    CODE_SIGNING_ALLOWED=NO build )
+    ARCHS="$ARCH" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build )
 
 APP="$IOS_DIR/build/Build/Products/Debug-iphonesimulator/$SCHEME.app"
 echo "✅ Built: $APP"
