@@ -4,21 +4,11 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
-# The Widget→DOM web shell: hosts the SAME `todo-core` (compiled to WASM, driven
-# via crux's `Core`) and renders its `Widget` tree to the DOM, fulfilling
-# capabilities with `fetch`. This is, in effect, `mobiler-web`.
-#
-# Standalone workspace (own lockfile) — built with `trunk`, separate from the
-# native demo workspace.
+# The Widget→DOM web client: the SAME todo-core, rendered to the DOM by the generic
+# `mobiler-web` shell. The app code is one line — mobiler-web does all the rendering.
+# Standalone workspace (trunk build).
 [workspace]
 
 [dependencies]
+mobiler-web = { path = "../../../mobiler-web" }
 todo-core = { path = "../todo-core" }
-mobiler-core = { path = "../../../mobiler-core" }
-crux_core = "0.18"
-serde_json = "1"
-
-leptos = { version = "0.7", features = ["csr"] }
-gloo-net = "0.6"
-wasm-bindgen-futures = "0.4"
-console_error_panic_hook = "0.1"

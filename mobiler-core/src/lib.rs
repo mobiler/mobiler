@@ -424,3 +424,164 @@ where
         depth: nav.depth(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Serialize;
+
+    #[derive(Clone, Copy, Serialize, PartialEq, Debug)]
+    enum Route {
+        Home,
+        Detail(u32),
+    }
+
+    #[derive(Serialize)]
+    enum Ev {
+        Tap,
+        Open(u32),
+    }
+
+    // ---- Nav ----
+
+    #[test]
+    fn nav_push_pop_depth() {
+        let mut nav = Nav::new(Route::Home);
+        assert_eq!(nav.depth(), 1);
+        assert!(!nav.can_go_back());
+
+        nav.push(Route::Detail(7));
+        assert_eq!(nav.depth(), 2);
+        assert!(nav.can_go_back());
+        assert!(matches!(nav.current(), Route::Detail(7)));
+
+        nav.pop();
+        assert_eq!(nav.depth(), 1);
+        assert!(matches!(nav.current(), Route::Home));
+
+        nav.pop(); // no-op at the root
+        assert_eq!(nav.depth(), 1);
+    }
+
+    #[test]
+    fn nav_reset_replaces_stack() {
+        let mut nav = Nav::new(Route::Home);
+        nav.push(Route::Detail(1));
+        nav.push(Route::Detail(2));
+        nav.reset(Route::Detail(9));
+        assert_eq!(nav.depth(), 1);
+        assert!(matches!(nav.current(), Route::Detail(9)));
+    }
+
+    #[test]
+    fn nav_route_key_is_serialization() {
+        let nav = Nav::new(Route::Detail(3));
+        assert_eq!(nav.route_key(), serde_json::to_string(&Route::Detail(3)).unwrap());
+    }
+
+    // ---- builders ----
+
+    #[test]
+    fn scaffold_sets_route_depth_and_no_back() {
+        match scaffold("Home", false, vec![], text("x")) {
+            Widget::Scaffold { route, depth, back, dark_mode, .. } => {
+                assert_eq!(route, "Home");
+                assert_eq!(depth, 1);
+                assert!(back.is_none());
+                assert!(!dark_mode);
+            }
+            other => panic!("expected Scaffold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scaffold_back_is_depth_2_with_back() {
+        match scaffold_back("Detail", true, vec![], text("x"), Ev::Tap) {
+            Widget::Scaffold { depth, back, dark_mode, .. } => {
+                assert_eq!(depth, 2);
+                assert_eq!(back, Some(serde_json::to_string(&Ev::Tap).unwrap()));
+                assert!(dark_mode);
+            }
+            other => panic!("expected Scaffold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nav_scaffold_shows_back_only_when_poppable() {
+        let mut nav = Nav::new(Route::Home);
+        // at the root: no back, depth 1, route = serialized current route
+        match nav_scaffold("T", false, vec![], text("x"), &nav, Ev::Tap) {
+            Widget::Scaffold { back, depth, route, .. } => {
+                assert!(back.is_none());
+                assert_eq!(depth, 1);
+                assert_eq!(route, serde_json::to_string(&Route::Home).unwrap());
+            }
+            other => panic!("expected Scaffold, got {other:?}"),
+        }
+        // after a push: back present, depth 2
+        nav.push(Route::Detail(2));
+        match nav_scaffold("T", false, vec![], text("x"), &nav, Ev::Tap) {
+            Widget::Scaffold { back, depth, .. } => {
+                assert_eq!(back, Some(serde_json::to_string(&Ev::Tap).unwrap()));
+                assert_eq!(depth, 2);
+            }
+            other => panic!("expected Scaffold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn buttons_carry_serialized_event_tokens() {
+        match button("Go", ButtonStyle::Filled, Ev::Open(5)) {
+            Widget::Button { label, on_press, .. } => {
+                assert_eq!(label, "Go");
+                assert_eq!(on_press, serde_json::to_string(&Ev::Open(5)).unwrap());
+            }
+            other => panic!("expected Button, got {other:?}"),
+        }
+        match card_button(text("c"), CardStyle::Elevated, Ev::Tap) {
+            Widget::Card { on_press, .. } => {
+                assert_eq!(on_press, Some(serde_json::to_string(&Ev::Tap).unwrap()));
+            }
+            other => panic!("expected Card, got {other:?}"),
+        }
+        // a plain card is not tappable
+        match card(text("c"), CardStyle::Elevated) {
+            Widget::Card { on_press, .. } => assert!(on_press.is_none()),
+            other => panic!("expected Card, got {other:?}"),
+        }
+    }
+
+    // ---- Cx capabilities ----
+
+    #[test]
+    fn cx_notify_and_save_enqueue_notifications() {
+        let mut cx = Cx::<Ev>::default();
+        cx.notify("toast", "show", "hi");
+        cx.save("blob");
+        assert_eq!(cx.notifications.len(), 2);
+        assert_eq!(cx.notifications[0], PluginNotify { plugin: "toast".into(), op: "show".into(), input: "hi".into() });
+        assert_eq!(cx.notifications[1], PluginNotify { plugin: "storage".into(), op: "save".into(), input: "blob".into() });
+        assert!(cx.requests.is_empty());
+    }
+
+    #[test]
+    fn cx_http_helpers_build_requests() {
+        let mut cx = Cx::<Ev>::default();
+        cx.get("http://h/x", |_| Ev::Tap);
+        cx.post("http://h/y", "hello", |_| Ev::Tap);
+        cx.patch("http://h/z", "patch", |_| Ev::Tap);
+        cx.delete("http://h/d", |_| Ev::Tap);
+
+        let methods: Vec<&str> = cx.requests.iter().map(|(c, _)| c.op.as_str()).collect();
+        assert_eq!(methods, ["GET", "POST", "PATCH", "DELETE"]);
+        assert!(cx.requests.iter().all(|(c, _)| c.plugin == "http"));
+
+        let get_input: serde_json::Value = serde_json::from_str(&cx.requests[0].0.input).unwrap();
+        assert_eq!(get_input["url"], "http://h/x");
+        assert!(get_input["body"].is_null());
+
+        let post_input: serde_json::Value = serde_json::from_str(&cx.requests[1].0.input).unwrap();
+        assert_eq!(post_input["url"], "http://h/y");
+        assert_eq!(post_input["body"], "hello");
+    }
+}

@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The mobiler CLI (root workspace)
+          # The mobiler CLI + runtime crates (root workspace)
           - name: cli
             dir: "."
           # Demos — each its own standalone workspace
@@ -24,6 +24,10 @@ jobs:
             dir: demos/todo
           - name: demo-coffee
             dir: demos/coffee
+          # Full-stack demo: native members only (domain + server + todo-core);
+          # its mobile/web crates are excluded from this workspace.
+          - name: demo-fullstack-todo
+            dir: demos/fullstack-todo
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
@@ -46,3 +50,25 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  # The web shell is WASM-only (Leptos + gloo-net), so it's checked separately
+  # against the wasm target rather than the host.
+  web:
+    name: web (mobiler-web, wasm)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobiler-web
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mobiler-web
+
+      - name: Build (wasm)
+        run: cargo build --target wasm32-unknown-unknown
