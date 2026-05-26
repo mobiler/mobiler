@@ -14,7 +14,7 @@ repository = "https://github.com/mobiler/mobiler"
 crate-type = ["lib"]
 
 [dependencies]
-mobiler-core = { path = "../mobiler-core", version = "0.4.0" }
+mobiler-core = { path = "../mobiler-core", version = "0.5.0" }
 crux_core = "0.18"
 leptos = { version = "0.7", features = ["csr"] }
 gloo-net = "0.6"
