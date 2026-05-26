@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mobiler Web — Todos</title>
+  <link data-trunk rel="rust" data-wasm-opt="0" />
+  <style>
+    :root {
+      --bg:#f4f5fb; --surface:#fff; --line:#e3e4ee; --ink:#1a1c2a;
+      --muted:#6b6f86; --primary:#3f4a8a; --primary-ink:#fff;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink);
+           font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .app { max-width: 680px; margin: 0 auto; padding: 28px; }
+    .topbar { font-size:13px; letter-spacing:.04em; text-transform:uppercase;
+              color:var(--muted); text-align:center; padding:6px 0 16px; }
+    .col { display:flex; flex-direction:column; gap:10px; }
+    .row { display:flex; flex-direction:row; align-items:center; gap:10px; }
+    .card { background:var(--surface); border:1px solid var(--line);
+            border-radius:14px; padding:14px 16px; }
+    .t-title { font-size:30px; font-weight:750; margin:2px 0; letter-spacing:-.01em; }
+    .t-subtitle { font-size:18px; font-weight:650; margin:0; }
+    .t-caption { font-size:13px; color:var(--muted); margin:0; line-height:1.4; }
+    .t-body { font-size:15px; margin:0; }
+    .field { flex:1; padding:11px 13px; border:1px solid var(--line);
+             border-radius:10px; font-size:15px; background:var(--surface); color:var(--ink); }
+    .btn { background:var(--primary); color:var(--primary-ink); border:none;
+           border-radius:999px; padding:11px 20px; font-weight:600; cursor:pointer; }
+    .btn:hover { filter:brightness(1.08); }
+    .iconbtn { background:transparent; border:none; cursor:pointer; font-size:17px; padding:4px; }
+    .check { display:flex; align-items:center; gap:10px; flex:1; cursor:pointer; font-size:15px; }
+    .check input { width:18px; height:18px; accent-color:var(--primary); }
+    .badge { background:#e7ebff; color:var(--primary); border-radius:999px;
+             padding:5px 13px; font-size:13px; font-weight:600; }
+    .spacer { height:8px; }
+    .unhandled { color:#b00; font-family:monospace; font-size:12px; }
+  </style>
+</head>
+<body></body>
+</html>

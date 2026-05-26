@@ -3,8 +3,8 @@
 [workspace]
 resolver = "2"
 members = ["domain", "server", "todo-core"]
-# `mobile` is its own workspace (scaffolded by `mobiler new`); keep it separate.
-exclude = ["mobile"]
+# `mobile` + `web-widgets` are their own workspaces (native FFI / WASM); separate.
+exclude = ["mobile", "web-widgets"]
 
 [workspace.package]
 edition = "2024"
