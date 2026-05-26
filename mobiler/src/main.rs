@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+mod build;
 mod dev;
 mod doctor;
 mod new;
@@ -42,6 +43,12 @@ enum Command {
         #[arg(long)]
         no_run: bool,
     },
+    /// Build the native artifact only (no install/launch) — the cloud-buildable unit.
+    Build {
+        /// Target platform.
+        #[arg(value_enum, default_value = "android")]
+        platform: build::Platform,
+    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -63,6 +70,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Watch { no_install, no_run } => match watch::run(no_install, no_run) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::Build { platform } => match build::run(platform) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");
