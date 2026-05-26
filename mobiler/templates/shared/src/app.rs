@@ -1,7 +1,7 @@
 use mobiler_core::{
     ButtonStyle, CardStyle, Cx, ImageRatio, ImageShape, InputValue, MobilerApp, MobilerShell,
     Spacing, Tone, Widget, badge, button, caption, card, column, divider, image, row, spacer,
-    switch, text, text_field, title,
+    text, text_field, title, toggle,
 };
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +66,7 @@ impl MobilerApp for {{NAME}}App {
             divider(),
             text_field("name", "Your name", model.name.clone()),
             text(greeting),
-            switch("notify", "Enable notifications", model.notify),
+            toggle("notify", "Enable notifications", model.notify),
             divider(),
             button("Say hello (toast plugin)", ButtonStyle::Outlined, Msg::Greet),
             spacer(Spacing::Lg),
