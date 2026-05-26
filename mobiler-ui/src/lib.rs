@@ -154,3 +154,42 @@ pub enum Widget {
         depth: u32,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+
+    // Round-trips the ABI without requiring `PartialEq` on the wire types:
+    // serialize → deserialize → re-serialize, and compare the two encodings.
+    fn round_trips<T: Serialize + DeserializeOwned>(value: &T) {
+        let a = serde_json::to_string(value).expect("serialize");
+        let back: T = serde_json::from_str(&a).expect("deserialize");
+        let b = serde_json::to_string(&back).expect("re-serialize");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn action_round_trips() {
+        round_trips(&Action::Start);
+        round_trips(&Action::Fired { token: "tok".to_string() });
+        round_trips(&Action::Input { id: "field".to_string(), value: InputValue::Bool(true) });
+        round_trips(&Action::Restore { data: "{}".to_string() });
+    }
+
+    #[test]
+    fn widget_round_trips() {
+        round_trips(&Widget::Text { content: "hi".to_string(), style: TextStyle::Title });
+        round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
+        round_trips(&Widget::Scaffold {
+            title: "T".to_string(),
+            body: Box::new(Widget::Divider),
+            tabs: vec![Tab { label: "A".to_string(), selected: true, on_select: "t".to_string() }],
+            back: Some("b".to_string()),
+            dark_mode: true,
+            route: "r".to_string(),
+            depth: 2,
+        });
+    }
+}

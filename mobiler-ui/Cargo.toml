@@ -11,3 +11,6 @@ readme = "README.md"
 [dependencies]
 facet = { version = "=0.44", features = ["chrono"] }
 serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
