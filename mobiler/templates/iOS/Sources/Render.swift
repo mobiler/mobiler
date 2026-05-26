@@ -7,7 +7,7 @@ import SharedTypes
 // Rust; the concrete look (fonts, colors, dp) is decided here — the iOS twin of the
 // Compose `Render`. Recursion is type-erased through `AnyView`.
 
-func render(_ widget: Widget, _ send: @escaping (Action) -> Void) -> AnyView {
+func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) -> AnyView {
     switch widget {
 
     // MARK: content
@@ -108,7 +108,7 @@ func render(_ widget: Widget, _ send: @escaping (Action) -> Void) -> AnyView {
             .textFieldStyle(.roundedBorder)
         )
 
-    case .switch(let id, let label, let value):
+    case .toggle(let id, let label, let value):
         return AnyView(
             Toggle(label, isOn: Binding(
                 get: { value },
@@ -156,7 +156,7 @@ func render(_ widget: Widget, _ send: @escaping (Action) -> Void) -> AnyView {
 
 /// Renders a `[Widget]` as sibling views (children of a stack/grid).
 @ViewBuilder
-private func childViews(_ children: [Widget], _ send: @escaping (Action) -> Void) -> some View {
+private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Action) -> Void) -> some View {
     ForEach(Array(children.enumerated()), id: \.offset) { _, child in
         render(child, send)
     }
@@ -166,8 +166,8 @@ private func childViews(_ children: [Widget], _ send: @escaping (Action) -> Void
 
 private struct ScaffoldView: View {
     let title: String
-    let body: Widget
-    let tabs: [Tab]
+    let body: SharedTypes.Widget
+    let tabs: [SharedTypes.Tab]
     let back: String?
     let darkMode: Bool
     let send: (Action) -> Void
@@ -232,8 +232,8 @@ private struct TextStyleMod: ViewModifier {
 }
 
 private struct ButtonStyleMod: ViewModifier {
-    let style: ButtonStyle
-    init(_ s: ButtonStyle) { style = s }
+    let style: SharedTypes.ButtonStyle
+    init(_ s: SharedTypes.ButtonStyle) { style = s }
     func body(content: Content) -> some View {
         switch style {
         case .filled: return AnyView(content.buttonStyle(.borderedProminent))

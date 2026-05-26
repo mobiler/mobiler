@@ -2,7 +2,7 @@ import Foundation
 import SharedTypes
 
 // NOTE (verify on macOS): `SharedTypes` is the facet-generated ABI types package
-// (Widget/Action/Effect/Request/Requests/PluginCall/PluginResponse/...). `CoreFFI`
+// (Widget/Action/Effect/Request/Requests/PluginCall/PluginResponse/...). `CoreFfi`
 // comes from the uniffi-generated bindings for the `shared` crate; depending on the
 // Xcode setup it's either in this same target (generated sources compiled in) or a
 // module to `import`. project.yml wires that.
@@ -17,7 +17,7 @@ import SharedTypes
 final class Core: ObservableObject {
     @Published private(set) var view: Widget
 
-    private let core = CoreFFI()
+    private let core = CoreFfi()
 
     init() {
         // First frame straight from the core's view model.
@@ -29,7 +29,7 @@ final class Core: ObservableObject {
     }
 
     func update(_ action: Action) {
-        process(core.update(Data(try! action.bincodeSerialize())))
+        process(core.update(data: Data(try! action.bincodeSerialize())))
     }
 
     private func process(_ effectBytes: Data) {

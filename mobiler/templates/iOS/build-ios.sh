@@ -33,6 +33,12 @@ cp "$APP_ROOT/target/$SIM_TARGET/release/libshared.a" "$GEN/lib/"
 #    Mirrors the Kotlin codegen, which emits both — needs the host lib from step 2.
 ( cd "$SHARED" && cargo run --bin codegen --features codegen -- --language swift --output-dir "$GEN" )
 
+# Clang only auto-discovers a module map literally named `module.modulemap`; the
+# codegen emits `sharedFFI.modulemap`, so expose it under the discoverable name
+# (SWIFT_INCLUDE_PATHS points the importer at $GEN). This is what lets
+# `import sharedFFI` in shared.swift resolve the RustBuffer/RustCallStatus symbols.
+cp "$GEN/sharedFFI.modulemap" "$GEN/module.modulemap"
+
 # 4) Generate the Xcode project from project.yml.
 ( cd "$IOS_DIR" && xcodegen generate )
 
