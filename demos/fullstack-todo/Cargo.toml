@@ -2,7 +2,9 @@
 # added as the demo grows: domain + server now; core/mobile + web-widgets next.
 [workspace]
 resolver = "2"
-members = ["domain", "server"]
+members = ["domain", "server", "todo-core"]
+# `mobile` is its own workspace (scaffolded by `mobiler new`); keep it separate.
+exclude = ["mobile"]
 
 [workspace.package]
 edition = "2024"
@@ -12,3 +14,6 @@ license = "MIT OR Apache-2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 domain = { path = "domain" }
+todo-core = { path = "todo-core" }
+# The Mobiler runtime, from the repo (this demo lives inside the mobiler repo).
+mobiler-core = { path = "../../mobiler-core" }

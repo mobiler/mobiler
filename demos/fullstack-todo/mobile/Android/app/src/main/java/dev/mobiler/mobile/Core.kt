@@ -1,4 +1,4 @@
-package {{PACKAGE}}
+package dev.mobiler.mobile
 
 import android.app.Application
 import android.content.Context
@@ -18,12 +18,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import {{PACKAGE_SHARED}}.CoreFfi
-import {{PACKAGE_SHARED_TYPES}}.Action
-import {{PACKAGE_SHARED_TYPES}}.Effect
-import {{PACKAGE_SHARED_TYPES}}.PluginResponse
-import {{PACKAGE_SHARED_TYPES}}.Requests
-import {{PACKAGE_SHARED_TYPES}}.Widget
+import dev.mobiler.mobile.shared.CoreFfi
+import dev.mobiler.mobile.shared.types.Action
+import dev.mobiler.mobile.shared.types.Effect
+import dev.mobiler.mobile.shared.types.PluginResponse
+import dev.mobiler.mobile.shared.types.Requests
+import dev.mobiler.mobile.shared.types.Widget
 
 /**
  * A native capability plugin. The opaque `{plugin, op, input}` envelope is

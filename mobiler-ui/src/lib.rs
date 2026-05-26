@@ -39,6 +39,9 @@ pub enum Action {
     Input { id: String, value: InputValue },
     /// Persisted state handed back to the core on startup (empty string if none).
     Restore { data: String },
+    /// Fired once on startup (after `Restore`) so the app can kick off initial
+    /// effects (e.g. fetching data).
+    Start,
 }
 
 // ---------------------------- style tokens ----------------------------

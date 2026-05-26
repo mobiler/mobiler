@@ -158,6 +158,12 @@ pub trait MobilerApp: Default {
         let _ = (data, model);
     }
 
+    /// Run once on startup, after [`restore`](Self::restore). The place to kick
+    /// off initial effects — e.g. fetch data with `cx.get`. Default: nothing.
+    fn init(&self, model: &mut Self::Model, cx: &mut Cx<Self::Event>) {
+        let _ = (model, cx);
+    }
+
     fn view(&self, model: &Self::Model) -> Widget;
 }
 
@@ -187,6 +193,7 @@ impl<A: MobilerApp> App for MobilerShell<A> {
             }
             Action::Input { id, value } => app.input(&id, value, model, &mut cx),
             Action::Restore { data } => app.restore(&data, model),
+            Action::Start => app.init(model, &mut cx),
         }
         let mut commands: Vec<Command<Effect, Action>> = Vec::new();
         for op in cx.notifications {
