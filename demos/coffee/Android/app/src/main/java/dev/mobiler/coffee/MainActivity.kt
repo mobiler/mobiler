@@ -1,6 +1,7 @@
 package dev.mobiler.coffee
 
 import android.os.Bundle
+import java.lang.ref.WeakReference
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -97,6 +98,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent { App() }
+    }
+
+    // Track the current Activity so window-bound capabilities (e.g. the confirm
+    // dialog) can reach it — plugins only hold the Application context.
+    override fun onResume() {
+        super.onResume()
+        MobilerActivity.current = WeakReference(this)
+    }
+
+    override fun onPause() {
+        MobilerActivity.current = null
+        super.onPause()
     }
 }
 
