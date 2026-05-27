@@ -5,6 +5,9 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Mobiler's web shell — renders any Mobiler app's Widget tree to the DOM (Leptos/WASM)."
 repository = "https://github.com/mobiler/mobiler"
+readme = "README.md"
+keywords = ["mobile", "cross-platform", "leptos", "wasm", "ui"]
+categories = ["wasm", "web-programming", "gui"]
 
 # WASM-targeted (Leptos CSR + gloo-net), so it's a standalone workspace — kept out
 # of the native root workspace, which would try to build it for the host target.
@@ -21,3 +24,4 @@ gloo-net = "0.6"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
 serde_json = "1"
+web-sys = { version = "0.3", features = ["Document", "HtmlHeadElement", "Element", "Node"] }

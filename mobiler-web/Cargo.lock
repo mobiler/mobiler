@@ -1190,6 +1190,7 @@ dependencies = [
  "mobiler-core",
  "serde_json",
  "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

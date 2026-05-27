@@ -1,0 +1,245 @@
+/* mobiler-web default theme — injected by the shell on mount.
+ *
+ * The web twin of the concrete look the Android (Material 3) and SwiftUI shells
+ * decide in code: each style-intent token (TextStyle, Tone, CardStyle, …) maps to
+ * a class here. Colors are CSS variables so `Scaffold.dark_mode` flips the whole
+ * theme by adding `.theme-dark`. A consuming app may override any of these classes
+ * with its own later stylesheet. */
+
+:root {
+  --bg: #f4f5fb;
+  --surface: #ffffff;
+  --surface-2: #eef0f8;
+  --line: #e3e4ee;
+  --ink: #1a1c2a;
+  --muted: #6b6f86;
+  --primary: #3f4a8a;
+  --primary-ink: #ffffff;
+  --accent: #3f4a8a;
+  --accent-soft: rgba(63, 74, 138, 0.16);
+  --radius: 14px;
+}
+
+.theme-dark {
+  --bg: #15171f;
+  --surface: #1e212b;
+  --surface-2: #262a36;
+  --line: #333748;
+  --ink: #eceef5;
+  --muted: #9aa0b4;
+  --primary: #8c9bff;
+  --primary-ink: #15171f;
+  --accent: #8c9bff;
+  --accent-soft: rgba(140, 155, 255, 0.18);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--ink);
+}
+/* A Scaffold owns its own bars + body padding, so let it bleed to the edges. */
+.app:has(.scaffold) { padding: 0; max-width: 430px; }
+
+/* ---- layout ---- */
+.col { display: flex; flex-direction: column; gap: 8px; }
+.row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.card {
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--surface);
+}
+.card-elevated { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+.card-outlined { background: transparent; border: 1px solid var(--line); }
+.card-filled { background: var(--surface-2); }
+/* A tappable card is a <button>; strip the native chrome so it reads as a card. */
+.card-tappable {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border: none;
+  cursor: pointer;
+}
+
+/* Z-stack. Scrim variant: bg image sets the size; overlay + content layer on top. */
+.box { position: relative; }
+.box-scrim { border-radius: 16px; overflow: hidden; }
+.box-scrim > .img { display: block; }
+.box-scrim > .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); }
+.box-scrim > .box-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  color: #fff;
+}
+.align-top-start    > .box-content { justify-content: flex-start; align-items: flex-start; }
+.align-top-end      > .box-content { justify-content: flex-start; align-items: flex-end; }
+.align-center       > .box-content { justify-content: center;     align-items: center; }
+.align-bottom-start > .box-content { justify-content: flex-end;   align-items: flex-start; }
+.align-bottom-center> .box-content { justify-content: flex-end;   align-items: center; }
+.align-bottom-end   > .box-content { justify-content: flex-end;   align-items: flex-end; }
+
+/* ---- content ---- */
+.t-title    { font-size: 28px; font-weight: 750; margin: 2px 0; letter-spacing: -0.01em; }
+.t-subtitle { font-size: 18px; font-weight: 650; margin: 0; }
+.t-emphasis { font-size: 15px; font-weight: 650; margin: 0; }
+.t-caption  { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.4; }
+.t-body     { font-size: 15px; margin: 0; }
+
+.img { display: block; width: 100%; object-fit: cover; }
+.ratio-wide   { aspect-ratio: 16 / 10; }
+.ratio-square { aspect-ratio: 1 / 1; }
+.ratio-tall   { aspect-ratio: 3 / 4; }
+.img-rounded  { border-radius: 16px; }
+.img-circle   { border-radius: 50%; }
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.tone-neutral { background: var(--surface-2); color: var(--muted); }
+.tone-success { background: #e6f4ea; color: #1e7e34; }
+.tone-warning { background: #fff4e5; color: #b66a00; }
+.tone-danger  { background: #fde8e8; color: #c0392b; }
+.tone-info    { background: var(--accent-soft); color: var(--accent); }
+
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
+.dot-indigo { background: #5c6bc0; }
+.dot-teal   { background: #26a69a; }
+.dot-coral  { background: #ff7043; }
+.dot-amber  { background: #ffb300; }
+.dot-lime   { background: #9ccc65; }
+.dot-pink   { background: #ec407a; }
+
+.divider { border: none; border-top: 1px solid var(--line); margin: 8px 0; }
+
+.spacer { flex: none; }
+.sp-xs { height: 4px; }
+.sp-sm { height: 8px; }
+.sp-md { height: 12px; }
+.sp-lg { height: 16px; }
+.sp-xl { height: 24px; }
+
+/* ---- input / actions ---- */
+.btn {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { filter: brightness(1.06); }
+.btn-filled   { background: var(--primary); color: var(--primary-ink); }
+.btn-outlined { background: transparent; color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.btn-text     { background: transparent; color: var(--primary); padding: 10px 8px; }
+
+.iconbtn { background: transparent; border: none; cursor: pointer; font-size: 17px; padding: 4px; }
+
+.chip {
+  border: none;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 14px;
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.chip.selected { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+.field {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 15px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 15px; }
+.check input { width: 18px; height: 18px; accent-color: var(--primary); }
+
+/* A checkbox styled as a switch (Toggle widget). */
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px; }
+.toggle input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.toggle input:checked { background: var(--primary); }
+.toggle input::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.toggle input:checked::before { transform: translateX(18px); }
+
+.slider { width: 100%; accent-color: var(--primary); }
+
+.stepper { display: flex; align-items: center; gap: 12px; }
+.stepper button {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 18px;
+  cursor: pointer;
+}
+.stepper-value { font-size: 18px; min-width: 24px; text-align: center; }
+
+/* ---- shell (Scaffold) ---- */
+.scaffold { display: flex; flex-direction: column; min-height: 100vh; background: var(--bg); color: var(--ink); }
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+.topbar .title { flex: 1; text-align: center; font-size: 17px; font-weight: 650; }
+.back { border: none; background: transparent; color: var(--ink); font-size: 24px; line-height: 1; cursor: pointer; }
+.scaffold-body { flex: 1; padding: 16px; }
+.tabbar { display: flex; border-top: 1px solid var(--line); background: var(--bg); position: sticky; bottom: 0; }
+.tab { flex: 1; border: none; background: transparent; padding: 12px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; }
+.tab.selected { color: var(--accent); font-weight: 650; }
