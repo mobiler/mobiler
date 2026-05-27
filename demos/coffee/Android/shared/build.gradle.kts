@@ -54,8 +54,9 @@ extensions.configure<CargoExtension>("cargo") {
     module = "../.."
     libname = "shared"
     profile = "debug"
-    // POC: emulator (x86_64) only. Add "arm64" when shipping to real devices.
-    targets = listOf("x86_64")
+    // Universal: arm64 (real devices) + x86_64 (emulator). The APK carries both
+    // native slices so it installs on a phone and an emulator alike.
+    targets = listOf("arm64", "x86_64")
     extraCargoBuildArguments = listOf("--package", "shared", "--features", "uniffi")
     cargoCommand = System.getProperty("user.home") + "/.cargo/bin/cargo"
     rustcCommand = System.getProperty("user.home") + "/.cargo/bin/rustc"
