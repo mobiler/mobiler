@@ -32,7 +32,13 @@ jobs:
           java-version: "21"
 
       - name: Install the Android NDK pinned by the gradle config
-        run: sdkmanager "ndk;30.0.14904198"
+        # sdkmanager isn't on PATH on the runner; use its full path. `set +o pipefail`
+        # so piping `yes` (to accept licenses) doesn't fail the step via SIGPIPE.
+        run: |
+          set +o pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;30.0.14904198"
 
       - name: Generate Kotlin ABI types + uniffi bindings
         run: |
