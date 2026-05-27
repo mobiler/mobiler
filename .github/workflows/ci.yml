@@ -109,3 +109,30 @@ jobs:
 
       - name: Build (trunk)
         run: trunk build
+
+  # The iOS shell only builds on macOS (uniffi Swift FFI + xcodebuild). Build the
+  # coffee demo for the simulator — no signing, no booted sim — so a shell or
+  # build-ios.sh regression is caught for free, without the rented Mac. (macOS
+  # runners are arm64, so the sim slice is aarch64-apple-ios-sim / arm64.) The iOS
+  # shell is kept byte-identical between templates/iOS and the demo, so this also
+  # guards the scaffold template.
+  ios:
+    name: iOS build (simulator)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + iOS simulator target
+        run: rustup target add aarch64-apple-ios-sim
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: demos/coffee
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build coffee for the iOS simulator
+        run: bash iOS/build-ios.sh
+        working-directory: demos/coffee
