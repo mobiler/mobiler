@@ -136,6 +136,16 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             .unwrap_or_default();
         return PluginResponse { ok: true, output: ua };
     }
+    if call.plugin == "dialog" && call.op == "confirm" {
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap_or(serde_json::Value::Null);
+        let title = v.get("title").and_then(serde_json::Value::as_str).unwrap_or("");
+        let message = v.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
+        let prompt = if title.is_empty() { message.to_string() } else { format!("{title}\n\n{message}") };
+        let ok = web_sys::window()
+            .and_then(|w| w.confirm_with_message(&prompt).ok())
+            .unwrap_or(false);
+        return PluginResponse { ok, output: if ok { "ok".into() } else { "cancel".into() } };
+    }
     if call.plugin != "http" {
         return PluginResponse { ok: false, output: format!("plugin '{}' not available", call.plugin) };
     }

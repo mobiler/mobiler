@@ -170,6 +170,25 @@ impl<E> Cx<E> {
     pub fn device_model(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("device", "model", "", then);
     }
+
+    /// Ask the user to confirm via a native dialog (built-in `dialog` capability).
+    /// `then` receives the choice: `response.ok` is `true` if confirmed, `false` if
+    /// cancelled/dismissed. Resolves asynchronously (the user replies whenever).
+    pub fn confirm(
+        &mut self,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        then: impl FnOnce(PluginResponse) -> E + Send + 'static,
+    ) {
+        #[derive(Serialize)]
+        struct Confirm {
+            title: String,
+            message: String,
+        }
+        let input = serde_json::to_string(&Confirm { title: title.into(), message: message.into() })
+            .expect("serialize confirm");
+        self.plugin("dialog", "confirm", input, then);
+    }
 }
 
 // ============================ the app trait ============================

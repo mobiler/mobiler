@@ -1,5 +1,7 @@
 package {{PACKAGE}}
 
+import android.app.Activity
+import android.app.AlertDialog
 import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -19,7 +21,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import java.lang.ref.WeakReference
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -104,6 +108,40 @@ class HapticsPlugin(private val context: Context) : MobilerPlugin {
     }
 }
 
+/**
+ * Holds the current Activity (weakly) so capabilities that need a window — a dialog
+ * has no Application-context window — can reach it. MainActivity updates it in
+ * onResume/onPause.
+ */
+object MobilerActivity {
+    var current: WeakReference<Activity>? = null
+}
+
+/** Official, bundled plugin: confirm dialog (request/response). Input is JSON
+ *  {title, message}; resolves ok=true when confirmed. Suspends until the user taps. */
+class DialogPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "confirm") return PluginResponse(false, "unknown op '$op'")
+        val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
+        val obj = JSONObject(input)
+        val title = obj.optString("title")
+        val message = obj.optString("message")
+        return withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { cont ->
+                val dialog = AlertDialog.Builder(activity)
+                    .setTitle(title.ifEmpty { null })
+                    .setMessage(message)
+                    .setPositiveButton("OK") { _, _ -> cont.resumeWith(Result.success(PluginResponse(true, "ok"))) }
+                    .setNegativeButton("Cancel") { _, _ -> cont.resumeWith(Result.success(PluginResponse(false, "cancel"))) }
+                    .setOnCancelListener { cont.resumeWith(Result.success(PluginResponse(false, "cancel"))) }
+                    .create()
+                cont.invokeOnCancellation { dialog.dismiss() }
+                dialog.show()
+            }
+        }
+    }
+}
+
 /** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
 class StoragePlugin(private val context: Context) : MobilerPlugin {
     private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
@@ -153,6 +191,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "share" to SharePlugin(application),
         "browser" to BrowserPlugin(application),
         "haptics" to HapticsPlugin(application),
+        "dialog" to DialogPlugin(),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))

@@ -73,6 +73,7 @@ enum Plugins {
         case "toast": return await ToastPlugin.handle(op: op, input: input)
         case "device": return await DevicePlugin.handle(op: op, input: input)
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
+        case "dialog": return await DialogPlugin.handle(op: op, input: input)
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
         }
@@ -211,6 +212,33 @@ enum ToastPlugin {
         UIView.animate(withDuration: 0.2) { label.alpha = 1 }
         UIView.animate(withDuration: 0.3, delay: 2.3) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
         return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Confirm dialog — request/response. Presents a UIAlertController and awaits the
+/// user's choice (`ok` = confirmed) via a continuation, so the core resolves only
+/// once they tap. Input is JSON `{title, message}`.
+@MainActor
+enum DialogPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "confirm" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        let title = obj?["title"] as? String ?? ""
+        let message = obj?["message"] as? String ?? ""
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            let alert = UIAlertController(
+                title: title.isEmpty ? nil : title, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+                cont.resume(returning: PluginResponse(ok: false, output: "cancel"))
+            })
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+                cont.resume(returning: PluginResponse(ok: true, output: "ok"))
+            })
+            presenter.present(alert, animated: true)
+        }
     }
 }
 

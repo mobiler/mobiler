@@ -23,6 +23,8 @@ pub enum Msg {
     Tap,
     WhatDevice,
     GotDevice(String),
+    AskConfirm,
+    Confirmed(bool),
 }
 
 #[derive(Clone)]
@@ -110,6 +112,8 @@ impl MobilerApp for Coffee {
             Msg::Tap => cx.haptic("medium"),
             Msg::WhatDevice => cx.device_model(|r| Msg::GotDevice(r.output)),
             Msg::GotDevice(info) => model.device_info = info,
+            Msg::AskConfirm => cx.confirm("Add to cart?", "Add this coffee to your order?", |r| Msg::Confirmed(r.ok)),
+            Msg::Confirmed(ok) => cx.toast(if ok { "Added to cart ✓" } else { "Cancelled" }),
         }
     }
 
@@ -185,7 +189,7 @@ fn detail(p: &Product, model: &Model) -> Widget {
         mobiler_core::caption(format!("Sweetness: {}%", model.sweetness)),
         slider("sweetness", model.sweetness, 100),
         row(vec![text("Quantity"), stepper(model.quantity, Msg::DecQty, Msg::IncQty)]),
-        button(format!("Add {} to cart · {}", model.quantity, p.price), ButtonStyle::Filled, Msg::CloseProduct),
+        button(format!("Add {} to cart · {}", model.quantity, p.price), ButtonStyle::Filled, Msg::AskConfirm),
         card(text("Tip: tap a product on the storefront to open this screen."), CardStyle::Outlined),
     ]);
     column(items)
