@@ -3,7 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Normal permission (auto-granted) for the built-in haptics capability. -->
+    <!-- This demo uses the haptics capability (cx.haptic), so it opts into VIBRATE.
+         Capabilities are opt-in per permission: an app requests only what it uses. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application

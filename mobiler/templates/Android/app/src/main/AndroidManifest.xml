@@ -2,9 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- HTTP (cx.http/get/post/…) is core, so INTERNET is on by default. Every other
+         permission is opt-in: a built-in capability ships in the shell, but you add its
+         permission only when you use it, so an app never requests more than it needs. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Normal permission (auto-granted) for the built-in haptics capability. -->
-    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Uncomment to enable the haptics capability (cx.haptic):
+    <uses-permission android:name="android.permission.VIBRATE" /> -->
 
     <application
         android:allowBackup="true"
