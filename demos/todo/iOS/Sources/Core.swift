@@ -1,6 +1,8 @@
 import Foundation
 import SharedTypes
 import UIKit
+import PhotosUI
+import UniformTypeIdentifiers
 
 // NOTE (verify on macOS): `SharedTypes` is the facet-generated ABI types package
 // (Widget/Action/Effect/Request/Requests/PluginCall/PluginResponse/...). `CoreFfi`
@@ -74,6 +76,7 @@ enum Plugins {
         case "device": return await DevicePlugin.handle(op: op, input: input)
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
+        case "photo": return await PhotoPlugin.handle(op: op, input: input)
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
         }
@@ -239,6 +242,60 @@ enum DialogPlugin {
             })
             presenter.present(alert, animated: true)
         }
+    }
+}
+
+/// Photo picker — request/response, permission-less (the system PHPicker). Loads the
+/// pick into a temp file and returns its `file://` URL (which the image widget renders).
+@MainActor
+enum PhotoPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "pick" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            var config = PHPickerConfiguration()
+            config.filter = .images
+            config.selectionLimit = 1
+            let picker = PHPickerViewController(configuration: config)
+            let delegate = PhotoPickerDelegate { cont.resume(returning: $0) }
+            PhotoPickerDelegate.retained = delegate // PHPicker holds its delegate weakly
+            picker.delegate = delegate
+            presenter.present(picker, animated: true)
+        }
+    }
+}
+
+private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegate {
+    static var retained: PhotoPickerDelegate?
+    private let onResult: (PluginResponse) -> Void
+    init(onResult: @escaping (PluginResponse) -> Void) { self.onResult = onResult }
+
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        guard let provider = results.first?.itemProvider else {
+            finish(PluginResponse(ok: false, output: "cancelled")); return
+        }
+        // Copy the pick to our own temp file (the system one is short-lived) and return it.
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, error in
+            guard let url else {
+                self.finish(PluginResponse(ok: false, output: error?.localizedDescription ?? "load failed")); return
+            }
+            let ext = url.pathExtension.isEmpty ? "jpg" : url.pathExtension
+            let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
+            do {
+                try FileManager.default.copyItem(at: url, to: dest)
+                self.finish(PluginResponse(ok: true, output: dest.absoluteString))
+            } catch {
+                self.finish(PluginResponse(ok: false, output: error.localizedDescription))
+            }
+        }
+    }
+
+    private func finish(_ r: PluginResponse) {
+        onResult(r)
+        PhotoPickerDelegate.retained = nil
     }
 }
 

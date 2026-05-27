@@ -1,5 +1,6 @@
 import SwiftUI
 import SharedTypes
+import UIKit
 
 // The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
 // (what to draw) + `Action` (what to send back). No app-specific types; this exact
@@ -15,18 +16,23 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(Text(content).modifier(TextStyleMod(style)))
 
     case .image(let source, let shape, let ratio):
-        // Size the box from a ratio'd `Color.clear` (an intrinsic-less sizing
-        // view) and let the image fill it as an overlay. Applying `.aspectRatio`
-        // to `AsyncImage` directly is unreliable — it tracks the loaded image's
-        // own ratio — which made the wide hero render far too tall.
+        // Size the box from a ratio'd `Color.clear` (an intrinsic-less sizing view)
+        // and let the image fill it as an overlay. Applying `.aspectRatio` to
+        // `AsyncImage` directly is unreliable. Local file URLs (a picked photo) load
+        // via UIImage — AsyncImage doesn't reliably fetch `file://`; remote URLs use
+        // AsyncImage.
+        let fill: AnyView
+        if source.hasPrefix("file:"), let img = URL(string: source).flatMap({ UIImage(contentsOfFile: $0.path) }) {
+            fill = AnyView(Image(uiImage: img).resizable().aspectRatio(contentMode: .fill))
+        } else {
+            fill = AnyView(AsyncImage(url: URL(string: source)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: { Color.gray.opacity(0.15) })
+        }
         return AnyView(
             Color.clear
                 .aspectRatio(aspect(ratio), contentMode: .fit)
-                .overlay(
-                    AsyncImage(url: URL(string: source)) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: { Color.gray.opacity(0.15) }
-                )
+                .overlay(fill)
                 .clipShape(imageShape(shape))
         )
 

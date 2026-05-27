@@ -171,6 +171,14 @@ impl<E> Cx<E> {
         self.plugin("device", "model", "", then);
     }
 
+    /// Let the user pick an image (built-in `photo` capability — the system photo
+    /// picker, no permission required). `then` receives the result: on success
+    /// `response.ok` is `true` and `response.output` is a local image URI you can
+    /// hand straight to the `image(...)` widget; on cancel, `ok` is `false`.
+    pub fn pick_photo(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("photo", "pick", "", then);
+    }
+
     /// Ask the user to confirm via a native dialog (built-in `dialog` capability).
     /// `then` receives the choice: `response.ok` is `true` if confirmed, `false` if
     /// cancelled/dismissed. Resolves asynchronously (the user replies whenever).

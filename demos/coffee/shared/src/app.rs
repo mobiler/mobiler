@@ -25,6 +25,8 @@ pub enum Msg {
     GotDevice(String),
     AskConfirm,
     Confirmed(bool),
+    PickPhoto,
+    GotPhoto(String),
 }
 
 #[derive(Clone)]
@@ -44,7 +46,8 @@ pub struct Model {
     open_product: Option<usize>,
     sweetness: i32,
     quantity: i32,
-    device_info: String, // filled by the device capability (request/response demo)
+    device_info: String,           // filled by the device capability (request/response demo)
+    picked_photo: Option<String>,  // a local image URI from the photo-picker capability
 }
 
 impl Default for Model {
@@ -64,6 +67,7 @@ impl Default for Model {
             sweetness: 50,
             quantity: 1,
             device_info: String::new(),
+            picked_photo: None,
         }
     }
 }
@@ -114,6 +118,12 @@ impl MobilerApp for Coffee {
             Msg::GotDevice(info) => model.device_info = info,
             Msg::AskConfirm => cx.confirm("Add to cart?", "Add this coffee to your order?", |r| Msg::Confirmed(r.ok)),
             Msg::Confirmed(ok) => cx.toast(if ok { "Added to cart ✓" } else { "Cancelled" }),
+            Msg::PickPhoto => cx.pick_photo(|r| Msg::GotPhoto(if r.ok { r.output } else { String::new() })),
+            Msg::GotPhoto(uri) => {
+                if !uri.is_empty() {
+                    model.picked_photo = Some(uri);
+                }
+            }
         }
     }
 
@@ -180,9 +190,14 @@ fn detail(p: &Product, model: &Model) -> Widget {
             button("Haptic", ButtonStyle::Outlined, Msg::Tap),
             button("Device", ButtonStyle::Outlined, Msg::WhatDevice),
         ]),
+        button("Pick a photo", ButtonStyle::Outlined, Msg::PickPhoto),
     ];
     if !model.device_info.is_empty() {
         items.push(mobiler_core::caption(format!("This device: {}", model.device_info)));
+    }
+    // The photo capability returns a local image URI — fed straight to the image widget.
+    if let Some(uri) = &model.picked_photo {
+        items.push(image(uri.as_str(), ImageShape::Rounded, ImageRatio::Wide));
     }
     items.extend([
         text(p.description),

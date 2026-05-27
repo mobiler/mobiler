@@ -142,6 +142,27 @@ class DialogPlugin : MobilerPlugin {
     }
 }
 
+/**
+ * Set by MainActivity: launches the system photo picker and calls back with the
+ * picked image URI (null if cancelled). The ActivityResult launcher must be
+ * registered on the Activity, so it can't live in the (Application-context) plugin.
+ */
+object PhotoPicker {
+    var launch: ((onResult: (String?) -> Unit) -> Unit)? = null
+}
+
+/** Official, bundled plugin: pick an image via the system photo picker (no permission). */
+class PhotoPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "pick") return PluginResponse(false, "unknown op '$op'")
+        val launch = PhotoPicker.launch ?: return PluginResponse(false, "photo picker unavailable")
+        val uri = suspendCancellableCoroutine<String?> { cont ->
+            launch { result -> cont.resumeWith(Result.success(result)) }
+        }
+        return if (uri != null) PluginResponse(true, uri) else PluginResponse(false, "cancelled")
+    }
+}
+
 /** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
 class StoragePlugin(private val context: Context) : MobilerPlugin {
     private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
@@ -192,6 +213,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "browser" to BrowserPlugin(application),
         "haptics" to HapticsPlugin(application),
         "dialog" to DialogPlugin(),
+        "photo" to PhotoPlugin(),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))

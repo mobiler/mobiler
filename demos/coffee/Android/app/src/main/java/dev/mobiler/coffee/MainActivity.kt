@@ -5,6 +5,8 @@ import java.lang.ref.WeakReference
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -94,9 +96,21 @@ import dev.mobiler.coffee.shared.types.Tone
 import dev.mobiler.coffee.shared.types.Widget
 
 class MainActivity : ComponentActivity() {
+    private var pendingPhoto: ((String?) -> Unit)? = null
+    // The photo picker's result launcher must be registered on the Activity (before
+    // it's STARTED), so the photo capability is wired to it via the PhotoPicker holder.
+    private val pickMedia = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        pendingPhoto?.invoke(uri?.toString())
+        pendingPhoto = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        PhotoPicker.launch = { onResult ->
+            pendingPhoto = onResult
+            pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
         setContent { App() }
     }
 

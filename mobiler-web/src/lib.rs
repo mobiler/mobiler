@@ -136,6 +136,9 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             .unwrap_or_default();
         return PluginResponse { ok: true, output: ua };
     }
+    if call.plugin == "photo" && call.op == "pick" {
+        return pick_photo().await;
+    }
     if call.plugin == "dialog" && call.op == "confirm" {
         let v: serde_json::Value = serde_json::from_str(&call.input).unwrap_or(serde_json::Value::Null);
         let title = v.get("title").and_then(serde_json::Value::as_str).unwrap_or("");
@@ -171,6 +174,42 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     match request.send().await {
         Ok(resp) => PluginResponse { ok: resp.ok(), output: resp.text().await.unwrap_or_default() },
         Err(e) => PluginResponse { ok: false, output: e.to_string() },
+    }
+}
+
+/// System photo picker: a hidden `<input type=file accept=image/*>`, clicked to open
+/// the browser's file dialog, awaiting the `change` event and returning a `blob:`
+/// object URL the `<img>` renderer loads. (No permission; the picker is the browser's.)
+async fn pick_photo() -> PluginResponse {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return PluginResponse { ok: false, output: "no document".into() };
+    };
+    let Some(input) = doc.create_element("input").ok().and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok()) else {
+        return PluginResponse { ok: false, output: "no input element".into() };
+    };
+    input.set_type("file");
+    input.set_accept("image/*");
+
+    let (tx, rx) = futures_channel::oneshot::channel::<Option<String>>();
+    let tx = std::cell::RefCell::new(Some(tx));
+    let input_for_cb = input.clone();
+    let on_change = Closure::wrap(Box::new(move || {
+        let url = input_for_cb
+            .files()
+            .and_then(|files| files.get(0))
+            .and_then(|file| web_sys::Url::create_object_url_with_blob(&file).ok());
+        if let Some(tx) = tx.borrow_mut().take() {
+            let _ = tx.send(url);
+        }
+    }) as Box<dyn FnMut()>);
+    input.set_onchange(Some(on_change.as_ref().unchecked_ref()));
+    input.click();
+    on_change.forget(); // keep the handler alive until `change` fires
+
+    match rx.await {
+        Ok(Some(url)) => PluginResponse { ok: true, output: url },
+        _ => PluginResponse { ok: false, output: "cancelled".into() },
     }
 }
 
