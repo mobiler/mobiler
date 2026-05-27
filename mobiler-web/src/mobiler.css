@@ -240,6 +240,15 @@ body {
 .topbar .title { flex: 1; text-align: center; font-size: 17px; font-weight: 650; }
 .back { border: none; background: transparent; color: var(--ink); font-size: 24px; line-height: 1; cursor: pointer; }
 .scaffold-body { flex: 1; padding: 16px; }
+/* Navigation transitions — the web twin of the native shells' push/pop slide and
+ * lateral crossfade. The shell alternates the -a/-b class each navigation so the
+ * animation restarts; same-route data updates carry no class (re-render in place). */
+@keyframes nav-push { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes nav-pop  { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+@keyframes nav-fade { from { opacity: 0; } to { opacity: 1; } }
+.nav-push-a, .nav-push-b { animation: nav-push 0.28s ease; }
+.nav-pop-a,  .nav-pop-b  { animation: nav-pop 0.28s ease; }
+.nav-fade-a, .nav-fade-b { animation: nav-fade 0.28s ease; }
 .tabbar { display: flex; border-top: 1px solid var(--line); background: var(--bg); position: sticky; bottom: 0; }
 .tab { flex: 1; border: none; background: transparent; padding: 12px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; }
 .tab.selected { color: var(--accent); font-weight: 650; }

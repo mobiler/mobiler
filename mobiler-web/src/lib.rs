@@ -14,6 +14,7 @@
 //! the whole theme. Your crate only supplies a minimal `index.html` with the Trunk
 //! entry point; an app may add its own stylesheet to override any widget class.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use crux_core::{App, Core};
@@ -349,7 +350,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, route, .. } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, route, depth } => {
             let back_btn = back.clone().map(|token| {
                 let send = send.clone();
                 view! {
@@ -378,15 +379,15 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // `theme-dark` flips the CSS variables for the whole shell — theme-as-data,
             // the web twin of the native shells' `preferredColorScheme`/Material theme.
             let class = if *dark_mode { "scaffold theme-dark" } else { "scaffold" };
+            let body_class = format!("scaffold-body {}", nav_class(route, *depth));
             let (title, body) = (title.clone(), render(body, send));
-            // `data-route` lets CSS animate body swaps on navigation (keyed re-render).
             view! {
                 <div class=class>
                     <div class="topbar">
                         {back_btn}
                         <span class="title">{title}</span>
                     </div>
-                    <div class="scaffold-body" data-route=route.clone()>{body}</div>
+                    <div class=body_class data-route=route.clone()>{body}</div>
                     {tabbar}
                 </div>
             }
@@ -398,6 +399,39 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
 /// Render a slice of children as sibling views.
 fn render_all(children: &[Widget], send: &Dispatch) -> Vec<AnyView> {
     children.iter().map(|c| render(c, send)).collect()
+}
+
+thread_local! {
+    /// (previous route key, previous depth, alternating toggle). The render is a
+    /// stateless whole-tree rebuild, so nav state lives here (wasm is single-
+    /// threaded). Lets the Scaffold body animate on navigation — the web twin of
+    /// the native shells keying their body on `route`.
+    static NAV: RefCell<(String, u32, bool)> = const { RefCell::new((String::new(), 0, false)) };
+}
+
+/// Pick the Scaffold body's transition class for this render. Returns `""` for a
+/// same-route data update (re-render in place, no transition). On a route change it
+/// returns a directional class — slide-in from the right when `depth` grew (push),
+/// from the left when it shrank (pop), a crossfade for a lateral move — and *alternates*
+/// the `-a`/`-b` suffix each navigation so the CSS animation restarts even though
+/// Leptos reuses the same DOM node.
+fn nav_class(route: &str, depth: u32) -> &'static str {
+    NAV.with_borrow_mut(|(prev_route, prev_depth, toggle)| {
+        if route == prev_route {
+            return "";
+        }
+        let dir = if depth > *prev_depth {
+            ["nav-push-a", "nav-push-b"]
+        } else if depth < *prev_depth {
+            ["nav-pop-a", "nav-pop-b"]
+        } else {
+            ["nav-fade-a", "nav-fade-b"]
+        };
+        *toggle = !*toggle;
+        *prev_route = route.to_string();
+        *prev_depth = depth;
+        dir[usize::from(*toggle)]
+    })
 }
 
 // ---- style intent → CSS class / glyph (the only place that names the look) ----
