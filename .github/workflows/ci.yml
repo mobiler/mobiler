@@ -150,3 +150,44 @@ jobs:
       # creds exist; here we just prove the device build stays green.
       - name: Device build (unsigned compile-check)
         run: bash iOS/build-ios.sh device
+
+  # Scaffold a fresh app with `mobiler new` and build it for Android. The demos are
+  # older/customized, so this is the only thing that compiles the *template* Android
+  # shell (Core.kt + its plugin registry) against the published core — catching
+  # template drift (e.g. a broken DialogPlugin). The template iOS shell is covered
+  # by the iOS lane (the demos' Core.swift is kept identical to it).
+  scaffold:
+    name: scaffold + build (template, Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + Android targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install the Android NDK pinned by the template
+        run: |
+          set +o pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;30.0.14904198"
+
+      - name: Build the mobiler CLI
+        run: cargo build -p mobiler
+
+      - name: Scaffold a fresh app and build it for Android
+        run: |
+          MOBILER="$GITHUB_WORKSPACE/target/debug/mobiler"
+          cd "$RUNNER_TEMP"
+          "$MOBILER" new scaffold_test --package dev.mobiler.scaffoldtest
+          cd scaffold_test
+          "$MOBILER" build android
