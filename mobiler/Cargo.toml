@@ -1,14 +1,14 @@
 [package]
 name = "mobiler"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Mobiler — Rust + Compose mobile framework CLI"
+description = "Build mobile apps in Rust — one core, native UI on Android, iOS, and the web (CLI)"
 repository = "https://github.com/mobiler/mobiler"
 homepage = "https://github.com/mobiler/mobiler"
 readme = "README.md"
-keywords = ["mobile", "android", "compose", "crux", "cross-platform"]
+keywords = ["mobile", "android", "ios", "crux", "cross-platform"]
 categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
