@@ -1,0 +1,15 @@
+[package]
+name = "coffee-web"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# The Widget→DOM web client for the coffee demo: the SAME `shared` core that runs
+# on Android (Compose) and iOS (SwiftUI), rendered to the DOM by the generic
+# `mobiler-web` shell — one Rust core, three platforms. The app code is one line
+# and needs no CSS (the shell ships its own). Standalone workspace (trunk build).
+[workspace]
+
+[dependencies]
+mobiler-web = { path = "../../../mobiler-web" }
+shared = { path = "../shared" }

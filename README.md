@@ -104,13 +104,13 @@ your app's types.
 
 ## Demos
 
-**Same core, native on every platform.** The `coffee` storefront — one Rust core,
-the *same* `Widget` tree — rendered by the stock Android shell and the stock iOS
-shell, no per-platform UI code:
+**Same core, every platform.** The `coffee` storefront — one Rust core, the *same*
+`Widget` tree — rendered by the stock Android, iOS, and web shells, no per-platform
+UI code:
 
-| Android (Jetpack Compose) | iOS (SwiftUI) |
-|:---:|:---:|
-| <img src="demos/coffee/screenshots/storefront.png" width="220" alt="coffee on Android"> | <img src="demos/coffee/screenshots/ios.png" width="220" alt="coffee on iOS"> |
+| Android (Jetpack Compose) | iOS (SwiftUI) | Web (Widget→DOM) |
+|:---:|:---:|:---:|
+| <img src="demos/coffee/screenshots/storefront.png" width="200" alt="coffee on Android"> | <img src="demos/coffee/screenshots/ios.png" width="200" alt="coffee on iOS"> | <img src="demos/coffee/screenshots/web.png" width="200" alt="coffee on web"> |
 
 And the full-stack demo shows that same core rendered natively **and** as a web app,
 both backed by one Axum server:
