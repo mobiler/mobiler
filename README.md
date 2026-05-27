@@ -5,7 +5,7 @@
 
 > **Build mobile apps in Rust — the logic *and* the UI — rendered to real native widgets.**
 
-**Status: experimental (v0.6.0).** Android (native Jetpack Compose) and **iOS**
+**Status: experimental.** Android (native Jetpack Compose) and **iOS**
 (SwiftUI) shells both render the same app core, which also runs on the **web**
 (Leptos/WASM — see the full-stack demo). iOS is verified on the simulator. APIs may
 still change.

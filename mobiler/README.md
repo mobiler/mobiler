@@ -2,7 +2,7 @@
 
 > **Build mobile apps in Rust — the logic *and* the UI — once, rendered to real native widgets on Android, iOS, and the web.**
 
-**Status: experimental (v0.6).** One Rust core drives three generic shells — Android
+**Status: experimental.** One Rust core drives three generic shells — Android
 (Jetpack Compose / Material 3), iOS (SwiftUI), and the web (Leptos/WASM) — with no
 per-app native code.
 
