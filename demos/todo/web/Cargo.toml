@@ -1,0 +1,15 @@
+[package]
+name = "todo-web"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# The Widget→DOM web client for the todo demo: the SAME `shared` core that runs on
+# Android (Compose) and iOS (SwiftUI), rendered to the DOM by the generic
+# `mobiler-web` shell. Exercises the Scaffold shell — nav (push/pop), tabs, back,
+# dark mode — plus Toggle/Grid/ColorDot. One line, no app CSS. Standalone workspace.
+[workspace]
+
+[dependencies]
+mobiler-web = { path = "../../../mobiler-web" }
+shared = { path = "../shared" }
