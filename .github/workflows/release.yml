@@ -42,7 +42,10 @@ jobs:
           fi
 
       - name: Authenticate to crates.io (Trusted Publishing)
-        uses: rust-lang/crates-io-auth-action@v1
+        # Pin v1.0.4, not the floating @v1: @v1 still ships a Node 20 runtime,
+        # which GitHub runners stop defaulting to on 2026-06-16 and remove in
+        # Sept 2026. v1.0.4 (Mar 2026) runs on Node 24.
+        uses: rust-lang/crates-io-auth-action@v1.0.4
         id: auth
 
       - name: Publish
