@@ -23,7 +23,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # create the GitHub Release for the tag
       id-token: write # required for Trusted Publishing
     steps:
       - uses: actions/checkout@v5
@@ -52,3 +52,11 @@ jobs:
         run: cargo publish -p mobiler
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+      # Create the GitHub Release for this tag (runs after a successful publish), so
+      # the Releases page tracks crates.io. Uses the preinstalled gh CLI — no
+      # third-party action. Notes are auto-generated from commits since the last tag.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "mobiler $GITHUB_REF_NAME" --generate-notes --latest --verify-tag
