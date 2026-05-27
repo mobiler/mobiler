@@ -4,14 +4,17 @@ One all-Rust product across surfaces, showing **how much you can reuse** between
 mobile and web. A flat todo list backed by one Axum server (in-memory, no DB),
 with the data model + API contract shared by every client via the `domain` crate.
 
-Three clients, **one Axum server**, all showing the same data:
+Three clients (the native one runs on **both Android and iOS**), **one Axum
+server**, all showing the same data:
 
 <p>
-  <img src="screenshots/mobile.png" width="220" alt="Native Android (Compose)">
+  <img src="screenshots/mobile.png" width="200" alt="Native Android (Compose)">
   &nbsp;
-  <img src="screenshots/web.png" width="300" alt="web-widgets: Widget→DOM">
+  <img src="screenshots/ios.png" width="200" alt="Native iOS (SwiftUI)">
   &nbsp;
-  <img src="screenshots/web-json.png" width="240" alt="web-json: own Leptos UI">
+  <img src="screenshots/web.png" width="280" alt="web-widgets: Widget→DOM">
+  &nbsp;
+  <img src="screenshots/web-json.png" width="220" alt="web-json: own Leptos UI">
 </p>
 
 It demonstrates **two reuse strategies side by side** (left→right above: native,

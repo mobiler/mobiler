@@ -2,13 +2,16 @@
 
 A todo / projects app built with [Mobiler](../../). Written as a `MobilerApp` —
 typed `Msg`/`Model`/`view` in Rust — with **zero per-app native code**: the same
-prebuilt generic Compose shell renders its `Widget` tree to Material 3, dark mode
-included. The Rust core owns all state and logic.
+prebuilt generic shells render its `Widget` tree natively on **Android** (Jetpack
+Compose / Material 3) and **iOS** (SwiftUI), dark mode included (it also builds for
+the web via `mobiler-web`). The Rust core owns all state and logic.
 
 <p>
-  <img src="screenshots/today.png" width="260" alt="Today — must-dos with project color dots">
+  <img src="screenshots/today.png" width="240" alt="Today on Android (Compose)">
   &nbsp;
-  <img src="screenshots/projects.png" width="260" alt="Projects — list with the color picker">
+  <img src="screenshots/ios.png" width="240" alt="Today on iOS (SwiftUI)">
+  &nbsp;
+  <img src="screenshots/projects.png" width="240" alt="Projects — list with the color picker (Android)">
 </p>
 
 ## What it shows
