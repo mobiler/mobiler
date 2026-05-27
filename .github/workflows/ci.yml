@@ -144,3 +144,9 @@ jobs:
 
       - name: Build for the iOS simulator
         run: bash iOS/build-ios.sh
+
+      # Validate the device (iphoneos) build too — unsigned compile-check, no Apple
+      # account. The signed .ipa export (TestFlight) runs elsewhere once signing
+      # creds exist; here we just prove the device build stays green.
+      - name: Device build (unsigned compile-check)
+        run: bash iOS/build-ios.sh device
