@@ -49,8 +49,8 @@ impl MobilerApp for Counter {
     fn update(&self, msg: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match msg {
             Msg::Increment => model.count += 1,
-            // Device APIs are capabilities (here, the native "toast" plugin).
-            Msg::Greet => cx.notify("toast", "show", "Hello from Rust!"),
+            // Device APIs are capabilities — here the built-in toast.
+            Msg::Greet => cx.toast("Hello from Rust!"),
         }
     }
 
@@ -79,14 +79,35 @@ your app's types.
 
 - **Generic shell** — one prebuilt shell renders any app; adding a platform = writing
   one shell, not one-per-app.
-- **Capabilities = plugins** — device APIs (toast, storage, **HTTP**, …) are async
-  effects fulfilled by the shell's plugin registry. Unknown plugin → graceful "not
-  available in this build", which is the line between the free generic shell and
-  custom/cloud builds.
+- **Capabilities = plugins** — device APIs (clipboard, share, HTTP, …) are async
+  effects fulfilled by the shell's plugin registry; adding one never changes the wire
+  ABI, and an unknown plugin degrades gracefully. See
+  [Built-in capabilities](#built-in-capabilities).
 - **Navigation** — a core-owned `Nav` stack drives animated push/pop and the system
   back button.
 - **Theme-as-data** — e.g. dark mode is a value in the `Widget` tree; the shell themes
   the whole app from it.
+
+## Built-in capabilities
+
+Device APIs are **capabilities** — async effects the generic shell fulfils natively on
+all three platforms (Android, iOS, web), reached through typed `cx` helpers in your
+`update`. These ship in the shell out of the box:
+
+| Capability | Rust API | Notes |
+|---|---|---|
+| HTTP | `cx.get` / `cx.post` / `cx.patch` / `cx.delete` | request/response (JSON) |
+| Storage | `cx.save` (+ `restore` on launch) | persist the model |
+| Clipboard | `cx.copy(text)` | copy text |
+| Share | `cx.share(text)` | system share sheet |
+| Browser | `cx.open_url(url)` | open a link externally |
+| Toast | `cx.toast(text)` | transient message / snackbar |
+| Device | `cx.device_model(then)` | device/model string |
+| Haptics | `cx.haptic(style)` | `light` / `medium` / `heavy` |
+| Confirm | `cx.confirm(title, message, then)` | native yes/no dialog |
+
+Each maps to an opaque `{plugin, op, input}` effect, so **adding a capability is a
+shell-registry entry — it never changes the wire ABI** or the generated bindings.
 
 ## Repository layout
 

@@ -54,9 +54,11 @@ The same core also runs on the web with the
 [`mobiler-web`](https://crates.io/crates/mobiler-web) shell — one line plus
 [Trunk](https://trunkrs.dev).
 
-Device APIs (toast, storage, HTTP, …) are async **capabilities** via `cx`; navigation
-is a core-owned `Nav` stack; dark mode and theming are data in the `Widget` tree. The
-widget vocabulary and runtime live in the
+Device APIs are async **capabilities** via `cx`, fulfilled by the generic shell on
+every platform. Built in: **HTTP, storage, clipboard, share, browser, toast, device
+info, haptics, and a confirm dialog** — adding one is a shell-registry entry, never an
+ABI change. Navigation is a core-owned `Nav` stack; dark mode and theming are data in
+the `Widget` tree. The widget vocabulary and runtime live in the
 [`mobiler-ui`](https://crates.io/crates/mobiler-ui) and
 [`mobiler-core`](https://crates.io/crates/mobiler-core) crates.
 

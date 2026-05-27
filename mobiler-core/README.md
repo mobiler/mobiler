@@ -32,9 +32,13 @@ impl MobilerApp for Counter {
 pub type App = MobilerShell<Counter>;
 ```
 
-- **Capabilities** via `Cx` — device APIs as async effects (`cx.notify` for
-  fire-and-forget, `cx.plugin`/`cx.http`/`cx.get`/… for request-response,
-  `cx.save` for persistence).
+- **Capabilities** via `Cx` — device APIs as async effects, reached through typed
+  helpers in `update`/`input`. Built in: HTTP (`cx.get`/`post`/`patch`/`delete`),
+  storage (`cx.save` + `restore`), clipboard (`cx.copy`), share (`cx.share`), browser
+  (`cx.open_url`), toast (`cx.toast`), device info (`cx.device_model`), haptics
+  (`cx.haptic`), and a confirm dialog (`cx.confirm`). Each is an opaque
+  `{plugin, op, input}` effect, so adding one never changes the wire ABI; the generic
+  shell fulfils them natively on Android, iOS, and the web.
 - **Navigation** — a core-owned `Nav<Route>` stack + `nav_scaffold`.
 - **Theme-as-data** — dark mode etc. flow through the `Widget` tree.
 
