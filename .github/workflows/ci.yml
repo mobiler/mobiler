@@ -72,3 +72,40 @@ jobs:
 
       - name: Build (wasm)
         run: cargo build --target wasm32-unknown-unknown
+
+  # The web demos are full Trunk apps (the SAME cores as native, Widget→DOM via
+  # mobiler-web). Trunk-build them so a shell change that breaks a demo is caught —
+  # building is the CI-friendly check (running them needs a browser/server).
+  web-demos:
+    name: web demo (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - demos/coffee/web
+          - demos/todo/web
+          - demos/fullstack-todo/web-widgets
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.dir }}
+
+      # Prebuilt Trunk binary (no third-party action / Node runtime). index.html sets
+      # data-wasm-opt="0", so no wasm-opt/binaryen is needed.
+      - name: Install Trunk
+        run: |
+          curl -fsSL https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xzf - -C "$HOME/.cargo/bin" trunk
+
+      - name: Build (trunk)
+        run: trunk build
