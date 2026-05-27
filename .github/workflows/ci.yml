@@ -110,15 +110,24 @@ jobs:
       - name: Build (trunk)
         run: trunk build
 
-  # The iOS shell only builds on macOS (uniffi Swift FFI + xcodebuild). Build the
-  # coffee demo for the simulator — no signing, no booted sim — so a shell or
-  # build-ios.sh regression is caught for free, without the rented Mac. (macOS
-  # runners are arm64, so the sim slice is aarch64-apple-ios-sim / arm64.) The iOS
-  # shell is kept byte-identical between templates/iOS and the demo, so this also
-  # guards the scaffold template.
+  # The iOS shell only builds on macOS (uniffi Swift FFI + xcodebuild). Build each
+  # demo for the simulator — no signing, no booted sim — so a shell or build-ios.sh
+  # regression is caught for free, without the rented Mac. (macOS runners are arm64,
+  # so the sim slice is aarch64-apple-ios-sim / arm64.) The iOS shell is kept
+  # byte-identical across templates/iOS and the demos, so this guards the template too.
   ios:
-    name: iOS build (simulator)
+    name: iOS build (${{ matrix.app }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - demos/coffee
+          - demos/todo
+          - demos/fullstack-todo/mobile
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
     steps:
       - uses: actions/checkout@v5
 
@@ -128,11 +137,10 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: demos/coffee
+          workspaces: ${{ matrix.app }}
 
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Build coffee for the iOS simulator
+      - name: Build for the iOS simulator
         run: bash iOS/build-ios.sh
-        working-directory: demos/coffee
