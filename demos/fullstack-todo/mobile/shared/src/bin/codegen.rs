@@ -13,6 +13,7 @@ use shared::App;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum Language {
     Kotlin,
+    Swift,
 }
 
 #[derive(Parser)]
@@ -30,20 +31,29 @@ fn main() -> Result<()> {
 
     let typegen_app = TypeRegistry::new().register_app::<App>()?.build()?;
 
-    let name = match args.language {
-        Language::Kotlin => "dev.mobiler.mobile.shared.types",
-    };
-    let config = Config::builder(name, &args.output_dir).build();
-
     match args.language {
         Language::Kotlin => {
             info!("Typegen for Kotlin");
+            let config = Config::builder("dev.mobiler.mobile.shared.types", &args.output_dir).build();
             typegen_app.kotlin(&config)?;
 
             info!("Bindgen for Kotlin");
             let bindgen_args = BindgenArgsBuilder::default()
                 .crate_name(env!("CARGO_PKG_NAME").to_string())
                 .kotlin(&args.output_dir)
+                .build()?;
+            bindgen(&bindgen_args)?;
+        }
+        Language::Swift => {
+            // Swift module name (no dots); the generic shell imports `SharedTypes`.
+            info!("Typegen for Swift");
+            let config = Config::builder("SharedTypes", &args.output_dir).build();
+            typegen_app.swift(&config)?;
+
+            info!("Bindgen for Swift");
+            let bindgen_args = BindgenArgsBuilder::default()
+                .crate_name(env!("CARGO_PKG_NAME").to_string())
+                .swift(&args.output_dir)
                 .build()?;
             bindgen(&bindgen_args)?;
         }
