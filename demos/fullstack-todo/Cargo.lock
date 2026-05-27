@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler-core"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "crux_core",
  "facet",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler-ui"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "facet",
  "serde",
