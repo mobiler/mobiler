@@ -15,13 +15,19 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(Text(content).modifier(TextStyleMod(style)))
 
     case .image(let source, let shape, let ratio):
+        // Size the box from a ratio'd `Color.clear` (an intrinsic-less sizing
+        // view) and let the image fill it as an overlay. Applying `.aspectRatio`
+        // to `AsyncImage` directly is unreliable — it tracks the loaded image's
+        // own ratio — which made the wide hero render far too tall.
         return AnyView(
-            AsyncImage(url: URL(string: source)) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: { Color.gray.opacity(0.15) }
-            .aspectRatio(aspect(ratio), contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .clipShape(imageShape(shape))
+            Color.clear
+                .aspectRatio(aspect(ratio), contentMode: .fit)
+                .overlay(
+                    AsyncImage(url: URL(string: source)) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: { Color.gray.opacity(0.15) }
+                )
+                .clipShape(imageShape(shape))
         )
 
     case .badge(let label, let tone):
@@ -56,17 +62,27 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return body
 
     case .box(let children, let align, let scrim):
+        // A scrim box (hero banner) must be sized by its background — the first
+        // child, an image — not by the dimming layer. A bare `Color` is an
+        // infinitely greedy view, so leaving it as a ZStack sibling inflates the
+        // box to fill the scroll view. Instead the scrim + foreground ride along
+        // as an `.overlay` on the image (the SwiftUI twin of Compose's
+        // `matchParentSize()`): sized to the image, never driving layout. The
+        // clipShape matches the rounded hero image so the dim doesn't bleed corners.
+        if scrim, children.count > 1, let first = children.first {
+            return AnyView(
+                render(first, send).overlay(
+                    ZStack(alignment: boxAlign(align)) {
+                        Color.black.opacity(0.4)
+                        VStack(alignment: .leading) { childViews(Array(children.dropFirst()), send) }
+                            .padding().foregroundColor(.white)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                )
+            )
+        }
         return AnyView(
-            ZStack(alignment: boxAlign(align)) {
-                if scrim, let first = children.first {
-                    render(first, send)
-                    Color.black.opacity(0.4)
-                    VStack(alignment: .leading) { childViews(Array(children.dropFirst()), send) }
-                        .padding().foregroundColor(.white)
-                } else {
-                    childViews(children, send)
-                }
-            }
+            ZStack(alignment: boxAlign(align)) { childViews(children, send) }
         )
 
     case .grid(let children):
