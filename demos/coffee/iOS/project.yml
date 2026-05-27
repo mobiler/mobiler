@@ -28,8 +28,15 @@ targets:
       - package: SharedTypes
     info:
       path: Sources/Info.plist
+      # xcodegen regenerates this plist from these properties on every build, so
+      # launch-screen / orientation keys MUST live here — not just in the committed
+      # Info.plist (which gets overwritten). Without UILaunchScreen iOS runs the app
+      # letterboxed (black bars top/bottom) instead of full screen.
       properties:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee
