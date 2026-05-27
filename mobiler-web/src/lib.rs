@@ -21,7 +21,7 @@ use crux_core::{App, Core};
 use leptos::prelude::*;
 use mobiler_core::{
     Action, BoxAlign, ButtonStyle, CardStyle, Effect, Icon, ImageRatio, ImageShape, InputValue,
-    PluginCall, PluginResponse, ProjectColor, Spacing, TextStyle, Tone, Widget,
+    PluginCall, PluginNotify, PluginResponse, ProjectColor, Spacing, TextStyle, Tone, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -89,7 +89,12 @@ where
         })
     };
 
-    // Fire Start so the app can load initial data (mirrors the native shells).
+    // Restore persisted state (localStorage), then fire Start — mirrors the native
+    // shells (which restore before Start so the app sees its saved Model on launch).
+    let saved = local_storage().and_then(|s| s.get_item(STORAGE_KEY).ok().flatten()).unwrap_or_default();
+    if !saved.is_empty() {
+        send(Action::Restore { data: saved });
+    }
     send(Action::Start);
 
     let send_for_view = send.clone();
@@ -108,8 +113,7 @@ where
     for effect in effects {
         match effect {
             Effect::Render(_) => set_view.set(core.view()),
-            // Fire-and-forget capabilities aren't fulfilled in this minimal shell yet.
-            Effect::PluginNotify(_) => {}
+            Effect::PluginNotify(notify) => perform_notify(&notify.operation),
             Effect::Plugin(mut request) => {
                 let core = core.clone();
                 spawn_local(async move {
@@ -150,6 +154,45 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     match request.send().await {
         Ok(resp) => PluginResponse { ok: resp.ok(), output: resp.text().await.unwrap_or_default() },
         Err(e) => PluginResponse { ok: false, output: e.to_string() },
+    }
+}
+
+const STORAGE_KEY: &str = "mobiler.state";
+
+/// `window.localStorage`, if available.
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+/// Fulfil a fire-and-forget capability in the browser — the web twin of the native
+/// shells' notify handlers (storage/clipboard/share/browser). None block; an unknown
+/// capability is a graceful no-op.
+fn perform_notify(notify: &PluginNotify) {
+    let win = match web_sys::window() {
+        Some(w) => w,
+        None => return,
+    };
+    match (notify.plugin.as_str(), notify.op.as_str()) {
+        // Persist the state blob (paired with cx.save + restore-on-startup above).
+        ("storage", "save") => {
+            if let Some(s) = local_storage() {
+                let _ = s.set_item(STORAGE_KEY, &notify.input);
+            }
+        }
+        // Copy to the clipboard (write_text returns a Promise we let run).
+        ("clipboard", "copy") => {
+            let _ = win.navigator().clipboard().write_text(&notify.input);
+        }
+        // Open a URL in a new tab.
+        ("browser", "open") => {
+            let _ = win.open_with_url_and_target(&notify.input, "_blank");
+        }
+        // No reliable cross-browser share sheet (navigator.share is mobile-only and
+        // gesture-gated), so degrade to copying — a sane universal fallback.
+        ("share", _) => {
+            let _ = win.navigator().clipboard().write_text(&notify.input);
+        }
+        _ => {} // unknown capability: ignore
     }
 }
 

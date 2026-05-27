@@ -99,6 +99,22 @@ impl<E> Cx<E> {
         self.notify("storage", "save", data);
     }
 
+    /// Copy `text` to the system clipboard (built-in `clipboard` capability).
+    pub fn copy(&mut self, text: impl Into<String>) {
+        self.notify("clipboard", "copy", text);
+    }
+
+    /// Open the system share sheet with `text` (built-in `share` capability).
+    pub fn share(&mut self, text: impl Into<String>) {
+        self.notify("share", "text", text);
+    }
+
+    /// Open `url` in the platform browser / default handler (built-in `browser`
+    /// capability). Fire-and-forget: the app leaves the foreground.
+    pub fn open_url(&mut self, url: impl Into<String>) {
+        self.notify("browser", "open", url);
+    }
+
     /// Perform an HTTP request via the shell's built-in `http` capability. When it
     /// completes, `then(response)` produces the typed event delivered back to
     /// `update` — `response.output` is the body, `response.ok` is success (2xx).

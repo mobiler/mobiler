@@ -1,7 +1,11 @@
 package dev.mobiler.coffee
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
@@ -42,6 +46,37 @@ class DevicePlugin : MobilerPlugin {
     }
 }
 
+/** Official, bundled plugin: copy text to the system clipboard. */
+class ClipboardPlugin(private val context: Context) : MobilerPlugin {
+    override fun handle(op: String, input: String): PluginResponse {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("text", input))
+        return PluginResponse(true, "")
+    }
+}
+
+/** Official, bundled plugin: open the system share sheet with `input` as text. */
+class SharePlugin(private val context: Context) : MobilerPlugin {
+    override fun handle(op: String, input: String): PluginResponse {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, input)
+        }
+        // Launched from a non-Activity (Application) context, so NEW_TASK is required.
+        context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return PluginResponse(true, "")
+    }
+}
+
+/** Official, bundled plugin: open a URL in the browser / default handler. */
+class BrowserPlugin(private val context: Context) : MobilerPlugin {
+    override fun handle(op: String, input: String): PluginResponse {
+        val view = Intent(Intent.ACTION_VIEW, Uri.parse(input)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(view)
+        return PluginResponse(true, "")
+    }
+}
+
 /** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
 class StoragePlugin(private val context: Context) : MobilerPlugin {
     private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
@@ -63,6 +98,9 @@ class Core(application: Application) : AndroidViewModel(application) {
         "toast" to ToastPlugin(application),
         "device" to DevicePlugin(),
         "storage" to StoragePlugin(application),
+        "clipboard" to ClipboardPlugin(application),
+        "share" to SharePlugin(application),
+        "browser" to BrowserPlugin(application),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))

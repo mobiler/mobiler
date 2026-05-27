@@ -1,5 +1,6 @@
 import Foundation
 import SharedTypes
+import UIKit
 
 // NOTE (verify on macOS): `SharedTypes` is the facet-generated ABI types package
 // (Widget/Action/Effect/Request/Requests/PluginCall/PluginResponse/...). `CoreFfi`
@@ -66,6 +67,9 @@ enum Plugins {
         switch plugin {
         case "http": return await HttpPlugin.handle(op: op, input: input)
         case "storage": return StoragePlugin.handle(op: op, input: input)
+        case "clipboard": return await ClipboardPlugin.handle(op: op, input: input)
+        case "share": return await SharePlugin.handle(op: op, input: input)
+        case "browser": return await BrowserPlugin.handle(op: op, input: input)
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
         }
@@ -112,4 +116,50 @@ enum StoragePlugin {
         default: return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
     }
+}
+
+/// Clipboard capability — copy text (UIPasteboard is main-actor only).
+@MainActor
+enum ClipboardPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        UIPasteboard.general.string = input
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Share capability — the system share sheet (UIActivityViewController).
+@MainActor
+enum SharePlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        let sheet = UIActivityViewController(activityItems: [input], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = presenter.view // iPad anchor
+        presenter.present(sheet, animated: true)
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Open a URL externally (Safari / the default handler).
+@MainActor
+enum BrowserPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard let url = URL(string: input) else {
+            return PluginResponse(ok: false, output: "invalid url")
+        }
+        UIApplication.shared.open(url)
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// The frontmost view controller — the generic shell owns no UIViewController, so
+/// modals (the share sheet) present from here.
+@MainActor
+private func topViewController() -> UIViewController? {
+    let scene = UIApplication.shared.connectedScenes
+        .first { $0.activationState == .foregroundActive } as? UIWindowScene
+    var top = scene?.keyWindow?.rootViewController
+    while let presented = top?.presentedViewController { top = presented }
+    return top
 }

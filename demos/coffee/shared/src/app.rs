@@ -15,6 +15,10 @@ pub enum Msg {
     CloseProduct,
     IncQty,
     DecQty,
+    // Capability demos (exercise the free built-in plugins).
+    Share,
+    CopyName,
+    OpenRecipe,
 }
 
 #[derive(Clone)]
@@ -73,7 +77,7 @@ impl MobilerApp for Coffee {
     type Event = Msg;
     type Model = Model;
 
-    fn update(&self, event: Msg, model: &mut Model, _cx: &mut Cx<Msg>) {
+    fn update(&self, event: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match event {
             Msg::SelectCategory(c) => model.selected_category = c,
             Msg::OpenProduct(i) => {
@@ -84,6 +88,18 @@ impl MobilerApp for Coffee {
             Msg::CloseProduct => model.open_product = None,
             Msg::IncQty => model.quantity += 1,
             Msg::DecQty => model.quantity = (model.quantity - 1).max(1),
+            // Free built-in capabilities, exercised against the open product.
+            Msg::Share => {
+                if let Some(p) = model.open_product.and_then(|i| model.products.get(i)) {
+                    cx.share(format!("{} — {} (★ {}) from the Mobiler coffee demo", p.name, p.price, p.rating));
+                }
+            }
+            Msg::CopyName => {
+                if let Some(p) = model.open_product.and_then(|i| model.products.get(i)) {
+                    cx.copy(p.name);
+                }
+            }
+            Msg::OpenRecipe => cx.open_url("https://en.wikipedia.org/wiki/Coffee"),
         }
     }
 
@@ -139,6 +155,12 @@ fn detail(p: &Product, model: &Model) -> Widget {
         image(p.image, ImageShape::Rounded, ImageRatio::Wide),
         title(p.name),
         text(format!("★ {}    {}", p.rating, p.price)),
+        // Free built-in capabilities (clipboard / share / browser) — tap to try.
+        row(vec![
+            button("Share", ButtonStyle::Outlined, Msg::Share),
+            button("Copy name", ButtonStyle::Outlined, Msg::CopyName),
+            button("Recipe ↗", ButtonStyle::Outlined, Msg::OpenRecipe),
+        ]),
         text(p.description),
         mobiler_core::caption(format!("Sweetness: {}%", model.sweetness)),
         slider("sweetness", model.sweetness, 100),
