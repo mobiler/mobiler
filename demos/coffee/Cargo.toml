@@ -20,3 +20,9 @@ serde = "1.0.228"
 
 [profile.android-dev]
 inherits = "dev"
+
+# Release builds (the device/release APK + iOS device .ipa) optimize for size and
+# strip symbols, so the shipped native libs are a few MB instead of ~16 MB debug.
+[profile.release]
+opt-level = "z"
+strip = true

@@ -27,6 +27,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Sign with the debug key so the release APK still sideloads (no Play
+            // Store / release keystore needed) — it's for sharing/feedback, not the
+            // store. Build it with: assembleRelease -PrustRelease.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

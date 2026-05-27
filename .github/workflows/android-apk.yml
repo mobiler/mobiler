@@ -1,0 +1,51 @@
+name: Android APK (shareable)
+
+# On-demand "cloud Android build": click "Run workflow" (or `gh workflow run
+# android-apk.yml`) and download the APK from the run's artifacts — no local
+# Android toolchain needed. Builds the coffee demo's release APK (slim: release
+# Rust + stripped, signed with the debug key so it sideloads onto any device).
+on:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    name: coffee release APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demos/coffee
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + Android targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: demos/coffee
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install the Android NDK pinned by the gradle config
+        run: sdkmanager "ndk;30.0.14904198"
+
+      - name: Generate Kotlin ABI types + uniffi bindings
+        run: |
+          cargo build -p shared --features uniffi
+          cargo run -p shared --bin codegen --features codegen,facet_typegen -- \
+            --language kotlin --output-dir Android/generated
+
+      - name: Build the release APK (release Rust via -PrustRelease)
+        run: ./Android/gradlew -p Android --no-daemon :app:assembleRelease -PrustRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: coffee-apk-${{ github.sha }}
+          path: demos/coffee/Android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error

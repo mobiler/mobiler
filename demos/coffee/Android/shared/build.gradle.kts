@@ -53,7 +53,9 @@ extensions.configure<CargoExtension>("cargo") {
     // Build the workspace root, with `--package shared`.
     module = "../.."
     libname = "shared"
-    profile = "debug"
+    // Debug Rust by default (fast `mobiler dev` loop); release+stripped for a slim
+    // shippable APK when invoked with `-PrustRelease` (e.g. assembleRelease).
+    profile = if (project.hasProperty("rustRelease")) "release" else "debug"
     // Universal: arm64 (real devices) + x86_64 (emulator). The APK carries both
     // native slices so it installs on a phone and an emulator alike.
     targets = listOf("arm64", "x86_64")
