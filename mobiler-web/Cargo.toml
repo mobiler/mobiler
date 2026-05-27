@@ -24,7 +24,8 @@ gloo-net = "0.6"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
 serde_json = "1"
+gloo-timers = "0.3"
 web-sys = { version = "0.3", features = [
-    "Document", "HtmlHeadElement", "Element", "Node",
+    "Document", "HtmlHeadElement", "HtmlElement", "Element", "Node",
     "Window", "Storage", "Navigator", "Clipboard",
 ] }

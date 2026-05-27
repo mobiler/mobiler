@@ -19,6 +19,10 @@ pub enum Msg {
     Share,
     CopyName,
     OpenRecipe,
+    ToastHi,
+    Tap,
+    WhatDevice,
+    GotDevice(String),
 }
 
 #[derive(Clone)]
@@ -38,6 +42,7 @@ pub struct Model {
     open_product: Option<usize>,
     sweetness: i32,
     quantity: i32,
+    device_info: String, // filled by the device capability (request/response demo)
 }
 
 impl Default for Model {
@@ -56,6 +61,7 @@ impl Default for Model {
             open_product: None,
             sweetness: 50,
             quantity: 1,
+            device_info: String::new(),
         }
     }
 }
@@ -100,6 +106,10 @@ impl MobilerApp for Coffee {
                 }
             }
             Msg::OpenRecipe => cx.open_url("https://en.wikipedia.org/wiki/Coffee"),
+            Msg::ToastHi => cx.toast("Brewing… ☕ (toast from the Rust core)"),
+            Msg::Tap => cx.haptic("medium"),
+            Msg::WhatDevice => cx.device_model(|r| Msg::GotDevice(r.output)),
+            Msg::GotDevice(info) => model.device_info = info,
         }
     }
 
@@ -150,24 +160,35 @@ fn product_card(index: usize, p: &Product) -> Widget {
 }
 
 fn detail(p: &Product, model: &Model) -> Widget {
-    column(vec![
+    let mut items = vec![
         button("← Back", ButtonStyle::Text, Msg::CloseProduct),
         image(p.image, ImageShape::Rounded, ImageRatio::Wide),
         title(p.name),
         text(format!("★ {}    {}", p.rating, p.price)),
-        // Free built-in capabilities (clipboard / share / browser) — tap to try.
+        // Free built-in capabilities — tap to try the shipped plugins.
         row(vec![
             button("Share", ButtonStyle::Outlined, Msg::Share),
             button("Copy name", ButtonStyle::Outlined, Msg::CopyName),
             button("Recipe ↗", ButtonStyle::Outlined, Msg::OpenRecipe),
         ]),
+        row(vec![
+            button("Toast", ButtonStyle::Outlined, Msg::ToastHi),
+            button("Haptic", ButtonStyle::Outlined, Msg::Tap),
+            button("Device", ButtonStyle::Outlined, Msg::WhatDevice),
+        ]),
+    ];
+    if !model.device_info.is_empty() {
+        items.push(mobiler_core::caption(format!("This device: {}", model.device_info)));
+    }
+    items.extend([
         text(p.description),
         mobiler_core::caption(format!("Sweetness: {}%", model.sweetness)),
         slider("sweetness", model.sweetness, 100),
         row(vec![text("Quantity"), stepper(model.quantity, Msg::DecQty, Msg::IncQty)]),
         button(format!("Add {} to cart · {}", model.quantity, p.price), ButtonStyle::Filled, Msg::CloseProduct),
         card(text("Tip: tap a product on the storefront to open this screen."), CardStyle::Outlined),
-    ])
+    ]);
+    column(items)
 }
 
 /// The Crux app the FFI + codegen target.

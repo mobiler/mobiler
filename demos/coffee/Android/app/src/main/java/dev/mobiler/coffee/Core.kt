@@ -7,6 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
@@ -77,6 +80,20 @@ class BrowserPlugin(private val context: Context) : MobilerPlugin {
     }
 }
 
+/** Official, bundled plugin: a haptic tap. `op` is the style; needs VIBRATE (manifest). */
+class HapticsPlugin(private val context: Context) : MobilerPlugin {
+    override fun handle(op: String, input: String): PluginResponse {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        val ms = when (op) { "light" -> 10L; "heavy" -> 40L; else -> 20L }
+        vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+        return PluginResponse(true, "")
+    }
+}
+
 /** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
 class StoragePlugin(private val context: Context) : MobilerPlugin {
     private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
@@ -101,6 +118,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "clipboard" to ClipboardPlugin(application),
         "share" to SharePlugin(application),
         "browser" to BrowserPlugin(application),
+        "haptics" to HapticsPlugin(application),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))

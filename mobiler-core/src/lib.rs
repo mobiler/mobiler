@@ -115,6 +115,17 @@ impl<E> Cx<E> {
         self.notify("browser", "open", url);
     }
 
+    /// Show a transient toast / snackbar with `text` (built-in `toast` capability).
+    pub fn toast(&mut self, text: impl Into<String>) {
+        self.notify("toast", "show", text);
+    }
+
+    /// Fire a haptic tap (built-in `haptics` capability). `style` is `"light"`,
+    /// `"medium"`, or `"heavy"`; unknown styles fall back to medium.
+    pub fn haptic(&mut self, style: impl Into<String>) {
+        self.notify("haptics", style, "");
+    }
+
     /// Perform an HTTP request via the shell's built-in `http` capability. When it
     /// completes, `then(response)` produces the typed event delivered back to
     /// `update` — `response.output` is the body, `response.ok` is success (2xx).
@@ -151,6 +162,13 @@ impl<E> Cx<E> {
     /// `DELETE url`, delivering the response to `then`.
     pub fn delete(&mut self, url: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.http("DELETE", url, None, then);
+    }
+
+    /// Query the device model/name via the built-in `device` capability; the result
+    /// (`response.output`, e.g. "Google Pixel 7" / "Apple iPhone (iOS 18.0)") is
+    /// delivered to `then`.
+    pub fn device_model(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("device", "model", "", then);
     }
 }
 

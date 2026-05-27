@@ -127,8 +127,15 @@ where
     }
 }
 
-/// Fulfil the `http` capability with `fetch`.
+/// Fulfil a request/response capability. `http` via `fetch`; `device` via the
+/// browser's user-agent string (the web analogue of a device model).
 async fn perform(call: &PluginCall) -> PluginResponse {
+    if call.plugin == "device" {
+        let ua = web_sys::window()
+            .and_then(|w| w.navigator().user_agent().ok())
+            .unwrap_or_default();
+        return PluginResponse { ok: true, output: ua };
+    }
     if call.plugin != "http" {
         return PluginResponse { ok: false, output: format!("plugin '{}' not available", call.plugin) };
     }
@@ -192,8 +199,30 @@ fn perform_notify(notify: &PluginNotify) {
         ("share", _) => {
             let _ = win.navigator().clipboard().write_text(&notify.input);
         }
+        // Transient toast: a styled div appended to <body>, auto-removed after a beat.
+        ("toast", _) => show_toast(&notify.input),
+        // Haptic tap. navigator.vibrate is unsupported on iOS Safari (a graceful no-op).
+        ("haptics", style) => {
+            let ms = match style {
+                "light" => 15,
+                "heavy" => 50,
+                _ => 30, // medium / unknown
+            };
+            let _ = win.navigator().vibrate_with_duration(ms);
+        }
         _ => {} // unknown capability: ignore
     }
+}
+
+/// Append a transient toast to `<body>` (styled by `.toast` in mobiler.css) and
+/// remove it after ~2.6 s — the web twin of the native toast/snackbar.
+fn show_toast(text: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let (Ok(el), Some(body)) = (doc.create_element("div"), doc.body()) else { return };
+    el.set_class_name("toast");
+    el.set_text_content(Some(text));
+    let _ = body.append_child(&el);
+    gloo_timers::callback::Timeout::new(2600, move || el.remove()).forget();
 }
 
 // ---------------- Widget → DOM ----------------

@@ -70,6 +70,9 @@ enum Plugins {
         case "clipboard": return await ClipboardPlugin.handle(op: op, input: input)
         case "share": return await SharePlugin.handle(op: op, input: input)
         case "browser": return await BrowserPlugin.handle(op: op, input: input)
+        case "toast": return await ToastPlugin.handle(op: op, input: input)
+        case "device": return await DevicePlugin.handle(op: op, input: input)
+        case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
         }
@@ -153,13 +156,85 @@ enum BrowserPlugin {
     }
 }
 
-/// The frontmost view controller — the generic shell owns no UIViewController, so
-/// modals (the share sheet) present from here.
+/// Device info — request/response. `model` returns e.g. "Apple iPhone (iOS 18.0)".
+@MainActor
+enum DevicePlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        switch op {
+        case "model":
+            let d = UIDevice.current
+            return PluginResponse(ok: true, output: "Apple \(d.model) (\(d.systemName) \(d.systemVersion))")
+        default:
+            return PluginResponse(ok: false, output: "unknown op '\(op)'")
+        }
+    }
+}
+
+/// Haptic tap — iOS has no permission requirement. `op` is the style.
+@MainActor
+enum HapticsPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        let style: UIImpactFeedbackGenerator.FeedbackStyle = switch op {
+        case "light": .light
+        case "heavy": .heavy
+        default: .medium
+        }
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Toast — iOS has no native toast, so show a transient padded label in the key
+/// window (the SwiftUI/UIKit twin of Android's Toast / the web's `.toast` div).
+@MainActor
+enum ToastPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard let window = keyWindow() else { return PluginResponse(ok: false, output: "no window") }
+        let label = PaddedLabel()
+        label.text = input
+        label.numberOfLines = 0
+        label.textColor = .white
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 14)
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.85)
+        label.layer.cornerRadius = 18
+        label.clipsToBounds = true
+        label.alpha = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        window.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: window.centerXAnchor),
+            label.bottomAnchor.constraint(equalTo: window.safeAreaLayoutGuide.bottomAnchor, constant: -32),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: window.leadingAnchor, constant: 24),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: window.trailingAnchor, constant: -24),
+        ])
+        UIView.animate(withDuration: 0.2) { label.alpha = 1 }
+        UIView.animate(withDuration: 0.3, delay: 2.3) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// A UILabel with inner padding (UILabel alone has none) — for the toast pill.
+private final class PaddedLabel: UILabel {
+    private let insets = UIEdgeInsets(top: 10, left: 18, bottom: 10, right: 18)
+    override func drawText(in rect: CGRect) { super.drawText(in: rect.inset(by: insets)) }
+    override var intrinsicContentSize: CGSize {
+        let s = super.intrinsicContentSize
+        return CGSize(width: s.width + insets.left + insets.right, height: s.height + insets.top + insets.bottom)
+    }
+}
+
+/// The active key window — where the shell hangs modals/toasts (it owns no VC).
+@MainActor
+private func keyWindow() -> UIWindow? {
+    (UIApplication.shared.connectedScenes
+        .first { $0.activationState == .foregroundActive } as? UIWindowScene)?.keyWindow
+}
+
+/// The frontmost view controller — modals (the share sheet) present from here.
 @MainActor
 private func topViewController() -> UIViewController? {
-    let scene = UIApplication.shared.connectedScenes
-        .first { $0.activationState == .foregroundActive } as? UIWindowScene
-    var top = scene?.keyWindow?.rootViewController
+    var top = keyWindow()?.rootViewController
     while let presented = top?.presentedViewController { top = presented }
     return top
 }
