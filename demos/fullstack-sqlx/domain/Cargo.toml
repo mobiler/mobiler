@@ -1,0 +1,10 @@
+[package]
+name = "domain"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+# Pure serde types shared by the server, the Mobiler app core, and any web client —
+# the single source of truth for the wire contract. No DB or framework deps here.
+[dependencies]
+serde.workspace = true

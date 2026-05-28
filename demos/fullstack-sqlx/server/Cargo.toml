@@ -1,0 +1,19 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+# Axum + SQLx (SQLite in dev) JSON API over the shared `domain` types. Uses SQLx's
+# runtime query API (not the compile-time macros), so it builds with no DATABASE_URL
+# and no `sqlx prepare` step. To move to Postgres: swap the `sqlite` feature for
+# `postgres`, change the connection URL, and adjust the `CREATE TABLE` DDL.
+[dependencies]
+domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+tower-http = { version = "0.6", features = ["cors"] }
+anyhow = "1"

@@ -1,0 +1,13 @@
+[package]
+name = "fullstack-sqlx-web"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# Standalone (WASM) workspace — the web client renders the SAME app-core through the
+# generic mobiler-web shell. One line of code; the shell does the rest.
+[workspace]
+
+[dependencies]
+mobiler-web = { path = "../../../mobiler-web" }
+app-core = { path = "../app-core" }
