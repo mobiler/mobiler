@@ -1,10 +1,13 @@
 # CLAUDE.md — building this app with Mobiler
 
-This project is a **[Mobiler](https://github.com/mobiler/mobiler)** app: you write the
-app's **logic AND UI in Rust**, and a generic prebuilt shell renders it natively on
-**Android (Jetpack Compose)**, **iOS (SwiftUI)**, and **web (Leptos/WASM → DOM)** — no
-per-app Kotlin/Swift/JS, no per-app UI codegen. (Mobiler builds on
-[Crux](https://github.com/redbadger/crux): a Rust core + a fixed `Widget` wire ABI.)
+This project is a **[Mobiler](https://github.com/mobiler/mobiler)** **mobile** app: you write
+the app's **logic AND UI in Rust**, and a generic prebuilt shell renders it natively on
+**Android (Jetpack Compose)** and **iOS (SwiftUI)** — no per-app Kotlin/Swift, no per-app UI
+codegen. (Mobiler builds on [Crux](https://github.com/redbadger/crux): a Rust core + a fixed
+`Widget` wire ABI.)
+
+It's **backend-agnostic**: talk to whatever HTTP API you already have (via `cx`), or store the
+app's data on the device — nothing here assumes a particular server.
 
 ## The model you implement
 
@@ -60,7 +63,8 @@ ABI change in the framework, not app work).
   - fire-and-forget: `cx.toast`, `cx.copy`, `cx.share`, `cx.open_url`, `cx.haptic`, `cx.save`
   - request/response (take a `then: |resp| -> Msg` closure): `cx.get` / `cx.post` / `cx.patch`
     / `cx.delete` (HTTP/JSON), `cx.confirm`, `cx.pick_photo`, `cx.capture_photo`, `cx.device_model`
-  - reach a backend through `cx.http` — **never** open a DB or socket from the app directly.
+  - **Data**: call whatever HTTP API you have with `cx.get` / `post` / `patch` / `delete`, **or**
+    keep it on-device with `cx.save` + `restore`. Never open a database or socket directly from the app.
 - **Theme is data**: set `dark_mode` on the `Scaffold`; the shell themes the whole app from it.
 
 ## Golden rules
@@ -80,12 +84,9 @@ mobiler dev                        # build core → gen types → build APK → 
 mobiler build android              # build the APK only
 bash iOS/build-ios.sh              # build for the iOS simulator (on a Mac; needs Xcode + XcodeGen)
 ```
-For a web client, add a tiny Trunk crate whose `main` is `mobiler_web::run::<shared::App>()`
-(the web shell renders the same core), then `trunk serve`.
 
 ## Where to look
 
 - API docs: <https://docs.rs/mobiler-core>
 - Worked examples (study these): the `demos/` in the Mobiler repo — `coffee` (storefront,
-  images, grid), `todo` (tabs, nav, CRUD, persistence), `fullstack-todo` and `fullstack-sqlx`
-  (a shared `domain` crate + an Axum backend + native and web clients).
+  images, grid) and `todo` (tabs, nav, CRUD, on-device persistence).

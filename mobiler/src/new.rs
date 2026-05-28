@@ -7,8 +7,32 @@ static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
 /// The Mobiler agent guide, written to the project as `CLAUDE.md` by `--agentic` so a
 /// coding agent (e.g. Claude Code) builds the app idiomatically. Kept outside `templates/`
-/// so it's emitted only on request, not in every scaffold.
-const AGENTIC_GUIDE: &str = include_str!("../agentic/CLAUDE.md");
+/// so it's emitted only on request. The base primer always applies; a flavor appends
+/// architecture-specific guidance.
+const GUIDE_BASE: &str = include_str!("../agentic/CLAUDE.md");
+const GUIDE_SHARED_UI: &str = include_str!("../agentic/shared-ui.md");
+const GUIDE_API: &str = include_str!("../agentic/api.md");
+
+/// Which agent guide `mobiler new --agentic [<flavor>]` emits.
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum AgenticGuide {
+    /// Just the generic Mobiler primer (what a bare `--agentic` emits).
+    Generic,
+    /// Primer + "same UI on mobile and web".
+    #[value(name = "shared-ui")]
+    SharedUi,
+    /// Primer + "reusable core + JSON API".
+    Api,
+}
+
+/// The full `CLAUDE.md` text for a flavor: the base primer plus a flavor appendix.
+fn agentic_guide(flavor: AgenticGuide) -> String {
+    match flavor {
+        AgenticGuide::Generic => GUIDE_BASE.to_string(),
+        AgenticGuide::SharedUi => format!("{GUIDE_BASE}{GUIDE_SHARED_UI}"),
+        AgenticGuide::Api => format!("{GUIDE_BASE}{GUIDE_API}"),
+    }
+}
 
 /// File extensions treated as binary — copied byte-for-byte, no templating.
 const BINARY_EXTS: &[&str] = &["jar", "webp", "png", "ico"];
@@ -34,7 +58,7 @@ struct Subs {
 /// Fallback NDK version pin when none is detectable. Update when bumping the framework's target NDK.
 const FALLBACK_NDK_VERSION: &str = "30.0.14904198";
 
-pub fn run(raw_name: &str, package: Option<&str>, agentic: bool) -> Result<()> {
+pub fn run(raw_name: &str, package: Option<&str>, agentic: Option<AgenticGuide>) -> Result<()> {
     let name = sanitize_project_name(raw_name)?;
     let display_name = display_name_from(&name);
     let package = package
@@ -70,8 +94,8 @@ pub fn run(raw_name: &str, package: Option<&str>, agentic: bool) -> Result<()> {
         write_local_properties(&out_dir, sdk_dir)?;
         written += 1;
     }
-    if agentic {
-        fs::write(out_dir.join("CLAUDE.md"), AGENTIC_GUIDE).context("writing CLAUDE.md")?;
+    if let Some(flavor) = agentic {
+        fs::write(out_dir.join("CLAUDE.md"), agentic_guide(flavor)).context("writing CLAUDE.md")?;
         written += 1;
     }
 
@@ -91,7 +115,7 @@ pub fn run(raw_name: &str, package: Option<&str>, agentic: bool) -> Result<()> {
     println!("  cd Android");
     println!("  ./gradlew :app:assembleDebug              # build APK");
     println!("  adb install -r app/build/outputs/apk/debug/app-debug.apk");
-    if agentic {
+    if agentic.is_some() {
         println!();
         println!("Wrote CLAUDE.md — a coding agent (e.g. Claude Code) will use it to build idiomatically.");
     }
@@ -339,12 +363,28 @@ mod test {
     }
 
     #[test]
-    fn agentic_guide_is_embedded_and_substantial() {
-        let g = super::AGENTIC_GUIDE;
-        assert!(g.contains("MobilerApp"), "guide explains the core trait");
-        assert!(g.contains("widget vocabulary"), "guide lists the UI builder vocabulary");
-        assert!(g.contains("cx."), "guide covers capabilities");
-        assert!(g.len() > 1500, "guide should be substantial, got {} bytes", g.len());
+    fn agentic_guides_compose_base_plus_flavor() {
+        use super::{AgenticGuide, agentic_guide};
+        let base = agentic_guide(AgenticGuide::Generic);
+        assert!(base.contains("MobilerApp"), "base explains the core trait");
+        assert!(base.contains("widget vocabulary"), "base lists the UI builder vocabulary");
+        assert!(base.contains("cx."), "base covers capabilities");
+        assert!(base.len() > 1500);
+        // The default (base) guide is mobile-only + backend-agnostic — no web in it.
+        assert!(!base.contains("mobiler_web"), "base must not assume a web target");
+        assert!(!base.to_lowercase().contains("trunk"), "base must not mention the web toolchain");
+
+        // Each flavor = the base primer, then a flavor-specific appendix.
+        let shared = agentic_guide(AgenticGuide::SharedUi);
+        assert!(shared.starts_with(&base), "flavor guides begin with the base primer");
+        assert!(
+            shared.contains("same UI on mobile and web") && shared.contains("mobiler_web"),
+            "shared-ui adds the web target"
+        );
+
+        let api = agentic_guide(AgenticGuide::Api);
+        assert!(api.starts_with(&base));
+        assert!(api.contains("reusable core + JSON API") && api.contains("SQLx"), "api appendix present");
     }
 }
 
