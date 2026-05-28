@@ -28,6 +28,9 @@ jobs:
           # its mobile/web crates are excluded from this workspace.
           - name: demo-fullstack-todo
             dir: demos/fullstack-todo
+          # Full-stack SQLx demo: domain + Axum/SQLx server + app-core (web is separate).
+          - name: demo-fullstack-sqlx
+            dir: demos/fullstack-sqlx
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
@@ -92,6 +95,7 @@ jobs:
           - demos/coffee/web
           - demos/todo/web
           - demos/fullstack-todo/web-widgets
+          - demos/fullstack-sqlx/web
     defaults:
       run:
         working-directory: ${{ matrix.dir }}

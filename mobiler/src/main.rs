@@ -24,6 +24,10 @@ enum Command {
         /// Android application/package id. Defaults to `dev.mobiler.<name>`.
         #[arg(long)]
         package: Option<String>,
+        /// Also write a `CLAUDE.md` agent guide so a coding agent (e.g. Claude Code)
+        /// builds the app idiomatically against the Mobiler framework.
+        #[arg(long)]
+        agentic: bool,
     },
     /// Build the Mobiler project, install, and launch (default: all three).
     Dev {
@@ -55,7 +59,7 @@ fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Doctor => doctor::run(),
-        Command::New { name, package } => match new::run(&name, package.as_deref()) {
+        Command::New { name, package, agentic } => match new::run(&name, package.as_deref(), agentic) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

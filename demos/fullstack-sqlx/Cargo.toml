@@ -1,0 +1,14 @@
+# Fullstack-SQLx demo workspace: a shared `domain`, an Axum + SQLx server, and the
+# Mobiler app core. The web client (WASM) is its own workspace under `web/`.
+[workspace]
+resolver = "2"
+members = ["domain", "server", "app-core"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+domain = { path = "domain" }

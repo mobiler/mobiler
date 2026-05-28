@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 
 static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
+/// The Mobiler agent guide, written to the project as `CLAUDE.md` by `--agentic` so a
+/// coding agent (e.g. Claude Code) builds the app idiomatically. Kept outside `templates/`
+/// so it's emitted only on request, not in every scaffold.
+const AGENTIC_GUIDE: &str = include_str!("../agentic/CLAUDE.md");
+
 /// File extensions treated as binary — copied byte-for-byte, no templating.
 const BINARY_EXTS: &[&str] = &["jar", "webp", "png", "ico"];
 
@@ -29,7 +34,7 @@ struct Subs {
 /// Fallback NDK version pin when none is detectable. Update when bumping the framework's target NDK.
 const FALLBACK_NDK_VERSION: &str = "30.0.14904198";
 
-pub fn run(raw_name: &str, package: Option<&str>) -> Result<()> {
+pub fn run(raw_name: &str, package: Option<&str>, agentic: bool) -> Result<()> {
     let name = sanitize_project_name(raw_name)?;
     let display_name = display_name_from(&name);
     let package = package
@@ -65,6 +70,10 @@ pub fn run(raw_name: &str, package: Option<&str>) -> Result<()> {
         write_local_properties(&out_dir, sdk_dir)?;
         written += 1;
     }
+    if agentic {
+        fs::write(out_dir.join("CLAUDE.md"), AGENTIC_GUIDE).context("writing CLAUDE.md")?;
+        written += 1;
+    }
 
     println!(
         "Created Mobiler app at {} ({} files)",
@@ -82,6 +91,10 @@ pub fn run(raw_name: &str, package: Option<&str>) -> Result<()> {
     println!("  cd Android");
     println!("  ./gradlew :app:assembleDebug              # build APK");
     println!("  adb install -r app/build/outputs/apk/debug/app-debug.apk");
+    if agentic {
+        println!();
+        println!("Wrote CLAUDE.md — a coding agent (e.g. Claude Code) will use it to build idiomatically.");
+    }
     Ok(())
 }
 
@@ -323,6 +336,15 @@ mod test {
         assert!(is_binary(Path::new("gradle/wrapper/gradle-wrapper.jar")));
         assert!(!is_binary(Path::new("shared/src/app.rs"))); // text → templated
         assert!(!is_binary(Path::new("Android/app/build.gradle.kts")));
+    }
+
+    #[test]
+    fn agentic_guide_is_embedded_and_substantial() {
+        let g = super::AGENTIC_GUIDE;
+        assert!(g.contains("MobilerApp"), "guide explains the core trait");
+        assert!(g.contains("widget vocabulary"), "guide lists the UI builder vocabulary");
+        assert!(g.contains("cx."), "guide covers capabilities");
+        assert!(g.len() > 1500, "guide should be substantial, got {} bytes", g.len());
     }
 }
 

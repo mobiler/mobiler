@@ -1,0 +1,4 @@
+/target
+# Dev SQLite database (created by the server on first run)
+notes.db
+notes.db-*
