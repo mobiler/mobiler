@@ -137,7 +137,10 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         return PluginResponse { ok: true, output: ua };
     }
     if call.plugin == "photo" && call.op == "pick" {
-        return pick_photo().await;
+        return take_image(false).await;
+    }
+    if call.plugin == "camera" && call.op == "capture" {
+        return take_image(true).await;
     }
     if call.plugin == "dialog" && call.op == "confirm" {
         let v: serde_json::Value = serde_json::from_str(&call.input).unwrap_or(serde_json::Value::Null);
@@ -177,10 +180,13 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     }
 }
 
-/// System photo picker: a hidden `<input type=file accept=image/*>`, clicked to open
-/// the browser's file dialog, awaiting the `change` event and returning a `blob:`
-/// object URL the `<img>` renderer loads. (No permission; the picker is the browser's.)
-async fn pick_photo() -> PluginResponse {
+/// Pick or capture an image via a hidden `<input type=file accept=image/*>`, clicked
+/// to open the browser's file dialog — or, with `capture`, to hint the device camera on
+/// supporting mobile browsers (desktop falls back to the file dialog). Awaits the
+/// `change` event and returns a `blob:` object URL the `<img>` renderer loads. No
+/// permission needed (the picker/camera prompt is the browser's). Backs both the
+/// `photo`/`pick` and `camera`/`capture` capabilities.
+async fn take_image(capture: bool) -> PluginResponse {
     use wasm_bindgen::{closure::Closure, JsCast};
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return PluginResponse { ok: false, output: "no document".into() };
@@ -190,6 +196,10 @@ async fn pick_photo() -> PluginResponse {
     };
     input.set_type("file");
     input.set_accept("image/*");
+    if capture {
+        // Hints the environment-facing camera on mobile browsers that support it.
+        let _ = input.set_attribute("capture", "environment");
+    }
 
     let (tx, rx) = futures_channel::oneshot::channel::<Option<String>>();
     let tx = std::cell::RefCell::new(Some(tx));

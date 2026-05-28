@@ -179,6 +179,16 @@ impl<E> Cx<E> {
         self.plugin("photo", "pick", "", then);
     }
 
+    /// Capture a photo with the device camera (built-in `camera` capability — launches
+    /// the system camera). `then` receives the result: on success `response.ok` is
+    /// `true` and `response.output` is a local image URI you can hand straight to the
+    /// `image(...)` widget; on cancel, `ok` is `false`. iOS requires an
+    /// `NSCameraUsageDescription` (the template ships one, opt-in); Android captures via
+    /// the system camera app, so no extra runtime permission is needed.
+    pub fn capture_photo(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("camera", "capture", "", then);
+    }
+
     /// Ask the user to confirm via a native dialog (built-in `dialog` capability).
     /// `then` receives the choice: `response.ok` is `true` if confirmed, `false` if
     /// cancelled/dismissed. Resolves asynchronously (the user replies whenever).
@@ -644,5 +654,32 @@ mod tests {
         let post_input: serde_json::Value = serde_json::from_str(&cx.requests[1].0.input).unwrap();
         assert_eq!(post_input["url"], "http://h/y");
         assert_eq!(post_input["body"], "hello");
+    }
+
+    #[test]
+    fn cx_pick_and_capture_photo_request_the_right_plugin() {
+        let mut cx = Cx::<Ev>::default();
+        cx.pick_photo(|_| Ev::Tap);
+        cx.capture_photo(|_| Ev::Tap);
+        assert_eq!(cx.requests.len(), 2);
+        // photo picker = `photo`/`pick`; camera capture = `camera`/`capture`. Both
+        // carry empty input (the shell needs no parameters to launch picker/camera).
+        assert_eq!((cx.requests[0].0.plugin.as_str(), cx.requests[0].0.op.as_str(), cx.requests[0].0.input.as_str()), ("photo", "pick", ""));
+        assert_eq!((cx.requests[1].0.plugin.as_str(), cx.requests[1].0.op.as_str(), cx.requests[1].0.input.as_str()), ("camera", "capture", ""));
+    }
+
+    #[test]
+    fn cx_capture_photo_routes_success_and_cancel() {
+        // Happy path: ok=true delivers the URI to the success branch.
+        let mut cx = Cx::<Ev>::default();
+        cx.capture_photo(|r| if r.ok { Ev::Open(7) } else { Ev::Tap });
+        let (_, then) = cx.requests.pop().unwrap();
+        assert!(matches!(then(PluginResponse { ok: true, output: "file:///tmp/shot.jpg".into() }), Ev::Open(7)));
+
+        // Sad path: ok=false (user cancelled / permission denied) takes the else branch.
+        let mut cx = Cx::<Ev>::default();
+        cx.capture_photo(|r| if r.ok { Ev::Open(7) } else { Ev::Tap });
+        let (_, then) = cx.requests.pop().unwrap();
+        assert!(matches!(then(PluginResponse { ok: false, output: String::new() }), Ev::Tap));
     }
 }

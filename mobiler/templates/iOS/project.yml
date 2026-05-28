@@ -37,6 +37,10 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
+        # requires this usage string to access the camera; the App Store flags apps that
+        # ship it without using the camera, so it's left off by default.
+        # NSCameraUsageDescription: "Take photos to use in the app."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: {{PACKAGE}}

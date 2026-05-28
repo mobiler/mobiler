@@ -26,6 +26,7 @@ pub enum Msg {
     AskConfirm,
     Confirmed(bool),
     PickPhoto,
+    CapturePhoto,
     GotPhoto(String),
 }
 
@@ -119,6 +120,7 @@ impl MobilerApp for Coffee {
             Msg::AskConfirm => cx.confirm("Add to cart?", "Add this coffee to your order?", |r| Msg::Confirmed(r.ok)),
             Msg::Confirmed(ok) => cx.toast(if ok { "Added to cart ✓" } else { "Cancelled" }),
             Msg::PickPhoto => cx.pick_photo(|r| Msg::GotPhoto(if r.ok { r.output } else { String::new() })),
+            Msg::CapturePhoto => cx.capture_photo(|r| Msg::GotPhoto(if r.ok { r.output } else { String::new() })),
             Msg::GotPhoto(uri) => {
                 if !uri.is_empty() {
                     model.picked_photo = Some(uri);
@@ -190,7 +192,10 @@ fn detail(p: &Product, model: &Model) -> Widget {
             button("Haptic", ButtonStyle::Outlined, Msg::Tap),
             button("Device", ButtonStyle::Outlined, Msg::WhatDevice),
         ]),
-        button("Pick a photo", ButtonStyle::Outlined, Msg::PickPhoto),
+        row(vec![
+            button("Pick a photo", ButtonStyle::Outlined, Msg::PickPhoto),
+            button("Take a photo", ButtonStyle::Outlined, Msg::CapturePhoto),
+        ]),
     ];
     if !model.device_info.is_empty() {
         items.push(mobiler_core::caption(format!("This device: {}", model.device_info)));
@@ -240,5 +245,19 @@ mod test {
         assert_eq!(model.sweetness, 80);
         app.update(Msg::CloseProduct, &mut model, &mut Cx::default());
         assert!(model.open_product.is_none());
+    }
+
+    #[test]
+    fn photo_result_sets_image_and_ignores_cancel() {
+        // Both the picker (PickPhoto) and the camera (CapturePhoto) deliver their result
+        // via GotPhoto, so this covers the result handling for both capabilities.
+        let app = Coffee;
+        let mut model = Model::default();
+        // Happy path: a URI is stored and shown.
+        app.update(Msg::GotPhoto("content://media/42".into()), &mut model, &mut Cx::default());
+        assert_eq!(model.picked_photo.as_deref(), Some("content://media/42"));
+        // Sad path: cancel / failure delivers an empty string → keep the prior photo.
+        app.update(Msg::GotPhoto(String::new()), &mut model, &mut Cx::default());
+        assert_eq!(model.picked_photo.as_deref(), Some("content://media/42"));
     }
 }

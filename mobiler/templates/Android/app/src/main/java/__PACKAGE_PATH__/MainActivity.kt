@@ -1,6 +1,9 @@
 package {{PACKAGE}}
 
+import android.net.Uri
 import android.os.Bundle
+import androidx.core.content.FileProvider
+import java.io.File
 import java.lang.ref.WeakReference
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -108,12 +111,31 @@ class MainActivity : ComponentActivity() {
         pendingPhoto = null
     }
 
+    // Camera capture (cx.capture_photo): TakePicture writes the full photo to a
+    // FileProvider URI we supply and reports success; we hand that URI back. It launches
+    // the system camera app, so no CAMERA permission is required.
+    private var pendingCamera: ((String?) -> Unit)? = null
+    private var pendingCameraUri: Uri? = null
+    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        pendingCamera?.invoke(if (success) pendingCameraUri?.toString() else null)
+        pendingCamera = null
+        pendingCameraUri = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         PhotoPicker.launch = { onResult ->
             pendingPhoto = onResult
             pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+        CameraCapture.launch = { onResult ->
+            pendingCamera = onResult
+            val dir = File(cacheDir, "captures").apply { mkdirs() }
+            val file = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            pendingCameraUri = uri
+            takePicture.launch(uri)
         }
         setContent { App() }
     }
