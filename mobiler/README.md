@@ -37,6 +37,21 @@ mobiler watch           # …same, re-running on every change
 mobiler build ios       # build the iOS app (on a Mac)
 ```
 
+### Agent-ready scaffolds: `--agentic`
+
+`mobiler new --agentic [<flavor>]` also writes a `CLAUDE.md` into the project so a coding
+agent (e.g. Claude Code) builds idiomatically against Mobiler — it captures the `MobilerApp`
+model, the widget-builder vocabulary, the capabilities, and the conventions. An optional
+flavor tailors the guide to your architecture:
+
+| Command | The `CLAUDE.md` describes… |
+|---|---|
+| `mobiler new app --agentic` | a **mobile** app, backend-agnostic — talk to any HTTP API via `cx`, or store data on-device (no web, no assumed server) |
+| `… --agentic shared-ui` | the above **plus the same UI on web** (one core rendered on mobile **and** web) |
+| `… --agentic api` | the above **plus a reusable core + JSON API** backend (Axum/SQLx; optional separate web UI) |
+
+Without `--agentic`, no `CLAUDE.md` is written.
+
 Your app lives in `shared/src/app.rs` as a `MobilerApp` — typed `Msg` events, a
 `Model`, and a `view` built from widget builders:
 
