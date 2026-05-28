@@ -16,6 +16,9 @@ struct TodoApp: App {
 
 private struct RootView: View {
     @ObservedObject var core: Core
+    // Regular width (iPad / large landscape) caps the content column so a phone
+    // layout doesn't stretch edge-to-edge on a big screen; compact fills as before.
+    @Environment(\.horizontalSizeClass) private var hSize
     var body: some View {
         content
             // Full-bleed system background so the status-bar and home-indicator
@@ -36,7 +39,8 @@ private struct RootView: View {
             ScrollView {
                 render(core.view) { core.update($0) }
                     .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity)  // center the capped column
             }
         }
     }

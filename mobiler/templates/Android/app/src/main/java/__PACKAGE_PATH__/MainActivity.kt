@@ -19,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,6 +58,8 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -138,15 +142,24 @@ fun App(core: Core = viewModel()) {
                 // Scaffold provides its own bars + scrollable body.
                 Render(view) { action -> core.update(action) }
             } else {
-                Column(
+                // Cap + center the content column so a phone layout doesn't stretch
+                // edge-to-edge on a tablet (the widthIn is a no-op on a phone).
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .statusBarsPadding()
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                        .verticalScroll(rememberScrollState()),
                 ) {
-                    Render(view) { action -> core.update(action) }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 760.dp)
+                            .align(Alignment.TopCenter)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Render(view) { action -> core.update(action) }
+                    }
                 }
             }
         }
@@ -247,11 +260,16 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
         }
 
-        is Widget.Grid -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            widget.children.chunked(2).forEach { rowItems ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    rowItems.forEach { item -> Box(modifier = Modifier.weight(1f)) { Render(item, send) } }
-                    repeat(2 - rowItems.size) { Spacer(modifier = Modifier.weight(1f)) }
+        is Widget.Grid -> BoxWithConstraints {
+            // Column count follows the available width: 2 on a phone, more on a
+            // tablet (the web/iOS twin of auto-fill / adaptive grids).
+            val cols = maxOf(2, (maxWidth.value / 190f).toInt())
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                widget.children.chunked(cols).forEach { rowItems ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        rowItems.forEach { item -> Box(modifier = Modifier.weight(1f)) { Render(item, send) } }
+                        repeat(cols - rowItems.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
                 }
             }
         }
@@ -314,26 +332,15 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             if (back != null) {
                 BackHandler { send(Action.Fired(back)) }
             }
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                topBar = {
-                    CenterAlignedTopAppBar(
-                        title = { Text(widget.title) },
-                        navigationIcon = {
-                            if (back != null) {
-                                IconButton(onClick = { send(Action.Fired(back)) }) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                }
-                            }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-                    )
-                },
-                bottomBar = {
-                    if (widget.tabs.isNotEmpty()) {
-                        NavigationBar {
+            BoxWithConstraints {
+                // On a wide screen (tablet / landscape) the bottom tab-bar becomes a
+                // side navigation rail; a phone keeps its bottom tabs.
+                val wide = maxWidth >= 600.dp && widget.tabs.isNotEmpty()
+                Row(modifier = Modifier.fillMaxSize()) {
+                    if (wide) {
+                        NavigationRail {
                             widget.tabs.forEach { t ->
-                                NavigationBarItem(
+                                NavigationRailItem(
                                     selected = t.selected,
                                     onClick = { send(Action.Fired(t.onSelect)) },
                                     label = { Text(t.label) },
@@ -342,38 +349,76 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             }
                         }
                     }
-                },
-            ) { padding ->
-                // Animate the body when the route changes: slide for push/pop
-                // (direction from depth), crossfade for a lateral move at the same
-                // depth. Same route = a data update → no transition (contentKey).
-                AnimatedContent(
-                    targetState = widget,
-                    contentKey = { it.route },
-                    transitionSpec = {
-                        val dur = 280
-                        when {
-                            targetState.depth > initialState.depth ->
-                                (slideInHorizontally(tween(dur)) { it } + fadeIn(tween(dur))) togetherWith
-                                    (slideOutHorizontally(tween(dur)) { -it / 3 } + fadeOut(tween(dur)))
-                            targetState.depth < initialState.depth ->
-                                (slideInHorizontally(tween(dur)) { -it / 3 } + fadeIn(tween(dur))) togetherWith
-                                    (slideOutHorizontally(tween(dur)) { it } + fadeOut(tween(dur)))
-                            else ->
-                                fadeIn(tween(dur)) togetherWith fadeOut(tween(dur))
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        topBar = {
+                            CenterAlignedTopAppBar(
+                                title = { Text(widget.title) },
+                                navigationIcon = {
+                                    if (back != null) {
+                                        IconButton(onClick = { send(Action.Fired(back)) }) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                        }
+                                    }
+                                },
+                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                            )
+                        },
+                        bottomBar = {
+                            if (!wide && widget.tabs.isNotEmpty()) {
+                                NavigationBar {
+                                    widget.tabs.forEach { t ->
+                                        NavigationBarItem(
+                                            selected = t.selected,
+                                            onClick = { send(Action.Fired(t.onSelect)) },
+                                            label = { Text(t.label) },
+                                            icon = {},
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    ) { padding ->
+                        // Animate the body when the route changes: slide for push/pop
+                        // (direction from depth), crossfade for a lateral move at the same
+                        // depth. Same route = a data update → no transition (contentKey).
+                        AnimatedContent(
+                            targetState = widget,
+                            contentKey = { it.route },
+                            transitionSpec = {
+                                val dur = 280
+                                when {
+                                    targetState.depth > initialState.depth ->
+                                        (slideInHorizontally(tween(dur)) { it } + fadeIn(tween(dur))) togetherWith
+                                            (slideOutHorizontally(tween(dur)) { -it / 3 } + fadeOut(tween(dur)))
+                                    targetState.depth < initialState.depth ->
+                                        (slideInHorizontally(tween(dur)) { -it / 3 } + fadeIn(tween(dur))) togetherWith
+                                            (slideOutHorizontally(tween(dur)) { it } + fadeOut(tween(dur)))
+                                    else ->
+                                        fadeIn(tween(dur)) togetherWith fadeOut(tween(dur))
+                                }
+                            },
+                            label = "nav",
+                        ) { screen ->
+                            // Cap + center the content column so it doesn't stretch on a tablet.
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(padding)
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .widthIn(max = 760.dp)
+                                        .align(Alignment.TopCenter)
+                                        .padding(horizontal = 16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Render(screen.body, send)
+                                }
+                            }
                         }
-                    },
-                    label = "nav",
-                ) { screen ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding)
-                            .padding(horizontal = 16.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Render(screen.body, send)
                     }
                 }
             }
