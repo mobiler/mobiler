@@ -142,3 +142,50 @@ fn render_inline(caps: &[&Capability]) -> String {
     };
     format!("{list}.")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cap(name: &str, short: &str, api: &str, notes: &str) -> Capability {
+        Capability {
+            name: name.into(),
+            short: short.into(),
+            api: api.into(),
+            plugin: "p".into(),
+            tier: "free".into(),
+            status: "shipped".into(),
+            since: "0.1.0".into(),
+            notes: notes.into(),
+        }
+    }
+
+    #[test]
+    fn render_inline_uses_an_oxford_and() {
+        let (a, b, c) = (cap("A", "aye", "x", "n"), cap("B", "bee", "y", "m"), cap("C", "cee", "z", "o"));
+        assert_eq!(render_inline(&[]), ".");
+        assert_eq!(render_inline(&[&a]), "aye.");
+        assert_eq!(render_inline(&[&a, &b]), "aye, and bee.");
+        assert_eq!(render_inline(&[&a, &b, &c]), "aye, bee, and cee.");
+    }
+
+    #[test]
+    fn render_table_has_a_header_and_a_row_per_capability() {
+        let t = render_table(&[&cap("HTTP", "http", "cx.get", "req")]);
+        assert!(t.starts_with("| Capability | Rust API | Notes |"));
+        assert!(t.contains("| HTTP | `cx.get` | req |"));
+    }
+
+    #[test]
+    fn rewrite_replaces_between_markers_keeps_surroundings_and_errors_without_them() {
+        let caps = [&cap("HTTP", "http", "cx.get", "req")];
+        let content = "intro\n<!-- capabilities:start format=inline -->\nOLD\n<!-- capabilities:end -->\noutro\n";
+        let out = rewrite(content, &caps).unwrap();
+        assert!(out.contains("http."), "generated content present");
+        assert!(!out.contains("OLD"), "stale content replaced");
+        assert!(out.contains("intro") && out.contains("outro"), "surrounding text preserved");
+        assert!(out.contains("<!-- capabilities:start") && out.contains("<!-- capabilities:end -->"), "markers kept");
+        // No markers → a clear error, never a panic.
+        assert!(rewrite("no markers here", &caps).is_err());
+    }
+}

@@ -222,7 +222,10 @@ fn display_name_from(name: &str) -> String {
 
 #[cfg(test)]
 mod test {
-    use super::{Subs, display_name_from, templated_path};
+    use super::{
+        Subs, default_package, display_name_from, is_binary, sanitize_project_name, substitute,
+        templated_path, validate_package,
+    };
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -265,6 +268,61 @@ mod test {
         );
         // Non-template files are left untouched.
         assert_eq!(templated_path(Path::new("shared/src/app.rs"), &s), PathBuf::from("shared/src/app.rs"));
+    }
+
+    #[test]
+    fn substitute_replaces_every_placeholder_in_specificity_order() {
+        let s = subs();
+        // Order matters: `{{PACKAGE_SHARED_TYPES}}` must be replaced before `{{PACKAGE}}`,
+        // or the longer token gets mangled by a partial `{{PACKAGE}}` match. This pins it.
+        let raw = "p={{PACKAGE}} pst={{PACKAGE_SHARED_TYPES}} ps={{PACKAGE_SHARED}} \
+                   pp={{PACKAGE_PATH}} n={{NAME}} ndk={{NDK_VERSION}}";
+        let out = substitute(raw, &s);
+        assert_eq!(
+            out,
+            "p=dev.mobiler.todos pst=dev.mobiler.todos.shared.types ps=dev.mobiler.todos.shared \
+             pp=dev/mobiler/todos n=Todos ndk=30.0.14904198"
+        );
+        assert!(!out.contains("{{"), "no placeholder should be left behind");
+    }
+
+    #[test]
+    fn sanitize_project_name_accepts_valid_and_rejects_bad() {
+        assert_eq!(sanitize_project_name("  my-app ").unwrap(), "my-app"); // trimmed
+        assert_eq!(sanitize_project_name("Counter").unwrap(), "Counter");
+        assert!(sanitize_project_name("").is_err()); // empty
+        assert!(sanitize_project_name("   ").is_err()); // whitespace only
+        assert!(sanitize_project_name("1app").is_err()); // must start with a letter
+        assert!(sanitize_project_name("my app").is_err()); // space is invalid
+        assert!(sanitize_project_name("my.app").is_err()); // dot is invalid
+    }
+
+    #[test]
+    fn validate_package_enforces_segments_and_chars() {
+        assert!(validate_package("dev.mobiler.todos").is_ok());
+        assert!(validate_package("dev.example").is_ok());
+        assert!(validate_package("").is_err()); // empty
+        assert!(validate_package("single").is_err()); // needs >= 2 segments
+        assert!(validate_package("dev..todos").is_err()); // empty segment
+        assert!(validate_package("dev.1bad").is_err()); // segment starts with a digit
+        assert!(validate_package("dev.bad-seg").is_err()); // hyphen not allowed in a package
+    }
+
+    #[test]
+    fn default_package_lowercases_and_underscores_hyphens() {
+        assert_eq!(default_package("Todos"), "dev.mobiler.todos");
+        assert_eq!(default_package("my-app"), "dev.mobiler.my_app");
+        assert_eq!(default_package("Counter"), "dev.mobiler.counter");
+    }
+
+    #[test]
+    fn is_binary_by_extension_and_by_name() {
+        assert!(is_binary(Path::new("app/src/main/res/icon.png")));
+        assert!(is_binary(Path::new("libs/foo.jar")));
+        assert!(is_binary(Path::new("Android/gradlew.bat"))); // by exact name
+        assert!(is_binary(Path::new("gradle/wrapper/gradle-wrapper.jar")));
+        assert!(!is_binary(Path::new("shared/src/app.rs"))); // text → templated
+        assert!(!is_binary(Path::new("Android/app/build.gradle.kts")));
     }
 }
 

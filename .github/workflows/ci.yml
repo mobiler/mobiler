@@ -197,3 +197,25 @@ jobs:
           "$MOBILER" new scaffold_test --package dev.mobiler.scaffoldtest
           cd scaffold_test
           "$MOBILER" build android
+
+  # Coverage gate for the unit-testable logic (root workspace). The CLI's
+  # process-spawning command modules (build/dev/doctor/watch/main) shell out to
+  # gradle/adb/cargo and can't be unit-tested, so they're excluded; the gate then
+  # reflects the testable surface (runtime, scaffold logic, codegen generator).
+  coverage:
+    name: coverage (root workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust toolchain
+        run: rustup show
+      - name: Add llvm-tools-preview
+        run: rustup component add llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+      - name: Coverage (fail under 75% lines)
+        run: >
+          cargo llvm-cov --workspace --summary-only
+          --fail-under-lines 75
+          --ignore-filename-regex 'mobiler/src/(build|dev|doctor|watch|main)\.rs'

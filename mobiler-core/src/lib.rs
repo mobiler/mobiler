@@ -682,4 +682,221 @@ mod tests {
         let (_, then) = cx.requests.pop().unwrap();
         assert!(matches!(then(PluginResponse { ok: false, output: String::new() }), Ev::Tap));
     }
+
+    #[test]
+    fn cx_notify_capabilities_map_to_the_right_plugin_and_op() {
+        let mut cx = Cx::<Ev>::default();
+        cx.copy("c");
+        cx.share("s");
+        cx.open_url("u");
+        cx.toast("t");
+        cx.haptic("heavy");
+        let got: Vec<(&str, &str, &str)> = cx
+            .notifications
+            .iter()
+            .map(|n| (n.plugin.as_str(), n.op.as_str(), n.input.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("clipboard", "copy", "c"),
+                ("share", "text", "s"),
+                ("browser", "open", "u"),
+                ("toast", "show", "t"),
+                ("haptics", "heavy", ""), // haptic style is the op, input empty
+            ]
+        );
+        assert!(cx.requests.is_empty());
+    }
+
+    #[test]
+    fn cx_device_model_is_a_request_not_a_notification() {
+        let mut cx = Cx::<Ev>::default();
+        cx.device_model(|_| Ev::Tap);
+        assert!(cx.notifications.is_empty());
+        assert_eq!(cx.requests.len(), 1);
+        let (call, _) = &cx.requests[0];
+        assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("device", "model", ""));
+    }
+
+    #[test]
+    fn cx_confirm_serializes_title_message_and_routes_ok() {
+        let mut cx = Cx::<Ev>::default();
+        cx.confirm("Delete?", "This cannot be undone.", |r| if r.ok { Ev::Tap } else { Ev::Open(0) });
+        let (call, then) = cx.requests.pop().unwrap();
+        assert_eq!((call.plugin.as_str(), call.op.as_str()), ("dialog", "confirm"));
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(v["title"], "Delete?");
+        assert_eq!(v["message"], "This cannot be undone.");
+        // ok=true → confirmed branch; ok=false would take the else branch.
+        assert!(matches!(then(PluginResponse { ok: true, output: "ok".into() }), Ev::Tap));
+    }
+
+    // ---- widget builders ----
+
+    #[test]
+    fn text_builders_carry_their_style() {
+        assert!(matches!(text("b"), Widget::Text { style: TextStyle::Body, .. }));
+        assert!(matches!(title("t"), Widget::Text { style: TextStyle::Title, .. }));
+        assert!(matches!(subtitle("s"), Widget::Text { style: TextStyle::Subtitle, .. }));
+        assert!(matches!(caption("c"), Widget::Text { style: TextStyle::Caption, .. }));
+        assert!(matches!(emphasis("e"), Widget::Text { style: TextStyle::Emphasis, .. }));
+    }
+
+    #[test]
+    fn layout_and_content_builders_produce_their_variants() {
+        assert!(matches!(row(vec![text("a")]), Widget::Row { children } if children.len() == 1));
+        assert!(matches!(column(vec![]), Widget::Column { children } if children.is_empty()));
+        assert!(matches!(grid(vec![text("a"), text("b")]), Widget::Grid { children } if children.len() == 2));
+        assert!(matches!(divider(), Widget::Divider));
+        assert!(matches!(spacer(Spacing::Lg), Widget::Spacer { .. }));
+        assert!(matches!(image("u", ImageShape::Circle, ImageRatio::Square), Widget::Image { .. }));
+        assert!(matches!(badge("new", Tone::Success), Widget::Badge { .. }));
+        assert!(matches!(color_dot(ProjectColor::Teal), Widget::ColorDot { .. }));
+        assert!(matches!(card(text("x"), CardStyle::Filled), Widget::Card { on_press: None, .. }));
+        // a scrim z-stack keeps its align + scrim flag
+        assert!(matches!(stack(BoxAlign::Center, true, vec![]), Widget::Box { scrim: true, .. }));
+    }
+
+    #[test]
+    fn input_builders_carry_ids_values_and_event_tokens() {
+        assert!(matches!(text_field("id", "ph", "v"), Widget::TextField { .. }));
+        assert!(matches!(toggle("t", "l", true), Widget::Toggle { value: true, .. }));
+        assert!(matches!(checkbox("c", "l", false), Widget::Checkbox { value: false, .. }));
+        assert!(matches!(slider("s", 3, 10), Widget::Slider { value: 3, max: 10, .. }));
+
+        match chip("Latte", true, Ev::Open(2)) {
+            Widget::Chip { selected, on_press, .. } => {
+                assert!(selected);
+                assert_eq!(on_press, serde_json::to_string(&Ev::Open(2)).unwrap());
+            }
+            other => panic!("expected Chip, got {other:?}"),
+        }
+        match stepper(5, Ev::Tap, Ev::Open(1)) {
+            Widget::Stepper { value, on_decrement, on_increment } => {
+                assert_eq!(value, 5);
+                assert_eq!(on_decrement, serde_json::to_string(&Ev::Tap).unwrap());
+                assert_eq!(on_increment, serde_json::to_string(&Ev::Open(1)).unwrap());
+            }
+            other => panic!("expected Stepper, got {other:?}"),
+        }
+        let t = tab("Home", true, Ev::Tap);
+        assert_eq!(t.label, "Home");
+        assert!(t.selected);
+        assert_eq!(t.on_select, serde_json::to_string(&Ev::Tap).unwrap());
+    }
+
+    // ---- ABI serialization round-trips (structural stability of the wire types) ----
+
+    #[test]
+    fn widget_tree_round_trips_through_serde() {
+        let tree = scaffold(
+            "Home",
+            true,
+            vec![tab("A", true, Ev::Tap)],
+            column(vec![
+                title("Hi"),
+                row(vec![button("Go", ButtonStyle::Filled, Ev::Open(3)), chip("x", false, Ev::Tap)]),
+                image("u", ImageShape::Rounded, ImageRatio::Wide),
+                slider("s", 2, 5),
+            ]),
+        );
+        let s = serde_json::to_string(&tree).unwrap();
+        let back: Widget = serde_json::from_str(&s).unwrap();
+        assert_eq!(s, serde_json::to_string(&back).unwrap());
+    }
+
+    #[test]
+    fn actions_and_input_values_round_trip() {
+        let actions = vec![
+            Action::Fired { token: serde_json::to_string(&Ev::Open(1)).unwrap() },
+            Action::Input { id: "n".into(), value: InputValue::Int(7) },
+            Action::Input { id: "n".into(), value: InputValue::Text("hi".into()) },
+            Action::Input { id: "n".into(), value: InputValue::Bool(true) },
+            Action::Restore { data: "blob".into() },
+            Action::Start,
+        ];
+        for a in actions {
+            let s = serde_json::to_string(&a).unwrap();
+            let back: Action = serde_json::from_str(&s).unwrap();
+            assert_eq!(s, serde_json::to_string(&back).unwrap());
+        }
+    }
+
+    // ---- MobilerShell: the fixed-ABI action dispatch ----
+
+    #[derive(Default)]
+    struct CounterModel {
+        count: i32,
+        restored: String,
+        started: bool,
+        last_input: String,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    enum CounterEv {
+        Inc,
+        Add(i32),
+    }
+
+    #[derive(Default)]
+    struct CounterApp;
+
+    impl MobilerApp for CounterApp {
+        type Event = CounterEv;
+        type Model = CounterModel;
+        fn update(&self, ev: CounterEv, model: &mut CounterModel, _cx: &mut Cx<CounterEv>) {
+            match ev {
+                CounterEv::Inc => model.count += 1,
+                CounterEv::Add(n) => model.count += n,
+            }
+        }
+        fn input(&self, id: &str, value: InputValue, model: &mut CounterModel, _cx: &mut Cx<CounterEv>) {
+            if let InputValue::Text(t) = value {
+                model.last_input = format!("{id}={t}");
+            }
+        }
+        fn restore(&self, data: &str, model: &mut CounterModel) {
+            model.restored = data.to_string();
+        }
+        fn init(&self, model: &mut CounterModel, _cx: &mut Cx<CounterEv>) {
+            model.started = true;
+        }
+        fn view(&self, model: &CounterModel) -> Widget {
+            text(format!("{}", model.count))
+        }
+    }
+
+    #[test]
+    fn shell_dispatches_fired_input_restore_and_start() {
+        use crux_core::App as _;
+        let shell = MobilerShell::<CounterApp>::default();
+        let mut m = CounterModel::default();
+
+        // Fired with a valid token → the typed event reaches app.update.
+        let _ = shell.update(Action::Fired { token: serde_json::to_string(&CounterEv::Add(5)).unwrap() }, &mut m);
+        assert_eq!(m.count, 5);
+        // Input → app.input.
+        let _ = shell.update(Action::Input { id: "name".into(), value: InputValue::Text("bob".into()) }, &mut m);
+        assert_eq!(m.last_input, "name=bob");
+        // Restore → app.restore.
+        let _ = shell.update(Action::Restore { data: "saved".into() }, &mut m);
+        assert_eq!(m.restored, "saved");
+        // Start → app.init.
+        let _ = shell.update(Action::Start, &mut m);
+        assert!(m.started);
+        // view renders the (mutated) model through the ABI.
+        assert!(matches!(shell.view(&m), Widget::Text { .. }));
+    }
+
+    #[test]
+    fn shell_ignores_a_malformed_fired_token() {
+        use crux_core::App as _;
+        let shell = MobilerShell::<CounterApp>::default();
+        let mut m = CounterModel::default();
+        // A token that doesn't deserialize to the app's event type is dropped — no
+        // panic, model untouched (the `if let Ok(event)` guard in MobilerShell::update).
+        let _ = shell.update(Action::Fired { token: "not a valid token".into() }, &mut m);
+        assert_eq!(m.count, 0);
+    }
 }
