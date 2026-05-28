@@ -1,0 +1,16 @@
+{
+  "_comment": "Single source of truth for Mobiler's built-in capabilities. Edit here, then run `cargo run -p xtask -- gen-readme` to rebuild the capability sections of the READMEs (CI runs `--check` to keep them in sync). This file is PUBLIC: free + shipped (and planned-free) capabilities only. The paid/monetization roadmap lives in the gitignored capabilities-private.json. Fields: name, short (lowercase phrase for inline prose), api (rendered as a code span), plugin (the {plugin} in the {plugin,op,input} envelope), tier (free|paid), status (shipped|in-progress|planned), since (version), notes (table cell).",
+  "capabilities": [
+    { "name": "HTTP", "short": "HTTP", "api": "cx.get / cx.post / cx.patch / cx.delete", "plugin": "http", "tier": "free", "status": "shipped", "since": "0.4.0", "notes": "request/response (JSON)" },
+    { "name": "Storage", "short": "storage", "api": "cx.save (+ restore on launch)", "plugin": "storage", "tier": "free", "status": "shipped", "since": "0.3.0", "notes": "persist the model" },
+    { "name": "Clipboard", "short": "clipboard", "api": "cx.copy(text)", "plugin": "clipboard", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "copy text" },
+    { "name": "Share", "short": "share", "api": "cx.share(text)", "plugin": "share", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "system share sheet" },
+    { "name": "Browser", "short": "browser", "api": "cx.open_url(url)", "plugin": "browser", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "open a link externally" },
+    { "name": "Toast", "short": "toast", "api": "cx.toast(text)", "plugin": "toast", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "transient message / snackbar" },
+    { "name": "Device", "short": "device info", "api": "cx.device_model(then)", "plugin": "device", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "device/model string" },
+    { "name": "Haptics", "short": "haptics", "api": "cx.haptic(style)", "plugin": "haptics", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "light / medium / heavy" },
+    { "name": "Confirm", "short": "a confirm dialog", "api": "cx.confirm(title, message, then)", "plugin": "dialog", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "native yes/no dialog" },
+    { "name": "Photo", "short": "the photo picker", "api": "cx.pick_photo(then)", "plugin": "photo", "tier": "free", "status": "shipped", "since": "0.8.0", "notes": "system photo picker → local image URI (no permission)" },
+    { "name": "Camera", "short": "camera capture", "api": "cx.capture_photo(then)", "plugin": "camera", "tier": "free", "status": "shipped", "since": "0.9.0", "notes": "system camera → local image URI" }
+  ]
+}

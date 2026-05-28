@@ -5,9 +5,12 @@
 The web twin of Mobiler's generic Android (Jetpack Compose) and iOS (SwiftUI)
 shells. It drives any [`MobilerApp`](https://crates.io/crates/mobiler-core)'s core
 with [Crux](https://github.com/redbadger/crux), renders its `Widget` tree to the DOM
-with [Leptos](https://leptos.dev) (CSR/WASM), and fulfils the built-in capabilities in
-the browser — HTTP via `fetch`, storage via `localStorage`, clipboard, share, toast,
-device, haptics, and confirm. Write your app once; it runs on the web with one line.
+with [Leptos](https://leptos.dev) (CSR/WASM), and fulfils the built-in capabilities
+natively in the browser — write your app once; it runs on the web with one line. Built in:
+
+<!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
+HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, and camera capture.
+<!-- capabilities:end -->
 
 ```rust
 // src/main.rs of a Trunk project

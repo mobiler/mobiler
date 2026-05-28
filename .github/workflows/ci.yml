@@ -51,6 +51,12 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The READMEs' capability sections are generated from capabilities.json — fail if a
+      # capability shipped without regenerating the docs (`cargo run -p xtask -- gen-readme`).
+      - name: README capabilities in sync
+        if: matrix.name == 'cli'
+        run: cargo run -p xtask -- gen-readme --check
+
   # The web shell is WASM-only (Leptos + gloo-net), so it's checked separately
   # against the wasm target rather than the host.
   web:
