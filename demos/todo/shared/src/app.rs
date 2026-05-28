@@ -514,4 +514,70 @@ mod test {
         assert_eq!(fresh.name, "Ada");
         assert!(fresh.tasks.iter().find(|t| t.id == 2).unwrap().today);
     }
+
+    #[test]
+    fn add_project_ignores_a_blank_name() {
+        let app = Todo;
+        let mut m = Model::default();
+        let before = m.projects.len();
+        m.project_input = "   ".into(); // whitespace only
+        app.update(Msg::AddProject, &mut m, &mut Cx::default());
+        assert_eq!(m.projects.len(), before, "a blank name must not create a project");
+    }
+
+    #[test]
+    fn delete_project_cascades_to_tasks_and_pops_its_detail() {
+        let app = Todo;
+        let mut m = Model::default();
+        app.update(Msg::OpenProject(2), &mut m, &mut Cx::default());
+        assert!(matches!(m.nav.current(), Route::ProjectDetail(2)));
+        app.update(Msg::DeleteProject(2), &mut m, &mut Cx::default());
+        assert!(!m.projects.iter().any(|p| p.id == 2), "project removed");
+        assert!(!m.tasks.iter().any(|t| t.project_id == 2), "its tasks removed too");
+        // we were viewing the deleted project, so the detail screen is popped
+        assert_eq!(m.nav.depth(), 1);
+        assert!(!matches!(m.nav.current(), Route::ProjectDetail(_)));
+    }
+
+    #[test]
+    fn add_task_requires_a_project_detail_and_nonblank_text() {
+        let app = Todo;
+        let mut m = Model::default();
+        let before = m.tasks.len();
+        // Off a project (on the Today root): AddTask is a no-op.
+        m.task_input = "stray".into();
+        app.update(Msg::AddTask, &mut m, &mut Cx::default());
+        assert_eq!(m.tasks.len(), before, "no task added when not on a project detail");
+        // On a project, but blank text: still a no-op.
+        app.update(Msg::OpenProject(1), &mut m, &mut Cx::default());
+        m.task_input = "   ".into();
+        app.update(Msg::AddTask, &mut m, &mut Cx::default());
+        assert_eq!(m.tasks.len(), before, "blank text adds nothing");
+        // On a project with real text: added under that project.
+        m.task_input = "Water plants".into();
+        app.update(Msg::AddTask, &mut m, &mut Cx::default());
+        assert_eq!(m.tasks.len(), before + 1);
+        assert!(m.tasks.iter().any(|t| t.text == "Water plants" && t.project_id == 1));
+    }
+
+    #[test]
+    fn select_tab_resets_the_nav_stack_to_a_root() {
+        let app = Todo;
+        let mut m = Model::default();
+        app.update(Msg::OpenProject(1), &mut m, &mut Cx::default());
+        assert_eq!(m.nav.depth(), 2);
+        app.update(Msg::SelectTab(TabKind::Projects), &mut m, &mut Cx::default());
+        assert_eq!(m.nav.depth(), 1);
+        assert!(matches!(m.nav.current(), Route::Projects));
+    }
+
+    #[test]
+    fn delete_task_removes_only_that_task() {
+        let app = Todo;
+        let mut m = Model::default();
+        let before = m.tasks.len();
+        app.update(Msg::DeleteTask(1), &mut m, &mut Cx::default());
+        assert_eq!(m.tasks.len(), before - 1);
+        assert!(!m.tasks.iter().any(|t| t.id == 1));
+    }
 }
