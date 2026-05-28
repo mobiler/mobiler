@@ -24,10 +24,11 @@ enum Command {
         /// Android application/package id. Defaults to `dev.mobiler.<name>`.
         #[arg(long)]
         package: Option<String>,
-        /// Also write a `CLAUDE.md` agent guide so a coding agent (e.g. Claude Code)
-        /// builds the app idiomatically against the Mobiler framework.
-        #[arg(long)]
-        agentic: bool,
+        /// Write a `CLAUDE.md` agent guide so a coding agent (e.g. Claude Code) builds
+        /// idiomatically. Bare `--agentic` = the generic primer; or pick a flavor:
+        /// `shared-ui` (same UI on mobile + web) or `api` (reusable core + JSON API).
+        #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "generic")]
+        agentic: Option<new::AgenticGuide>,
     },
     /// Build the Mobiler project, install, and launch (default: all three).
     Dev {
