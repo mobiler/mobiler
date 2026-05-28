@@ -163,6 +163,11 @@ mobiler dev                  # build core → generate types → build APK → i
 
 Edit `shared/src/app.rs` (your `MobilerApp`) and re-run `mobiler dev`.
 
+**Building with a coding agent?** Add `--agentic` to `mobiler new` to drop a `CLAUDE.md` guide
+into the scaffold so e.g. Claude Code writes idiomatic Mobiler. Bare `--agentic` assumes a
+mobile app talking to any API or storing data on-device; tailor it with `--agentic shared-ui`
+(same UI on mobile + web) or `--agentic api` (reusable core + JSON API backend).
+
 On a Mac, the scaffold also includes an iOS shell — `bash iOS/build-ios.sh` builds
 it for the simulator (needs Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen);
 no Apple account or signing required).
