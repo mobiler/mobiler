@@ -37,6 +37,9 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # This demo uses the camera capability (cx.capture_photo), so it ships the
+        # iOS-required usage string (the user is prompted on first camera use).
+        NSCameraUsageDescription: "Take a photo to attach to a coffee."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee

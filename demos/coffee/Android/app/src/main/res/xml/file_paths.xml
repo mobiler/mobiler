@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paths the FileProvider may share. cx.capture_photo writes captured images to the
+     captures/ subdir of the app's internal cache, then hands that URI to the camera. -->
+<paths>
+    <cache-path name="captures" path="captures/" />
+</paths>

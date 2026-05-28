@@ -77,6 +77,7 @@ enum Plugins {
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
         case "photo": return await PhotoPlugin.handle(op: op, input: input)
+        case "camera": return await CameraPlugin.handle(op: op, input: input)
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
         }
@@ -296,6 +297,61 @@ private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegat
     private func finish(_ r: PluginResponse) {
         onResult(r)
         PhotoPickerDelegate.retained = nil
+    }
+}
+
+/// Camera capture — request/response. Launches UIImagePickerController(.camera), writes
+/// the shot to a temp file and returns its `file://` URL. Requires NSCameraUsageDescription
+/// (project.yml). The simulator has no camera, so it returns ok:false there; on a device it
+/// presents the system camera. No separate permission API call — iOS prompts on first use.
+@MainActor
+enum CameraPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "capture" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            return PluginResponse(ok: false, output: "camera not available")
+        }
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            let picker = UIImagePickerController()
+            picker.sourceType = .camera
+            let delegate = CameraCaptureDelegate { cont.resume(returning: $0) }
+            CameraCaptureDelegate.retained = delegate // the picker holds its delegate weakly
+            picker.delegate = delegate
+            presenter.present(picker, animated: true)
+        }
+    }
+}
+
+private final class CameraCaptureDelegate: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    static var retained: CameraCaptureDelegate?
+    private let onResult: (PluginResponse) -> Void
+    init(onResult: @escaping (PluginResponse) -> Void) { self.onResult = onResult }
+
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        picker.dismiss(animated: true)
+        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.9) else {
+            finish(PluginResponse(ok: false, output: "no image")); return
+        }
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        do {
+            try data.write(to: dest)
+            finish(PluginResponse(ok: true, output: dest.absoluteString))
+        } catch {
+            finish(PluginResponse(ok: false, output: error.localizedDescription))
+        }
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+        finish(PluginResponse(ok: false, output: "cancelled"))
+    }
+
+    private func finish(_ r: PluginResponse) {
+        onResult(r)
+        CameraCaptureDelegate.retained = nil
     }
 }
 

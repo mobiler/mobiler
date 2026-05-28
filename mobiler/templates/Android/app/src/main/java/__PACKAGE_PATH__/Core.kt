@@ -163,6 +163,28 @@ class PhotoPlugin : MobilerPlugin {
     }
 }
 
+/**
+ * Set by MainActivity: launches the system camera and calls back with the captured
+ * image URI (null if cancelled). Like [PhotoPicker], the ActivityResult launcher must
+ * be registered on the Activity, so it can't live in the (Application-context) plugin.
+ */
+object CameraCapture {
+    var launch: ((onResult: (String?) -> Unit) -> Unit)? = null
+}
+
+/** Official, bundled plugin: capture a photo with the system camera (cx.capture_photo).
+ *  Intent-based (the system camera app handles capture), so no CAMERA permission. */
+class CameraPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "capture") return PluginResponse(false, "unknown op '$op'")
+        val launch = CameraCapture.launch ?: return PluginResponse(false, "camera unavailable")
+        val uri = suspendCancellableCoroutine<String?> { cont ->
+            launch { result -> cont.resumeWith(Result.success(result)) }
+        }
+        return if (uri != null) PluginResponse(true, uri) else PluginResponse(false, "cancelled")
+    }
+}
+
 /** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
 class StoragePlugin(private val context: Context) : MobilerPlugin {
     private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
@@ -214,6 +236,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "haptics" to HapticsPlugin(application),
         "dialog" to DialogPlugin(),
         "photo" to PhotoPlugin(),
+        "camera" to CameraPlugin(),
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))
