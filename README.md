@@ -94,17 +94,21 @@ Device APIs are **capabilities** — async effects the generic shell fulfils nat
 all three platforms (Android, iOS, web), reached through typed `cx` helpers in your
 `update`. These ship in the shell out of the box:
 
+<!-- capabilities:start format=table (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
 | Capability | Rust API | Notes |
 |---|---|---|
-| HTTP | `cx.get` / `cx.post` / `cx.patch` / `cx.delete` | request/response (JSON) |
-| Storage | `cx.save` (+ `restore` on launch) | persist the model |
+| HTTP | `cx.get / cx.post / cx.patch / cx.delete` | request/response (JSON) |
+| Storage | `cx.save (+ restore on launch)` | persist the model |
 | Clipboard | `cx.copy(text)` | copy text |
 | Share | `cx.share(text)` | system share sheet |
 | Browser | `cx.open_url(url)` | open a link externally |
 | Toast | `cx.toast(text)` | transient message / snackbar |
 | Device | `cx.device_model(then)` | device/model string |
-| Haptics | `cx.haptic(style)` | `light` / `medium` / `heavy` |
+| Haptics | `cx.haptic(style)` | light / medium / heavy |
 | Confirm | `cx.confirm(title, message, then)` | native yes/no dialog |
+| Photo | `cx.pick_photo(then)` | system photo picker → local image URI (no permission) |
+| Camera | `cx.capture_photo(then)` | system camera → local image URI |
+<!-- capabilities:end -->
 
 Each maps to an opaque `{plugin, op, input}` effect, so **adding a capability is a
 shell-registry entry — it never changes the wire ABI** or the generated bindings.

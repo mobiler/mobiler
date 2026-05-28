@@ -33,12 +33,12 @@ pub type App = MobilerShell<Counter>;
 ```
 
 - **Capabilities** via `Cx` — device APIs as async effects, reached through typed
-  helpers in `update`/`input`. Built in: HTTP (`cx.get`/`post`/`patch`/`delete`),
-  storage (`cx.save` + `restore`), clipboard (`cx.copy`), share (`cx.share`), browser
-  (`cx.open_url`), toast (`cx.toast`), device info (`cx.device_model`), haptics
-  (`cx.haptic`), and a confirm dialog (`cx.confirm`). Each is an opaque
-  `{plugin, op, input}` effect, so adding one never changes the wire ABI; the generic
-  shell fulfils them natively on Android, iOS, and the web.
+  helpers in `update`/`input`. Built in:
+  <!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
+  HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, and camera capture.
+  <!-- capabilities:end -->
+  Each is an opaque `{plugin, op, input}` effect, so adding one never changes the wire
+  ABI; the generic shell fulfils them natively on Android, iOS, and the web.
 - **Navigation** — a core-owned `Nav<Route>` stack + `nav_scaffold`.
 - **Theme-as-data** — dark mode etc. flow through the `Widget` tree.
 

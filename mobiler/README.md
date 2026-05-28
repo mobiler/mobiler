@@ -55,9 +55,13 @@ The same core also runs on the web with the
 [Trunk](https://trunkrs.dev).
 
 Device APIs are async **capabilities** via `cx`, fulfilled by the generic shell on
-every platform. Built in: **HTTP, storage, clipboard, share, browser, toast, device
-info, haptics, and a confirm dialog** — adding one is a shell-registry entry, never an
-ABI change. Navigation is a core-owned `Nav` stack; dark mode and theming are data in
+every platform — adding one is a shell-registry entry, never an ABI change. Built in:
+
+<!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
+HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, and camera capture.
+<!-- capabilities:end -->
+
+Navigation is a core-owned `Nav` stack; dark mode and theming are data in
 the `Widget` tree. The widget vocabulary and runtime live in the
 [`mobiler-ui`](https://crates.io/crates/mobiler-ui) and
 [`mobiler-core`](https://crates.io/crates/mobiler-core) crates.

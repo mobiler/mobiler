@@ -1,0 +1,14 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Dev-only tooling (not published). `cargo run -p xtask -- gen-readme [--check]`
+# rebuilds the README capability sections from capabilities.json.
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1"

@@ -10,6 +10,8 @@
 /NOTES.md
 /BUSINESS_PLAN.md
 /BUILD_SERVICE_PLAN.md
+# Paid / monetization capability roadmap — private (the public registry is capabilities.json)
+/capabilities-private.json
 
 # Local design references (third-party screenshots) — never publish
 /tmp/

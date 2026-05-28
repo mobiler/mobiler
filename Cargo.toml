@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["mobiler", "mobiler-ui", "mobiler-core"]
+members = ["mobiler", "mobiler-ui", "mobiler-core", "xtask"]
 
 [workspace.package]
 edition = "2024"
