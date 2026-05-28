@@ -271,3 +271,50 @@ body {
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes toast-out { to { opacity: 0; } }
+
+/* ---- responsive: tablets / large viewports ---- */
+/* Phone layouts (below the breakpoint) are deliberately left exactly as-is. Past it
+ * we *use* the extra width instead of stretching the phone column: grids gain
+ * columns, plain screens stop running edge-to-edge, and a Scaffold's bottom tab-bar
+ * becomes a left navigation rail — the web twin of the native shells' NavigationRail.
+ * The rail is pure layout: the same three Scaffold children (topbar, body, tabbar)
+ * are re-placed via grid areas, so there's no DOM/markup change, only CSS. */
+@media (min-width: 768px) {
+  .app { max-width: 900px; }
+  .app:has(.scaffold) { max-width: 1100px; }
+
+  /* Fill the wider space with more columns rather than two stretched ones. */
+  .grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+
+  /* Don't let a plain (non-grid) screen's text/rows run the full width: cap + center. */
+  .scaffold-body { max-width: 760px; margin: 0 auto; width: 100%; }
+
+  /* Tab-bar → left navigation rail, only when the Scaffold actually has tabs. */
+  .scaffold:has(.tabbar) {
+    display: grid;
+    grid-template-columns: 224px 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "rail topbar" "rail body";
+  }
+  .scaffold:has(.tabbar) > .topbar { grid-area: topbar; }
+  .scaffold:has(.tabbar) > .scaffold-body { grid-area: body; }
+  .scaffold:has(.tabbar) > .tabbar {
+    grid-area: rail;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
+    border-top: none;
+    border-right: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    padding: 12px 8px;
+  }
+  .scaffold:has(.tabbar) > .tabbar .tab {
+    flex: none;
+    text-align: left;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .scaffold:has(.tabbar) > .tabbar .tab.selected { background: var(--accent-soft); }
+}

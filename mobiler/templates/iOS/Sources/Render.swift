@@ -92,11 +92,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         )
 
     case .grid(let children):
-        return AnyView(
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                childViews(children, send)
-            }
-        )
+        // Column count adapts to width: 2 on a phone (compact), more on iPad.
+        return AnyView(GridView(children: children, send: send))
 
     // MARK: input / actions
     case .button(let label, let style, let onPress):
@@ -187,6 +184,20 @@ private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Act
     }
 }
 
+/// A responsive grid: 2 columns on a phone (compact width), 4 on an iPad (regular) —
+/// the iOS twin of the web shell's `auto-fill` grid and Android's width-derived count.
+private struct GridView: View {
+    let children: [SharedTypes.Widget]
+    let send: (Action) -> Void
+    @Environment(\.horizontalSizeClass) private var hSize
+    var body: some View {
+        let cols = hSize == .regular ? 4 : 2
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: cols), spacing: 12) {
+            childViews(children, send)
+        }
+    }
+}
+
 // MARK: - Scaffold (top bar + scrollable body + bottom tabs + theme-as-data)
 
 private struct ScaffoldView: View {
@@ -202,8 +213,40 @@ private struct ScaffoldView: View {
     // Remember the depth of the previous route so a route change knows its
     // direction (push vs pop). Updated after each route settles.
     @State private var prevDepth: UInt32 = 0
+    // Regular width (iPad / large landscape) swaps the bottom tab-bar for a side rail.
+    @Environment(\.horizontalSizeClass) private var hSize
 
     var body: some View {
+        let useRail = hSize == .regular && !tabs.isEmpty
+        Group {
+            if useRail {
+                HStack(spacing: 0) {
+                    navRail
+                    Divider()
+                    mainColumn(showBottomTabs: false)
+                }
+            } else {
+                mainColumn(showBottomTabs: true)
+            }
+        }
+        .preferredColorScheme(darkMode ? .dark : .light)
+        .animation(.easeInOut(duration: 0.28), value: route)
+        // Edge-swipe to go back — the iOS idiom for Android's system BackHandler.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .local).onEnded { value in
+                guard let back = back else { return }
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                if value.startLocation.x < 32, value.translation.width > 90, horizontal {
+                    send(.fired(token: back))
+                }
+            }
+        )
+        // After each route settles, record its depth for the next transition.
+        .task(id: route) { prevDepth = depth }
+    }
+
+    // Top bar + scrollable body, optionally with the phone's bottom tab-bar.
+    private func mainColumn(showBottomTabs: Bool) -> some View {
         VStack(spacing: 0) {
             HStack {
                 if let back = back {
@@ -224,16 +267,18 @@ private struct ScaffoldView: View {
             // The body is keyed by `route`, so a push/pop swaps the whole screen
             // (with a slide+fade; lateral move crossfades); a same-route update
             // just re-renders in place. The iOS twin of Android's AnimatedContent.
+            // On a regular width the column is capped + centered so it doesn't stretch.
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) { render(self.content, send) }
                     .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity)
             }
             .id(route)
             .transition(navTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if !tabs.isEmpty {
+            if showBottomTabs && !tabs.isEmpty {
                 Divider()
                 HStack {
                     ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
@@ -248,20 +293,29 @@ private struct ScaffoldView: View {
                 .padding(.vertical, 10)
             }
         }
-        .preferredColorScheme(darkMode ? .dark : .light)
-        .animation(.easeInOut(duration: 0.28), value: route)
-        // Edge-swipe to go back — the iOS idiom for Android's system BackHandler.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24, coordinateSpace: .local).onEnded { value in
-                guard let back = back else { return }
-                let horizontal = abs(value.translation.width) > abs(value.translation.height)
-                if value.startLocation.x < 32, value.translation.width > 90, horizontal {
-                    send(.fired(token: back))
+    }
+
+    // Vertical navigation rail (regular width) — the iPad twin of the bottom tabs.
+    private var navRail: some View {
+        VStack(spacing: 4) {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                Button(action: { send(.fired(token: tab.onSelect)) }) {
+                    Text(tab.label)
+                        .fontWeight(tab.selected ? .semibold : .regular)
+                        .foregroundColor(tab.selected ? .accentColor : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 14)
+                        .background(tab.selected ? Color.accentColor.opacity(0.12) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .buttonStyle(.plain)
             }
-        )
-        // After each route settles, record its depth for the next transition.
-        .task(id: route) { prevDepth = depth }
+            Spacer()
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
+        .frame(width: 220)
     }
 
     private var navTransition: AnyTransition {

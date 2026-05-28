@@ -16,6 +16,9 @@ struct CoffeeApp: App {
 
 private struct RootView: View {
     @ObservedObject var core: Core
+    // Regular width (iPad / large landscape) caps the content column so a phone
+    // layout doesn't stretch edge-to-edge on a big screen; compact fills as before.
+    @Environment(\.horizontalSizeClass) private var hSize
     var body: some View {
         // Re-renders whenever the core publishes a new view model. A Scaffold
         // renders its own bars + scrollable body; any other root we wrap in a
@@ -26,7 +29,8 @@ private struct RootView: View {
             ScrollView {
                 render(core.view) { core.update($0) }
                     .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity)  // center the capped column
             }
         }
     }
