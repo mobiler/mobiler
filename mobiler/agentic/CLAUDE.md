@@ -65,6 +65,10 @@ ABI change in the framework, not app work).
     / `cx.delete` (HTTP/JSON), `cx.confirm`, `cx.pick_photo`, `cx.capture_photo`, `cx.device_model`
   - **Data**: call whatever HTTP API you have with `cx.get` / `post` / `patch` / `delete`, **or**
     keep it on-device with `cx.save` + `restore`. Never open a database or socket directly from the app.
+  - If you stand up your **own** backend: **SQLite** is an excellent default for a small app, but
+    a production server **must** set WAL + a `busy_timeout` pragma and have a backup (e.g.
+    **Litestream**) — or use **PostgreSQL** for multi-instance/scale. The `api` flavor and
+    `demos/fullstack-sqlx` (Axum + SQLx) carry the production setup to copy.
 - **Theme is data**: set `dark_mode` on the `Scaffold`; the shell themes the whole app from it.
 
 ## Golden rules

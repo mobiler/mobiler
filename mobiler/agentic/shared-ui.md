@@ -11,6 +11,11 @@ This app renders **one `Widget` tree on every platform** — mobile and web look
   + a minimal `index.html`); see `demos/coffee/web` for the exact shape.
 - **Data**: keep it local (`cx.save` / `restore`) for a simple app, or talk to a backend over
   `cx.http`. If you need a server + database, follow `demos/fullstack-sqlx` (Axum + SQLx).
+  **SQLite is a great default for a small app**, but a production server **must** set WAL + a
+  `busy_timeout` pragma and have a backup (**Litestream**) — or use **PostgreSQL** for
+  multi-instance/scale. Copy the production setup from `demos/fullstack-sqlx/server` (pragmas in
+  `connect()`, backup in `litestream.yml`). The app talks to it only over `cx.http`, never a
+  direct DB connection.
 
 **If the user has a web design reference or prototype** (e.g. a Lovable/Figma export, or a
 prototype running locally): **ask for its path on disk, read it**, and **translate** the

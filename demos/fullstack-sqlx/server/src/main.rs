@@ -13,22 +13,92 @@ use axum::{
 };
 use domain::{NewNote, Note};
 use sqlx::SqlitePool;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
 use std::net::SocketAddr;
+use std::str::FromStr;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // SQLite file for dev; `?mode=rwc` creates it if missing.
-    let url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:notes.db?mode=rwc".to_string());
-    let pool = SqlitePool::connect(&url).await?;
+    // Structured logs; RUST_LOG overrides (default: info).
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,tower_http=info".into()),
+        )
+        .init();
+
+    let pool = connect().await?;
     migrate(&pool).await?;
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("notes server listening on http://{addr}");
+    // Bind 127.0.0.1 by default (sit behind a reverse proxy in prod); BIND_ADDR overrides
+    // — set it to 0.0.0.0:3000 in a container.
+    let addr: SocketAddr = std::env::var("BIND_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:3000".to_string())
+        .parse()?;
+    tracing::info!("notes server listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router(pool)).await?;
+    axum::serve(listener, router(pool.clone()))
+        .with_graceful_shutdown(shutdown(pool))
+        .await?;
     Ok(())
+}
+
+/// Open the SQLite pool with the pragmas a server needs in production:
+/// - **WAL** journal so readers never block the writer (and vice versa) — essential for a
+///   web server, and required by Litestream for continuous backup.
+/// - **busy_timeout** so a brief write lock *waits* instead of erroring with the classic
+///   "database is locked" (SQLite serializes writes; this is the #1 web-server gotcha).
+/// - **synchronous = NORMAL** — durable under WAL and much faster than FULL.
+/// - **foreign keys** enforced (off by default in SQLite).
+///
+/// Writes serialize at the DB level regardless of pool size, so a small pool is plenty;
+/// WAL lets the read connections run concurrently. `DATABASE_URL` overrides the path
+/// (e.g. `sqlite:/var/lib/notes/notes.db`).
+async fn connect() -> anyhow::Result<SqlitePool> {
+    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:notes.db".to_string());
+    connect_with_url(&url).await
+}
+
+async fn connect_with_url(url: &str) -> anyhow::Result<SqlitePool> {
+    let options = SqliteConnectOptions::from_str(url)?
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(5))
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await?;
+    Ok(pool)
+}
+
+/// Wait for Ctrl-C / SIGTERM, then close the pool — which checkpoints the WAL back into the
+/// main DB file, so the process exits with a clean database (and a `docker stop` is graceful).
+async fn shutdown(pool: SqlitePool) {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut sig) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            sig.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    tracing::info!("shutting down: closing the pool (checkpoints WAL)…");
+    pool.close().await;
 }
 
 /// The API. CORS is permissive so a web client on another origin can call it.
@@ -36,6 +106,7 @@ fn router(pool: SqlitePool) -> Router {
     Router::new()
         .route("/notes", get(list_notes).post(create_note))
         .route("/notes/{id}", get(get_note).delete(delete_note))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(pool)
 }
@@ -119,11 +190,14 @@ async fn delete_note(State(pool): State<SqlitePool>, Path(id): Path<i64>) -> Sta
     match db_delete(&pool, id).await {
         Ok(true) => StatusCode::NO_CONTENT,
         Ok(false) => StatusCode::NOT_FOUND,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        Err(e) => internal(e),
     }
 }
 
-fn internal(_e: sqlx::Error) -> StatusCode {
+/// Map a DB error to 500 — and log it, so a failing query is diagnosable instead of a
+/// silent 500 (never leak the raw error to the client).
+fn internal(e: sqlx::Error) -> StatusCode {
+    tracing::error!("database error: {e}");
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
@@ -157,5 +231,25 @@ mod tests {
         assert!(db_delete(&pool, 1).await.unwrap());
         assert!(!db_delete(&pool, 1).await.unwrap());
         assert!(db_list(&pool).await.unwrap().is_empty());
+    }
+
+    /// The production `connect()` actually applies its pragmas — WAL (also required by
+    /// Litestream) and enforced foreign keys — on a real on-disk database.
+    #[tokio::test]
+    async fn connect_applies_production_pragmas() {
+        let dir = std::env::temp_dir().join(format!("mobiler_notes_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let url = format!("sqlite:{}", dir.join("notes.db").display());
+
+        let pool = connect_with_url(&url).await.unwrap();
+        let (journal,): (String,) =
+            sqlx::query_as("PRAGMA journal_mode").fetch_one(&pool).await.unwrap();
+        assert_eq!(journal.to_lowercase(), "wal", "WAL must be enabled");
+        let (fk,): (i64,) =
+            sqlx::query_as("PRAGMA foreign_keys").fetch_one(&pool).await.unwrap();
+        assert_eq!(fk, 1, "foreign keys must be enforced");
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

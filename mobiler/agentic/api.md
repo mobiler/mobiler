@@ -25,4 +25,29 @@ web/       the web client — EITHER `mobiler_web::run::<App>()` (same UI as mob
   needs a different, richer experience, write a **bespoke Leptos app** that consumes `domain` +
   the same API (presentation only — no business logic in the web layer).
 
+### Production database — SQLite by default
+
+SQLite is the right default for a small app (one shop/venue, modest traffic): it handles
+thousands of writes/sec, while such an app does a handful per minute. **When you build the
+server's DB setup, always:**
+
+1. **Set the production pragmas** on the SQLite pool (not optional for a web server):
+   - `journal_mode = WAL` — readers don't block the writer (and required by Litestream).
+   - `busy_timeout` (~5s) — a brief write lock waits instead of erroring `database is locked`
+     (SQLite serializes writes; this is the #1 gotcha if you skip it).
+   - `synchronous = NORMAL`, `foreign_keys = ON`. Build the pool from `SqliteConnectOptions`
+     with `create_if_missing(true)`; a small `max_connections` is plenty (writes serialize;
+     WAL lets reads run concurrently). Copy `demos/fullstack-sqlx` `server/src/main.rs` `connect()`.
+2. **Add a backup** — use **Litestream** (`litestream replicate -exec "./server"`): continuous
+   replication of the DB file to S3/R2/B2 with point-in-time restore. A SQLite app without a
+   backup story is not production-ready. (See `demos/fullstack-sqlx/server/litestream.yml`.)
+3. **Shut down gracefully** (close the pool on SIGTERM/Ctrl-C → checkpoints the WAL), log with
+   `tracing`, and make the bind address configurable (`0.0.0.0` in a container).
+
+**Use PostgreSQL instead when:** multiple app instances share one DB (SQLite is a local file —
+don't share it over a network FS), a shared multi-tenant DB grows large, or you want managed
+HA/backups (RDS/Supabase/Neon/Fly). Thanks to **runtime SQLx queries**, switching is mostly a
+connection-string + DDL change — start on SQLite, migrate only if a client outgrows it. Use a
+`migrations/` dir + `sqlx migrate` for real schemas (not inline `CREATE TABLE`).
+
 **Before building, ask the user** for the backend base URL and the app's entities / screens.
