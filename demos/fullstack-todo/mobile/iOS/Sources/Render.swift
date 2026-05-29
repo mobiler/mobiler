@@ -25,8 +25,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         let fill: AnyView
         if source.hasPrefix("file:"), let url = URL(string: source) {
             // Decode local images (a full-res camera/picked photo) OFF the main thread —
-            // decoding in `render` (which runs on every update) blocked the UI. FileImageView
-            // loads + downsamples asynchronously and caches the result.
+            // decoding a many-megapixel file inline in `render` (which runs on every update)
+            // can stall the UI. FileImageView loads + downsamples asynchronously and caches.
             fill = AnyView(FileImageView(url: url))
         } else {
             fill = AnyView(AsyncImage(url: URL(string: source)) { image in
@@ -241,11 +241,19 @@ private struct ScaffoldView: View {
         }
         .preferredColorScheme(darkMode ? .dark : .light)
         .animation(.easeInOut(duration: 0.28), value: route)
-        // NOTE: a container-level edge-swipe-back gesture used to live here, but a
-        // simultaneous DragGesture watching the leading edge ate taps on leading-edge
-        // buttons (e.g. an in-body "← Back"). Back stays available via the top-bar arrow
-        // and the app's own controls; a non-conflicting edge-swipe (a thin leading-edge
-        // strip rather than the whole surface) can be reintroduced later.
+        // Edge-swipe to go back — the iOS idiom for Android's system BackHandler. The
+        // gesture only engages past a 90pt drag from the leading edge, so it doesn't
+        // interfere with taps (a tap has ~0 translation < the 24pt minimum). It's a
+        // `.simultaneousGesture`, so it never blocks the buttons beneath it.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .local).onEnded { value in
+                guard let back = back else { return }
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                if value.startLocation.x < 32, value.translation.width > 90, horizontal {
+                    send(.fired(token: back))
+                }
+            }
+        )
         // After each route settles, record its depth for the next transition.
         .task(id: route) { prevDepth = depth }
     }
@@ -356,10 +364,7 @@ private struct ButtonStyleMod: ViewModifier {
         switch style {
         case .filled: return AnyView(content.buttonStyle(.borderedProminent))
         case .outlined: return AnyView(content.buttonStyle(.bordered))
-        // `.borderless` buttons don't reliably register taps in a plain ScrollView/VStack
-        // (the buttons that work here all use `.plain`/`.bordered`); use `.plain` (proven
-        // tappable) tinted with the accent color so it still reads as a text button.
-        case .text: return AnyView(content.buttonStyle(.plain).foregroundColor(.accentColor))
+        case .text: return AnyView(content.buttonStyle(.borderless))
         }
     }
 }
@@ -447,7 +452,7 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
 
 /// Renders a local file image, decoding it OFF the main thread (downsample + cache) with a
 /// neutral placeholder until ready — so a large photo never blocks `render` (which runs on
-/// every state update). This is what keeps picking/taking a photo from freezing the UI.
+/// every state update). A perf safeguard for many-megapixel camera/picked photos.
 private struct FileImageView: View {
     let url: URL
     @State private var image: UIImage?

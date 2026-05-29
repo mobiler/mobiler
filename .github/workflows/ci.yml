@@ -161,6 +161,21 @@ jobs:
       - name: Device build (unsigned compile-check)
         run: bash iOS/build-ios.sh device
 
+      # Behavioral UI test on a booted simulator (only coffee carries the CoffeeUITests
+      # target). Drives the generic shell with real taps to guard tap-routing
+      # regressions — e.g. the build-4 bug where the hero image swallowed the in-body
+      # "← Back" button's tap — which compile-only builds can't catch. The shell is
+      # byte-identical across demos + the template, so testing coffee guards them all.
+      - name: UI test (behavioral — coffee back button)
+        if: matrix.app == 'demos/coffee'
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(v['udid'] for rt,devs in d['devices'].items() if 'iOS' in rt for v in devs if v.get('isAvailable') and v['name'].startswith('iPhone')))")
+          echo "Using simulator $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcodebuild test -project iOS/Coffee.xcodeproj -scheme Coffee \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -derivedDataPath iOS/build CODE_SIGNING_ALLOWED=NO
+
   # Scaffold a fresh app with `mobiler new` and build it for Android. The demos are
   # older/customized, so this is the only thing that compiles the *template* Android
   # shell (Core.kt + its plugin registry) against the published core — catching
