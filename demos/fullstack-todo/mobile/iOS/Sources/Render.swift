@@ -23,8 +23,11 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // via UIImage — AsyncImage doesn't reliably fetch `file://`; remote URLs use
         // AsyncImage.
         let fill: AnyView
-        if source.hasPrefix("file:"), let url = URL(string: source), let img = downsampledFileImage(at: url) {
-            fill = AnyView(Image(uiImage: img).resizable().aspectRatio(contentMode: .fill))
+        if source.hasPrefix("file:"), let url = URL(string: source) {
+            // Decode local images (a full-res camera/picked photo) OFF the main thread —
+            // decoding in `render` (which runs on every update) blocked the UI. FileImageView
+            // loads + downsamples asynchronously and caches the result.
+            fill = AnyView(FileImageView(url: url))
         } else {
             fill = AnyView(AsyncImage(url: URL(string: source)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
@@ -347,7 +350,10 @@ private struct ButtonStyleMod: ViewModifier {
         switch style {
         case .filled: return AnyView(content.buttonStyle(.borderedProminent))
         case .outlined: return AnyView(content.buttonStyle(.bordered))
-        case .text: return AnyView(content.buttonStyle(.borderless))
+        // `.borderless` buttons don't reliably register taps in a plain ScrollView/VStack
+        // (the buttons that work here all use `.plain`/`.bordered`); use `.plain` (proven
+        // tappable) tinted with the accent color so it still reads as a text button.
+        case .text: return AnyView(content.buttonStyle(.plain).foregroundColor(.accentColor))
         }
     }
 }
@@ -433,10 +439,30 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
     }
 }
 
-// A picked/captured photo can be many megapixels; decoding it full-size on the main
-// thread inside `render` (which runs on every state update) stalls the UI — it looks
-// like a freeze. Downsample with ImageIO to a display size and cache by path, so each
-// file image is decoded once and kept small.
+/// Renders a local file image, decoding it OFF the main thread (downsample + cache) with a
+/// neutral placeholder until ready — so a large photo never blocks `render` (which runs on
+/// every state update). This is what keeps picking/taking a photo from freezing the UI.
+private struct FileImageView: View {
+    let url: URL
+    @State private var image: UIImage?
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Color.gray.opacity(0.15)
+            }
+        }
+        .task(id: url.path) {
+            if let cached = fileImageCache.object(forKey: url.path as NSString) { image = cached; return }
+            image = await Task.detached(priority: .userInitiated) { downsampledFileImage(at: url) }.value
+        }
+    }
+}
+
+// A picked/captured photo can be many megapixels; decoding it full-size stalls the UI.
+// Downsample with ImageIO to a display size and cache by path, so each file image is
+// decoded once and kept small. Called from FileImageView's background task (off-main).
 private let fileImageCache = NSCache<NSString, UIImage>()
 private func downsampledFileImage(at url: URL, maxPixel: CGFloat = 1400) -> UIImage? {
     let key = url.path as NSString
