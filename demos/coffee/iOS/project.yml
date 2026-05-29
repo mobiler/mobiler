@@ -51,10 +51,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee
         SWIFT_VERSION: "5.9"
         # TestFlight rejects a re-upload that reuses a build number, so bump
-        # CURRENT_PROJECT_VERSION for each new build. Build 2 patched the wrong layer; build 3
-        # has the real fixes (back button .text->.plain, photo decode moved off the main thread).
+        # CURRENT_PROJECT_VERSION for each new build. Builds 2 & 3 chased the wrong cause
+        # (button style); build 4 is the real fix — images use .allowsHitTesting(false) so the
+        # hero image no longer swallows the "← Back" tap and a picked photo no longer eats taps
+        # around it (the "freeze"). Verified on the iOS simulator via XCUITest before upload.
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]

@@ -38,6 +38,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 .aspectRatio(aspect(ratio), contentMode: .fit)
                 .overlay(fill)
                 .clipShape(imageShape(shape))
+                // An image is decoration, never a touch target. The sizing `Color.clear`
+                // is hit-testable and has no accessibility element, so without this it
+                // silently swallows taps meant for an adjacent control — e.g. an in-body
+                // "← Back" button rendered just above an image, whose taps never reach
+                // their action (verified on-sim). Let touches pass through.
+                .allowsHitTesting(false)
         )
 
     case .badge(let label, let tone):
