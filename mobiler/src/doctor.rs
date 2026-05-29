@@ -39,6 +39,12 @@ pub fn run() -> ExitCode {
         check("adb", adb_available()),
         check("emulator binary", emulator_binary()),
         check("AVDs configured", avds_configured()),
+        // iOS toolchain — macOS only (these Skip on other hosts, like the KVM checks do on non-Linux).
+        check("Xcode", xcode()),
+        check("iOS Rust targets", ios_rust_targets()),
+        check("XcodeGen", xcodegen()),
+        check("iOS Simulator runtime", ios_simulator()),
+        check("Code-signing identity", code_signing()),
     ];
 
     let name_width = checks.iter().map(|c| c.name.len()).max().unwrap_or(20);
@@ -503,4 +509,133 @@ fn avds_configured() -> Status {
 
 fn dirs_avd() -> Option<PathBuf> {
     env::var_os("HOME").map(|h| Path::new(&h).join(".android/avd"))
+}
+
+// -------------------- iOS toolchain (macOS only) --------------------
+
+/// A full Xcode (not just the Command Line Tools) is needed to build the iOS shell and
+/// run the simulator. Checks `xcode-select -p` points at an Xcode and `xcodebuild` works.
+fn xcode() -> Status {
+    if !cfg!(target_os = "macos") {
+        return Status::Skip { reason: "non-macOS host".into() };
+    }
+    let dev_dir = Command::new("xcode-select")
+        .arg("-p")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let Some(dir) = dev_dir else {
+        return Status::Fail {
+            detail: "xcode-select not configured".into(),
+            fix: "Install Xcode from the App Store, then:\n  \
+                  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer\n  \
+                  sudo xcodebuild -license accept"
+                .into(),
+        };
+    };
+    match Command::new("xcodebuild").arg("-version").output() {
+        Ok(o) if o.status.success() => {
+            let v = String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("Xcode").to_string();
+            Status::Ok { detail: format!("{v} ({dir})") }
+        }
+        _ => Status::Fail {
+            detail: format!("xcodebuild unavailable (xcode-select -> {dir})"),
+            fix: "Point xcode-select at a full Xcode, not just the Command Line Tools:\n  \
+                  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+                .into(),
+        },
+    }
+}
+
+/// The iOS Rust targets `build-ios.sh` compiles for: the simulator slice (which follows the
+/// Mac's arch) and the arm64 device slice.
+fn ios_rust_targets() -> Status {
+    if !cfg!(target_os = "macos") {
+        return Status::Skip { reason: "non-macOS host".into() };
+    }
+    let sim = if cfg!(target_arch = "aarch64") {
+        "aarch64-apple-ios-sim" // Apple Silicon
+    } else {
+        "x86_64-apple-ios" // Intel
+    };
+    let needed = [sim, "aarch64-apple-ios"];
+    let Ok(out) = Command::new("rustup").args(["target", "list", "--installed"]).output() else {
+        return Status::Fail {
+            detail: "rustup target list failed".into(),
+            fix: "Resolve the rustup check above first.".into(),
+        };
+    };
+    let installed = String::from_utf8_lossy(&out.stdout);
+    let installed: Vec<&str> = installed.lines().collect();
+    let missing: Vec<&str> = needed.iter().copied().filter(|t| !installed.contains(t)).collect();
+    if missing.is_empty() {
+        Status::Ok { detail: needed.join(", ") }
+    } else {
+        Status::Fail {
+            detail: format!("missing: {}", missing.join(", ")),
+            fix: format!("rustup target add {}", missing.join(" ")),
+        }
+    }
+}
+
+/// `build-ios.sh` generates the Xcode project from `project.yml` with XcodeGen.
+fn xcodegen() -> Status {
+    if !cfg!(target_os = "macos") {
+        return Status::Skip { reason: "non-macOS host".into() };
+    }
+    match which::which("xcodegen") {
+        Ok(p) => Status::Ok { detail: p.display().to_string() },
+        Err(_) => Status::Fail {
+            detail: "not found on PATH".into(),
+            fix: "Install XcodeGen (build-ios.sh needs it):\n  brew install xcodegen".into(),
+        },
+    }
+}
+
+/// At least one installed iOS simulator runtime (needed to *run* a sim build).
+fn ios_simulator() -> Status {
+    if !cfg!(target_os = "macos") {
+        return Status::Skip { reason: "non-macOS host".into() };
+    }
+    let Ok(out) = Command::new("xcrun").args(["simctl", "list", "runtimes"]).output() else {
+        return Status::Fail {
+            detail: "xcrun simctl unavailable".into(),
+            fix: "Ensure Xcode is installed and selected (see the Xcode check above).".into(),
+        };
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let count = text.lines().filter(|l| l.contains("iOS ")).count();
+    if count == 0 {
+        Status::Warn {
+            detail: "no iOS simulator runtime".into(),
+            message: "Install one: Xcode -> Settings -> Components/Platforms -> iOS \
+                      (or `xcodebuild -downloadPlatform iOS`)."
+                .into(),
+        }
+    } else {
+        Status::Ok { detail: format!("{count} iOS runtime(s)") }
+    }
+}
+
+/// A code-signing identity — needed for device / TestFlight builds (not for the simulator),
+/// so its absence is a warning, not a failure.
+fn code_signing() -> Status {
+    if !cfg!(target_os = "macos") {
+        return Status::Skip { reason: "non-macOS host".into() };
+    }
+    let Ok(out) = Command::new("security").args(["find-identity", "-v", "-p", "codesigning"]).output() else {
+        return Status::Warn { detail: "could not query identities".into(), message: "skipped".into() };
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    if text.contains("0 valid identities found") || !text.contains("valid identities found") {
+        Status::Warn {
+            detail: "none".into(),
+            message: "Fine for the simulator. For device / TestFlight builds, sign in to Xcode \
+                      (Settings -> Accounts) so a signing identity is installed."
+                .into(),
+        }
+    } else {
+        Status::Ok { detail: "present".into() }
+    }
 }
