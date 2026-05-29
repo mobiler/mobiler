@@ -24,28 +24,55 @@ pub fn run() -> ExitCode {
     println!("Mobiler doctor -- checking your dev environment");
     println!("{}", "-".repeat(70));
 
-    let checks = vec![
+    // Per-platform scoping: only run a platform's checks if it looks set up, so an
+    // iOS-only Mac isn't a wall of Android failures (and vice versa). A platform you
+    // haven't configured collapses to a single "not configured" note, not a row of [FAIL]s.
+    let android_on = env::var_os("ANDROID_HOME").is_some();
+    let ios_on = ios_configured();
+
+    let mut checks = vec![
         check("rustup installed", rustup_installed()),
         check("Active Rust toolchain", active_toolchain()),
-        check("Android Rust targets", android_rust_targets()),
-        check("ANDROID_HOME", android_home()),
-        check("Android SDK structure", android_sdk_structure()),
-        check("cmdline-tools (sdkmanager)", cmdline_tools()),
-        check("Android NDK", ndk_installed()),
-        check("ANDROID_NDK_HOME", ndk_home()),
-        check("Java compiler (javac)", javac()),
-        check("KVM device (/dev/kvm)", kvm_device()),
-        check("kvm group membership", kvm_group()),
-        check("adb", adb_available()),
-        check("emulator binary", emulator_binary()),
-        check("AVDs configured", avds_configured()),
-        // iOS toolchain — macOS only (these Skip on other hosts, like the KVM checks do on non-Linux).
-        check("Xcode", xcode()),
-        check("iOS Rust targets", ios_rust_targets()),
-        check("XcodeGen", xcodegen()),
-        check("iOS Simulator runtime", ios_simulator()),
-        check("Code-signing identity", code_signing()),
     ];
+
+    if android_on {
+        checks.extend([
+            check("Android Rust targets", android_rust_targets()),
+            check("ANDROID_HOME", android_home()),
+            check("Android SDK structure", android_sdk_structure()),
+            check("cmdline-tools (sdkmanager)", cmdline_tools()),
+            check("Android NDK", ndk_installed()),
+            check("ANDROID_NDK_HOME", ndk_home()),
+            check("Java compiler (javac)", javac()),
+            check("KVM device (/dev/kvm)", kvm_device()),
+            check("kvm group membership", kvm_group()),
+            check("adb", adb_available()),
+            check("emulator binary", emulator_binary()),
+            check("AVDs configured", avds_configured()),
+        ]);
+    } else {
+        checks.push(check(
+            "Android toolchain",
+            Status::Skip { reason: "not configured — set ANDROID_HOME to build for Android".into() },
+        ));
+    }
+
+    if ios_on {
+        checks.extend([
+            check("Xcode", xcode()),
+            check("iOS Rust targets", ios_rust_targets()),
+            check("XcodeGen", xcodegen()),
+            check("iOS Simulator runtime", ios_simulator()),
+            check("Code-signing identity", code_signing()),
+        ]);
+    } else {
+        let reason = if cfg!(target_os = "macos") {
+            "not configured — install Xcode to build for iOS".into()
+        } else {
+            "requires macOS".into()
+        };
+        checks.push(check("iOS toolchain", Status::Skip { reason }));
+    }
 
     let name_width = checks.iter().map(|c| c.name.len()).max().unwrap_or(20);
     let mut failures = Vec::new();
@@ -68,6 +95,17 @@ pub fn run() -> ExitCode {
     }
 
     println!("{}", "-".repeat(70));
+
+    // If neither platform is configured you can't build anything — nudge to set one up.
+    if !android_on && !ios_on {
+        failures.push((
+            "Target platform",
+            "Mobiler builds for Android and iOS — configure at least one:\n  \
+             Android: install the SDK, then `export ANDROID_HOME=\"$HOME/Android/Sdk\"`\n  \
+             iOS (macOS only): install Xcode from the App Store"
+                .to_string(),
+        ));
+    }
 
     if !warnings.is_empty() {
         println!("\nWarnings:");
@@ -356,13 +394,16 @@ fn javac() -> Status {
             ),
         };
     }
-    Status::Fail {
-        detail: "not found".into(),
-        fix: "Ubuntu's openjdk-21-jre is JRE-only (no javac). Install a full JDK:\n  \
-              sudo apt install openjdk-21-jdk\nor set JAVA_HOME to Android Studio's bundled JBR \
-              (e.g. /snap/android-studio/current/jbr)."
-            .into(),
-    }
+    let fix = if cfg!(target_os = "macos") {
+        "No JDK with `javac` found (Android builds need it). Install one:\n  \
+         brew install openjdk\n(then follow brew's caveats to put it on PATH), or set \
+         JAVA_HOME to a JDK / Android Studio's bundled JBR."
+    } else {
+        "Ubuntu's openjdk-21-jre is JRE-only (no javac). Install a full JDK:\n  \
+         sudo apt install openjdk-21-jdk\nor set JAVA_HOME to Android Studio's bundled JBR \
+         (e.g. /snap/android-studio/current/jbr)."
+    };
+    Status::Fail { detail: "not found".into(), fix: fix.into() }
 }
 
 fn run_version(bin: &Path, flag: &str) -> Option<String> {
@@ -512,6 +553,18 @@ fn dirs_avd() -> Option<PathBuf> {
 }
 
 // -------------------- iOS toolchain (macOS only) --------------------
+
+/// Is iOS development plausibly set up here? (macOS + a configured `xcode-select`.) Gates
+/// whether the iOS checks run at all — so a Mac without Xcode shows one "not configured"
+/// note instead of a column of failures.
+fn ios_configured() -> bool {
+    cfg!(target_os = "macos")
+        && Command::new("xcode-select")
+            .arg("-p")
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false)
+}
 
 /// A full Xcode (not just the Command Line Tools) is needed to build the iOS shell and
 /// run the simulator. Checks `xcode-select -p` points at an Xcode and `xcodebuild` works.
