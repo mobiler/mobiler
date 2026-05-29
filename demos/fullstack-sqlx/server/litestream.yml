@@ -1,0 +1,36 @@
+# Litestream — continuous, near-real-time backup/replication for the SQLite database.
+# Requires WAL mode (the server enables it in `connect()`). This is the recommended way
+# to run SQLite in production: streaming replication to object storage with point-in-time
+# restore, so a lost/destroyed server doesn't mean lost data.
+#
+# Install: https://litestream.io/install/  (a single static binary)
+#
+# Typical production usage — let Litestream supervise the server (it restores on boot,
+# replicates continuously, and restarts the child if it dies):
+#
+#     litestream replicate -config litestream.yml -exec "./server"
+#
+# Or run it standalone alongside an already-running server:
+#
+#     litestream replicate -config litestream.yml
+#
+# Restore the latest snapshot (e.g. onto a fresh machine) BEFORE first boot:
+#
+#     litestream restore -config litestream.yml -if-replica-exists notes.db
+#
+# Credentials come from the environment:
+#   LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY
+
+dbs:
+  - path: notes.db          # must match the server's DATABASE_URL path
+    replicas:
+      # S3-compatible object storage. Works with AWS S3, Cloudflare R2, Backblaze B2,
+      # MinIO, etc. For AWS S3 omit `endpoint`; set it for R2/B2/MinIO.
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: notes
+        endpoint: ${LITESTREAM_ENDPOINT}    # e.g. https://<acct>.r2.cloudflarestorage.com
+
+      # Simplest option for a single box / NFS / mounted volume — uncomment instead of S3:
+      # - type: file
+      #   path: /var/backups/notes

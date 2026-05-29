@@ -43,3 +43,35 @@ mobiler new notes-mobile
 - **CORS** is permissive on the server so the web client (a different origin) can call it.
 - The app talks to the server **only over HTTP** (`cx.get/post/delete`) — never a direct DB
   connection from a client.
+
+## Production (SQLite is a great fit for small apps)
+
+SQLite runs small production apps just fine — a coffee-shop/restaurant ordering app does a
+handful of writes per *minute*; SQLite handles thousands per *second*. The server is already
+set up for it (`server/src/main.rs`, `connect()`):
+
+- **WAL journal mode** — readers never block the writer (and vice versa); essential for a web
+  server, and required by Litestream.
+- **`busy_timeout`** — a brief write lock *waits* instead of erroring with the infamous
+  `database is locked` (SQLite serializes writes — this pragma is the #1 web-server gotcha).
+- **`synchronous = NORMAL`** (durable under WAL, fast) and **foreign keys enforced**.
+- Small connection pool (writes serialize at the DB level; WAL lets reads run concurrently),
+  **graceful shutdown** (Ctrl-C / SIGTERM closes the pool → checkpoints the WAL), structured
+  **`tracing`** logs, and a configurable bind (`BIND_ADDR`, default `127.0.0.1:3000` — set
+  `0.0.0.0:3000` in a container). Override the DB path with `DATABASE_URL`.
+
+**Backups — use [Litestream](https://litestream.io)** (`server/litestream.yml`): continuous
+streaming replication of the SQLite file to S3-compatible storage (R2/B2/MinIO/S3) with
+point-in-time restore. Run it as the server's supervisor so it restores on boot and replicates
+live:
+
+```bash
+litestream replicate -config litestream.yml -exec "./server"
+```
+
+**When to reach for PostgreSQL instead:** multiple app instances behind a load balancer sharing
+one DB, or a single shared multi-tenant DB at scale, or you want managed HA/backups (RDS,
+Supabase, Neon, Fly Postgres). For one venue per instance, SQLite + Litestream is simpler and
+cheaper. Because the server uses **runtime SQLx queries**, moving is mostly a connection-string +
+DDL change (see the SQLite → PostgreSQL note above) — start on SQLite, migrate only if a client
+outgrows it.
