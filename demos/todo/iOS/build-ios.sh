@@ -77,28 +77,50 @@ elif [ -z "${EXPORT_METHOD:-}" ]; then
     echo "   Set EXPORT_METHOD=app-store|ad-hoc|development + DEVELOPMENT_TEAM for a signed .ipa."
 
 else
-    # Signed device build → installable .ipa (TestFlight / ad-hoc OTA). Needs an
-    # Apple account: a signing identity in the keychain + a provisioning profile for
-    # $BUNDLE_ID. Automatic signing uses $DEVELOPMENT_TEAM.
+    # Signed device build → installable .ipa (TestFlight / ad-hoc OTA). With an App Store
+    # Connect API key (ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH) signing is cloud-managed:
+    # xcodebuild creates/downloads the cert + provisioning profile, so nothing needs to be
+    # in the keychain — this is the path the CI lane uses. Without the key, a keychain
+    # signing identity for $BUNDLE_ID is used instead. project.yml turns signing off for
+    # the simulator default, so re-enable it here with CODE_SIGNING_ALLOWED=YES.
     : "${DEVELOPMENT_TEAM:?set DEVELOPMENT_TEAM (your Apple team id) for a signed build}"
+    AUTH=()
+    if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ] && [ -n "${ASC_KEY_PATH:-}" ]; then
+        AUTH=(-allowProvisioningUpdates
+              -authenticationKeyPath "$ASC_KEY_PATH"
+              -authenticationKeyID "$ASC_KEY_ID"
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+    fi
     xcodebuild -project "$SCHEME.xcodeproj" -scheme "$SCHEME" \
         -sdk iphoneos -configuration Release -derivedDataPath build \
         -archivePath "build/$SCHEME.xcarchive" \
         ARCHS="$ARCH" ONLY_ACTIVE_ARCH=NO \
-        CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-        archive
+        CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+        ${AUTH[@]+"${AUTH[@]}"} archive
     cat > build/ExportOptions.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>method</key><string>${EXPORT_METHOD}</string>
   <key>teamID</key><string>${DEVELOPMENT_TEAM}</string>
+  <key>signingStyle</key><string>automatic</string>
   <key>destination</key><string>export</string>
 </dict></plist>
 PLIST
     xcodebuild -exportArchive -archivePath "build/$SCHEME.xcarchive" \
-        -exportOptionsPlist build/ExportOptions.plist -exportPath build/ipa
+        -exportOptionsPlist build/ExportOptions.plist -exportPath build/ipa \
+        ${AUTH[@]+"${AUTH[@]}"}
     echo "✅ Built (device, signed): $IOS_DIR/build/ipa/$SCHEME.ipa"
-    echo "   Upload to TestFlight: xcrun altool --upload-app -f build/ipa/$SCHEME.ipa \\"
-    echo "     --type ios --apiKey \$ASC_KEY_ID --apiIssuer \$ASC_ISSUER_ID"
+    if [ "${UPLOAD:-0}" = "1" ]; then
+        # altool finds the API key by id in a standard dir — stage it there, then upload.
+        : "${ASC_KEY_ID:?UPLOAD=1 needs ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH}"
+        mkdir -p "$HOME/.appstoreconnect/private_keys"
+        cp "$ASC_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+        echo "Uploading $SCHEME.ipa to App Store Connect / TestFlight…"
+        xcrun altool --upload-app -f "build/ipa/$SCHEME.ipa" --type ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+        echo "✅ Uploaded — it appears in TestFlight after processing (a few minutes)."
+    else
+        echo "   To upload: set UPLOAD=1 with ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH."
+    fi
 fi
