@@ -77,12 +77,13 @@ elif [ -z "${EXPORT_METHOD:-}" ]; then
     echo "   Set EXPORT_METHOD=app-store|ad-hoc|development + DEVELOPMENT_TEAM for a signed .ipa."
 
 else
-    # Signed device build → installable .ipa (TestFlight / ad-hoc OTA). With an App Store
-    # Connect API key (ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH) signing is cloud-managed:
-    # xcodebuild creates/downloads the cert + provisioning profile, so nothing needs to be
-    # in the keychain — this is the path the CI lane uses. Without the key, a keychain
-    # signing identity for $BUNDLE_ID is used instead. project.yml turns signing off for
-    # the simulator default, so re-enable it here with CODE_SIGNING_ALLOWED=YES.
+    # Signed device build → installable .ipa for TestFlight / App Store. Two-phase, so a
+    # brand-new team with NO registered devices can build: archive UNSIGNED, then let
+    # -exportArchive mint the App Store *distribution* profile (which carries no device
+    # list, so it needs zero registered devices) via the App Store Connect API key and sign
+    # during export. A signed archive instead makes automatic signing try to create a
+    # *development* profile, which DOES embed a device list and fails on a deviceless team
+    # ("your team has no devices…"). project.yml already disables signing — what we want here.
     : "${DEVELOPMENT_TEAM:?set DEVELOPMENT_TEAM (your Apple team id) for a signed build}"
     AUTH=()
     if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ] && [ -n "${ASC_KEY_PATH:-}" ]; then
@@ -95,8 +96,8 @@ else
         -sdk iphoneos -configuration Release -derivedDataPath build \
         -archivePath "build/$SCHEME.xcarchive" \
         ARCHS="$ARCH" ONLY_ACTIVE_ARCH=NO \
-        CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-        ${AUTH[@]+"${AUTH[@]}"} archive
+        CODE_SIGNING_ALLOWED=NO \
+        archive
     cat > build/ExportOptions.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
