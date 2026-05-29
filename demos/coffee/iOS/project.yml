@@ -68,3 +68,32 @@ targets:
         # The archive is built unsigned (build-ios.sh signs at export for App Store); the
         # simulator + device compile-check builds need no signing either.
         CODE_SIGNING_ALLOWED: "NO"
+
+  # Behavioral UI test (the iOS twin of an instrumented Android test). Drives the
+  # generic shell on the simulator to guard tap-routing regressions like the build-4
+  # "image swallows the back-button tap" bug — a unit test can't catch those. Run with
+  # `xcodebuild test -scheme Coffee` (CI's iOS lane does this for coffee). It's only
+  # built for the `test` action (see the scheme below), so build-ios.sh's plain build +
+  # unsigned device archive never touch it.
+  CoffeeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: Coffee
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        CODE_SIGNING_ALLOWED: "NO"
+        TEST_TARGET_NAME: Coffee
+
+schemes:
+  Coffee:
+    build:
+      targets:
+        Coffee: all
+        CoffeeUITests: [test]   # only built/run for `xcodebuild test`
+    test:
+      targets:
+        - CoffeeUITests

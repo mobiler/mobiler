@@ -155,9 +155,28 @@ jobs:
       - name: Build for the iOS simulator
         run: bash iOS/build-ios.sh
 
+      # Behavioral UI test on a booted simulator (only coffee carries the CoffeeUITests
+      # target). Drives the generic shell with real taps to guard tap-routing
+      # regressions — e.g. the build-4 bug where the hero image swallowed the in-body
+      # "← Back" button's tap — which compile-only builds can't catch. The shell is
+      # byte-identical across demos + the template, so testing coffee guards them all.
+      # MUST run before the device build below: that step rebuilds the Rust staticlib
+      # (generated/lib/libshared.a) for the *device* slice, which would then fail to link
+      # against this simulator test build ("built for iOS, linking for iOS-simulator").
+      - name: UI test (behavioral — coffee back button)
+        if: matrix.app == 'demos/coffee'
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(v['udid'] for rt,devs in d['devices'].items() if 'iOS' in rt for v in devs if v.get('isAvailable') and v['name'].startswith('iPhone')))")
+          echo "Using simulator $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcodebuild test -project iOS/Coffee.xcodeproj -scheme Coffee \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -derivedDataPath iOS/build CODE_SIGNING_ALLOWED=NO
+
       # Validate the device (iphoneos) build too — unsigned compile-check, no Apple
       # account. The signed .ipa export (TestFlight) runs elsewhere once signing
-      # creds exist; here we just prove the device build stays green.
+      # creds exist; here we just prove the device build stays green. (Runs last because
+      # it overwrites generated/lib/libshared.a with the device slice.)
       - name: Device build (unsigned compile-check)
         run: bash iOS/build-ios.sh device
 
