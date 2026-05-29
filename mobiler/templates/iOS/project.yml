@@ -37,6 +37,12 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four
+        # orientations) by declaring the app full-screen.
+        UIRequiresFullScreen: true
+        # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
+        # the "Missing export compliance" question.
+        ITSAppUsesNonExemptEncryption: false
         # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
         # requires this usage string to access the camera; the App Store flags apps that
         # ship it without using the camera, so it's left off by default.
@@ -50,5 +56,10 @@ targets:
         OTHER_LDFLAGS: ["-lshared"]
         # uniffi FFI modulemap so `shared.swift` finds the C symbols.
         SWIFT_INCLUDE_PATHS: ["$(PROJECT_DIR)/generated"]
-        # Simulator-only for now; no code signing needed.
+        # App icon: actool builds the required sizes from the single 1024 source in
+        # Sources/Assets.xcassets/AppIcon.appiconset and injects CFBundleIconName. Replace
+        # the placeholder icon (a neutral diamond) with your own.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The archive is built unsigned (build-ios.sh signs at export for App Store); the
+        # simulator + device compile-check builds need no signing either.
         CODE_SIGNING_ALLOWED: "NO"

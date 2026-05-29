@@ -1,6 +1,7 @@
 import SwiftUI
 import SharedTypes
 import UIKit
+import ImageIO
 
 // The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
 // (what to draw) + `Action` (what to send back). No app-specific types; this exact
@@ -22,7 +23,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // via UIImage — AsyncImage doesn't reliably fetch `file://`; remote URLs use
         // AsyncImage.
         let fill: AnyView
-        if source.hasPrefix("file:"), let img = URL(string: source).flatMap({ UIImage(contentsOfFile: $0.path) }) {
+        if source.hasPrefix("file:"), let url = URL(string: source), let img = downsampledFileImage(at: url) {
             fill = AnyView(Image(uiImage: img).resizable().aspectRatio(contentMode: .fill))
         } else {
             fill = AnyView(AsyncImage(url: URL(string: source)) { image in
@@ -231,16 +232,11 @@ private struct ScaffoldView: View {
         }
         .preferredColorScheme(darkMode ? .dark : .light)
         .animation(.easeInOut(duration: 0.28), value: route)
-        // Edge-swipe to go back — the iOS idiom for Android's system BackHandler.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24, coordinateSpace: .local).onEnded { value in
-                guard let back = back else { return }
-                let horizontal = abs(value.translation.width) > abs(value.translation.height)
-                if value.startLocation.x < 32, value.translation.width > 90, horizontal {
-                    send(.fired(token: back))
-                }
-            }
-        )
+        // NOTE: a container-level edge-swipe-back gesture used to live here, but a
+        // simultaneous DragGesture watching the leading edge ate taps on leading-edge
+        // buttons (e.g. an in-body "← Back"). Back stays available via the top-bar arrow
+        // and the app's own controls; a non-conflicting edge-swipe (a thin leading-edge
+        // strip rather than the whole surface) can be reintroduced later.
         // After each route settles, record its depth for the next transition.
         .task(id: route) { prevDepth = depth }
     }
@@ -435,4 +431,25 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
     case .bottomCenter: return .bottom
     case .bottomEnd: return .bottomTrailing
     }
+}
+
+// A picked/captured photo can be many megapixels; decoding it full-size on the main
+// thread inside `render` (which runs on every state update) stalls the UI — it looks
+// like a freeze. Downsample with ImageIO to a display size and cache by path, so each
+// file image is decoded once and kept small.
+private let fileImageCache = NSCache<NSString, UIImage>()
+private func downsampledFileImage(at url: URL, maxPixel: CGFloat = 1400) -> UIImage? {
+    let key = url.path as NSString
+    if let cached = fileImageCache.object(forKey: key) { return cached }
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+    let img = UIImage(cgImage: cg)
+    fileImageCache.setObject(img, forKey: key)
+    return img
 }
