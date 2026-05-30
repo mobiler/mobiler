@@ -11,7 +11,7 @@ import UIKit
 enum ScannerPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "scan" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
-        guard let presenter = topViewController() else {
+        guard let presenter = frontmostViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
@@ -19,6 +19,18 @@ enum ScannerPlugin {
             vc.modalPresentationStyle = .fullScreen
             presenter.present(vc, animated: true)
         }
+    }
+
+    // Self-contained presenter lookup (the shell's own topViewController() is private to
+    // Core.swift, so a droppable plugin file finds the frontmost VC itself).
+    private static func frontmostViewController() -> UIViewController? {
+        let keyWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }?
+            .keyWindow
+        var top = keyWindow?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        return top
     }
 }
 
