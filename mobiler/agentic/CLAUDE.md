@@ -71,7 +71,8 @@ ABI change in the framework, not app work).
     `demos/fullstack-sqlx` (Axum + SQLx) carry the production setup to copy.
   - **Plugins** = advanced native capabilities you add with `mobiler plugin add <name>` (run
     `mobiler plugin list` to see them): **scanner** (barcode/QR), **biometric** (Face ID/fingerprint),
-    **securestore** (encrypted key/value), **websocket** (real-time), **battery**. Call one via the
+    **securestore** (encrypted key/value), **websocket** (real-time), **notifications** (local
+    scheduled reminders), **battery**. Call one via the
     generic escape hatch `cx.plugin("<name>", "<op>", input, then)` → `PluginResponse { ok, output }`.
     Prefer a bundled plugin over reinventing a native feature; an unregistered plugin degrades to
     `ok:false`, so guard on `resp.ok`.

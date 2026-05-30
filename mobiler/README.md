@@ -50,6 +50,7 @@ ABI change. Bundled free plugins:
 | 🔐 `biometric` | Face ID / fingerprint auth |
 | 🗝️ `securestore` | encrypted key/value (Keychain / Keystore) |
 | 🔌 `websocket` | persistent real-time connection |
+| 🔔 `notifications` | local scheduled notifications (reminders) |
 | 🔋 `battery` | device battery level (sample) |
 
 ```bash
