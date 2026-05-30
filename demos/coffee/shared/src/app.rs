@@ -35,6 +35,11 @@ pub enum Msg {
     StoredSecret(bool),
     Authed(PluginResponse),
     RevealedSecret(PluginResponse),
+    // WebSocket demo: connect to an echo server, send, receive the echo.
+    WsEcho,
+    WsOpen(PluginResponse),
+    WsSent(PluginResponse),
+    WsFrame(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -58,6 +63,7 @@ pub struct Model {
     picked_photo: Option<String>,  // a local image URI from the photo-picker capability
     scanned: Option<String>,       // last barcode/QR scanned via the scanner plugin
     secret_status: Option<String>, // biometric + securestore demo status line
+    ws_status: Option<String>,     // websocket echo demo status line
 }
 
 impl Default for Model {
@@ -80,6 +86,7 @@ impl Default for Model {
             picked_photo: None,
             scanned: None,
             secret_status: None,
+            ws_status: None,
         }
     }
 }
@@ -171,6 +178,32 @@ impl MobilerApp for Coffee {
                     format!("Read failed: {}", resp.output)
                 });
             }
+            // WebSocket echo: connect → on open, send "hello from mobiler" → recv the echo.
+            Msg::WsEcho => {
+                model.ws_status = Some("Connecting…".into());
+                cx.plugin("websocket", "connect", "wss://echo.websocket.org", Msg::WsOpen);
+            }
+            Msg::WsOpen(resp) => {
+                if resp.ok {
+                    model.ws_status = Some("Connected — sending…".into());
+                    cx.plugin("websocket", "recv", "", Msg::WsFrame);
+                    cx.plugin("websocket", "send", "hello from mobiler", Msg::WsSent);
+                } else {
+                    model.ws_status = Some(format!("WS connect failed: {}", resp.output));
+                }
+            }
+            Msg::WsSent(_) => {}
+            Msg::WsFrame(resp) => {
+                model.ws_status = Some(if resp.ok {
+                    format!("Echo: {}", resp.output)
+                } else {
+                    "WS closed".into()
+                });
+                // One round-trip is enough for the demo; close after the first echo.
+                if resp.ok {
+                    cx.plugin("websocket", "close", "", Msg::WsSent);
+                }
+            }
         }
     }
 
@@ -244,6 +277,7 @@ fn detail(p: &Product, model: &Model) -> Widget {
         row(vec![
             button("Scan a code", ButtonStyle::Filled, Msg::ScanCode),
             button("Lock test", ButtonStyle::Outlined, Msg::SecureDemo),
+            button("WS echo", ButtonStyle::Outlined, Msg::WsEcho),
         ]),
     ];
     if !model.device_info.is_empty() {
@@ -255,6 +289,10 @@ fn detail(p: &Product, model: &Model) -> Widget {
     }
     // biometric + securestore demo status.
     if let Some(s) = &model.secret_status {
+        items.push(mobiler_core::caption(s.clone()));
+    }
+    // websocket echo demo status.
+    if let Some(s) = &model.ws_status {
         items.push(mobiler_core::caption(s.clone()));
     }
     // The photo capability returns a local image URI — fed straight to the image widget.

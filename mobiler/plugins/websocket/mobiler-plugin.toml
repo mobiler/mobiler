@@ -1,0 +1,21 @@
+# Free, bundled Mobiler plugin: WebSocket (persistent real-time connection). Four ops bridge a
+# streaming socket into the request/response ABI; the app pumps `recv` in a loop. Call from Rust:
+#   cx.plugin("websocket", "connect", "wss://echo.websocket.org", |r| Msg::WsOpen(r.ok))
+#   cx.plugin("websocket", "send", "hello", |_| Msg::Noop)
+#   cx.plugin("websocket", "recv", "", |r| Msg::WsFrame(r))   // re-issue recv after each frame;
+#                                                              // r.ok==false, output "closed" → stop
+#   cx.plugin("websocket", "close", "", |_| Msg::Noop)
+#
+# Install:  mobiler plugin add websocket
+# Android = OkHttp WebSocket (already a shell dep); iOS = URLSessionWebSocketTask (system framework).
+name = "websocket"
+summary = "WebSocket — persistent real-time connection (free)"
+
+[android]
+sources = ["android/WebSocketPlugin.kt"]
+register = '"websocket" to WebSocketPlugin(application)'
+# OkHttp is already a template dependency (HttpPlugin), so no extra gradle_deps needed.
+
+[ios]
+sources = ["ios/WebSocketPlugin.swift"]
+register = 'case "websocket": return await WebSocketPlugin.handle(op: op, input: input)'
