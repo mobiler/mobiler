@@ -39,6 +39,8 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
     </application>
 
 </manifest>

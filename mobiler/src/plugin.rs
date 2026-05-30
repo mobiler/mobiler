@@ -54,6 +54,12 @@ struct PlatformSpec {
     /// Each becomes an `implementation("…")` line in the app's build.gradle.kts.
     #[serde(default)]
     gradle_deps: Vec<String>,
+    /// XML snippets inserted inside `<application>` in AndroidManifest.xml — e.g. a
+    /// `<receiver android:name=".NotificationReceiver" android:exported="false"/>` a plugin needs
+    /// to fire while the app is closed. Each should carry a unique `android:name` (used for the
+    /// idempotency check).
+    #[serde(default)]
+    manifest_application: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -171,6 +177,12 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
             let line = format!("implementation(\"{dep}\")");
             report(insert_before(&gradle, "mobiler:gradle-deps", &line, dep)?, "Android Gradle dependency");
         }
+        for xml in &a.manifest_application {
+            // Idempotency key: the snippet's android:name (unique per receiver/service/provider),
+            // falling back to the trimmed snippet if it has none.
+            let needle = manifest_name(xml).unwrap_or_else(|| xml.trim().to_string());
+            report(insert_before(&manifest_xml, "mobiler:manifest-application", xml.trim(), &needle)?, "Android manifest entry");
+        }
     }
 
     if let Some(i) = &manifest.ios {
@@ -213,6 +225,15 @@ fn report(res: Insert, what: &str) {
         Insert::AlreadyPresent => println!("  · {what} already present (skipped)"),
         Insert::MarkerMissing(m) => println!("  ! {what}: anchor `{m}` not found — add it manually"),
     }
+}
+
+/// Extract the value of `android:name="…"` from a manifest XML snippet (the idempotency key
+/// for a `<receiver>` / `<service>` / `<provider>` entry).
+fn manifest_name(xml: &str) -> Option<String> {
+    let key = "android:name=\"";
+    let start = xml.find(key)? + key.len();
+    let end = xml[start..].find('"')? + start;
+    Some(xml[start..end].to_string())
 }
 
 /// Copy one plugin source file into `dst_dir`, substituting `{{PACKAGE}}` etc.
@@ -322,7 +343,7 @@ mod test {
         .unwrap();
         fs::write(
             root.join("Android/app/src/main/AndroidManifest.xml"),
-            "<manifest>\n    <!-- mobiler:permissions -->\n    <application/>\n</manifest>\n",
+            "<manifest>\n    <!-- mobiler:permissions -->\n    <application>\n        <!-- mobiler:manifest-application -->\n    </application>\n</manifest>\n",
         )
         .unwrap();
         fs::write(root.join("Android/settings.gradle.kts"), "rootProject.name = \"Demo\"\n").unwrap();
@@ -391,10 +412,9 @@ mod test {
             t("iOS/Sources/Core.swift").contains("// mobiler:plugins"),
             "Core.swift needs the // mobiler:plugins anchor"
         );
-        assert!(
-            t("Android/app/src/main/AndroidManifest.xml").contains("mobiler:permissions"),
-            "AndroidManifest.xml needs the mobiler:permissions anchor"
-        );
+        let manifest = t("Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("mobiler:permissions"), "AndroidManifest.xml needs the mobiler:permissions anchor");
+        assert!(manifest.contains("mobiler:manifest-application"), "AndroidManifest.xml needs the mobiler:manifest-application anchor");
         let yml = t("iOS/project.yml");
         assert!(yml.contains("# mobiler:info-plist"), "project.yml needs the info-plist anchor");
         assert!(yml.contains("# mobiler:target-extra"), "project.yml needs the target-extra anchor");
@@ -422,6 +442,7 @@ sources = ["android/FooPlugin.kt"]
 register = '"foo" to FooPlugin(application)'
 permissions = ["android.permission.NFC"]
 gradle_deps = ["com.example:foo:1.2.3"]
+manifest_application = ['<receiver android:name=".FooReceiver" android:exported="false"/>']
 [ios]
 sources = ["ios/FooPlugin.swift"]
 register = 'case "foo": return await FooPlugin.handle(op: op, input: input)'
