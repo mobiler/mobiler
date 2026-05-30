@@ -53,11 +53,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee
         SWIFT_VERSION: "5.9"
         # TestFlight rejects a re-upload that reuses a build number, so bump
-        # CURRENT_PROJECT_VERSION for each new build. Build 5 added the scanner plugin; build 6
-        # adds biometric + securestore (a "Lock test" button: store a secret → Face ID → reveal),
-        # so auth can be tested on a real device.
+        # CURRENT_PROJECT_VERSION for each new build. Build 6 added biometric + securestore;
+        # build 7 adds the websocket plugin (a "WS echo" button: connect to an echo server,
+        # send, show the echoed frame).
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "7"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]
