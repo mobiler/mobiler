@@ -10,8 +10,13 @@
 /NOTES.md
 /BUSINESS_PLAN.md
 /BUILD_SERVICE_PLAN.md
+/CAPABILITIES-ROADMAP.md
 # Paid / monetization capability roadmap — private (the public registry is capabilities.json)
 /capabilities-private.json
+
+# Paid/licensed plugin source + colleague handoff material — never in the public open-core repo.
+# These live in the private mobiler/plugins repo; this is a backstop against an accidental commit.
+/starters/
 
 # Local design references (third-party screenshots) — never publish
 /tmp/

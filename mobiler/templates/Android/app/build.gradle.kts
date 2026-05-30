@@ -60,5 +60,6 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     // HTTP capability (Core.kt HttpPlugin)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // mobiler:gradle-deps — `mobiler plugin add` inserts plugin Gradle dependencies above this line
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
