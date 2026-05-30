@@ -238,6 +238,8 @@ class Core(application: Application) : AndroidViewModel(application) {
         "photo" to PhotoPlugin(),
         "camera" to CameraPlugin(),
         "scanner" to ScannerPlugin(application),
+        "biometric" to BiometricPlugin(application),
+        "securestore" to SecureStorePlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

@@ -5,7 +5,7 @@ import android.os.Bundle
 import androidx.core.content.FileProvider
 import java.io.File
 import java.lang.ref.WeakReference
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
@@ -102,7 +102,9 @@ import dev.mobiler.coffee.shared.types.TextStyle as ModelTextStyle
 import dev.mobiler.coffee.shared.types.Tone
 import dev.mobiler.coffee.shared.types.Widget
 
-class MainActivity : ComponentActivity() {
+// FragmentActivity (a ComponentActivity subclass — Compose/ActivityResult work unchanged) so the
+// biometric plugin's androidx.biometric BiometricPrompt has the FragmentActivity host it requires.
+class MainActivity : FragmentActivity() {
     private var pendingPhoto: ((String?) -> Unit)? = null
     // The photo picker's result launcher must be registered on the Activity (before
     // it's STARTED), so the photo capability is wired to it via the PhotoPicker holder.

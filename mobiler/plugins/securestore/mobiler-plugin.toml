@@ -1,0 +1,20 @@
+# Free, bundled Mobiler plugin: secure key/value storage (encrypted secrets). For auth tokens /
+# API keys — NOT bulk data (use cx.save for general state). Call from Rust:
+#   cx.plugin("securestore", "set",    r#"{"key":"token","value":"abc"}"#, |r| Msg::Stored(r.ok))
+#   cx.plugin("securestore", "get",    r#"{"key":"token"}"#,               |r| Msg::Token(r.output))
+#   cx.plugin("securestore", "delete", r#"{"key":"token"}"#,               |r| Msg::Cleared(r.ok))
+#
+# Install:  mobiler plugin add securestore
+# Pair with `biometric` (gate a get behind an authenticate in your core). Android =
+# EncryptedSharedPreferences (Keystore-backed); iOS = Keychain (system framework).
+name = "securestore"
+summary = "Secure key/value storage — Keychain / EncryptedSharedPreferences (free)"
+
+[android]
+sources = ["android/SecureStorePlugin.kt"]
+register = '"securestore" to SecureStorePlugin(application)'
+gradle_deps = ["androidx.security:security-crypto:1.1.0-alpha06"]
+
+[ios]
+sources = ["ios/SecureStorePlugin.swift"]
+register = 'case "securestore": return await SecureStorePlugin.handle(op: op, input: input)'
