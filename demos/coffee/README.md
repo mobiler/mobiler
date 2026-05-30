@@ -17,6 +17,7 @@ Material 3 — no UI logic in the native layer.
 - A single **terracotta** brand seed color; Material 3 derives the rest of the palette (dark mode included)
 - Selectable **Chip** category filters that filter a 2-column **Grid** of tappable product **Card**s (image + name + price + ★ rating)
 - A **product detail** screen (tap a card) with a **Slider** (sweetness) and a quantity **Stepper**, plus back navigation
+- **Plugin demos** on the detail screen (added with `mobiler plugin add`): **Scan a code** (scanner — barcode/QR), **Lock test** (biometric auth + securestore), **WS echo** (websocket round-trip)
 - Every interaction runs the Crux update loop and re-renders
 
 All styling is **token-based in Rust** (`ImageShape`, `ImageRatio`, `BoxAlign`, …); the Compose shell owns the concrete look.

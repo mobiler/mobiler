@@ -10,6 +10,14 @@
 (Leptos/WASM — see the full-stack demo). iOS is verified on the simulator. APIs may
 still change.
 
+**Capabilities & plugins at a glance** — device/platform features your Rust core calls, all rendered natively:
+
+> **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
+>
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔋 battery
+
+→ [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
+
 ## What it is
 
 Mobiler builds on [Crux](https://github.com/redbadger/crux): a Rust core owns all
@@ -112,6 +120,30 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 
 Each maps to an opaque `{plugin, op, input}` effect, so **adding a capability is a
 shell-registry entry — it never changes the wire ABI** or the generated bindings.
+
+## Plugins — `mobiler plugin add`
+
+Advanced/native capabilities ship as **droppable plugins**: one command installs the native handler
+into your app and patches the per-shell registration — no framework code, no ABI change. Bundled
+free plugins:
+
+| Plugin | Capability | `mobiler plugin add …` |
+|---|---|---|
+| 🔎 **scanner** | barcode / QR scanning | `mobiler plugin add scanner` |
+| 🔐 **biometric** | Face ID / fingerprint auth | `mobiler plugin add biometric` |
+| 🗝️ **securestore** | encrypted key/value (Keychain / Keystore) | `mobiler plugin add securestore` |
+| 🔌 **websocket** | persistent real-time connection | `mobiler plugin add websocket` |
+| 🔋 **battery** | device battery level (sample) | `mobiler plugin add battery` |
+
+```bash
+mobiler plugin list            # see the bundled (free) plugins
+mobiler plugin add scanner     # install one into the current app
+```
+
+Call a plugin from Rust via the generic escape hatch — `cx.plugin("scanner", "scan", "", then)` →
+`PluginResponse { ok, output }`. A plugin is a self-describing package (`mobiler-plugin.toml` +
+native sources); `mobiler plugin add` also accepts a **local package directory**, which is how
+commercial/licensed plugins (e.g. NFC) are delivered.
 
 ## Repository layout
 
