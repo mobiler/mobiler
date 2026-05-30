@@ -62,5 +62,7 @@ dependencies {
     // Async image loading (Coil 3 + OkHttp network fetcher)
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // mobiler:gradle-deps — `mobiler plugin add` inserts plugin Gradle dependencies above this line
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -237,6 +237,8 @@ class Core(application: Application) : AndroidViewModel(application) {
         "dialog" to DialogPlugin(),
         "photo" to PhotoPlugin(),
         "camera" to CameraPlugin(),
+        "scanner" to ScannerPlugin(application),
+        // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))
