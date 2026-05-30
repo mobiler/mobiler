@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔋 battery
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -133,6 +133,7 @@ free plugins:
 | 🔐 **biometric** | Face ID / fingerprint auth | `mobiler plugin add biometric` |
 | 🗝️ **securestore** | encrypted key/value (Keychain / Keystore) | `mobiler plugin add securestore` |
 | 🔌 **websocket** | persistent real-time connection | `mobiler plugin add websocket` |
+| 🔔 **notifications** | local scheduled notifications (reminders) | `mobiler plugin add notifications` |
 | 🔋 **battery** | device battery level (sample) | `mobiler plugin add battery` |
 
 ```bash
