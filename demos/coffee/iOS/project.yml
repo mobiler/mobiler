@@ -57,7 +57,7 @@ targets:
         # build 7 adds the websocket plugin (a "WS echo" button: connect to an echo server,
         # send, show the echoed frame).
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "7"
+        CURRENT_PROJECT_VERSION: "8"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]

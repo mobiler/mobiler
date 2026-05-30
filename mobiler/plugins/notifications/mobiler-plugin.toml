@@ -1,0 +1,25 @@
+# Free, bundled Mobiler plugin: local scheduled notifications — appointment/reminder alerts that
+# fire even when the app is closed. Call from Rust:
+#   cx.plugin("notifications", "requestPermission", "", |r| Msg::NotifAllowed(r.ok))
+#   cx.plugin("notifications", "schedule",
+#             r#"{"id":1,"title":"Appointment","body":"in 1 hour","after_seconds":3600}"#, |_| Msg::Noop)
+#   cx.plugin("notifications", "cancel", r#"{"id":1}"#, |_| Msg::Noop)
+#
+# Install:  mobiler plugin add notifications
+name = "notifications"
+summary = "Local scheduled notifications — appointment/reminder alerts (free)"
+
+[android]
+sources = ["android/NotificationsPlugin.kt"]
+register = '"notifications" to NotificationsPlugin(application)'
+# POST_NOTIFICATIONS is the Android 13+ runtime permission for posting notifications.
+permissions = ["android.permission.POST_NOTIFICATIONS"]
+# AlarmManager fires this receiver to post the notification while the app is closed; it must be
+# statically declared so it runs without a live process.
+manifest_application = ['<receiver android:name=".NotificationReceiver" android:exported="false"/>']
+
+[ios]
+sources = ["ios/NotificationsPlugin.swift"]
+register = 'case "notifications": return await NotificationsPlugin.handle(op: op, input: input)'
+# iOS asks for notification authorization at runtime (requestPermission op) — no Info.plist key
+# required for local notifications.
