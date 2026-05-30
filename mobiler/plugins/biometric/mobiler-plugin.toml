@@ -1,0 +1,22 @@
+# Free, bundled Mobiler plugin: biometric authentication (Face ID / fingerprint). Call from Rust:
+#   cx.plugin("biometric", "authenticate", "Unlock your vault", |r| Msg::Authed(r.ok))
+#   → r.ok == true on success; r.ok == false (output = reason) on cancel / fail / unavailable.
+#
+# Install:  mobiler plugin add biometric
+# NOTE: needs the FragmentActivity shell (MainActivity extends FragmentActivity) — true since the
+# template was updated. Pair with the `securestore` plugin to protect stored secrets.
+name = "biometric"
+summary = "Biometric auth — Face ID / fingerprint (free)"
+
+[android]
+sources = ["android/BiometricPlugin.kt"]
+register = '"biometric" to BiometricPlugin(application)'
+gradle_deps = ["androidx.biometric:biometric:1.1.0"]
+
+[ios]
+sources = ["ios/BiometricPlugin.swift"]
+register = 'case "biometric": return await BiometricPlugin.handle(op: op, input: input)'
+
+# iOS requires this usage string to use Face ID (Touch ID needs no extra key).
+[ios.info_plist]
+NSFaceIDUsageDescription = "Authenticate to unlock secure features."

@@ -53,6 +53,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    // FragmentActivity host (MainActivity) — required by the biometric plugin's BiometricPrompt.
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
@@ -63,6 +65,8 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     // mobiler:gradle-deps — `mobiler plugin add` inserts plugin Gradle dependencies above this line
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

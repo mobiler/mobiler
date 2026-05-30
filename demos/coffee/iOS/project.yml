@@ -40,6 +40,8 @@ targets:
         # This demo uses the camera capability (cx.capture_photo), so it ships the
         # iOS-required usage string (the user is prompted on first camera use).
         NSCameraUsageDescription: "Take a photo to attach to a coffee."
+        # The biometric plugin uses Face ID (cx.plugin("biometric",…)).
+        NSFaceIDUsageDescription: "Authenticate to unlock secure features."
         # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four
         # orientations) by declaring the app full-screen.
         UIRequiresFullScreen: true
@@ -51,11 +53,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.coffee
         SWIFT_VERSION: "5.9"
         # TestFlight rejects a re-upload that reuses a build number, so bump
-        # CURRENT_PROJECT_VERSION for each new build. Build 4 fixed the back/photo tap bug
-        # (.allowsHitTesting(false) on images); build 5 adds the scanner plugin (a "Scan a code"
-        # button on the product detail) so barcode/QR scanning can be tested on a real device.
+        # CURRENT_PROJECT_VERSION for each new build. Build 5 added the scanner plugin; build 6
+        # adds biometric + securestore (a "Lock test" button: store a secret → Face ID → reveal),
+        # so auth can be tested on a real device.
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "5"
+        CURRENT_PROJECT_VERSION: "6"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]

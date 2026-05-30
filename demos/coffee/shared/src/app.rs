@@ -1,7 +1,7 @@
 use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, Cx, ImageRatio, ImageShape, InputValue, MobilerApp,
-    MobilerShell, Widget, button, card, card_button, chip, column, image, row, slider, stack,
-    stepper, text, title,
+    MobilerShell, PluginResponse, Widget, button, card, card_button, chip, column, image, row,
+    slider, stack, stepper, text, title,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,11 @@ pub enum Msg {
     GotPhoto(String),
     ScanCode,
     GotScan(String),
+    // Auth demo: store a secret, biometric-unlock, read it back.
+    SecureDemo,
+    StoredSecret(bool),
+    Authed(PluginResponse),
+    RevealedSecret(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -52,6 +57,7 @@ pub struct Model {
     device_info: String,           // filled by the device capability (request/response demo)
     picked_photo: Option<String>,  // a local image URI from the photo-picker capability
     scanned: Option<String>,       // last barcode/QR scanned via the scanner plugin
+    secret_status: Option<String>, // biometric + securestore demo status line
 }
 
 impl Default for Model {
@@ -73,6 +79,7 @@ impl Default for Model {
             device_info: String::new(),
             picked_photo: None,
             scanned: None,
+            secret_status: None,
         }
     }
 }
@@ -136,6 +143,34 @@ impl MobilerApp for Coffee {
                 Msg::GotScan(if r.ok { r.output } else { format!("(no scan: {})", r.output) })
             }),
             Msg::GotScan(result) => model.scanned = Some(result),
+            // Auth demo: store a secret in the keychain/keystore, then require a biometric
+            // unlock before reading it back — the canonical biometric + securestore pairing.
+            Msg::SecureDemo => {
+                model.secret_status = Some("Storing secret…".into());
+                cx.plugin("securestore", "set", r#"{"key":"demo","value":"espresso-42"}"#, |r| Msg::StoredSecret(r.ok));
+            }
+            Msg::StoredSecret(ok) => {
+                if ok {
+                    model.secret_status = Some("Stored. Authenticate to reveal it.".into());
+                    cx.plugin("biometric", "authenticate", "Reveal the secret", Msg::Authed);
+                } else {
+                    model.secret_status = Some("Couldn't store the secret.".into());
+                }
+            }
+            Msg::Authed(resp) => {
+                if resp.ok {
+                    cx.plugin("securestore", "get", r#"{"key":"demo"}"#, Msg::RevealedSecret);
+                } else {
+                    model.secret_status = Some(format!("Auth failed: {}", resp.output));
+                }
+            }
+            Msg::RevealedSecret(resp) => {
+                model.secret_status = Some(if resp.ok {
+                    format!("Unlocked secret: {}", resp.output)
+                } else {
+                    format!("Read failed: {}", resp.output)
+                });
+            }
         }
     }
 
@@ -208,6 +243,7 @@ fn detail(p: &Product, model: &Model) -> Widget {
         ]),
         row(vec![
             button("Scan a code", ButtonStyle::Filled, Msg::ScanCode),
+            button("Lock test", ButtonStyle::Outlined, Msg::SecureDemo),
         ]),
     ];
     if !model.device_info.is_empty() {
@@ -216,6 +252,10 @@ fn detail(p: &Product, model: &Model) -> Widget {
     // The scanner plugin returns "<format>:<value>" — show it so a tester can read the result.
     if let Some(code) = &model.scanned {
         items.push(mobiler_core::caption(format!("Scanned: {}", code)));
+    }
+    // biometric + securestore demo status.
+    if let Some(s) = &model.secret_status {
+        items.push(mobiler_core::caption(s.clone()));
     }
     // The photo capability returns a local image URI — fed straight to the image widget.
     if let Some(uri) = &model.picked_photo {
