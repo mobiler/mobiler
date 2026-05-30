@@ -1,4 +1,5 @@
 import AVFoundation
+import SharedTypes
 import UIKit
 
 // Barcode/QR scanner (free, bundled). iOS has no prebuilt scanner like Android's ML Kit, so

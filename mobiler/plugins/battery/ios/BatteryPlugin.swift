@@ -1,3 +1,4 @@
+import SharedTypes
 import UIKit
 
 // Reports the battery level as a percentage string ("0".."100"). `PluginResponse` is the
