@@ -1,0 +1,14 @@
+# A free sample Mobiler plugin: reads the device battery level. Demonstrates the plugin
+# package format used by `mobiler plugin add`. Call it from Rust with:
+#   cx.plugin("battery", "level", "", |r| Msg::GotBattery(r))   // r.output = "0".."100"
+name = "battery"
+summary = "Read the device battery level (free sample)"
+
+[android]
+sources = ["android/BatteryPlugin.kt"]
+register = '"battery" to BatteryPlugin(application)'
+# No permission needed to read the battery level.
+
+[ios]
+sources = ["ios/BatteryPlugin.swift"]
+register = 'case "battery": return await BatteryPlugin.handle(op: op, input: input)'

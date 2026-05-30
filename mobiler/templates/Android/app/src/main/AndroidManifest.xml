@@ -10,6 +10,8 @@
     <!-- Uncomment to enable the haptics capability (cx.haptic):
     <uses-permission android:name="android.permission.VIBRATE" /> -->
 
+    <!-- mobiler:permissions (plugin add inserts uses-permission lines above this line) -->
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

@@ -4,6 +4,8 @@ mod build;
 mod dev;
 mod doctor;
 mod new;
+mod plugin;
+mod templating;
 mod watch;
 
 #[derive(Parser)]
@@ -54,6 +56,11 @@ enum Command {
         #[arg(value_enum, default_value = "android")]
         platform: build::Platform,
     },
+    /// Manage plugins (add a capability package to this app).
+    Plugin {
+        #[command(subcommand)]
+        cmd: plugin::PluginCmd,
+    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -82,6 +89,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Build { platform } => match build::run(platform) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::Plugin { cmd } => match plugin::run(cmd) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

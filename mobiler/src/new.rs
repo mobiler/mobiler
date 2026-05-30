@@ -1,7 +1,8 @@
+use crate::templating::{Subs, is_binary, substitute, templated_path};
 use anyhow::{Context, Result, anyhow, bail};
 use include_dir::{Dir, include_dir};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
@@ -34,27 +35,6 @@ fn agentic_guide(flavor: AgenticGuide) -> String {
     }
 }
 
-/// File extensions treated as binary — copied byte-for-byte, no templating.
-const BINARY_EXTS: &[&str] = &["jar", "webp", "png", "ico"];
-
-/// File names treated as binary regardless of extension.
-const BINARY_NAMES: &[&str] = &["gradle-wrapper.jar", "gradlew.bat"];
-
-struct Subs {
-    /// User-visible project name (e.g. "Todos").
-    name: String,
-    /// Java/Kotlin package (e.g. "com.example.todos").
-    package: String,
-    /// Package as a path (e.g. "com/example/todos").
-    package_path: String,
-    /// Package + ".shared" — uniffi's output package.
-    package_shared: String,
-    /// Package + ".shared.types" — typegen's output package.
-    package_shared_types: String,
-    /// Installed NDK version, e.g. "30.0.14904198". Detected from $ANDROID_HOME/ndk/.
-    ndk_version: String,
-}
-
 /// Fallback NDK version pin when none is detectable. Update when bumping the framework's target NDK.
 const FALLBACK_NDK_VERSION: &str = "30.0.14904198";
 
@@ -78,14 +58,7 @@ pub fn run(raw_name: &str, package: Option<&str>, agentic: Option<AgenticGuide>)
     let ndk_version = detect_ndk_version(android_home.as_deref())
         .unwrap_or_else(|| FALLBACK_NDK_VERSION.to_string());
 
-    let subs = Subs {
-        name: display_name.clone(),
-        package_path: package.replace('.', "/"),
-        package_shared: format!("{package}.shared"),
-        package_shared_types: format!("{package}.shared.types"),
-        package,
-        ndk_version: ndk_version.clone(),
-    };
+    let subs = Subs::from_package(package, display_name.clone(), ndk_version.clone());
 
     let mut written = 0usize;
     write_dir(&TEMPLATES, &out_dir, &subs, &mut written)?;
@@ -149,37 +122,15 @@ fn write_dir(dir: &Dir<'_>, out_root: &Path, subs: &Subs, written: &mut usize) -
     Ok(())
 }
 
-/// Apply path-level transforms:
-/// - `__PACKAGE_PATH__` is replaced with the package's directory form.
-/// - A trailing `.tmpl` is stripped. Template manifests are stored as
-///   `Cargo.toml.tmpl` so `cargo package` doesn't treat `templates/` as a nested
-///   package and drop it from the published crate; they scaffold back to
-///   `Cargo.toml`.
-fn templated_path(rel: &Path, subs: &Subs) -> PathBuf {
-    let as_str = rel.to_string_lossy();
-    let replaced = as_str.replace("__PACKAGE_PATH__", &subs.package_path);
-    let replaced = replaced.strip_suffix(".tmpl").unwrap_or(&replaced);
-    PathBuf::from(replaced)
-}
-
-fn substitute(raw: &str, subs: &Subs) -> String {
-    raw.replace("{{PACKAGE_SHARED_TYPES}}", &subs.package_shared_types)
-        .replace("{{PACKAGE_SHARED}}", &subs.package_shared)
-        .replace("{{PACKAGE_PATH}}", &subs.package_path)
-        .replace("{{PACKAGE}}", &subs.package)
-        .replace("{{NDK_VERSION}}", &subs.ndk_version)
-        .replace("{{NAME}}", &subs.name)
-}
-
 fn detect_ndk_version(android_home: Option<&str>) -> Option<String> {
     let home = android_home?;
     let ndk_dir = Path::new(home).join("ndk");
-    let max = fs::read_dir(ndk_dir).ok()?
+    fs::read_dir(ndk_dir)
+        .ok()?
         .filter_map(Result::ok)
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .filter_map(|e| e.file_name().into_string().ok())
-        .max();
-    max
+        .max()
 }
 
 fn write_local_properties(out_dir: &Path, sdk_dir: &str) -> Result<()> {
@@ -187,18 +138,6 @@ fn write_local_properties(out_dir: &Path, sdk_dir: &str) -> Result<()> {
     fs::write(&path, format!("sdk.dir={sdk_dir}\n"))
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(())
-}
-
-fn is_binary(p: &Path) -> bool {
-    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-        if BINARY_NAMES.contains(&name) {
-            return true;
-        }
-    }
-    p.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| BINARY_EXTS.contains(&e))
-        .unwrap_or(false)
 }
 
 #[cfg(unix)]
@@ -229,9 +168,7 @@ fn sanitize_project_name(raw: &str) -> Result<String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     if !valid {
-        bail!(
-            "project name `{trimmed}` must contain only [a-zA-Z0-9_-]; got an invalid character"
-        );
+        bail!("project name `{trimmed}` must contain only [a-zA-Z0-9_-]; got an invalid character");
     }
     if !trimmed.chars().next().unwrap().is_ascii_alphabetic() {
         bail!("project name must start with a letter");
@@ -240,7 +177,6 @@ fn sanitize_project_name(raw: &str) -> Result<String> {
 }
 
 /// Convert kebab-case / snake_case / lowercase project name into PascalCase.
-/// Examples: "mobiler-test" -> "MobilerTest", "todos" -> "Todos", "my_app" -> "MyApp".
 fn display_name_from(name: &str) -> String {
     let mut result = String::new();
     let mut capitalize_next = true;
@@ -257,139 +193,7 @@ fn display_name_from(name: &str) -> String {
     result
 }
 
-#[cfg(test)]
-mod test {
-    use super::{
-        Subs, default_package, display_name_from, is_binary, sanitize_project_name, substitute,
-        templated_path, validate_package,
-    };
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn pascal_case_conversion() {
-        assert_eq!(display_name_from("todos"), "Todos");
-        assert_eq!(display_name_from("mobiler-test"), "MobilerTest");
-        assert_eq!(display_name_from("my_app"), "MyApp");
-        assert_eq!(display_name_from("Counter"), "Counter");
-        assert_eq!(display_name_from("foo-bar-baz"), "FooBarBaz");
-    }
-
-    fn subs() -> Subs {
-        Subs {
-            name: "Todos".into(),
-            package: "dev.mobiler.todos".into(),
-            package_path: "dev/mobiler/todos".into(),
-            package_shared: "dev.mobiler.todos.shared".into(),
-            package_shared_types: "dev.mobiler.todos.shared.types".into(),
-            ndk_version: "30.0.14904198".into(),
-        }
-    }
-
-    #[test]
-    fn templated_path_strips_tmpl_suffix() {
-        let s = subs();
-        // Template manifests scaffold back to real manifests.
-        assert_eq!(templated_path(Path::new("Cargo.toml.tmpl"), &s), PathBuf::from("Cargo.toml"));
-        assert_eq!(
-            templated_path(Path::new("shared/Cargo.toml.tmpl"), &s),
-            PathBuf::from("shared/Cargo.toml")
-        );
-    }
-
-    #[test]
-    fn templated_path_expands_package_path() {
-        let s = subs();
-        assert_eq!(
-            templated_path(Path::new("Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt"), &s),
-            PathBuf::from("Android/app/src/main/java/dev/mobiler/todos/MainActivity.kt")
-        );
-        // Non-template files are left untouched.
-        assert_eq!(templated_path(Path::new("shared/src/app.rs"), &s), PathBuf::from("shared/src/app.rs"));
-    }
-
-    #[test]
-    fn substitute_replaces_every_placeholder_in_specificity_order() {
-        let s = subs();
-        // Order matters: `{{PACKAGE_SHARED_TYPES}}` must be replaced before `{{PACKAGE}}`,
-        // or the longer token gets mangled by a partial `{{PACKAGE}}` match. This pins it.
-        let raw = "p={{PACKAGE}} pst={{PACKAGE_SHARED_TYPES}} ps={{PACKAGE_SHARED}} \
-                   pp={{PACKAGE_PATH}} n={{NAME}} ndk={{NDK_VERSION}}";
-        let out = substitute(raw, &s);
-        assert_eq!(
-            out,
-            "p=dev.mobiler.todos pst=dev.mobiler.todos.shared.types ps=dev.mobiler.todos.shared \
-             pp=dev/mobiler/todos n=Todos ndk=30.0.14904198"
-        );
-        assert!(!out.contains("{{"), "no placeholder should be left behind");
-    }
-
-    #[test]
-    fn sanitize_project_name_accepts_valid_and_rejects_bad() {
-        assert_eq!(sanitize_project_name("  my-app ").unwrap(), "my-app"); // trimmed
-        assert_eq!(sanitize_project_name("Counter").unwrap(), "Counter");
-        assert!(sanitize_project_name("").is_err()); // empty
-        assert!(sanitize_project_name("   ").is_err()); // whitespace only
-        assert!(sanitize_project_name("1app").is_err()); // must start with a letter
-        assert!(sanitize_project_name("my app").is_err()); // space is invalid
-        assert!(sanitize_project_name("my.app").is_err()); // dot is invalid
-    }
-
-    #[test]
-    fn validate_package_enforces_segments_and_chars() {
-        assert!(validate_package("dev.mobiler.todos").is_ok());
-        assert!(validate_package("dev.example").is_ok());
-        assert!(validate_package("").is_err()); // empty
-        assert!(validate_package("single").is_err()); // needs >= 2 segments
-        assert!(validate_package("dev..todos").is_err()); // empty segment
-        assert!(validate_package("dev.1bad").is_err()); // segment starts with a digit
-        assert!(validate_package("dev.bad-seg").is_err()); // hyphen not allowed in a package
-    }
-
-    #[test]
-    fn default_package_lowercases_and_underscores_hyphens() {
-        assert_eq!(default_package("Todos"), "dev.mobiler.todos");
-        assert_eq!(default_package("my-app"), "dev.mobiler.my_app");
-        assert_eq!(default_package("Counter"), "dev.mobiler.counter");
-    }
-
-    #[test]
-    fn is_binary_by_extension_and_by_name() {
-        assert!(is_binary(Path::new("app/src/main/res/icon.png")));
-        assert!(is_binary(Path::new("libs/foo.jar")));
-        assert!(is_binary(Path::new("Android/gradlew.bat"))); // by exact name
-        assert!(is_binary(Path::new("gradle/wrapper/gradle-wrapper.jar")));
-        assert!(!is_binary(Path::new("shared/src/app.rs"))); // text → templated
-        assert!(!is_binary(Path::new("Android/app/build.gradle.kts")));
-    }
-
-    #[test]
-    fn agentic_guides_compose_base_plus_flavor() {
-        use super::{AgenticGuide, agentic_guide};
-        let base = agentic_guide(AgenticGuide::Generic);
-        assert!(base.contains("MobilerApp"), "base explains the core trait");
-        assert!(base.contains("widget vocabulary"), "base lists the UI builder vocabulary");
-        assert!(base.contains("cx."), "base covers capabilities");
-        assert!(base.len() > 1500);
-        // The default (base) guide is mobile-only + backend-agnostic — no web in it.
-        assert!(!base.contains("mobiler_web"), "base must not assume a web target");
-        assert!(!base.to_lowercase().contains("trunk"), "base must not mention the web toolchain");
-
-        // Each flavor = the base primer, then a flavor-specific appendix.
-        let shared = agentic_guide(AgenticGuide::SharedUi);
-        assert!(shared.starts_with(&base), "flavor guides begin with the base primer");
-        assert!(
-            shared.contains("same UI on mobile and web") && shared.contains("mobiler_web"),
-            "shared-ui adds the web target"
-        );
-
-        let api = agentic_guide(AgenticGuide::Api);
-        assert!(api.starts_with(&base));
-        assert!(api.contains("reusable core + JSON API") && api.contains("SQLx"), "api appendix present");
-    }
-}
-
 fn default_package(name: &str) -> String {
-    // Package names must contain only [a-z0-9_], so lowercase + replace hyphens.
     let sanitized: String = name
         .to_lowercase()
         .chars()
@@ -414,10 +218,126 @@ fn validate_package(pkg: &str) -> Result<()> {
             bail!("package segment `{part}` must start with a letter");
         }
         if !part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err(anyhow!(
-                "package segment `{part}` may contain only [a-zA-Z0-9_]"
-            ));
+            return Err(anyhow!("package segment `{part}` may contain only [a-zA-Z0-9_]"));
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::{
+        AgenticGuide, agentic_guide, default_package, display_name_from, sanitize_project_name,
+        validate_package,
+    };
+    use crate::templating::{Subs, is_binary, substitute, templated_path};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn pascal_case_conversion() {
+        assert_eq!(display_name_from("todos"), "Todos");
+        assert_eq!(display_name_from("mobiler-test"), "MobilerTest");
+        assert_eq!(display_name_from("my_app"), "MyApp");
+        assert_eq!(display_name_from("Counter"), "Counter");
+        assert_eq!(display_name_from("foo-bar-baz"), "FooBarBaz");
+    }
+
+    fn subs() -> Subs {
+        Subs::from_package("dev.mobiler.todos".into(), "Todos".into(), "30.0.14904198".into())
+    }
+
+    #[test]
+    fn templated_path_strips_tmpl_suffix() {
+        let s = subs();
+        assert_eq!(templated_path(Path::new("Cargo.toml.tmpl"), &s), PathBuf::from("Cargo.toml"));
+        assert_eq!(
+            templated_path(Path::new("shared/Cargo.toml.tmpl"), &s),
+            PathBuf::from("shared/Cargo.toml")
+        );
+    }
+
+    #[test]
+    fn templated_path_expands_package_path() {
+        let s = subs();
+        assert_eq!(
+            templated_path(Path::new("Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt"), &s),
+            PathBuf::from("Android/app/src/main/java/dev/mobiler/todos/MainActivity.kt")
+        );
+        assert_eq!(templated_path(Path::new("shared/src/app.rs"), &s), PathBuf::from("shared/src/app.rs"));
+    }
+
+    #[test]
+    fn substitute_replaces_every_placeholder_in_specificity_order() {
+        let s = subs();
+        let raw = "p={{PACKAGE}} pst={{PACKAGE_SHARED_TYPES}} ps={{PACKAGE_SHARED}} \
+                   pp={{PACKAGE_PATH}} n={{NAME}} ndk={{NDK_VERSION}}";
+        let out = substitute(raw, &s);
+        assert_eq!(
+            out,
+            "p=dev.mobiler.todos pst=dev.mobiler.todos.shared.types ps=dev.mobiler.todos.shared \
+             pp=dev/mobiler/todos n=Todos ndk=30.0.14904198"
+        );
+        assert!(!out.contains("{{"), "no placeholder should be left behind");
+    }
+
+    #[test]
+    fn sanitize_project_name_accepts_valid_and_rejects_bad() {
+        assert_eq!(sanitize_project_name("  my-app ").unwrap(), "my-app");
+        assert_eq!(sanitize_project_name("Counter").unwrap(), "Counter");
+        assert!(sanitize_project_name("").is_err());
+        assert!(sanitize_project_name("   ").is_err());
+        assert!(sanitize_project_name("1app").is_err());
+        assert!(sanitize_project_name("my app").is_err());
+        assert!(sanitize_project_name("my.app").is_err());
+    }
+
+    #[test]
+    fn validate_package_enforces_segments_and_chars() {
+        assert!(validate_package("dev.mobiler.todos").is_ok());
+        assert!(validate_package("dev.example").is_ok());
+        assert!(validate_package("").is_err());
+        assert!(validate_package("single").is_err());
+        assert!(validate_package("dev..todos").is_err());
+        assert!(validate_package("dev.1bad").is_err());
+        assert!(validate_package("dev.bad-seg").is_err());
+    }
+
+    #[test]
+    fn default_package_lowercases_and_underscores_hyphens() {
+        assert_eq!(default_package("Todos"), "dev.mobiler.todos");
+        assert_eq!(default_package("my-app"), "dev.mobiler.my_app");
+        assert_eq!(default_package("Counter"), "dev.mobiler.counter");
+    }
+
+    #[test]
+    fn is_binary_by_extension_and_by_name() {
+        assert!(is_binary(Path::new("app/src/main/res/icon.png")));
+        assert!(is_binary(Path::new("libs/foo.jar")));
+        assert!(is_binary(Path::new("Android/gradlew.bat")));
+        assert!(is_binary(Path::new("gradle/wrapper/gradle-wrapper.jar")));
+        assert!(!is_binary(Path::new("shared/src/app.rs")));
+        assert!(!is_binary(Path::new("Android/app/build.gradle.kts")));
+    }
+
+    #[test]
+    fn agentic_guides_compose_base_plus_flavor() {
+        let base = agentic_guide(AgenticGuide::Generic);
+        assert!(base.contains("MobilerApp"), "base explains the core trait");
+        assert!(base.contains("widget vocabulary"), "base lists the UI builder vocabulary");
+        assert!(base.contains("cx."), "base covers capabilities");
+        assert!(base.len() > 1500);
+        assert!(!base.contains("mobiler_web"), "base must not assume a web target");
+        assert!(!base.to_lowercase().contains("trunk"), "base must not mention the web toolchain");
+
+        let shared = agentic_guide(AgenticGuide::SharedUi);
+        assert!(shared.starts_with(&base), "flavor guides begin with the base primer");
+        assert!(
+            shared.contains("same UI on mobile and web") && shared.contains("mobiler_web"),
+            "shared-ui adds the web target"
+        );
+
+        let api = agentic_guide(AgenticGuide::Api);
+        assert!(api.starts_with(&base));
+        assert!(api.contains("reusable core + JSON API") && api.contains("SQLx"), "api appendix present");
+    }
 }

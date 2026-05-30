@@ -78,6 +78,7 @@ enum Plugins {
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
         case "photo": return await PhotoPlugin.handle(op: op, input: input)
         case "camera": return await CameraPlugin.handle(op: op, input: input)
+        // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
         }
