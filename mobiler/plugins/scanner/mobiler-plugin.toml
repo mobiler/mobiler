@@ -1,0 +1,23 @@
+# Free, bundled Mobiler plugin: barcode / QR scanner (single-shot). Call it from Rust with:
+#   cx.plugin("scanner", "scan", "", |r| Msg::Scanned(r))
+#   → r.output = "<format>:<value>", e.g. "qr:https://…" or "ean13:9781234567897".
+#     r.ok == false on cancel / no camera / permission denied.
+#
+# Install:  mobiler plugin add scanner
+name = "scanner"
+summary = "Barcode / QR scanner — single-shot, returns <format>:<value> (free)"
+
+[android]
+sources = ["android/ScannerPlugin.kt"]
+register = '"scanner" to ScannerPlugin(application)'
+# ML Kit's GmsBarcodeScanner ships its own camera UI + asks for the camera permission itself,
+# so the plugin needs no CAMERA permission in the manifest and no CameraX plumbing.
+gradle_deps = ["com.google.android.gms:play-services-code-scanner:16.1.0"]
+
+[ios]
+sources = ["ios/ScannerPlugin.swift"]
+register = 'case "scanner": return await ScannerPlugin.handle(op: op, input: input)'
+
+# iOS requires a camera usage string to open the camera (the scanner uses AVCaptureSession).
+[ios.info_plist]
+NSCameraUsageDescription = "Scan barcodes and QR codes."

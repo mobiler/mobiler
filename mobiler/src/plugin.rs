@@ -50,6 +50,10 @@ struct PlatformSpec {
     register: String,
     #[serde(default)]
     permissions: Vec<String>,
+    /// Gradle dependency coordinates (e.g. "com.google.android.gms:play-services-code-scanner:16.1.0").
+    /// Each becomes an `implementation("…")` line in the app's build.gradle.kts.
+    #[serde(default)]
+    gradle_deps: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +165,11 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
         for perm in &a.permissions {
             let line = format!("<uses-permission android:name=\"{perm}\" />");
             report(insert_before(&manifest_xml, "mobiler:permissions", &line, perm)?, "Android permission");
+        }
+        let gradle = root.join("Android/app/build.gradle.kts");
+        for dep in &a.gradle_deps {
+            let line = format!("implementation(\"{dep}\")");
+            report(insert_before(&gradle, "mobiler:gradle-deps", &line, dep)?, "Android Gradle dependency");
         }
     }
 
@@ -318,6 +327,11 @@ mod test {
         .unwrap();
         fs::write(root.join("Android/settings.gradle.kts"), "rootProject.name = \"Demo\"\n").unwrap();
         fs::write(
+            root.join("Android/app/build.gradle.kts"),
+            "dependencies {\n    implementation(project(\":shared\"))\n    // mobiler:gradle-deps\n}\n",
+        )
+        .unwrap();
+        fs::write(
             root.join("iOS/Sources/Core.swift"),
             "switch plugin {\n        case \"http\": return x\n        // mobiler:plugins\n        default: return y\n        }\n",
         )
@@ -384,6 +398,10 @@ mod test {
         let yml = t("iOS/project.yml");
         assert!(yml.contains("# mobiler:info-plist"), "project.yml needs the info-plist anchor");
         assert!(yml.contains("# mobiler:target-extra"), "project.yml needs the target-extra anchor");
+        assert!(
+            t("Android/app/build.gradle.kts").contains("mobiler:gradle-deps"),
+            "build.gradle.kts needs the mobiler:gradle-deps anchor"
+        );
     }
 
     #[test]
@@ -403,6 +421,7 @@ mod test {
 sources = ["android/FooPlugin.kt"]
 register = '"foo" to FooPlugin(application)'
 permissions = ["android.permission.NFC"]
+gradle_deps = ["com.example:foo:1.2.3"]
 [ios]
 sources = ["ios/FooPlugin.swift"]
 register = 'case "foo": return await FooPlugin.handle(op: op, input: input)'
@@ -418,6 +437,8 @@ NFCReaderUsageDescription = "use nfc"
 
         let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
         assert!(manifest.contains("android.permission.NFC"), "permission added");
+    let gradle = read(&root, "Android/app/build.gradle.kts");
+    assert!(gradle.contains("implementation(\"com.example:foo:1.2.3\")"), "gradle dep added");
         let project = read(&root, "iOS/project.yml");
         assert!(project.contains("NFCReaderUsageDescription: \"use nfc\""), "info.plist key added");
         assert!(
