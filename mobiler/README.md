@@ -35,7 +35,31 @@ cd myapp
 mobiler dev             # build core → generate types → build APK → install + launch
 mobiler watch           # …same, re-running on every change
 mobiler build ios       # build the iOS app (on a Mac)
+mobiler plugin list     # list the bundled capability plugins
+mobiler plugin add scanner   # install a plugin into the app
 ```
+
+## Plugins
+
+Advanced native capabilities install as **droppable plugins** — one command, no framework code or
+ABI change. Bundled free plugins:
+
+| Plugin | Capability |
+|---|---|
+| 🔎 `scanner` | barcode / QR scanning |
+| 🔐 `biometric` | Face ID / fingerprint auth |
+| 🗝️ `securestore` | encrypted key/value (Keychain / Keystore) |
+| 🔌 `websocket` | persistent real-time connection |
+| 🔋 `battery` | device battery level (sample) |
+
+```bash
+mobiler plugin list
+mobiler plugin add scanner
+```
+
+`mobiler plugin add` also takes a local package directory (`mobiler-plugin.toml` + native sources),
+which is how commercial/licensed plugins ship. Call one from Rust via `cx.plugin("<name>", "<op>",
+input, then)`.
 
 ### Agent-ready scaffolds: `--agentic`
 
