@@ -47,6 +47,7 @@ targets:
         # requires this usage string to access the camera; the App Store flags apps that
         # ship it without using the camera, so it's left off by default.
         # NSCameraUsageDescription: "Take photos to use in the app."
+        # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: {{PACKAGE}}
@@ -63,3 +64,4 @@ targets:
         # The archive is built unsigned (build-ios.sh signs at export for App Store); the
         # simulator + device compile-check builds need no signing either.
         CODE_SIGNING_ALLOWED: "NO"
+    # mobiler:target-extra (plugin add inserts a target-level entitlements block above this line)
