@@ -28,6 +28,8 @@ pub enum Msg {
     PickPhoto,
     CapturePhoto,
     GotPhoto(String),
+    ScanCode,
+    GotScan(String),
 }
 
 #[derive(Clone)]
@@ -49,6 +51,7 @@ pub struct Model {
     quantity: i32,
     device_info: String,           // filled by the device capability (request/response demo)
     picked_photo: Option<String>,  // a local image URI from the photo-picker capability
+    scanned: Option<String>,       // last barcode/QR scanned via the scanner plugin
 }
 
 impl Default for Model {
@@ -69,6 +72,7 @@ impl Default for Model {
             quantity: 1,
             device_info: String::new(),
             picked_photo: None,
+            scanned: None,
         }
     }
 }
@@ -126,6 +130,12 @@ impl MobilerApp for Coffee {
                     model.picked_photo = Some(uri);
                 }
             }
+            // Scanner plugin (free, bundled). Returns "<format>:<value>" (e.g. "qr:…",
+            // "ean13:…"); on cancel / no camera / denied it returns ok:false (output = reason).
+            Msg::ScanCode => cx.plugin("scanner", "scan", "", |r| {
+                Msg::GotScan(if r.ok { r.output } else { format!("(no scan: {})", r.output) })
+            }),
+            Msg::GotScan(result) => model.scanned = Some(result),
         }
     }
 
@@ -196,9 +206,16 @@ fn detail(p: &Product, model: &Model) -> Widget {
             button("Pick a photo", ButtonStyle::Outlined, Msg::PickPhoto),
             button("Take a photo", ButtonStyle::Outlined, Msg::CapturePhoto),
         ]),
+        row(vec![
+            button("Scan a code", ButtonStyle::Filled, Msg::ScanCode),
+        ]),
     ];
     if !model.device_info.is_empty() {
         items.push(mobiler_core::caption(format!("This device: {}", model.device_info)));
+    }
+    // The scanner plugin returns "<format>:<value>" — show it so a tester can read the result.
+    if let Some(code) = &model.scanned {
+        items.push(mobiler_core::caption(format!("Scanned: {}", code)));
     }
     // The photo capability returns a local image URI — fed straight to the image widget.
     if let Some(uri) = &model.picked_photo {
