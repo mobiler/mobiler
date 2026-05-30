@@ -40,6 +40,10 @@ pub enum Msg {
     WsOpen(PluginResponse),
     WsSent(PluginResponse),
     WsFrame(PluginResponse),
+    // Notifications demo: ask permission, schedule a reminder ~10s out.
+    RemindMe,
+    NotifAllowed(PluginResponse),
+    NotifScheduled(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -64,6 +68,7 @@ pub struct Model {
     scanned: Option<String>,       // last barcode/QR scanned via the scanner plugin
     secret_status: Option<String>, // biometric + securestore demo status line
     ws_status: Option<String>,     // websocket echo demo status line
+    notif_status: Option<String>,  // notifications demo status line
 }
 
 impl Default for Model {
@@ -87,6 +92,7 @@ impl Default for Model {
             scanned: None,
             secret_status: None,
             ws_status: None,
+            notif_status: None,
         }
     }
 }
@@ -204,6 +210,32 @@ impl MobilerApp for Coffee {
                     cx.plugin("websocket", "close", "", Msg::WsSent);
                 }
             }
+            // Notifications: ask permission, then schedule a reminder ~10s out so a tester
+            // can background the app and watch it fire.
+            Msg::RemindMe => {
+                model.notif_status = Some("Requesting permission…".into());
+                cx.plugin("notifications", "requestPermission", "", Msg::NotifAllowed);
+            }
+            Msg::NotifAllowed(resp) => {
+                if resp.ok {
+                    model.notif_status = Some("Scheduling a reminder in ~10s — background the app".into());
+                    cx.plugin(
+                        "notifications",
+                        "schedule",
+                        r#"{"id":1,"title":"Coffee reminder","body":"Your espresso awaits ☕","after_seconds":10}"#,
+                        Msg::NotifScheduled,
+                    );
+                } else {
+                    model.notif_status = Some(format!("Notifications not allowed: {}", resp.output));
+                }
+            }
+            Msg::NotifScheduled(resp) => {
+                model.notif_status = Some(if resp.ok {
+                    "Reminder set — background the app to see it fire".into()
+                } else {
+                    format!("Schedule failed: {}", resp.output)
+                });
+            }
         }
     }
 
@@ -278,6 +310,7 @@ fn detail(p: &Product, model: &Model) -> Widget {
             button("Scan a code", ButtonStyle::Filled, Msg::ScanCode),
             button("Lock test", ButtonStyle::Outlined, Msg::SecureDemo),
             button("WS echo", ButtonStyle::Outlined, Msg::WsEcho),
+            button("Remind me", ButtonStyle::Outlined, Msg::RemindMe),
         ]),
     ];
     if !model.device_info.is_empty() {
@@ -293,6 +326,10 @@ fn detail(p: &Product, model: &Model) -> Widget {
     }
     // websocket echo demo status.
     if let Some(s) = &model.ws_status {
+        items.push(mobiler_core::caption(s.clone()));
+    }
+    // notifications demo status.
+    if let Some(s) = &model.notif_status {
         items.push(mobiler_core::caption(s.clone()));
     }
     // The photo capability returns a local image URI — fed straight to the image widget.

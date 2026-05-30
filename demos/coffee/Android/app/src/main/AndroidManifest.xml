@@ -6,6 +6,8 @@
     <!-- This demo uses the haptics capability (cx.haptic), so it opts into VIBRATE.
          Capabilities are opt-in per permission: an app requests only what it uses. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- mobiler:permissions (plugin add inserts uses-permission lines above this line) -->
 
     <application
         android:allowBackup="true"
@@ -39,6 +41,9 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver android:name=".NotificationReceiver" android:exported="false"/>
+        <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
     </application>
 
 </manifest>

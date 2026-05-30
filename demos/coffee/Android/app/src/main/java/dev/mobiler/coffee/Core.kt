@@ -241,6 +241,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "biometric" to BiometricPlugin(application),
         "securestore" to SecureStorePlugin(application),
         "websocket" to WebSocketPlugin(application),
+        "notifications" to NotificationsPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

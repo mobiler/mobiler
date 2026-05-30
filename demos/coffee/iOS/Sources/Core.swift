@@ -82,6 +82,7 @@ enum Plugins {
         case "biometric": return await BiometricPlugin.handle(op: op, input: input)
         case "securestore": return await SecureStorePlugin.handle(op: op, input: input)
         case "websocket": return await WebSocketPlugin.handle(op: op, input: input)
+        case "notifications": return await NotificationsPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
