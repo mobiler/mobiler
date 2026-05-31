@@ -1,5 +1,7 @@
 package {{PACKAGE}}
 
+import {{PACKAGE_SHARED_TYPES}}.PluginResponse
+
 import kotlinx.coroutines.channels.Channel
 import okhttp3.OkHttpClient
 import okhttp3.Request

@@ -1,5 +1,7 @@
 package dev.mobiler.coffee
 
+import dev.mobiler.coffee.shared.types.PluginResponse
+
 import kotlinx.coroutines.channels.Channel
 import okhttp3.OkHttpClient
 import okhttp3.Request

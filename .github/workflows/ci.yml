@@ -221,6 +221,44 @@ jobs:
           cd scaffold_test
           "$MOBILER" build android
 
+  # Build a real demo (coffee) for Android — it carries INSTALLED plugins (scanner,
+  # biometric, securestore, websocket, notifications), which the template/scaffold lane
+  # doesn't exercise. Guards plugin-shell compile regressions (e.g. a bundled plugin .kt
+  # referencing a generated `shared.types` type without importing it).
+  android-demo:
+    name: Android build (demos/coffee)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + Android targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install the Android NDK pinned by the template
+        run: |
+          set +o pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;30.0.14904198"
+
+      - name: Build the mobiler CLI
+        run: cargo build -p mobiler
+
+      - name: Build coffee for Android
+        run: |
+          MOBILER="$GITHUB_WORKSPACE/target/debug/mobiler"
+          cd demos/coffee
+          "$MOBILER" build android
+
   # Coverage gate for the unit-testable logic (root workspace). The CLI's
   # process-spawning command modules (build/dev/doctor/watch/main) shell out to
   # gradle/adb/cargo and can't be unit-tested, so they're excluded; the gate then

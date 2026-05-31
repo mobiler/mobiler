@@ -1,5 +1,7 @@
 package dev.mobiler.coffee
 
+import dev.mobiler.coffee.shared.types.PluginResponse
+
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
