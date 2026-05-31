@@ -20,9 +20,8 @@ use std::sync::Arc;
 use crux_core::{App, Core};
 use leptos::prelude::*;
 use mobiler_core::{
-    Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, Effect, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, ProjectColor, Spacing,
-    TextStyle, Theme, Tone, Widget,
+    Action, BoxAlign, ButtonStyle, CardStyle, Effect, Icon, ImageRatio, ImageShape, InputValue,
+    PluginCall, PluginNotify, PluginResponse, ProjectColor, Spacing, TextStyle, Tone, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -482,7 +481,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, route, depth } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, route, depth } => {
             let back_btn = back.clone().map(|token| {
                 let send = send.clone();
                 view! {
@@ -512,12 +511,9 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // the web twin of the native shells' `preferredColorScheme`/Material theme.
             let class = if *dark_mode { "scaffold theme-dark" } else { "scaffold" };
             let body_class = format!("scaffold-body {}", nav_class(route, *depth));
-            // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
-            // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
-            let theme_style = theme.as_ref().map(theme_css).unwrap_or_default();
             let (title, body) = (title.clone(), render(body, send));
             view! {
-                <div class=class style=theme_style>
+                <div class=class>
                     <div class="topbar">
                         {back_btn}
                         <span class="title">{title}</span>
@@ -542,35 +538,6 @@ thread_local! {
     /// threaded). Lets the Scaffold body animate on navigation — the web twin of
     /// the native shells keying their body on `route`.
     static NAV: RefCell<(String, u32, bool)> = const { RefCell::new((String::new(), 0, false)) };
-}
-
-/// Render an app [`Theme`] as inline CSS custom properties on the scaffold root — the web
-/// twin of the native brand/tint + shape + spacing + font. Overrides `mobiler.css`'s defaults
-/// (its rules read these via `var(--…)`); dark mode still works (it only swaps the colors the
-/// seed doesn't pin).
-fn theme_css(t: &Theme) -> String {
-    let (r, g, b) = (t.seed.r, t.seed.g, t.seed.b);
-    let radius = match t.corner {
-        Corner::None => "0px",
-        Corner::Small => "8px",
-        Corner::Medium => "14px",
-        Corner::Large => "22px",
-    };
-    let (gap, pad) = match t.density {
-        Density::Compact => ("8px", "10px"),
-        Density::Comfortable => ("12px", "14px"),
-    };
-    let font = match t.font {
-        FontFamily::System => "system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif",
-        FontFamily::Rounded => "ui-rounded, \"SF Pro Rounded\", \"Segoe UI\", system-ui, sans-serif",
-        FontFamily::Serif => "ui-serif, Georgia, \"Times New Roman\", serif",
-        FontFamily::Monospace => "ui-monospace, \"SF Mono\", \"Cascadia Code\", Menlo, monospace",
-    };
-    format!(
-        "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
-         --accent-soft:rgba({r},{g},{b},0.16);--radius:{radius};\
-         --gap:{gap};--pad:{pad};--font:{font};"
-    )
 }
 
 /// Pick the Scaffold body's transition class for this render. Returns `""` for a

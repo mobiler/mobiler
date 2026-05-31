@@ -17,8 +17,8 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, ProjectColor, Rgb, Spacing, Tab, TextStyle, Theme, Tone, Widget,
+    Action, BoxAlign, ButtonStyle, CardStyle, Icon, ImageRatio, ImageShape, InputValue,
+    ProjectColor, Spacing, Tab, TextStyle, Tone, Widget,
 };
 
 // ============================ capabilities ============================
@@ -456,7 +456,7 @@ pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E)
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, depth: 1 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, depth: 1 }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -465,7 +465,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, depth: 2 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, depth: 2 }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -491,28 +491,8 @@ where
         tabs,
         back: if nav.can_go_back() { Some(tok(on_back)) } else { None },
         dark_mode,
-        theme: None,
         route: nav.route_key(),
         depth: nav.depth(),
-    }
-}
-
-/// Apply a [`Theme`] to a scaffold (brand color, corner, density, font). No-op on any
-/// other widget. Lets an app brand its UI without new scaffold builder overloads:
-/// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
-pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
-    match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, route, depth, .. } => Widget::Scaffold {
-            title,
-            body,
-            tabs,
-            back,
-            dark_mode,
-            theme: Some(theme),
-            route,
-            depth,
-        },
-        other => other,
     }
 }
 

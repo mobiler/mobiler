@@ -158,12 +158,9 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun App(core: Core = viewModel()) {
     val view = core.view
-    // Theme is data: a Scaffold carries dark_mode + an optional brand `theme`, from the Rust core.
-    // Brand color, corner radius (Cards via MaterialTheme.shapes), and font flow through
-    // MaterialTheme automatically. (Density + image-corner are a follow-up on Android.)
+    // Theme is data: a Scaffold carries dark_mode, decided by the Rust core.
     val dark = (view as? Widget.Scaffold)?.darkMode ?: isSystemInDarkTheme()
-    val appTheme = (view as? Widget.Scaffold)?.theme
-    {{NAME}}Theme(darkTheme = dark, theme = appTheme) {
+    {{NAME}}Theme(darkTheme = dark) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (view is Widget.Scaffold) {
                 // Scaffold provides its own bars + scrollable body.
