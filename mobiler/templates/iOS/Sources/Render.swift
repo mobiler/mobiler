@@ -191,11 +191,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 }
 
 /// The active app [`Theme`] (set when a Scaffold renders), read by the non-View mapper helpers
-/// for corner/density/font. `nil` ⇒ framework defaults (no visual change). Single-threaded,
-/// main-actor render, so a static is safe — and the theme is app-global, like dark mode.
-@MainActor
+/// for corner/density/font. `nil` ⇒ framework defaults (no visual change). Render is
+/// single-threaded on the main actor, so `nonisolated(unsafe)` is sound here — it lets the
+/// nonisolated mapper helpers (spacing/imageShape/TextStyleMod) read it; the theme is
+/// app-global, like dark mode.
 enum ActiveTheme {
-    static var current: Theme?
+    nonisolated(unsafe) static var current: Theme?
 }
 
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
