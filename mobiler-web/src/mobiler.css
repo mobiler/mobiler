@@ -18,6 +18,10 @@
   --accent: #3f4a8a;
   --accent-soft: rgba(63, 74, 138, 0.16);
   --radius: 14px;
+  /* Spacing + font are theme-overridable (set inline by an app Theme); these are the defaults. */
+  --gap: 12px;
+  --pad: 14px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 .theme-dark {
@@ -39,7 +43,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font);
 }
 
 .app {
@@ -54,8 +58,8 @@ body {
 .app:has(.scaffold) { padding: 0; max-width: 430px; }
 
 /* ---- layout ---- */
-.col { display: flex; flex-direction: column; gap: 8px; }
-.row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.col { display: flex; flex-direction: column; gap: calc(var(--gap) * 0.66); }
+.row { display: flex; flex-direction: row; align-items: center; gap: calc(var(--gap) * 0.66); }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .card {
@@ -239,7 +243,7 @@ body {
 }
 .topbar .title { flex: 1; text-align: center; font-size: 17px; font-weight: 650; }
 .back { border: none; background: transparent; color: var(--ink); font-size: 24px; line-height: 1; cursor: pointer; }
-.scaffold-body { flex: 1; padding: 16px; }
+.scaffold-body { flex: 1; padding: var(--pad); }
 /* Navigation transitions — the web twin of the native shells' push/pop slide and
  * lateral crossfade. The shell alternates the -a/-b class each navigation so the
  * animation restarts; same-route data updates carry no class (re-render in place). */

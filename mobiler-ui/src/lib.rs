@@ -90,6 +90,67 @@ pub enum BoxAlign { TopStart, TopEnd, Center, BottomStart, BottomCenter, BottomE
 #[repr(C)]
 pub enum ProjectColor { Indigo, Teal, Coral, Amber, Lime, Pink }
 
+// ------------------------------- theme -------------------------------
+
+/// A 24-bit RGB color. Used for a theme's brand/seed color — the one place an app
+/// supplies an arbitrary color (everything else is intent tokens).
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct Rgb {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Rgb {
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+}
+
+/// Global corner-radius scale. `Medium` ≈ the current (un-themed) look.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum Corner { None, Small, Medium, Large }
+
+/// Global spacing scale. `Comfortable` ≈ the current (un-themed) spacing.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum Density { Compact, Comfortable }
+
+/// A finite, cross-platform font family (maps to each platform's nearest system
+/// font design — no bundled font files). `System` ≈ the current look.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum FontFamily { System, Rounded, Serif, Monospace }
+
+/// App branding as data — the visual twin of `dark_mode`. Set on a [`Widget::Scaffold`]
+/// (`theme: None` = the framework defaults, i.e. no visual change). The shell maps these
+/// to its native theming: `seed` → the brand/primary color (Android M3 scheme / iOS tint /
+/// web `--primary`), plus a global corner, spacing, and font choice.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct Theme {
+    pub seed: Rgb,
+    pub corner: Corner,
+    pub density: Density,
+    pub font: FontFamily,
+}
+
+/// `Theme::default()` matches the framework's un-themed look as closely as a theme can
+/// (medium corners, comfortable spacing, system font) with a neutral indigo seed — so an
+/// app can override just the bits it cares about: `Theme { seed: brand, ..Default::default() }`.
+impl Default for Theme {
+    fn default() -> Self {
+        Theme {
+            seed: Rgb::new(0x5C, 0x6B, 0xC0), // indigo — matches the legacy default accent
+            corner: Corner::Medium,
+            density: Density::Comfortable,
+            font: FontFamily::System,
+        }
+    }
+}
+
 /// A bottom-navigation tab. `selected` marks the active one; tapping sends
 /// `on_select`.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug)]
@@ -150,6 +211,9 @@ pub enum Widget {
         tabs: Vec<Tab>,
         back: Option<ActionToken>,
         dark_mode: bool,
+        /// App branding (brand color, corner, density, font). `None` = framework
+        /// defaults (no visual change) — theme-as-data, the visual twin of `dark_mode`.
+        theme: Option<Theme>,
         route: String,
         depth: u32,
     },
@@ -182,14 +246,32 @@ mod tests {
     fn widget_round_trips() {
         round_trips(&Widget::Text { content: "hi".to_string(), style: TextStyle::Title });
         round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
+        // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),
             body: Box::new(Widget::Divider),
             tabs: vec![Tab { label: "A".to_string(), selected: true, on_select: "t".to_string() }],
             back: Some("b".to_string()),
             dark_mode: true,
+            theme: None,
             route: "r".to_string(),
             depth: 2,
+        });
+        // Themed scaffold — all four theme knobs must round-trip.
+        round_trips(&Widget::Scaffold {
+            title: "T".to_string(),
+            body: Box::new(Widget::Divider),
+            tabs: vec![],
+            back: None,
+            dark_mode: false,
+            theme: Some(Theme {
+                seed: Rgb::new(0xC8, 0x5A, 0x3C),
+                corner: Corner::Large,
+                density: Density::Compact,
+                font: FontFamily::Rounded,
+            }),
+            route: "r".to_string(),
+            depth: 1,
         });
     }
 }

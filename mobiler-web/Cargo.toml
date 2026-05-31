@@ -1,6 +1,6 @@
 [package]
 name = "mobiler-web"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Mobiler's web shell — renders any Mobiler app's Widget tree to the DOM (Leptos/WASM)."
@@ -17,7 +17,7 @@ categories = ["wasm", "web-programming", "gui"]
 crate-type = ["lib"]
 
 [dependencies]
-mobiler-core = { path = "../mobiler-core", version = "0.10.0" }
+mobiler-core = { path = "../mobiler-core", version = "0.11.0" }
 crux_core = "0.18"
 leptos = { version = "0.7", features = ["csr"] }
 gloo-net = "0.6"
