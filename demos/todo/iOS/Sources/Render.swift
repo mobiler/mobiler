@@ -178,12 +178,33 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, _, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let route, let depth):
+        // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
+        // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
+        // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
+        ActiveTheme.current = theme
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
-            darkMode: darkMode, route: route, depth: depth, send: send
+            darkMode: darkMode, theme: theme, route: route, depth: depth, send: send
         ))
     }
+}
+
+/// The active app [`Theme`] (set when a Scaffold renders), read by the non-View mapper helpers
+/// for corner/density/font. `nil` ⇒ framework defaults (no visual change). Single-threaded,
+/// main-actor render, so a static is safe — and the theme is app-global, like dark mode.
+@MainActor
+enum ActiveTheme {
+    static var current: Theme?
+}
+
+/// Concrete look derived from the active theme (with framework defaults when un-themed).
+extension Theme {
+    var brandColor: Color { Color(red: Double(seed.r) / 255, green: Double(seed.g) / 255, blue: Double(seed.b) / 255) }
+    var cardRadius: CGFloat { switch corner { case .none: 0; case .small: 8; case .medium: 14; case .large: 22 } }
+    var imageRadius: CGFloat { switch corner { case .none: 0; case .small: 10; case .medium: 16; case .large: 24 } }
+    var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0 } }
+    var fontDesign: Font.Design { switch font { case .system: .default; case .rounded: .rounded; case .serif: .serif; case .monospace: .monospaced } }
 }
 
 /// Renders a `[Widget]` as sibling views (children of a stack/grid).
@@ -216,6 +237,7 @@ private struct ScaffoldView: View {
     let tabs: [SharedTypes.Tab]
     let back: String?
     let darkMode: Bool
+    let theme: Theme?
     let route: String
     let depth: UInt32
     let send: (Action) -> Void
@@ -240,6 +262,9 @@ private struct ScaffoldView: View {
             }
         }
         .preferredColorScheme(darkMode ? .dark : .light)
+        // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
+        // toggles, sliders, text fields — one modifier themes most controls.
+        .tint(theme?.brandColor)
         .animation(.easeInOut(duration: 0.28), value: route)
         // Edge-swipe to go back — the iOS idiom for Android's system BackHandler. The
         // gesture only engages past a 90pt drag from the leading edge, so it doesn't
@@ -346,13 +371,15 @@ private struct ScaffoldView: View {
 private struct TextStyleMod: ViewModifier {
     let style: TextStyle
     init(_ s: TextStyle) { style = s }
+    // The theme's font design (rounded/serif/mono); `.default` when un-themed.
+    private var design: Font.Design { ActiveTheme.current?.fontDesign ?? .default }
     func body(content: Content) -> some View {
         switch style {
-        case .title: return AnyView(content.font(.largeTitle.bold()))
-        case .subtitle: return AnyView(content.font(.title3.weight(.semibold)))
-        case .caption: return AnyView(content.font(.footnote).foregroundColor(.secondary))
-        case .emphasis: return AnyView(content.font(.body.weight(.semibold)))
-        case .body: return AnyView(content.font(.body))
+        case .title: return AnyView(content.font(.system(.largeTitle, design: design).bold()))
+        case .subtitle: return AnyView(content.font(.system(.title3, design: design).weight(.semibold)))
+        case .caption: return AnyView(content.font(.system(.footnote, design: design)).foregroundColor(.secondary))
+        case .emphasis: return AnyView(content.font(.system(.body, design: design).weight(.semibold)))
+        case .body: return AnyView(content.font(.system(.body, design: design)))
         }
     }
 }
@@ -373,7 +400,7 @@ private struct CardMod: ViewModifier {
     let style: CardStyle
     init(_ s: CardStyle) { style = s }
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 14)
+        let shape = RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14)
         switch style {
         case .elevated:
             return AnyView(content.background(shape.fill(Color(.secondarySystemBackground)))
@@ -387,7 +414,8 @@ private struct CardMod: ViewModifier {
 }
 
 private func spacing(_ s: Spacing) -> CGFloat {
-    switch s { case .xs: return 4; case .sm: return 8; case .md: return 12; case .lg: return 16; case .xl: return 24 }
+    let base: CGFloat = { switch s { case .xs: return 4; case .sm: return 8; case .md: return 12; case .lg: return 16; case .xl: return 24 } }()
+    return base * (ActiveTheme.current?.densityScale ?? 1.0)
 }
 
 private func toneColors(_ tone: Tone) -> (Color, Color) {
@@ -430,7 +458,7 @@ private func iconTint(_ icon: Icon) -> Color {
 private func imageShape(_ s: ImageShape) -> AnyShape {
     switch s {
     case .square: return AnyShape(Rectangle())
-    case .rounded: return AnyShape(RoundedRectangle(cornerRadius: 16))
+    case .rounded: return AnyShape(RoundedRectangle(cornerRadius: ActiveTheme.current?.imageRadius ?? 16))
     case .circle: return AnyShape(Circle())
     }
 }

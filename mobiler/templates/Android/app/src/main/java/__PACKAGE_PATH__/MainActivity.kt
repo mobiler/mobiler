@@ -92,6 +92,8 @@ import {{PACKAGE_SHARED_TYPES}}.Action
 import {{PACKAGE_SHARED_TYPES}}.BoxAlign
 import {{PACKAGE_SHARED_TYPES}}.ButtonStyle
 import {{PACKAGE_SHARED_TYPES}}.CardStyle
+import {{PACKAGE_SHARED_TYPES}}.Corner
+import {{PACKAGE_SHARED_TYPES}}.Density
 import {{PACKAGE_SHARED_TYPES}}.Icon as WidgetIcon
 import {{PACKAGE_SHARED_TYPES}}.ImageRatio
 import {{PACKAGE_SHARED_TYPES}}.ImageShape
@@ -99,6 +101,7 @@ import {{PACKAGE_SHARED_TYPES}}.InputValue
 import {{PACKAGE_SHARED_TYPES}}.ProjectColor
 import {{PACKAGE_SHARED_TYPES}}.Spacing
 import {{PACKAGE_SHARED_TYPES}}.TextStyle as ModelTextStyle
+import {{PACKAGE_SHARED_TYPES}}.Theme as ModelTheme
 import {{PACKAGE_SHARED_TYPES}}.Tone
 import {{PACKAGE_SHARED_TYPES}}.Widget
 
@@ -158,9 +161,16 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun App(core: Core = viewModel()) {
     val view = core.view
-    // Theme is data: a Scaffold carries dark_mode, decided by the Rust core.
+    // Theme is data: a Scaffold carries dark_mode + an optional brand `theme`, from the Rust core.
+    // Brand color, corner radius (Cards via MaterialTheme.shapes), and font flow through
+    // MaterialTheme automatically. Density (spacing) + image-corner aren't MaterialTheme knobs,
+    // so the non-composable mapper helpers (spacingFor/shapeFor) read them from `activeTheme`.
     val dark = (view as? Widget.Scaffold)?.darkMode ?: isSystemInDarkTheme()
-    {{NAME}}Theme(darkTheme = dark) {
+    val appTheme = (view as? Widget.Scaffold)?.theme
+    // Stash the active theme before rendering (app-global, like dark mode; render runs on the
+    // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
+    activeTheme = appTheme
+    {{NAME}}Theme(darkTheme = dark, theme = appTheme) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (view is Widget.Scaffold) {
                 // Scaffold provides its own bars + scrollable body.
@@ -467,12 +477,38 @@ private fun colorFor(style: ModelTextStyle): Color = when (style) {
     else -> MaterialTheme.colorScheme.onSurface
 }
 
-private fun spacingFor(size: Spacing): Dp = when (size) {
-    Spacing.XS -> 4.dp
-    Spacing.SM -> 8.dp
-    Spacing.MD -> 12.dp
-    Spacing.LG -> 16.dp
-    Spacing.XL -> 24.dp
+// Active app theme (set by App() when a Scaffold renders), read by the non-composable mapper
+// helpers below for density (spacing) + image-corner — knobs MaterialTheme can't carry.
+// null = framework defaults (no visual change). App-global, like dark mode; the SwiftUI
+// shell's `ActiveTheme.current` twin.
+private var activeTheme: ModelTheme? = null
+
+// Spacing multiplier from the theme's density. Comfortable (or un-themed) = 1.0; Compact tightens.
+private val densityScale: Float
+    get() = when (activeTheme?.density) {
+        Density.COMPACT -> 0.75f
+        Density.COMFORTABLE, null -> 1.0f
+    }
+
+// Image corner radius (dp) from the theme's corner; 16 when un-themed (the original look).
+private val imageCornerDp: Int
+    get() = when (activeTheme?.corner) {
+        Corner.NONE -> 0
+        Corner.SMALL -> 10
+        Corner.MEDIUM -> 16
+        Corner.LARGE -> 24
+        null -> 16
+    }
+
+private fun spacingFor(size: Spacing): Dp {
+    val base = when (size) {
+        Spacing.XS -> 4
+        Spacing.SM -> 8
+        Spacing.MD -> 12
+        Spacing.LG -> 16
+        Spacing.XL -> 24
+    }
+    return (base * densityScale).dp
 }
 
 private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.ImageVector = when (icon) {
@@ -516,7 +552,7 @@ private fun projectColorOf(color: ProjectColor): Color = when (color) {
 
 private fun shapeFor(shape: ImageShape): Shape = when (shape) {
     ImageShape.SQUARE -> RectangleShape
-    ImageShape.ROUNDED -> RoundedCornerShape(16.dp)
+    ImageShape.ROUNDED -> RoundedCornerShape(imageCornerDp.dp)
     ImageShape.CIRCLE -> CircleShape
 }
 
