@@ -1,5 +1,7 @@
 package {{PACKAGE}}
 
+import {{PACKAGE_SHARED_TYPES}}.PluginResponse
+
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager

@@ -1,5 +1,7 @@
 package {{PACKAGE}}
 
+import {{PACKAGE_SHARED_TYPES}}.PluginResponse
+
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import org.json.JSONObject

@@ -1,5 +1,7 @@
 package {{PACKAGE}}
 
+import {{PACKAGE_SHARED_TYPES}}.PluginResponse
+
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat

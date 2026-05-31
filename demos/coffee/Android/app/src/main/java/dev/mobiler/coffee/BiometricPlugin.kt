@@ -1,5 +1,7 @@
 package dev.mobiler.coffee
 
+import dev.mobiler.coffee.shared.types.PluginResponse
+
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat

@@ -1,5 +1,7 @@
 package dev.mobiler.coffee
 
+import dev.mobiler.coffee.shared.types.PluginResponse
+
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import org.json.JSONObject

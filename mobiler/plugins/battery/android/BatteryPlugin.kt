@@ -1,5 +1,7 @@
 package {{PACKAGE}}
 
+import {{PACKAGE_SHARED_TYPES}}.PluginResponse
+
 import android.app.Application
 import android.content.Context
 import android.os.BatteryManager

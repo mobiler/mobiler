@@ -1,5 +1,7 @@
 package dev.mobiler.coffee
 
+import dev.mobiler.coffee.shared.types.PluginResponse
+
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
