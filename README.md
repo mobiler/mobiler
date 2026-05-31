@@ -205,6 +205,26 @@ On a Mac, the scaffold also includes an iOS shell — `bash iOS/build-ios.sh` bu
 it for the simulator (needs Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen);
 no Apple account or signing required).
 
+## Upgrading an app — `mobiler upgrade`
+
+The generic native shells (the `Widget`-tree interpreter on each platform) are scaffolded
+into your project, so a new framework version's shell improvements don't arrive by bumping a
+dependency. `mobiler upgrade` pulls them in, from the app root:
+
+```bash
+cargo install mobiler   # get the newer CLI first
+cd myapp
+mobiler upgrade         # bump mobiler-core + write changed shells as *.mobiler-new (review)
+mobiler upgrade --apply # …or overwrite the shells in place (a *.mobiler-bak is saved)
+```
+
+**Non-destructive by default.** It bumps your `mobiler-core` dependency, then writes each changed
+generic shell file beside the original as `<file>.mobiler-new` for you to review/merge. It **never**
+touches your Rust app code (`shared/src/`); files carrying plugin/customization state (`Core.kt`,
+`AndroidManifest.xml`, `iOS/project.yml`, …) are likewise only ever offered as `.mobiler-new` to
+merge by hand — never overwritten. `--apply` overwrites the generic shells in place after saving a
+`.mobiler-bak` of each. A `.mobiler/version` stamp records the framework version the app is on.
+
 ## License
 
 Dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
