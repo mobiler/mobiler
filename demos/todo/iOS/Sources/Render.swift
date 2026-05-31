@@ -178,7 +178,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, _, let route, let depth):
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
             darkMode: darkMode, route: route, depth: depth, send: send
