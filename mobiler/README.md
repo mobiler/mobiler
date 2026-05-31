@@ -102,7 +102,9 @@ HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm
 <!-- capabilities:end -->
 
 Navigation is a core-owned `Nav` stack; dark mode and theming are data in
-the `Widget` tree. The widget vocabulary and runtime live in the
+the `Widget` tree. A `Scaffold` can carry a `Theme` — brand color, corner
+radius, density, and font — that every native shell (iOS, Android, web)
+applies; `theme: None` keeps the default look. The widget vocabulary and runtime live in the
 [`mobiler-ui`](https://crates.io/crates/mobiler-ui) and
 [`mobiler-core`](https://crates.io/crates/mobiler-core) crates.
 
