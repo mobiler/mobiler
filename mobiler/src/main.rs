@@ -6,6 +6,7 @@ mod doctor;
 mod new;
 mod plugin;
 mod templating;
+mod upgrade;
 mod watch;
 
 #[derive(Parser)]
@@ -61,6 +62,15 @@ enum Command {
         #[command(subcommand)]
         cmd: plugin::PluginCmd,
     },
+    /// Update this app's generic native shells + `mobiler-core` dep to the CLI's templates.
+    /// Non-destructive by default (writes `<file>.mobiler-new`); `--apply` overwrites in place
+    /// (saving `<file>.mobiler-bak`). Never touches your Rust app code or plugin-patched files.
+    Upgrade {
+        /// Overwrite changed shell files in place instead of writing `.mobiler-new` (a
+        /// `.mobiler-bak` of each is saved first).
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -96,6 +106,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Plugin { cmd } => match plugin::run(cmd) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::Upgrade { apply } => match upgrade::run(apply) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");
