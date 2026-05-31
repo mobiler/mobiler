@@ -1,6 +1,10 @@
 /target
 **/*.rs.bk
 
+# `mobiler upgrade` review sidecars (the version stamp in .mobiler/ IS tracked)
+*.mobiler-new
+*.mobiler-bak
+
 # Android
 /Android/.gradle/
 /Android/build/

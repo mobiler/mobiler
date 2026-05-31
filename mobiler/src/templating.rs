@@ -62,7 +62,11 @@ impl Subs {
         // `name` is only needed for `{{NAME}}` (absent from plugin sources); best-effort.
         let name = read_app_name(root)
             .unwrap_or_else(|| package.rsplit('.').next().unwrap_or("App").to_string());
-        Ok(Subs::from_package(package, name, String::new()))
+        // Recover the NDK pin already baked into the app so `upgrade` re-substitutes the same
+        // value (otherwise `{{NDK_VERSION}}` would blank out and the gradle file would falsely
+        // read as "changed"). Empty when absent — only `Android/shared/build.gradle.kts` uses it.
+        let ndk_version = read_ndk_version(root).unwrap_or_default();
+        Ok(Subs::from_package(package, name, ndk_version))
     }
 }
 
@@ -112,8 +116,18 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
 
 /// Best-effort app name from `Android/settings.gradle.kts` (`rootProject.name = "Todo"`).
 fn read_app_name(root: &Path) -> Option<String> {
-    let settings = std::fs::read_to_string(root.join("Android/settings.gradle.kts")).ok()?;
-    let line = settings.lines().find(|l| l.contains("rootProject.name"))?;
+    read_quoted(root.join("Android/settings.gradle.kts"), "rootProject.name")
+}
+
+/// The NDK version pinned in `Android/shared/build.gradle.kts` (`ndkVersion = "…"`).
+fn read_ndk_version(root: &Path) -> Option<String> {
+    read_quoted(root.join("Android/shared/build.gradle.kts"), "ndkVersion")
+}
+
+/// First double-quoted value on the first line of `file` containing `key`.
+fn read_quoted(file: PathBuf, key: &str) -> Option<String> {
+    let content = std::fs::read_to_string(file).ok()?;
+    let line = content.lines().find(|l| l.contains(key))?;
     let start = line.find('"')? + 1;
     let end = line[start..].find('"')? + start;
     Some(line[start..end].to_string())

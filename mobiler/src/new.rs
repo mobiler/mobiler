@@ -63,6 +63,9 @@ pub fn run(raw_name: &str, package: Option<&str>, agentic: Option<AgenticGuide>)
     let mut written = 0usize;
     write_dir(&TEMPLATES, &out_dir, &subs, &mut written)?;
     make_gradlew_executable(&out_dir)?;
+    // Stamp the generating CLI version so `mobiler upgrade` (and future drift checks) have a baseline.
+    crate::upgrade::write_version_stamp(&out_dir).context("writing version stamp")?;
+    written += 1;
     if let Some(sdk_dir) = android_home.as_deref() {
         write_local_properties(&out_dir, sdk_dir)?;
         written += 1;

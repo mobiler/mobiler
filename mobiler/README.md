@@ -37,7 +37,27 @@ mobiler watch           # …same, re-running on every change
 mobiler build ios       # build the iOS app (on a Mac)
 mobiler plugin list     # list the bundled capability plugins
 mobiler plugin add scanner   # install a plugin into the app
+mobiler upgrade         # pull the latest generic shells + mobiler-core into an existing app
 ```
+
+## Upgrading an existing app
+
+New framework versions improve the generic native shells (the `Widget`-tree interpreter on
+each platform). Because those shells are scaffolded into your project, `mobiler upgrade` pulls
+the updates in for you, from the app root:
+
+```bash
+cargo install mobiler   # get the new CLI first
+cd myapp
+mobiler upgrade         # bump mobiler-core + write changed shells as *.mobiler-new (review)
+mobiler upgrade --apply # …or overwrite the shells in place (a *.mobiler-bak is saved)
+```
+
+It's **non-destructive by default**: it bumps your `mobiler-core` dependency, writes any changed
+generic shell file beside the original as `<file>.mobiler-new` for you to review/merge, and never
+touches your Rust app code (`shared/src/`) or plugin-patched files (`Core.kt`, manifests — these
+are offered as `.mobiler-new` to merge by hand, never overwritten). `--apply` overwrites the
+generic shells in place after saving a `.mobiler-bak` of each.
 
 ## Plugins
 
