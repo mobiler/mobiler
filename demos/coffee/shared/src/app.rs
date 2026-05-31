@@ -1,7 +1,8 @@
 use mobiler_core::{
-    BoxAlign, ButtonStyle, CardStyle, Cx, ImageRatio, ImageShape, InputValue, MobilerApp,
-    MobilerShell, PluginResponse, Widget, button, card, card_button, chip, column, image, row,
-    slider, stack, stepper, text, title,
+    BoxAlign, ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, ImageRatio, ImageShape,
+    InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Theme, Widget, button, card,
+    card_button, chip, column, image, row, scaffold, scaffold_back, slider, stack, stepper, text,
+    title, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -248,10 +249,21 @@ impl MobilerApp for Coffee {
     }
 
     fn view(&self, model: &Model) -> Widget {
-        match model.open_product.and_then(|i| model.products.get(i)) {
-            Some(product) => detail(product, model),
-            None => storefront(model),
-        }
+        // Dogfood the theming engine: a terracotta brand (large corners, rounded font,
+        // comfortable density). Wrapping in a Scaffold is what lets the shells apply it —
+        // theme is carried on the Scaffold, the visual twin of dark_mode.
+        let theme = Theme {
+            seed: Rgb::new(0xC8, 0x5A, 0x3C),
+            corner: Corner::Large,
+            density: Density::Comfortable,
+            font: FontFamily::Rounded,
+        };
+        let root = match model.open_product.and_then(|i| model.products.get(i)) {
+            // Detail is depth 2: the top bar + system back fire CloseProduct.
+            Some(product) => scaffold_back(product.name, false, vec![], detail(product, model), Msg::CloseProduct),
+            None => scaffold("Coffee", false, vec![], storefront(model)),
+        };
+        with_theme(root, theme)
     }
 }
 
@@ -287,7 +299,7 @@ fn product_card(index: usize, p: &Product) -> Widget {
 
 fn detail(p: &Product, model: &Model) -> Widget {
     let mut items = vec![
-        button("← Back", ButtonStyle::Text, Msg::CloseProduct),
+        // Back is handled by the Scaffold top bar (and the system back button).
         image(p.image, ImageShape::Rounded, ImageRatio::Wide),
         title(p.name),
         text(format!("★ {}    {}", p.rating, p.price)),
