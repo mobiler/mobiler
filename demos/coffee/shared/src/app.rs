@@ -1,8 +1,8 @@
 use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, ImageRatio, ImageShape,
     InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Theme, Widget, button, card,
-    card_button, chip, column, image, row, scaffold, scaffold_back, slider, stack, stepper, text,
-    title, with_theme,
+    card_button, chip, column, image, row, scaffold, slider, stack, stepper, text, title,
+    with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -258,9 +258,10 @@ impl MobilerApp for Coffee {
             density: Density::Comfortable,
             font: FontFamily::Rounded,
         };
+        // Both screens are themed Scaffolds (title bar + body). Detail keeps its in-body
+        // "← Back" button (guarded by the CoffeeUITests regression), so no top-bar back.
         let root = match model.open_product.and_then(|i| model.products.get(i)) {
-            // Detail is depth 2: the top bar + system back fire CloseProduct.
-            Some(product) => scaffold_back(product.name, false, vec![], detail(product, model), Msg::CloseProduct),
+            Some(product) => scaffold(product.name, false, vec![], detail(product, model)),
             None => scaffold("Coffee", false, vec![], storefront(model)),
         };
         with_theme(root, theme)
@@ -299,7 +300,7 @@ fn product_card(index: usize, p: &Product) -> Widget {
 
 fn detail(p: &Product, model: &Model) -> Widget {
     let mut items = vec![
-        // Back is handled by the Scaffold top bar (and the system back button).
+        button("← Back", ButtonStyle::Text, Msg::CloseProduct),
         image(p.image, ImageShape::Rounded, ImageRatio::Wide),
         title(p.name),
         text(format!("★ {}    {}", p.rating, p.price)),
