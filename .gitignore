@@ -1,8 +1,9 @@
 /target
 **/*.rs.bk
 
-# Local Claude Code settings (per-machine)
+# Local Claude Code state (per-machine). Shared procedures live in .claude/skills/ and ARE committed.
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Internal working notes — kept local, not published
 /idea.md
