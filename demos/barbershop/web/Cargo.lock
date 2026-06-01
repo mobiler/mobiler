@@ -1189,7 +1189,7 @@ checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
 
 [[package]]
 name = "mobiler-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "crux_core",
  "facet",
@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler-ui"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "facet",
  "serde",
@@ -1208,7 +1208,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler-web"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "console_error_panic_hook",
  "crux_core",
