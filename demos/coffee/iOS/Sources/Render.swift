@@ -57,6 +57,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .colorDot(let color):
         return AnyView(Circle().fill(projectColor(color)).frame(width: 12, height: 12))
 
+    case .avatar(let source, let status):
+        return AnyView(AvatarView(source: source, status: status))
+
+    case .rating(let value, let max, let onRate):
+        return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
+
     case .divider:
         return AnyView(Divider())
 
@@ -218,14 +224,14 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let route, let depth):
         // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
         // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
         // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
         ActiveTheme.current = theme
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
-            darkMode: darkMode, theme: theme, fab: fab, route: route, depth: depth, send: send
+            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet, route: route, depth: depth, send: send
         ))
     }
 }
@@ -270,6 +276,56 @@ private struct GridView: View {
     }
 }
 
+// Circular avatar image with an optional colored status dot.
+private struct AvatarView: View {
+    let source: String
+    let status: Tone?
+    var body: some View {
+        let img: AnyView
+        if source.hasPrefix("file:"), let url = URL(string: source) {
+            img = AnyView(FileImageView(url: url))
+        } else {
+            img = AnyView(AsyncImage(url: URL(string: source)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: { Color.gray.opacity(0.15) })
+        }
+        return img
+            .frame(width: 48, height: 48)
+            .clipShape(Circle())
+            .overlay(alignment: .bottomTrailing) {
+                if let status = status {
+                    Circle().fill(toneColors(status).0)
+                        .frame(width: 12, height: 12)
+                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                }
+            }
+    }
+}
+
+// Star rating; tappable when `onRate` carries one token per star.
+private struct RatingView: View {
+    let value: UInt32
+    let max: UInt8
+    let onRate: [String]?
+    let send: (Action) -> Void
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(1...Int(max), id: \.self) { i in
+                let threshold = UInt32(i) * 10
+                let name = value >= threshold ? "star.fill" : (value + 5 >= threshold ? "star.leadinghalf.filled" : "star")
+                if let tokens = onRate, i - 1 < tokens.count {
+                    let token = tokens[i - 1]
+                    Button(action: { send(.fired(token: token)) }) {
+                        Image(systemName: name).foregroundColor(.accentColor)
+                    }.buttonStyle(.plain)
+                } else {
+                    Image(systemName: name).foregroundColor(.accentColor)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Scaffold (top bar + scrollable body + bottom tabs + theme-as-data)
 
 private struct ScaffoldView: View {
@@ -280,6 +336,7 @@ private struct ScaffoldView: View {
     let darkMode: Bool
     let theme: Theme?
     let fab: SharedTypes.Fab?
+    let sheet: SharedTypes.Sheet?
     let route: String
     let depth: UInt32
     let send: (Action) -> Void
@@ -323,6 +380,26 @@ private struct ScaffoldView: View {
         )
         // After each route settles, record its depth for the next transition.
         .task(id: route) { prevDepth = depth }
+        // Modal bottom sheet — a scrim (tap to dismiss) + a panel from the bottom.
+        .overlay {
+            if let sheet = sheet {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.45).ignoresSafeArea()
+                        .onTapGesture { send(.fired(token: sheet.onDismiss)) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Capsule().fill(Color.secondary.opacity(0.4))
+                            .frame(width: 40, height: 4).frame(maxWidth: .infinity)
+                        Text(sheet.title).font(.title3.bold())
+                        render(sheet.child, send)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                }
+                .transition(.opacity)
+            }
+        }
     }
 
     // Top bar + scrollable body, optionally with the phone's bottom tab-bar.

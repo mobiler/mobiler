@@ -5,10 +5,10 @@
 
 use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, badge,
-    button, caption, card, card_button, chip, column, divider, emphasis, grid, icon_button, image,
-    row, scaffold, scroller, search_field, segment, segmented, spacer, stack, subtitle, tab_icon,
-    text, title, with_fab, with_theme,
+    ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
+    badge, button, caption, card, card_button, chip, column, divider, emphasis, grid, icon_button,
+    image, rating, rating_input, row, scaffold, scroller, search_field, segment, segmented, spacer,
+    stack, subtitle, tab_icon, text, title, with_fab, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +35,9 @@ pub enum Msg {
     SelectCategory(String),
     SelectAudience(Audience),
     OpenService(u32),
+    CloseSheet,
+    Rate(u8),
+    ConfirmBooking,
     Notifications,
     Book,
 }
@@ -48,12 +51,25 @@ struct Service {
     image: &'static str,
 }
 
+#[derive(Clone)]
+struct Barber {
+    name: &'static str,
+    specialty: &'static str,
+    rating: &'static str,
+    image: &'static str,
+}
+
 pub struct Model {
     tab: Tab,
     category: String,
     audience: Audience,
     search: String,
     services: Vec<Service>,
+    barbers: Vec<Barber>,
+    /// Index of the service whose booking sheet is open (`None` = closed).
+    open_service: Option<usize>,
+    /// Stars the user tapped in the booking sheet, in tenths (0 = unrated).
+    user_rating: u32,
 }
 
 impl Default for Model {
@@ -71,8 +87,21 @@ impl Default for Model {
                 Service { name: "Cut + Beard", price: "$42", rating: "5.0", category: "Combo", image: "https://loremflickr.com/400/400/grooming?lock=5" },
                 Service { name: "Kids Cut", price: "$20", rating: "4.6", category: "Hair", image: "https://loremflickr.com/400/400/kidshaircut?lock=6" },
             ],
+            barbers: vec![
+                Barber { name: "Marco", specialty: "Fades & tapers", rating: "4.9", image: "https://loremflickr.com/200/200/barber,man?lock=11" },
+                Barber { name: "Dev", specialty: "Beard sculpting", rating: "4.8", image: "https://loremflickr.com/200/200/man,beard?lock=12" },
+                Barber { name: "Iris", specialty: "Classic cuts", rating: "5.0", image: "https://loremflickr.com/200/200/hairstylist?lock=13" },
+                Barber { name: "Theo", specialty: "Hot shaves", rating: "4.7", image: "https://loremflickr.com/200/200/barbershop?lock=14" },
+            ],
+            open_service: None,
+            user_rating: 0,
         }
     }
+}
+
+/// Parse a "4.8"-style rating into tenths (48) for the `rating` widget.
+fn tenths(s: &str) -> u32 {
+    (s.parse::<f32>().unwrap_or(0.0) * 10.0).round() as u32
 }
 
 #[derive(Default)]
@@ -88,9 +117,15 @@ impl MobilerApp for FadeHouse {
             Msg::SelectCategory(c) => model.category = c,
             Msg::SelectAudience(a) => model.audience = a,
             Msg::OpenService(i) => {
-                if let Some(s) = model.services.get(i as usize) {
-                    cx.toast(format!("Booking “{}” — {}", s.name, s.price));
-                }
+                model.open_service = Some(i as usize);
+                model.user_rating = 0;
+            }
+            Msg::CloseSheet => model.open_service = None,
+            Msg::Rate(stars) => model.user_rating = u32::from(stars) * 10,
+            Msg::ConfirmBooking => {
+                let name = model.open_service.and_then(|i| model.services.get(i)).map(|s| s.name).unwrap_or("");
+                cx.toast(format!("Booked “{name}” ✓"));
+                model.open_service = None;
             }
             Msg::Notifications => cx.toast("No new notifications"),
             Msg::Book => cx.toast("Pick a date & time — coming next"),
@@ -126,9 +161,46 @@ impl MobilerApp for FadeHouse {
             Tab::Profile => ("Profile", profile_screen()),
         };
         // Themed Scaffold + icon tab bar + a "book now" floating action button.
-        let root = with_fab(scaffold(title_text, true, tabs, body), Icon::Calendar, Msg::Book);
+        let mut root = with_fab(scaffold(title_text, true, tabs, body), Icon::Calendar, Msg::Book);
+        // Tapping a service opens a booking bottom sheet (Sheet).
+        if let Some(s) = model.open_service.and_then(|i| model.services.get(i)) {
+            root = with_sheet(root, format!("Book {}", s.name), booking_sheet(s, model.user_rating), Msg::CloseSheet);
+        }
         with_theme(root, theme)
     }
+}
+
+fn booking_sheet(s: &Service, user_rating: u32) -> Widget {
+    column(vec![
+        row(vec![
+            image(s.image, ImageShape::Rounded, ImageRatio::Square),
+            column(vec![title(s.name), text(s.price), rating(tenths(s.rating), 5)]),
+        ]),
+        spacer(Spacing::Sm),
+        emphasis("Rate your last visit"),
+        // Tappable star rating (Rating with on_rate) — one event per star.
+        rating_input(user_rating, 5, vec![Msg::Rate(1), Msg::Rate(2), Msg::Rate(3), Msg::Rate(4), Msg::Rate(5)]),
+        spacer(Spacing::Sm),
+        button("Confirm booking", ButtonStyle::Filled, Msg::ConfirmBooking),
+    ])
+}
+
+fn barbers_scroller(model: &Model) -> Widget {
+    // "Our barbers" — a horizontally-scrolling rail (Scroller) of Avatars.
+    scroller(
+        model
+            .barbers
+            .iter()
+            .map(|b| {
+                column(vec![
+                    avatar_status(b.image, Tone::Success),
+                    emphasis(b.name),
+                    caption(b.specialty),
+                    rating(tenths(b.rating), 5),
+                ])
+            })
+            .collect(),
+    )
 }
 
 fn category_carousel(model: &Model) -> Widget {
@@ -175,6 +247,8 @@ fn home(model: &Model) -> Widget {
         hero,
         audience_segmented(model),
         category_carousel(model),
+        subtitle("Our barbers"),
+        barbers_scroller(model),
         subtitle("Popular services"),
         services_grid(model),
     ])
@@ -214,7 +288,7 @@ fn service_card(index: u32, s: &Service) -> Widget {
         column(vec![
             image(s.image, ImageShape::Rounded, ImageRatio::Square),
             emphasis(s.name),
-            row(vec![text(s.price), text(format!("★ {}", s.rating))]),
+            row(vec![text(s.price), rating(tenths(s.rating), 5)]),
             badge(s.category, Tone::Info),
         ]),
         CardStyle::Filled,
@@ -281,6 +355,18 @@ mod test {
         let mut cx = Cx::<Msg>::default();
         app.update(Msg::SelectTab(Tab::Services), &mut model, &mut cx);
         assert_eq!(model.tab, Tab::Services);
+    }
+
+    #[test]
+    fn open_service_opens_sheet_rate_then_confirm_closes() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::OpenService(0), &mut model, &mut cx);
+        assert_eq!(model.open_service, Some(0));
+        app.update(Msg::Rate(4), &mut model, &mut cx);
+        assert_eq!(model.user_rating, 40);
+        app.update(Msg::ConfirmBooking, &mut model, &mut cx);
+        assert_eq!(model.open_service, None, "confirming closes the sheet");
     }
 
     #[test]

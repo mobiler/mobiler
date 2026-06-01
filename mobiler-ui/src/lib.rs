@@ -193,6 +193,16 @@ pub struct Segment {
     pub on_select: ActionToken,
 }
 
+/// A modal bottom sheet anchored over the scaffold body (a scrim behind, a panel rising from
+/// the bottom). Present (`Some`) ⇒ open; tapping the scrim/handle sends `on_dismiss`.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
+#[repr(C)]
+pub struct Sheet {
+    pub title: String,
+    pub child: Box<Widget>,
+    pub on_dismiss: ActionToken,
+}
+
 // ------------------------------- widgets -------------------------------
 
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
@@ -203,6 +213,11 @@ pub enum Widget {
     Text { content: String, style: TextStyle },
     Image { source: String, shape: ImageShape, ratio: ImageRatio },
     Badge { label: String, tone: Tone },
+    /// A circular avatar image with an optional colored status dot.
+    Avatar { source: String, status: Option<Tone> },
+    /// A star rating. `value` is in tenths (e.g. `48` = 4.8 of `max` stars). When `on_rate`
+    /// is set (one token per star), the stars are tappable — star *i* fires `on_rate[i]`.
+    Rating { value: u32, max: u8, on_rate: Option<Vec<ActionToken>> },
     /// Small non-interactive colored dot — a project/identity hint.
     ColorDot { color: ProjectColor },
     Divider,
@@ -254,6 +269,8 @@ pub enum Widget {
         theme: Option<Theme>,
         /// Optional floating action button (raised primary action over the body).
         fab: Option<Fab>,
+        /// Optional modal bottom sheet over the body (a scrim + a panel from the bottom).
+        sheet: Option<Sheet>,
         route: String,
         depth: u32,
     },
@@ -295,6 +312,7 @@ mod tests {
             dark_mode: true,
             theme: None,
             fab: None,
+            sheet: None,
             route: "r".to_string(),
             depth: 2,
         });
@@ -312,6 +330,7 @@ mod tests {
                 font: FontFamily::Rounded,
             }),
             fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
+            sheet: Some(Sheet { title: "S".to_string(), child: Box::new(Widget::Divider), on_dismiss: "d".to_string() }),
             route: "r".to_string(),
             depth: 1,
         });

@@ -71,6 +71,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.StarHalf
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -84,6 +86,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -264,6 +267,39 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             modifier = Modifier.size(12.dp).clip(CircleShape).background(projectColorOf(widget.color)),
         )
 
+        is Widget.Avatar -> Box {
+            AsyncImage(
+                model = widget.source,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(48.dp).clip(CircleShape),
+            )
+            widget.status?.let { st ->
+                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(toneColors(st).first))
+            }
+        }
+
+        is Widget.Rating -> Row(verticalAlignment = Alignment.CenterVertically) {
+            val tint = MaterialTheme.colorScheme.primary
+            val onRate = widget.onRate
+            for (i in 1..widget.max.toInt()) {
+                val threshold = (i * 10).toUInt()
+                val ic = when {
+                    widget.value >= threshold -> Icons.Default.Star
+                    widget.value + 5u >= threshold -> Icons.Default.StarHalf
+                    else -> Icons.Default.StarBorder
+                }
+                if (onRate != null && i - 1 < onRate.size) {
+                    val token = onRate[i - 1]
+                    IconButton(onClick = { send(Action.Fired(token)) }, modifier = Modifier.size(32.dp)) {
+                        Icon(ic, contentDescription = null, tint = tint)
+                    }
+                } else {
+                    Icon(ic, contentDescription = null, tint = tint)
+                }
+            }
+        }
+
         is Widget.Divider -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
@@ -419,6 +455,19 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val back = widget.back
             if (back != null) {
                 BackHandler { send(Action.Fired(back)) }
+            }
+            // Modal bottom sheet — present in the tree ⇒ shown (a Popup, so it overlays
+            // everything regardless of where it's composed). Scrim/swipe fires on_dismiss.
+            widget.sheet?.let { sheet ->
+                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(sheet.title, style = MaterialTheme.typography.titleLarge)
+                        Render(sheet.child, send)
+                    }
+                }
             }
             BoxWithConstraints {
                 // On a wide screen (tablet / landscape) the bottom tab-bar becomes a

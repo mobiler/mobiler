@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
     Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, Fab, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, ProjectColor, Rgb, Segment, Spacing, Tab, TextStyle, Theme, Tone, Widget,
+    ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, Tab, TextStyle, Theme, Tone,
+    Widget,
 };
 
 // ============================ capabilities ============================
@@ -413,6 +414,22 @@ pub fn grid(children: Vec<Widget>) -> Widget { Widget::Grid { children } }
 /// Horizontally scrolling row of children (a carousel / chip rail).
 #[must_use]
 pub fn scroller(children: Vec<Widget>) -> Widget { Widget::Scroller { children } }
+/// A circular avatar image.
+#[must_use]
+pub fn avatar(source: impl Into<String>) -> Widget { Widget::Avatar { source: source.into(), status: None } }
+/// A circular avatar image with a colored status dot.
+#[must_use]
+pub fn avatar_status(source: impl Into<String>, status: Tone) -> Widget {
+    Widget::Avatar { source: source.into(), status: Some(status) }
+}
+/// A read-only star rating. `value` is in tenths (e.g. `48` = 4.8 of `max` stars).
+#[must_use]
+pub fn rating(value: u32, max: u8) -> Widget { Widget::Rating { value, max, on_rate: None } }
+/// A tappable star rating — `on_rate` carries one event per star (star *i* fires `on_rate[i]`).
+#[must_use]
+pub fn rating_input<E: Serialize>(value: u32, max: u8, on_rate: Vec<E>) -> Widget {
+    Widget::Rating { value, max, on_rate: Some(on_rate.into_iter().map(tok).collect()) }
+}
 
 #[must_use]
 pub fn button<E: Serialize>(label: impl Into<String>, style: ButtonStyle, on_press: E) -> Widget {
@@ -480,7 +497,7 @@ pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bo
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, depth: 1 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, depth: 1 }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -489,7 +506,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, depth: 2 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, depth: 2 }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -517,6 +534,7 @@ where
         dark_mode,
         theme: None,
         fab: None,
+        sheet: None,
         route: nav.route_key(),
         depth: nav.depth(),
     }
@@ -527,7 +545,7 @@ where
 /// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
 pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, route, depth, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -535,6 +553,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
             dark_mode,
             theme: Some(theme),
             fab,
+            sheet,
             route,
             depth,
         },
@@ -546,7 +565,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
 /// No-op on any other widget: `with_fab(scaffold(...), Icon::Add, Msg::New)`.
 pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, route, depth, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -554,6 +573,27 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
             dark_mode,
             theme,
             fab: Some(Fab { icon, on_press: tok(on_press) }),
+            sheet,
+            route,
+            depth,
+        },
+        other => other,
+    }
+}
+
+/// Open a modal bottom sheet over a scaffold's body. No-op on any other widget — drive it from
+/// the model: `with_sheet(scaffold(...), title, sheet_body, Msg::CloseSheet)`.
+pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child: Widget, on_dismiss: E) -> Widget {
+    match widget {
+        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, route, depth, .. } => Widget::Scaffold {
+            title: t,
+            body,
+            tabs,
+            back,
+            dark_mode,
+            theme,
+            fab,
+            sheet: Some(Sheet { title: title.into(), child: Box::new(child), on_dismiss: tok(on_dismiss) }),
             route,
             depth,
         },
