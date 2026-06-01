@@ -482,7 +482,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, route, depth } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, route, depth } => {
             let back_btn = back.clone().map(|token| {
                 let send = send.clone();
                 view! {
@@ -498,15 +498,27 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                         let (send, token) = (send.clone(), tab.on_select.clone());
                         let class = if tab.selected { "tab selected" } else { "tab" };
                         let label = tab.label.clone();
+                        // Optional leading icon → glyph above the label (icon tab bar).
+                        let icon = tab.icon.map(|i| view! { <span class="tab-icon">{icon_glyph(i)}</span> });
                         view! {
                             <button class=class on:click=move |_| send(Action::Fired { token: token.clone() })>
-                                {label}
+                                {icon}
+                                <span class="tab-label">{label}</span>
                             </button>
                         }
                         .into_any()
                     })
                     .collect();
                 view! { <div class="tabbar">{tabs}</div> }
+            });
+            // Floating action button — the raised primary action, anchored over the body.
+            let fab_btn = fab.clone().map(|f| {
+                let (send, token) = (send.clone(), f.on_press.clone());
+                view! {
+                    <button class="fab" on:click=move |_| send(Action::Fired { token: token.clone() })>
+                        {icon_glyph(f.icon)}
+                    </button>
+                }
             });
             // `theme-dark` flips the CSS variables for the whole shell — theme-as-data,
             // the web twin of the native shells' `preferredColorScheme`/Material theme.
@@ -523,6 +535,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                         <span class="title">{title}</span>
                     </div>
                     <div class=body_class data-route=route.clone()>{body}</div>
+                    {fab_btn}
                     {tabbar}
                 </div>
             }
@@ -655,6 +668,30 @@ fn icon_glyph(i: Icon) -> &'static str {
         Icon::Settings => "⚙",
         Icon::Check => "✓",
         Icon::Star => "★",
+        Icon::Info => "ℹ",
+        Icon::Home => "⌂",
+        Icon::Search => "🔍",
+        Icon::Menu => "☰",
+        Icon::Filter => "⚟",
+        Icon::Back => "‹",
+        Icon::Forward => "›",
+        Icon::Down => "⌄",
+        Icon::Bell => "🔔",
+        Icon::Cart => "🛒",
+        Icon::Share => "↗",
+        Icon::Heart => "♡",
+        Icon::HeartFilled => "♥",
+        Icon::Person => "👤",
+        Icon::People => "👥",
+        Icon::Phone => "📞",
+        Icon::Mail => "✉",
+        Icon::Calendar => "📅",
+        Icon::Clock => "🕑",
+        Icon::MapPin => "📍",
+        Icon::Camera => "📷",
+        Icon::Photo => "🖼",
+        Icon::Play => "▶",
+        Icon::Scissors => "✂",
     }
 }
 

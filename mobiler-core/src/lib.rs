@@ -17,7 +17,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, FontFamily, Icon, ImageRatio,
+    Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, Fab, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, ProjectColor, Rgb, Spacing, Tab, TextStyle, Theme, Tone, Widget,
 };
 
@@ -444,10 +444,16 @@ pub fn stepper<E: Serialize>(value: i32, on_decrement: E, on_increment: E) -> Wi
     Widget::Stepper { value, on_decrement: tok(on_decrement), on_increment: tok(on_increment) }
 }
 
-/// A bottom-nav tab carrying a typed selection event.
+/// A bottom-nav tab carrying a typed selection event (label-only).
 #[must_use]
 pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E) -> Tab {
-    Tab { label: label.into(), selected, on_select: tok(on_select) }
+    Tab { label: label.into(), selected, on_select: tok(on_select), icon: None }
+}
+
+/// A bottom-nav tab with a leading icon (icon tab bar).
+#[must_use]
+pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bool, on_select: E) -> Tab {
+    Tab { label: label.into(), selected, on_select: tok(on_select), icon: Some(icon) }
 }
 
 /// App shell: top bar + bottom-nav `tabs` + scrollable `body`. `dark_mode` is
@@ -456,7 +462,7 @@ pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E)
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, depth: 1 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, depth: 1 }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -465,7 +471,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, depth: 2 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, depth: 2 }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -492,6 +498,7 @@ where
         back: if nav.can_go_back() { Some(tok(on_back)) } else { None },
         dark_mode,
         theme: None,
+        fab: None,
         route: nav.route_key(),
         depth: nav.depth(),
     }
@@ -502,13 +509,33 @@ where
 /// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
 pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, route, depth, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
             back,
             dark_mode,
             theme: Some(theme),
+            fab,
+            route,
+            depth,
+        },
+        other => other,
+    }
+}
+
+/// Anchor a floating action button over a scaffold's body (the raised primary action).
+/// No-op on any other widget: `with_fab(scaffold(...), Icon::Add, Msg::New)`.
+pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget {
+    match widget {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, route, depth, .. } => Widget::Scaffold {
+            title,
+            body,
+            tabs,
+            back,
+            dark_mode,
+            theme,
+            fab: Some(Fab { icon, on_press: tok(on_press) }),
             route,
             depth,
         },
