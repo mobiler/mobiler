@@ -105,6 +105,13 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // Column count adapts to width: 2 on a phone (compact), more on iPad.
         return AnyView(GridView(children: children, send: send))
 
+    case .scroller(let children):
+        return AnyView(
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) { childViews(children, send) }
+            }
+        )
+
     // MARK: input / actions
     case .button(let label, let style, let onPress):
         return AnyView(Button(label) { send(.fired(token: onPress)) }.modifier(ButtonStyleMod(style)))
@@ -135,6 +142,39 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 set: { send(.input(id: id, value: .text($0))) }
             ))
             .textFieldStyle(.roundedBorder)
+        )
+
+    case .searchField(let id, let placeholder, let value):
+        return AnyView(
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                TextField(placeholder, text: Binding(
+                    get: { value },
+                    set: { send(.input(id: id, value: .text($0))) }
+                ))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Color.gray.opacity(0.12))
+            .clipShape(Capsule())
+        )
+
+    case .segmented(let segments):
+        return AnyView(
+            HStack(spacing: 4) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+                    Button(action: { send(.fired(token: seg.onSelect)) }) {
+                        Text(seg.label).font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(seg.selected ? Color.accentColor : Color.clear)
+                            .foregroundColor(seg.selected ? .white : .secondary)
+                            .clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Color.gray.opacity(0.12))
+            .clipShape(Capsule())
         )
 
     case .toggle(let id, let label, let value):

@@ -62,6 +62,21 @@ body {
 .row { display: flex; flex-direction: row; align-items: center; gap: calc(var(--gap) * 0.66); }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+/* Horizontal scroller / carousel — children lay out in a row that scrolls sideways. */
+.scroller { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.scroller::-webkit-scrollbar { display: none; }
+.scroller > * { flex: 0 0 auto; }
+
+/* Search field — leading magnifier + pill input. */
+.searchfield { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; }
+.search-icon { color: var(--muted); }
+.search-input { flex: 1; border: none; background: transparent; outline: none; font: inherit; color: var(--ink); }
+
+/* Segmented control — exclusive options in a pill track. */
+.segmented { display: flex; gap: 4px; background: var(--surface-2); border-radius: 999px; padding: 4px; }
+.segment { flex: 1; border: none; background: transparent; border-radius: 999px; padding: 8px 12px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
+.segment.selected { background: var(--primary); color: #fff; }
+
 .card {
   border-radius: var(--radius);
   padding: 14px;

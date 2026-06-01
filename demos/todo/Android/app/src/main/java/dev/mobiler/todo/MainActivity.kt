@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -85,6 +86,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBarDefaults
@@ -281,6 +285,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
         }
 
+        is Widget.Scroller -> Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { widget.children.forEach { Render(it, send) } }
+
         is Widget.Button -> when (widget.style) {
             ButtonStyle.FILLED -> Button(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
             ButtonStyle.OUTLINED -> OutlinedButton(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
@@ -304,6 +314,26 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        is Widget.SearchField -> OutlinedTextField(
+            value = widget.value,
+            onValueChange = { send(Action.Input(widget.id, InputValue.Text(it))) },
+            placeholder = { Text(widget.placeholder) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            singleLine = true,
+            shape = RoundedCornerShape(50),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        is Widget.Segmented -> SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            widget.segments.forEachIndexed { i, seg ->
+                SegmentedButton(
+                    selected = seg.selected,
+                    onClick = { send(Action.Fired(seg.onSelect)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = widget.segments.size),
+                ) { Text(seg.label) }
+            }
+        }
 
         is Widget.Toggle -> Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),

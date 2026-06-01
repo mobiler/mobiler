@@ -367,6 +367,10 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let kids = render_all(children, send);
             view! { <div class="grid">{kids}</div> }.into_any()
         }
+        Widget::Scroller { children } => {
+            let kids = render_all(children, send);
+            view! { <div class="scroller">{kids}</div> }.into_any()
+        }
 
         // ---- input / actions ----
         Widget::Button { label, style, on_press } => {
@@ -414,6 +418,42 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 />
             }
             .into_any()
+        }
+        Widget::SearchField { id, placeholder, value } => {
+            let (send, id) = (send.clone(), id.clone());
+            let (placeholder, value) = (placeholder.clone(), value.clone());
+            view! {
+                <div class="searchfield">
+                    <span class="search-icon">{icon_glyph(Icon::Search)}</span>
+                    <input
+                        class="search-input"
+                        placeholder=placeholder
+                        prop:value=value
+                        on:input=move |ev| send(Action::Input {
+                            id: id.clone(),
+                            value: InputValue::Text(event_target_value(&ev)),
+                        })
+                    />
+                </div>
+            }
+            .into_any()
+        }
+        Widget::Segmented { segments } => {
+            let segs: Vec<AnyView> = segments
+                .iter()
+                .map(|s| {
+                    let (send, token) = (send.clone(), s.on_select.clone());
+                    let class = if s.selected { "segment selected" } else { "segment" };
+                    let label = s.label.clone();
+                    view! {
+                        <button class=class on:click=move |_| send(Action::Fired { token: token.clone() })>
+                            {label}
+                        </button>
+                    }
+                    .into_any()
+                })
+                .collect();
+            view! { <div class="segmented">{segs}</div> }.into_any()
         }
         Widget::Toggle { id, label, value } => {
             let (send, id, label, checked) = (send.clone(), id.clone(), label.clone(), *value);
