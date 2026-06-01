@@ -56,7 +56,7 @@ pub enum ButtonStyle { Filled, Outlined, Text }
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum CardStyle { Elevated, Outlined, Filled }
+pub enum CardStyle { Elevated, Outlined, Filled, Brand }
 
 /// Semantic status color (distinct from brand/identity color).
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,6 +144,9 @@ pub enum FontFamily { System, Rounded, Serif, Monospace }
 #[repr(C)]
 pub struct Theme {
     pub seed: Rgb,
+    /// Optional secondary brand color. `None` ⇒ derived from `seed`. Used for the
+    /// gradient on `CardStyle::Brand` (seed → accent) and as a secondary accent.
+    pub accent: Option<Rgb>,
     pub corner: Corner,
     pub density: Density,
     pub font: FontFamily,
@@ -156,6 +159,7 @@ impl Default for Theme {
     fn default() -> Self {
         Theme {
             seed: Rgb::new(0x5C, 0x6B, 0xC0), // indigo — matches the legacy default accent
+            accent: None,
             corner: Corner::Medium,
             density: Density::Comfortable,
             font: FontFamily::System,
@@ -325,6 +329,7 @@ mod tests {
             dark_mode: false,
             theme: Some(Theme {
                 seed: Rgb::new(0xC8, 0x5A, 0x3C),
+                accent: Some(Rgb::new(0xE0, 0x6A, 0x2C)),
                 corner: Corner::Large,
                 density: Density::Compact,
                 font: FontFamily::Rounded,

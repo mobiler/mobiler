@@ -666,8 +666,11 @@ fn theme_css(t: &Theme) -> String {
         FontFamily::Serif => "ui-serif, Georgia, \"Times New Roman\", serif",
         FontFamily::Monospace => "ui-monospace, \"SF Mono\", \"Cascadia Code\", Menlo, monospace",
     };
+    // Secondary brand color (for the CardStyle::Brand gradient); falls back to the seed.
+    let (ar, ag, ab) = t.accent.map_or((r, g, b), |a| (a.r, a.g, a.b));
     format!(
         "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
+         --accent2:rgb({ar},{ag},{ab});\
          --accent-soft:rgba({r},{g},{b},0.16);--radius:{radius};\
          --gap:{gap};--pad:{pad};--font:{font};"
     )
@@ -723,6 +726,7 @@ fn card_class(s: CardStyle) -> &'static str {
         CardStyle::Elevated => "card-elevated",
         CardStyle::Outlined => "card-outlined",
         CardStyle::Filled => "card-filled",
+        CardStyle::Brand => "card-brand",
     }
 }
 

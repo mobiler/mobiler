@@ -16,6 +16,7 @@
   --primary: #3f4a8a;
   --primary-ink: #ffffff;
   --accent: #3f4a8a;
+  --accent2: #3f4a8a;
   --accent-soft: rgba(63, 74, 138, 0.16);
   --radius: 14px;
   /* Spacing + font are theme-overridable (set inline by an app Theme); these are the defaults. */
@@ -34,6 +35,7 @@
   --primary: #8c9bff;
   --primary-ink: #15171f;
   --accent: #8c9bff;
+  --accent2: #8c9bff;
   --accent-soft: rgba(140, 155, 255, 0.18);
 }
 
@@ -107,6 +109,9 @@ body {
 .card-elevated { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
 .card-outlined { background: transparent; border: 1px solid var(--line); }
 .card-filled { background: var(--surface-2); }
+/* Brand gradient card (promo banner) — fills seed → accent. */
+.card-brand { background: linear-gradient(135deg, var(--primary), var(--accent2)); color: #fff; border: none; }
+.card-brand .t-caption { color: rgba(255,255,255,0.85); }
 /* A tappable card is a <button>; strip the native chrome so it reads as a card. */
 .card-tappable {
   display: block;

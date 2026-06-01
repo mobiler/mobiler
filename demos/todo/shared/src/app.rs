@@ -299,6 +299,7 @@ impl MobilerApp for Todo {
         // rounded font (coffee uses terracotta — same engine, distinct identities).
         let theme = Theme {
             seed: Rgb::new(0x5C, 0x6B, 0xC0),
+            accent: None,
             corner: Corner::Large,
             density: Density::Comfortable,
             font: FontFamily::Rounded,

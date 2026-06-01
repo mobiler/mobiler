@@ -19,6 +19,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -109,6 +110,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
@@ -341,6 +343,18 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
                     if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, elevation = elev) { CardBody(widget.child, send) }
                     else Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                }
+                CardStyle.BRAND -> {
+                    // Brand gradient (seed → accent, via the M3 primary → secondary scheme).
+                    val cs = MaterialTheme.colorScheme
+                    val grad = Brush.linearGradient(listOf(cs.primary, cs.secondary))
+                    val brandMod = mod
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(grad)
+                        .then(if (op != null) Modifier.clickable { send(Action.Fired(op)) } else Modifier)
+                    Box(modifier = brandMod) {
+                        CompositionLocalProvider(LocalContentColor provides Color.White) { CardBody(widget.child, send) }
+                    }
                 }
             }
         }

@@ -144,6 +144,7 @@ impl MobilerApp for FadeHouse {
         // Brand: warm brass on a dark shell — the classic barbershop look.
         let theme = Theme {
             seed: Rgb::new(0xC8, 0x8A, 0x3C),
+            accent: Some(Rgb::new(0xE0, 0x6A, 0x2C)), // warm orange — for the brand gradient
             corner: Corner::Medium,
             density: Density::Comfortable,
             font: FontFamily::System,
@@ -245,6 +246,12 @@ fn home(model: &Model) -> Widget {
         // Search bar (SearchField) — emits Input { id: "search", … }.
         search_field("search", "Search services…", model.search.as_str()),
         hero,
+        // Brand-gradient promo banner (CardStyle::Brand — fills seed → accent).
+        card_button(
+            column(vec![title("20% off your first cut"), caption("New here? Book today and save.")]),
+            CardStyle::Brand,
+            Msg::Book,
+        ),
         audience_segmented(model),
         category_carousel(model),
         subtitle("Our barbers"),
