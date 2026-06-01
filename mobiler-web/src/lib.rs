@@ -309,6 +309,39 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         Widget::ColorDot { color } => {
             view! { <span class=format!("dot {}", dot_class(*color))></span> }.into_any()
         }
+        Widget::Avatar { source, status } => {
+            let dot = status.map(|t| view! { <span class=format!("avatar-status {}", tone_class(t))></span> });
+            view! {
+                <span class="avatar">
+                    <img class="avatar-img" src=source.clone() />
+                    {dot}
+                </span>
+            }
+            .into_any()
+        }
+        Widget::Rating { value, max, on_rate } => {
+            let value = *value;
+            let stars: Vec<AnyView> = (1..=*max)
+                .map(|i| {
+                    let threshold = u32::from(i) * 10;
+                    // filled / half / empty by tenths.
+                    let glyph = if value >= threshold { "★" } else if value + 5 >= threshold { "⯨" } else { "☆" };
+                    match on_rate {
+                        Some(tokens) => {
+                            let (send, token) = (send.clone(), tokens.get(usize::from(i - 1)).cloned().unwrap_or_default());
+                            view! {
+                                <button class="star star-tappable" on:click=move |_| send(Action::Fired { token: token.clone() })>
+                                    {glyph}
+                                </button>
+                            }
+                            .into_any()
+                        }
+                        None => view! { <span class="star">{glyph}</span> }.into_any(),
+                    }
+                })
+                .collect();
+            view! { <span class="rating">{stars}</span> }.into_any()
+        }
         Widget::Divider => view! { <hr class="divider" /> }.into_any(),
         Widget::Spacer { size } => {
             view! { <div class=format!("spacer {}", spacer_class(*size))></div> }.into_any()
@@ -522,7 +555,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, route, depth } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth } => {
             let back_btn = back.clone().map(|token| {
                 let send = send.clone();
                 view! {
@@ -560,6 +593,19 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                     </button>
                 }
             });
+            // Modal bottom sheet — a scrim (tap to dismiss) + a panel rising from the bottom.
+            let sheet_overlay = sheet.as_ref().map(|s| {
+                let (send_scrim, dismiss) = (send.clone(), s.on_dismiss.clone());
+                let (title, child) = (s.title.clone(), render(&s.child, send));
+                view! {
+                    <div class="sheet-scrim" on:click=move |_| send_scrim(Action::Fired { token: dismiss.clone() })></div>
+                    <div class="sheet">
+                        <div class="sheet-handle"></div>
+                        <div class="sheet-title">{title}</div>
+                        {child}
+                    </div>
+                }
+            });
             // `theme-dark` flips the CSS variables for the whole shell — theme-as-data,
             // the web twin of the native shells' `preferredColorScheme`/Material theme.
             let class = if *dark_mode { "scaffold theme-dark" } else { "scaffold" };
@@ -577,6 +623,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                     <div class=body_class data-route=route.clone()>{body}</div>
                     {fab_btn}
                     {tabbar}
+                    {sheet_overlay}
                 </div>
             }
             .into_any()

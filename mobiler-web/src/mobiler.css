@@ -77,6 +77,28 @@ body {
 .segment { flex: 1; border: none; background: transparent; border-radius: 999px; padding: 8px 12px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
 .segment.selected { background: var(--primary); color: #fff; }
 
+/* Avatar — circular image with an optional status dot. */
+.avatar { position: relative; display: inline-block; width: 48px; height: 48px; }
+.avatar-img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+.avatar-status { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg); }
+
+/* Star rating. */
+.rating { display: inline-flex; gap: 2px; color: var(--accent); font-size: 16px; line-height: 1; }
+.star { color: var(--accent); }
+.star-tappable { border: none; background: transparent; cursor: pointer; font-size: 20px; color: var(--accent); padding: 0 1px; }
+
+/* Modal bottom sheet — scrim + a panel rising from the bottom. */
+.sheet-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 20; }
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
+  background: var(--surface); border-radius: 20px 20px 0 0; padding: 12px 18px 28px;
+  box-shadow: 0 -8px 28px rgba(0,0,0,0.28); max-height: 80%; overflow-y: auto;
+  animation: sheet-rise 0.24s ease;
+}
+.sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 12px; }
+.sheet-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+@keyframes sheet-rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
 .card {
   border-radius: var(--radius);
   padding: 14px;
