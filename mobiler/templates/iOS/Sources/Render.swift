@@ -57,6 +57,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .colorDot(let color):
         return AnyView(Circle().fill(projectColor(color)).frame(width: 12, height: 12))
 
+    case .avatar(let source, let status):
+        return AnyView(AvatarView(source: source, status: status))
+
+    case .rating(let value, let max, let onRate):
+        return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
+
     case .divider:
         return AnyView(Divider())
 
@@ -105,6 +111,13 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // Column count adapts to width: 2 on a phone (compact), more on iPad.
         return AnyView(GridView(children: children, send: send))
 
+    case .scroller(let children):
+        return AnyView(
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) { childViews(children, send) }
+            }
+        )
+
     // MARK: input / actions
     case .button(let label, let style, let onPress):
         return AnyView(Button(label) { send(.fired(token: onPress)) }.modifier(ButtonStyleMod(style)))
@@ -135,6 +148,39 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 set: { send(.input(id: id, value: .text($0))) }
             ))
             .textFieldStyle(.roundedBorder)
+        )
+
+    case .searchField(let id, let placeholder, let value):
+        return AnyView(
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                TextField(placeholder, text: Binding(
+                    get: { value },
+                    set: { send(.input(id: id, value: .text($0))) }
+                ))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Color.gray.opacity(0.12))
+            .clipShape(Capsule())
+        )
+
+    case .segmented(let segments):
+        return AnyView(
+            HStack(spacing: 4) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+                    Button(action: { send(.fired(token: seg.onSelect)) }) {
+                        Text(seg.label).font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(seg.selected ? Color.accentColor : Color.clear)
+                            .foregroundColor(seg.selected ? .white : .secondary)
+                            .clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Color.gray.opacity(0.12))
+            .clipShape(Capsule())
         )
 
     case .toggle(let id, let label, let value):
@@ -178,14 +224,14 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let route, let depth):
         // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
         // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
         // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
         ActiveTheme.current = theme
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
-            darkMode: darkMode, theme: theme, route: route, depth: depth, send: send
+            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet, route: route, depth: depth, send: send
         ))
     }
 }
@@ -202,6 +248,7 @@ enum ActiveTheme {
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
 extension Theme {
     var brandColor: Color { Color(red: Double(seed.r) / 255, green: Double(seed.g) / 255, blue: Double(seed.b) / 255) }
+    var accentColor: Color { accent.map { Color(red: Double($0.r) / 255, green: Double($0.g) / 255, blue: Double($0.b) / 255) } ?? brandColor }
     var cardRadius: CGFloat { switch corner { case .none: 0; case .small: 8; case .medium: 14; case .large: 22 } }
     var imageRadius: CGFloat { switch corner { case .none: 0; case .small: 10; case .medium: 16; case .large: 24 } }
     var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0 } }
@@ -230,6 +277,56 @@ private struct GridView: View {
     }
 }
 
+// Circular avatar image with an optional colored status dot.
+private struct AvatarView: View {
+    let source: String
+    let status: Tone?
+    var body: some View {
+        let img: AnyView
+        if source.hasPrefix("file:"), let url = URL(string: source) {
+            img = AnyView(FileImageView(url: url))
+        } else {
+            img = AnyView(AsyncImage(url: URL(string: source)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: { Color.gray.opacity(0.15) })
+        }
+        return img
+            .frame(width: 48, height: 48)
+            .clipShape(Circle())
+            .overlay(alignment: .bottomTrailing) {
+                if let status = status {
+                    Circle().fill(toneColors(status).0)
+                        .frame(width: 12, height: 12)
+                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                }
+            }
+    }
+}
+
+// Star rating; tappable when `onRate` carries one token per star.
+private struct RatingView: View {
+    let value: UInt32
+    let max: UInt8
+    let onRate: [String]?
+    let send: (Action) -> Void
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(1...Int(max), id: \.self) { i in
+                let threshold = UInt32(i) * 10
+                let name = value >= threshold ? "star.fill" : (value + 5 >= threshold ? "star.leadinghalf.filled" : "star")
+                if let tokens = onRate, i - 1 < tokens.count {
+                    let token = tokens[i - 1]
+                    Button(action: { send(.fired(token: token)) }) {
+                        Image(systemName: name).foregroundColor(.accentColor)
+                    }.buttonStyle(.plain)
+                } else {
+                    Image(systemName: name).foregroundColor(.accentColor)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Scaffold (top bar + scrollable body + bottom tabs + theme-as-data)
 
 private struct ScaffoldView: View {
@@ -239,6 +336,8 @@ private struct ScaffoldView: View {
     let back: String?
     let darkMode: Bool
     let theme: Theme?
+    let fab: SharedTypes.Fab?
+    let sheet: SharedTypes.Sheet?
     let route: String
     let depth: UInt32
     let send: (Action) -> Void
@@ -282,6 +381,26 @@ private struct ScaffoldView: View {
         )
         // After each route settles, record its depth for the next transition.
         .task(id: route) { prevDepth = depth }
+        // Modal bottom sheet — a scrim (tap to dismiss) + a panel from the bottom.
+        .overlay {
+            if let sheet = sheet {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.45).ignoresSafeArea()
+                        .onTapGesture { send(.fired(token: sheet.onDismiss)) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Capsule().fill(Color.secondary.opacity(0.4))
+                            .frame(width: 40, height: 4).frame(maxWidth: .infinity)
+                        Text(sheet.title).font(.title3.bold())
+                        render(sheet.child, send)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                }
+                .transition(.opacity)
+            }
+        }
     }
 
     // Top bar + scrollable body, optionally with the phone's bottom tab-bar.
@@ -316,16 +435,36 @@ private struct ScaffoldView: View {
             .id(route)
             .transition(navTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Floating action button — the raised primary action, over the body bottom-trailing.
+            .overlay(alignment: .bottomTrailing) {
+                if let fab = fab {
+                    Button(action: { send(.fired(token: fab.onPress)) }) {
+                        Image(systemName: sfSymbol(fab.icon))
+                            .font(.title2)
+                            .frame(width: 56, height: 56)
+                            .background(theme?.brandColor ?? .accentColor)
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .shadow(radius: 6, y: 3)
+                    }
+                    .padding(18)
+                }
+            }
 
             if showBottomTabs && !tabs.isEmpty {
                 Divider()
                 HStack {
                     ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
                         Button(action: { send(.fired(token: tab.onSelect)) }) {
-                            Text(tab.label)
-                                .fontWeight(tab.selected ? .semibold : .regular)
-                                .foregroundColor(tab.selected ? .accentColor : .secondary)
-                                .frame(maxWidth: .infinity)
+                            VStack(spacing: 2) {
+                                if let icon = tab.icon {
+                                    Image(systemName: sfSymbol(icon)).font(.system(size: 20))
+                                }
+                                Text(tab.label).font(.caption)
+                            }
+                            .fontWeight(tab.selected ? .semibold : .regular)
+                            .foregroundColor(tab.selected ? .accentColor : .secondary)
+                            .frame(maxWidth: .infinity)
                         }
                     }
                 }
@@ -339,14 +478,19 @@ private struct ScaffoldView: View {
         VStack(spacing: 4) {
             ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
                 Button(action: { send(.fired(token: tab.onSelect)) }) {
-                    Text(tab.label)
-                        .fontWeight(tab.selected ? .semibold : .regular)
-                        .foregroundColor(tab.selected ? .accentColor : .secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 14)
-                        .background(tab.selected ? Color.accentColor.opacity(0.12) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    HStack(spacing: 10) {
+                        if let icon = tab.icon {
+                            Image(systemName: sfSymbol(icon)).font(.system(size: 18))
+                        }
+                        Text(tab.label)
+                    }
+                    .fontWeight(tab.selected ? .semibold : .regular)
+                    .foregroundColor(tab.selected ? .accentColor : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 14)
+                    .background(tab.selected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
             }
@@ -410,6 +554,13 @@ private struct CardMod: ViewModifier {
             return AnyView(content.background(shape.fill(Color(.tertiarySystemBackground))))
         case .outlined:
             return AnyView(content.overlay(shape.stroke(Color.gray.opacity(0.3))))
+        case .brand:
+            let t = ActiveTheme.current
+            let grad = LinearGradient(
+                colors: [t?.brandColor ?? .accentColor, t?.accentColor ?? .accentColor],
+                startPoint: .topLeading, endPoint: .bottomTrailing,
+            )
+            return AnyView(content.background(shape.fill(grad)).foregroundColor(.white))
         }
     }
 }
@@ -449,6 +600,30 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .settings: return "gearshape"
     case .check: return "checkmark"
     case .star: return "star.fill"
+    case .info: return "info.circle"
+    case .home: return "house.fill"
+    case .search: return "magnifyingglass"
+    case .menu: return "line.3.horizontal"
+    case .filter: return "line.3.horizontal.decrease.circle"
+    case .back: return "chevron.left"
+    case .forward: return "chevron.right"
+    case .down: return "chevron.down"
+    case .bell: return "bell.fill"
+    case .cart: return "cart.fill"
+    case .share: return "square.and.arrow.up"
+    case .heart: return "heart"
+    case .heartFilled: return "heart.fill"
+    case .person: return "person.fill"
+    case .people: return "person.2.fill"
+    case .phone: return "phone.fill"
+    case .mail: return "envelope.fill"
+    case .calendar: return "calendar"
+    case .clock: return "clock.fill"
+    case .mapPin: return "mappin.and.ellipse"
+    case .camera: return "camera.fill"
+    case .photo: return "photo"
+    case .play: return "play.fill"
+    case .scissors: return "scissors"
     }
 }
 

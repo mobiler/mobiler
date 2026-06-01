@@ -12,7 +12,7 @@
     { "name": "Confirm", "short": "a confirm dialog", "api": "cx.confirm(title, message, then)", "plugin": "dialog", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "native yes/no dialog" },
     { "name": "Photo", "short": "the photo picker", "api": "cx.pick_photo(then)", "plugin": "photo", "tier": "free", "status": "shipped", "since": "0.8.0", "notes": "system photo picker → local image URI (no permission)" },
     { "name": "Camera", "short": "camera capture", "api": "cx.capture_photo(then)", "plugin": "camera", "tier": "free", "status": "shipped", "since": "0.9.0", "notes": "system camera → local image URI" },
-    { "name": "Date picker", "short": "the date picker", "api": "cx.pick_date(then)", "plugin": "datetime", "tier": "free", "status": "in-progress", "since": "0.12.0", "notes": "native date picker → ISO YYYY-MM-DD string" },
-    { "name": "Time picker", "short": "the time picker", "api": "cx.pick_time(then)", "plugin": "datetime", "tier": "free", "status": "in-progress", "since": "0.12.0", "notes": "native time picker → 24-hour HH:MM string" }
+    { "name": "Date picker", "short": "the date picker", "api": "cx.pick_date(then)", "plugin": "datetime", "tier": "free", "status": "shipped", "since": "0.12.0", "notes": "native date picker → ISO YYYY-MM-DD string" },
+    { "name": "Time picker", "short": "the time picker", "api": "cx.pick_time(then)", "plugin": "datetime", "tier": "free", "status": "shipped", "since": "0.12.0", "notes": "native time picker → 24-hour HH:MM string" }
   ]
 }

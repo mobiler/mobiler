@@ -35,7 +35,7 @@ pub type App = MobilerShell<Counter>;
 - **Capabilities** via `Cx` — device APIs as async effects, reached through typed
   helpers in `update`/`input`. Built in:
   <!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
-  HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, and camera capture.
+  HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, camera capture, the date picker, and the time picker.
   <!-- capabilities:end -->
   Each is an opaque `{plugin, op, input}` effect, so adding one never changes the wire
   ABI; the generic shell fulfils them natively on Android, iOS, and the web.

@@ -57,8 +57,10 @@ fun {{NAME}}Theme(
         // A brand theme wins: build a scheme seeded from its color, no dynamic override.
         theme != null -> {
             val seed = Color(theme.seed.r.toInt(), theme.seed.g.toInt(), theme.seed.b.toInt())
+            // Optional accent seeds M3 secondary/tertiary (drives CardStyle.BRAND gradients); falls back to the seed.
+            val accent = theme.accent?.let { Color(it.r.toInt(), it.g.toInt(), it.b.toInt()) } ?: seed
             val base = if (darkTheme) DarkColorScheme else LightColorScheme
-            base.copy(primary = seed, secondary = seed, tertiary = seed)
+            base.copy(primary = seed, secondary = accent, tertiary = accent)
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current

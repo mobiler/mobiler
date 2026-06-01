@@ -76,6 +76,7 @@ enum Plugins {
         case "device": return await DevicePlugin.handle(op: op, input: input)
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
+        case "datetime": return await DateTimePlugin.handle(op: op, input: input)
         case "photo": return await PhotoPlugin.handle(op: op, input: input)
         case "camera": return await CameraPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
@@ -242,6 +243,59 @@ enum DialogPlugin {
             alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
                 cont.resume(returning: PluginResponse(ok: true, output: "ok"))
             })
+            presenter.present(alert, animated: true)
+        }
+    }
+}
+
+/// Native date / time picker — request/response. `op` is "date" (→ ISO "YYYY-MM-DD")
+/// or "time" (→ 24-hour "HH:MM"); `ok=false` on cancel. Presents a UIDatePicker in an
+/// action sheet and resolves via a continuation once the user taps Done.
+@MainActor
+enum DateTimePlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        let mode: UIDatePicker.Mode
+        switch op {
+        case "date": mode = .date
+        case "time": mode = .time
+        default: return PluginResponse(ok: false, output: "unknown op '\(op)'")
+        }
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            let picker = UIDatePicker()
+            picker.datePickerMode = mode
+            picker.preferredDatePickerStyle = .wheels
+            picker.translatesAutoresizingMaskIntoConstraints = false
+
+            // An action sheet with blank message lines reserves room for the wheel picker.
+            let alert = UIAlertController(
+                title: op == "date" ? "Pick a date" : "Pick a time",
+                message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .actionSheet)
+            alert.view.addSubview(picker)
+            NSLayoutConstraint.activate([
+                picker.centerXAnchor.constraint(equalTo: alert.view.centerXAnchor),
+                picker.topAnchor.constraint(equalTo: alert.view.topAnchor, constant: 48),
+                picker.widthAnchor.constraint(equalTo: alert.view.widthAnchor, constant: -16),
+            ])
+
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.dateFormat = op == "date" ? "yyyy-MM-dd" : "HH:mm"
+
+            var resumed = false
+            func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+                done(PluginResponse(ok: false, output: "cancel"))
+            })
+            alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
+                done(PluginResponse(ok: true, output: fmt.string(from: picker.date)))
+            })
+            // iPad presents action sheets in a popover, which needs a source.
+            alert.popoverPresentationController?.sourceView = presenter.view
+            alert.popoverPresentationController?.sourceRect = CGRect(
+                x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
             presenter.present(alert, animated: true)
         }
     }
