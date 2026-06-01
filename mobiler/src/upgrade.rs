@@ -191,12 +191,42 @@ fn sync_file(
     }
 
     let current = fs::read(&dst).with_context(|| format!("reading {}", dst.display()))?;
+
+    // MERGE-class files carry plugin/user state at anchors. Rather than refuse to touch them
+    // (which would strand shell improvements — e.g. a base dependency the new shells need), we
+    // re-emit the new template and splice the user's injected lines back in above each anchor.
+    // If that can't be done safely (a marker is missing — e.g. a hand-mangled file), we fall
+    // back to the conservative behaviour: offer `.mobiler-new`, never overwrite.
+    let mut merge_failed = false;
+    let desired = if class == Class::Merge {
+        let merged = std::str::from_utf8(&desired)
+            .ok()
+            .zip(std::str::from_utf8(&current).ok())
+            .and_then(|(new_tmpl, cur)| merge_anchors(new_tmpl, cur));
+        match merged {
+            Some(m) => m.into_bytes(),
+            None => {
+                merge_failed = true; // couldn't splice safely — keep the raw template for the sidecar
+                desired
+            }
+        }
+    } else {
+        desired
+    };
+
     if current == desired {
         report.up_to_date += 1;
         return Ok(());
     }
 
-    match class {
+    // A successfully-merged anchor file is safe to write like a shell file (user state preserved);
+    // only a merge fallback stays hands-off.
+    let effective = match class {
+        Class::Merge if merge_failed => Class::Merge,
+        Class::Merge => Class::Shell, // merged: re-applied user injections onto the new shell
+        other => other,
+    };
+    match effective {
         Class::Merge => {
             write_sidecar(&dst, "mobiler-new", &desired)?;
             report.merge.push(rel_disp);
@@ -213,6 +243,54 @@ fn sync_file(
         Class::Own => unreachable!("OWN files return early"),
     }
     Ok(())
+}
+
+/// Re-apply a user's anchor injections onto the new template. `plugin add` inserts its payload
+/// lines immediately above a `mobiler:<anchor>` marker (and copies plugin bodies to separate
+/// files), so a user's injected lines are exactly the contiguous lines above each marker in their
+/// file that the stock template doesn't contain. We rebuild from `new_tmpl`, splicing those lines
+/// back above each marker. Returns `None` if any marker present in the template is missing from
+/// the user's file (can't merge safely → caller falls back to a `.mobiler-new` sidecar).
+///
+/// Invariant this relies on: the template line *directly above* each marker is stable (a base dep
+/// / registration that stays in the shell, or a blank line) — true of all current anchor files —
+/// so the upward walk stops at it and never mistakes an evolving shell line for a user injection.
+fn merge_anchors(new_tmpl: &str, current: &str) -> Option<String> {
+    let is_marker = |line: &str| ANCHORS.iter().any(|a| line.contains(*a));
+    // Stock lines (trimmed, non-empty) — anything here is template structure, not a user injection.
+    let stock: std::collections::HashSet<&str> =
+        new_tmpl.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let cur_lines: Vec<&str> = current.lines().collect();
+
+    // Trailing-newline fidelity: preserve whatever the template ends with.
+    let ends_with_nl = new_tmpl.ends_with('\n');
+    let mut out: Vec<String> = Vec::new();
+    for line in new_tmpl.lines() {
+        if is_marker(line) {
+            // Find the matching marker line in the user's file (by the same anchor string).
+            let anchor: &str = ANCHORS.iter().copied().find(|a| line.contains(a))?;
+            let cur_idx = cur_lines.iter().position(|l| l.contains(anchor))?;
+            // Walk upward collecting the user's injected lines (non-blank, not in the template).
+            let mut injected: Vec<&str> = Vec::new();
+            let mut i = cur_idx;
+            while i > 0 {
+                let above = cur_lines[i - 1];
+                if above.trim().is_empty() || stock.contains(above.trim()) {
+                    break;
+                }
+                injected.push(above);
+                i -= 1;
+            }
+            injected.reverse();
+            out.extend(injected.into_iter().map(str::to_string));
+        }
+        out.push(line.to_string());
+    }
+    let mut merged = out.join("\n");
+    if ends_with_nl {
+        merged.push('\n');
+    }
+    Some(merged)
 }
 
 /// Write `<dst>.<suffix>` next to `dst` (e.g. `Render.swift.mobiler-new`).
@@ -336,6 +414,28 @@ mod test {
     }
 
     #[test]
+    fn merge_anchors_updates_shell_and_preserves_injections() {
+        // Mirrors the real anchor files: an evolving shell line (core → extended) higher up, and a
+        // STABLE base line (okhttp) directly above the marker — `plugin add` always inserts its
+        // payload between that stable line and the marker.
+        let new_tmpl = "deps {\n    impl(\"material-icons-extended\")\n    impl(\"okhttp\")\n    // mobiler:gradle-deps — insert above\n}\n";
+        // No plugins installed: adopt the new template verbatim (so the evolved base dep lands).
+        let fresh = "deps {\n    impl(\"material-icons-core\")\n    impl(\"okhttp\")\n    // mobiler:gradle-deps — insert above\n}\n";
+        assert_eq!(merge_anchors(new_tmpl, fresh).as_deref(), Some(new_tmpl));
+
+        // A plugin injected a line directly above the anchor: it must survive onto the new shell.
+        let with_plugin =
+            "deps {\n    impl(\"material-icons-core\")\n    impl(\"okhttp\")\n    impl(\"play-services-scanner\")\n    // mobiler:gradle-deps — insert above\n}\n";
+        let merged = merge_anchors(new_tmpl, with_plugin).unwrap();
+        assert!(merged.contains("material-icons-extended"), "shell evolution applied");
+        assert!(merged.contains("play-services-scanner"), "plugin injection preserved");
+        assert!(!merged.contains("material-icons-core"), "stale base dep dropped");
+
+        // Marker missing in the user's file ⇒ refuse to merge (caller keeps it hands-off).
+        assert_eq!(merge_anchors(new_tmpl, "deps {\n}\n"), None);
+    }
+
+    #[test]
     fn extract_dep_version_reads_string_form() {
         let cargo = "[dependencies]\ncrux_core.workspace = true\nmobiler-core = \"0.11\"\n";
         assert_eq!(extract_dep_version(cargo, "mobiler-core").as_deref(), Some("0.11"));
@@ -411,9 +511,13 @@ mod test {
     }
 
     #[test]
-    fn merge_file_never_overwritten_even_with_apply() {
+    fn merge_file_without_usable_anchor_stays_hands_off() {
         let root = skeleton();
-        // Core.kt carries plugin state; its template has a `mobiler:plugins` anchor → MERGE.
+        // A MERGE-class file (Core.kt template carries a `mobiler:plugins` anchor) whose on-disk
+        // copy has no usable marker → merge_anchors() can't splice safely → conservative fallback:
+        // never overwritten (even with --apply), offered as .mobiler-new. (The happy path — marker
+        // present, injections re-applied onto the new shell — is covered by the merge_anchors unit
+        // test and verified end-to-end via `mobiler new` + `upgrade --apply`.)
         let core = root.join("Android/app/src/main/java/dev/mobiler/demo/Core.kt");
         fs::write(&core, "package dev.mobiler.demo\n// my installed plugins\n").unwrap();
 
@@ -421,11 +525,11 @@ mod test {
         assert_eq!(
             fs::read_to_string(&core).unwrap(),
             "package dev.mobiler.demo\n// my installed plugins\n",
-            "MERGE file is never overwritten"
+            "unmergeable MERGE file is never overwritten"
         );
         assert!(
             root.join("Android/app/src/main/java/dev/mobiler/demo/Core.kt.mobiler-new").exists(),
-            "MERGE file offered as .mobiler-new"
+            "offered as .mobiler-new"
         );
         let _ = fs::remove_dir_all(&root);
     }
