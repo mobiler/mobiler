@@ -183,6 +183,16 @@ pub struct Fab {
     pub on_press: ActionToken,
 }
 
+/// One option in a [`Widget::Segmented`] control (mirrors [`Tab`]). `selected` marks the
+/// active segment; tapping sends `on_select`.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
+#[repr(C)]
+pub struct Segment {
+    pub label: String,
+    pub selected: bool,
+    pub on_select: ActionToken,
+}
+
 // ------------------------------- widgets -------------------------------
 
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
@@ -208,11 +218,17 @@ pub enum Widget {
     Box { children: Vec<Widget>, align: BoxAlign, scrim: bool },
     /// Fixed 2-column grid; children flow left-to-right, top-to-bottom.
     Grid { children: Vec<Widget> },
+    /// Horizontally scrolling row of children (a carousel / chip rail).
+    Scroller { children: Vec<Widget> },
     // Input
     Button { label: String, style: ButtonStyle, on_press: ActionToken },
     IconButton { icon: Icon, on_press: ActionToken },
     Chip { label: String, selected: bool, on_press: ActionToken },
     TextField { id: String, placeholder: String, value: String },
+    /// A search input (leading magnifier, pill shape); emits `Input { id, Text }` like `TextField`.
+    SearchField { id: String, placeholder: String, value: String },
+    /// A single-choice segmented control — exclusive options in a pill (e.g. Men/Women/Kids).
+    Segmented { segments: Vec<Segment> },
     Toggle { id: String, label: String, value: bool },
     Checkbox { id: String, label: String, value: bool },
     /// Continuous 0..=`max` slider; emits `Input { id, Int }`.

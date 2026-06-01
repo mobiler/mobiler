@@ -5,9 +5,10 @@
 
 use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, badge, button,
-    caption, card, card_button, chip, column, divider, emphasis, grid, icon_button, image, row,
-    scaffold, spacer, stack, subtitle, tab_icon, text, title, with_fab, with_theme,
+    ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, badge,
+    button, caption, card, card_button, chip, column, divider, emphasis, grid, icon_button, image,
+    row, scaffold, scroller, search_field, segment, segmented, spacer, stack, subtitle, tab_icon,
+    text, title, with_fab, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,10 +22,18 @@ pub enum Tab {
     Profile,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Audience {
+    Men,
+    Women,
+    Kids,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
     SelectTab(Tab),
     SelectCategory(String),
+    SelectAudience(Audience),
     OpenService(u32),
     Notifications,
     Book,
@@ -42,6 +51,8 @@ struct Service {
 pub struct Model {
     tab: Tab,
     category: String,
+    audience: Audience,
+    search: String,
     services: Vec<Service>,
 }
 
@@ -50,6 +61,8 @@ impl Default for Model {
         Self {
             tab: Tab::Home,
             category: "All".to_string(),
+            audience: Audience::Men,
+            search: String::new(),
             services: vec![
                 Service { name: "Classic Cut", price: "$28", rating: "4.9", category: "Hair", image: "https://loremflickr.com/400/400/haircut?lock=1" },
                 Service { name: "Skin Fade", price: "$32", rating: "4.8", category: "Hair", image: "https://loremflickr.com/400/400/barber?lock=2" },
@@ -73,6 +86,7 @@ impl MobilerApp for FadeHouse {
         match msg {
             Msg::SelectTab(t) => model.tab = t,
             Msg::SelectCategory(c) => model.category = c,
+            Msg::SelectAudience(a) => model.audience = a,
             Msg::OpenService(i) => {
                 if let Some(s) = model.services.get(i as usize) {
                     cx.toast(format!("Booking “{}” — {}", s.name, s.price));
@@ -80,6 +94,14 @@ impl MobilerApp for FadeHouse {
             }
             Msg::Notifications => cx.toast("No new notifications"),
             Msg::Book => cx.toast("Pick a date & time — coming next"),
+        }
+    }
+
+    fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
+        if id == "search" {
+            if let InputValue::Text(t) = value {
+                model.search = t;
+            }
         }
     }
 
@@ -109,14 +131,27 @@ impl MobilerApp for FadeHouse {
     }
 }
 
-fn home(model: &Model) -> Widget {
-    let categories = ["All", "Hair", "Beard", "Combo"];
-    let chips = row(
+fn category_carousel(model: &Model) -> Widget {
+    // A horizontally-scrolling chip rail (Scroller) — more categories than fit on one row.
+    let categories = ["All", "Hair", "Beard", "Combo", "Shave", "Kids", "Color"];
+    scroller(
         categories
             .iter()
             .map(|c| chip((*c).to_string(), model.category.as_str() == *c, Msg::SelectCategory((*c).to_string())))
             .collect(),
-    );
+    )
+}
+
+fn audience_segmented(model: &Model) -> Widget {
+    // A single-choice segmented control (Segmented).
+    segmented(vec![
+        segment("Men", model.audience == Audience::Men, Msg::SelectAudience(Audience::Men)),
+        segment("Women", model.audience == Audience::Women, Msg::SelectAudience(Audience::Women)),
+        segment("Kids", model.audience == Audience::Kids, Msg::SelectAudience(Audience::Kids)),
+    ])
+}
+
+fn home(model: &Model) -> Widget {
     let hero = stack(
         BoxAlign::BottomStart,
         true,
@@ -135,8 +170,11 @@ fn home(model: &Model) -> Widget {
             spacer(Spacing::Md),
             icon_button(Icon::Bell, Msg::Notifications),
         ]),
+        // Search bar (SearchField) — emits Input { id: "search", … }.
+        search_field("search", "Search services…", model.search.as_str()),
         hero,
-        chips,
+        audience_segmented(model),
+        category_carousel(model),
         subtitle("Popular services"),
         services_grid(model),
     ])
@@ -144,7 +182,9 @@ fn home(model: &Model) -> Widget {
 
 fn services_screen(model: &Model) -> Widget {
     column(vec![
-        caption("Choose a service to book your chair."),
+        search_field("search", "Search services…", model.search.as_str()),
+        audience_segmented(model),
+        category_carousel(model),
         spacer(Spacing::Sm),
         services_grid(model),
     ])
@@ -152,13 +192,20 @@ fn services_screen(model: &Model) -> Widget {
 
 fn services_grid(model: &Model) -> Widget {
     let cat = model.category.as_str();
+    let q = model.search.to_lowercase();
     let cards: Vec<Widget> = model
         .services
         .iter()
         .enumerate()
+        // Kids audience narrows to kids services; Men/Women show the full menu.
+        .filter(|(_, s)| model.audience != Audience::Kids || s.name.contains("Kids"))
         .filter(|(_, s)| cat == "All" || s.category == cat)
+        .filter(|(_, s)| q.is_empty() || s.name.to_lowercase().contains(&q))
         .map(|(i, s)| service_card(i as u32, s))
         .collect();
+    if cards.is_empty() {
+        return card(caption("No services match your search."), CardStyle::Outlined);
+    }
     grid(cards)
 }
 
@@ -234,5 +281,15 @@ mod test {
         let mut cx = Cx::<Msg>::default();
         app.update(Msg::SelectTab(Tab::Services), &mut model, &mut cx);
         assert_eq!(model.tab, Tab::Services);
+    }
+
+    #[test]
+    fn search_input_updates_query_and_audience_switches() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.input("search", InputValue::Text("beard".into()), &mut model, &mut cx);
+        assert_eq!(model.search, "beard");
+        app.update(Msg::SelectAudience(Audience::Kids), &mut model, &mut cx);
+        assert_eq!(model.audience, Audience::Kids);
     }
 }

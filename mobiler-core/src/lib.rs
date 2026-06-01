@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
     Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, Fab, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, ProjectColor, Rgb, Spacing, Tab, TextStyle, Theme, Tone, Widget,
+    ImageShape, InputValue, ProjectColor, Rgb, Segment, Spacing, Tab, TextStyle, Theme, Tone, Widget,
 };
 
 // ============================ capabilities ============================
@@ -410,6 +410,9 @@ pub fn stack(align: BoxAlign, scrim: bool, children: Vec<Widget>) -> Widget {
 }
 #[must_use]
 pub fn grid(children: Vec<Widget>) -> Widget { Widget::Grid { children } }
+/// Horizontally scrolling row of children (a carousel / chip rail).
+#[must_use]
+pub fn scroller(children: Vec<Widget>) -> Widget { Widget::Scroller { children } }
 
 #[must_use]
 pub fn button<E: Serialize>(label: impl Into<String>, style: ButtonStyle, on_press: E) -> Widget {
@@ -426,6 +429,21 @@ pub fn chip<E: Serialize>(label: impl Into<String>, selected: bool, on_press: E)
 #[must_use]
 pub fn text_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
     Widget::TextField { id: id.into(), placeholder: placeholder.into(), value: value.into() }
+}
+/// A search input (leading magnifier, pill); emits `Input { id, Text }` like [`text_field`].
+#[must_use]
+pub fn search_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    Widget::SearchField { id: id.into(), placeholder: placeholder.into(), value: value.into() }
+}
+/// One option in a [`segmented`] control, carrying a typed selection event.
+#[must_use]
+pub fn segment<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E) -> Segment {
+    Segment { label: label.into(), selected, on_select: tok(on_select) }
+}
+/// A single-choice segmented control (exclusive options in a pill).
+#[must_use]
+pub fn segmented(segments: Vec<Segment>) -> Widget {
+    Widget::Segmented { segments }
 }
 #[must_use]
 pub fn toggle(id: impl Into<String>, label: impl Into<String>, value: bool) -> Widget {
