@@ -402,6 +402,26 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_filepicker_copies_both_sources_and_registers_activity() {
+        let root = skeleton();
+        add_at(&root, "filepicker").unwrap();
+
+        // Both Android sources copied with the package substituted.
+        let plugin = read(&root, "Android/app/src/main/java/dev/mobiler/demo/FilePickerPlugin.kt");
+        assert!(plugin.contains("package dev.mobiler.demo"));
+        let activity = read(&root, "Android/app/src/main/java/dev/mobiler/demo/FilePickerActivity.kt");
+        assert!(activity.contains("class FilePickerActivity"));
+        // Registered in both shells + the helper Activity declared in the manifest.
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"filepicker\" to FilePickerPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"filepicker\": return await FilePickerPlugin.handle"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android:name=\".FilePickerActivity\""), "helper activity declared");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

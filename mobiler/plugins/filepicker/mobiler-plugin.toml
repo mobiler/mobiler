@@ -1,0 +1,13 @@
+name = "filepicker"
+summary = "Pick a file via the system document picker — returns a local URI (free)"
+
+[android]
+# A transparent helper Activity runs the Storage-Access-Framework picker, so the plugin
+# is self-contained (no edit to the app's MainActivity, which `plugin add` can't do).
+sources = ["android/FilePickerPlugin.kt", "android/FilePickerActivity.kt"]
+register = '"filepicker" to FilePickerPlugin(application)'
+manifest_application = ['<activity android:name=".FilePickerActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />']
+
+[ios]
+sources = ["ios/FilePickerPlugin.swift"]
+register = 'case "filepicker": return await FilePickerPlugin.handle(op: op, input: input)'
