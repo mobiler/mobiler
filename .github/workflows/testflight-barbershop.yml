@@ -1,0 +1,62 @@
+name: TestFlight (barbershop)
+
+# Manual lane: builds a signed device .ipa of the barbershop ("Fade House") demo and
+# uploads it to App Store Connect / TestFlight via an App Store Connect API key. Signing
+# is cloud-managed (xcodebuild -allowProvisioningUpdates), so NO certificates are installed
+# on the runner. Uses the same four repository secrets as the coffee lane:
+#   APPLE_TEAM_ID            — 10-char Apple Developer team id
+#   APPSTORE_API_KEY_ID      — App Store Connect API key id
+#   APPSTORE_API_ISSUER_ID   — App Store Connect API issuer id
+#   APPSTORE_API_KEY_P8      — contents of the AuthKey_*.p8 file
+# PREREQUISITE (one-time, manual): the bundle id `dev.mobiler.barbershop` must be registered
+# in App Store Connect with an app record created, just like coffee's `dev.mobiler.coffee`.
+# Trigger from the Actions tab → "TestFlight (barbershop)" → Run workflow.
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    name: barbershop → TestFlight
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      # App Store Connect requires the app be built with the iOS 26 SDK (Xcode 26+);
+      # select the newest Xcode installed on the runner.
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Stage App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey.p8"
+
+      - name: Build signed .ipa + upload to TestFlight
+        working-directory: demos/barbershop/iOS
+        env:
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          # Xcode 16+/26 export method name for App Store / TestFlight builds.
+          EXPORT_METHOD: app-store-connect
+          UPLOAD: "1"
+        run: |
+          export ASC_KEY_PATH="$RUNNER_TEMP/asc/AuthKey.p8"
+          ./build-ios.sh device
+
+      # Keep the .ipa even if the upload step fails, so it can be uploaded by hand
+      # (Transporter.app) while we debug.
+      - name: Upload .ipa artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barbershop-ipa
+          path: demos/barbershop/iOS/build/ipa/*.ipa
+          if-no-files-found: ignore

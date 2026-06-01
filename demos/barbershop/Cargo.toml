@@ -3,7 +3,7 @@
 # (WASM) is its own workspace under `web/`.
 [workspace]
 resolver = "2"
-members = ["app-core"]
+members = ["app-core", "shared"]
 
 [workspace.package]
 edition = "2021"
@@ -12,3 +12,9 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+crux_core = "0.18.0"
+
+# Slim, stripped native libs for release APKs (mirrors the other native demos).
+[profile.release]
+opt-level = "z"
+strip = true
