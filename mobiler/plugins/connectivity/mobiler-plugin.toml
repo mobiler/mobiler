@@ -1,0 +1,12 @@
+name = "connectivity"
+summary = "Network connectivity status — online:wifi / online:cellular / offline (free)"
+
+[android]
+sources = ["android/ConnectivityPlugin.kt"]
+register = '"connectivity" to ConnectivityPlugin(application)'
+# ACCESS_NETWORK_STATE is an install-time (normal) permission — no runtime prompt.
+permissions = ["android.permission.ACCESS_NETWORK_STATE"]
+
+[ios]
+sources = ["ios/ConnectivityPlugin.swift"]
+register = 'case "connectivity": return await ConnectivityPlugin.handle(op: op, input: input)'

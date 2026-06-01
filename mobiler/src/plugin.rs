@@ -386,6 +386,22 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_connectivity_copies_registers_and_adds_permission() {
+        let root = skeleton();
+        add_at(&root, "connectivity").unwrap();
+
+        let kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/ConnectivityPlugin.kt");
+        assert!(kt.contains("package dev.mobiler.demo"), "package substituted");
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"connectivity\" to ConnectivityPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"connectivity\": return await ConnectivityPlugin.handle"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.ACCESS_NETWORK_STATE"), "permission injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
