@@ -248,6 +248,7 @@ enum ActiveTheme {
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
 extension Theme {
     var brandColor: Color { Color(red: Double(seed.r) / 255, green: Double(seed.g) / 255, blue: Double(seed.b) / 255) }
+    var accentColor: Color { accent.map { Color(red: Double($0.r) / 255, green: Double($0.g) / 255, blue: Double($0.b) / 255) } ?? brandColor }
     var cardRadius: CGFloat { switch corner { case .none: 0; case .small: 8; case .medium: 14; case .large: 22 } }
     var imageRadius: CGFloat { switch corner { case .none: 0; case .small: 10; case .medium: 16; case .large: 24 } }
     var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0 } }
@@ -553,6 +554,13 @@ private struct CardMod: ViewModifier {
             return AnyView(content.background(shape.fill(Color(.tertiarySystemBackground))))
         case .outlined:
             return AnyView(content.overlay(shape.stroke(Color.gray.opacity(0.3))))
+        case .brand:
+            let t = ActiveTheme.current
+            let grad = LinearGradient(
+                colors: [t?.brandColor ?? .accentColor, t?.accentColor ?? .accentColor],
+                startPoint: .topLeading, endPoint: .bottomTrailing,
+            )
+            return AnyView(content.background(shape.fill(grad)).foregroundColor(.white))
         }
     }
 }

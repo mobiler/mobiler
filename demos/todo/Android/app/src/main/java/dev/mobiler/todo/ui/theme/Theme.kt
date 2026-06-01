@@ -58,7 +58,8 @@ fun TodoTheme(
         theme != null -> {
             val seed = Color(theme.seed.r.toInt(), theme.seed.g.toInt(), theme.seed.b.toInt())
             val base = if (darkTheme) DarkColorScheme else LightColorScheme
-            base.copy(primary = seed, secondary = seed, tertiary = seed)
+            val accent = theme.accent?.let { Color(it.r.toInt(), it.g.toInt(), it.b.toInt()) } ?: seed
+            base.copy(primary = seed, secondary = accent, tertiary = accent)
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current

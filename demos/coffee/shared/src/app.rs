@@ -254,6 +254,7 @@ impl MobilerApp for Coffee {
         // theme is carried on the Scaffold, the visual twin of dark_mode.
         let theme = Theme {
             seed: Rgb::new(0xC8, 0x5A, 0x3C),
+            accent: None,
             corner: Corner::Large,
             density: Density::Comfortable,
             font: FontFamily::Rounded,
