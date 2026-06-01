@@ -139,6 +139,7 @@ jobs:
           - demos/coffee
           - demos/todo
           - demos/fullstack-todo/mobile
+          - demos/barbershop
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -238,7 +239,7 @@ jobs:
         # coffee carries installed plugins; todo + fullstack exercise the other demo
         # shells so Kotlin drift (new Widget variants in the exhaustive `when`) can't
         # slip through uncaught — their Android shells aren't otherwise CI-compiled.
-        demo: [demos/coffee, demos/todo, demos/fullstack-todo/mobile]
+        demo: [demos/coffee, demos/todo, demos/fullstack-todo/mobile, demos/barbershop]
     steps:
       - uses: actions/checkout@v5
 

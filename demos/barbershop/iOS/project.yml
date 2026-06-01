@@ -1,0 +1,67 @@
+# XcodeGen spec → Mobiler.xcodeproj (project-as-code, so the build is scriptable
+# and reproducible — no hand-edited .pbxproj). `build-ios.sh` runs `xcodegen
+# generate` then `xcodebuild`.
+#
+# VERIFY-ON-MAC: the fiddly part is linking the Rust static lib + its uniffi FFI
+# (the modulemap / header / search paths). The settings below are the standard
+# Crux-iOS shape; expect to adjust paths on the first MacinCloud build.
+name: Fadehouse
+options:
+  bundleIdPrefix: dev.mobiler.barbershop
+  deploymentTarget:
+    iOS: "16.0"
+
+packages:
+  # The facet-generated ABI types (Widget/Action/Effect/...), emitted by
+  # `codegen --language swift` into generated/SharedTypes.
+  SharedTypes:
+    path: generated/SharedTypes
+
+targets:
+  Fadehouse:
+    type: application
+    platform: iOS
+    sources:
+      - Sources                       # App.swift, Core.swift, Render.swift
+      - generated/shared.swift         # uniffi Swift wrapper (generated)
+    dependencies:
+      - package: SharedTypes
+    info:
+      path: Sources/Info.plist
+      # xcodegen regenerates this plist from these properties on every build, so
+      # launch-screen / orientation keys MUST live here — not just in the committed
+      # Info.plist (which gets overwritten). Without UILaunchScreen iOS runs the app
+      # letterboxed (black bars top/bottom) instead of full screen.
+      properties:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.barbershop
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four
+        # orientations) by declaring the app full-screen.
+        UIRequiresFullScreen: true
+        # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
+        # the "Missing export compliance" question.
+        ITSAppUsesNonExemptEncryption: false
+        # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
+        # requires this usage string to access the camera; the App Store flags apps that
+        # ship it without using the camera, so it's left off by default.
+        # NSCameraUsageDescription: "Take photos to use in the app."
+        # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.barbershop
+        SWIFT_VERSION: "5.9"
+        # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
+        LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
+        OTHER_LDFLAGS: ["-lshared"]
+        # uniffi FFI modulemap so `shared.swift` finds the C symbols.
+        SWIFT_INCLUDE_PATHS: ["$(PROJECT_DIR)/generated"]
+        # App icon: actool builds the required sizes from the single 1024 source in
+        # Sources/Assets.xcassets/AppIcon.appiconset and injects CFBundleIconName. Replace
+        # the placeholder icon (a neutral diamond) with your own.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The archive is built unsigned (build-ios.sh signs at export for App Store); the
+        # simulator + device compile-check builds need no signing either.
+        CODE_SIGNING_ALLOWED: "NO"
+    # mobiler:target-extra (plugin add inserts a target-level entitlements block above this line)

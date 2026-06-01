@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- HTTP (cx.http/get/post/…) is core, so INTERNET is on by default. Every other
+         permission is opt-in: a built-in capability ships in the shell, but you add its
+         permission only when you use it, so an app never requests more than it needs. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Uncomment to enable the haptics capability (cx.haptic):
+    <uses-permission android:name="android.permission.VIBRATE" /> -->
+
+    <!-- mobiler:permissions (plugin add inserts uses-permission lines above this line) -->
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Fadehouse">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Fadehouse">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Lets cx.capture_photo hand the system camera app a writable file URI.
+             Capture is intent-based (the system camera app), so no CAMERA permission is
+             needed — this provider just shares the destination file. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
+    </application>
+
+</manifest>
