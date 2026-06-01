@@ -4,7 +4,7 @@
 use domain::{NewNote, Note};
 use mobiler_core::{
     ButtonStyle, CardStyle, Cx, InputValue, MobilerApp, MobilerShell, Widget, button, caption,
-    card, column, emphasis, scaffold, text, text_field, title,
+    card, column, emphasis, text, text_field, title,
 };
 use serde::{Deserialize, Serialize};
 
@@ -106,7 +106,9 @@ impl MobilerApp for Notes {
                 CardStyle::Outlined,
             ));
         }
-        scaffold("Notes", false, vec![], column(items))
+        // Deliberately NOT a Scaffold — keeps the shells' non-Scaffold root render path
+        // (the scroll-container fallback) exercised. The in-body title above is the heading.
+        column(items)
     }
 }
 

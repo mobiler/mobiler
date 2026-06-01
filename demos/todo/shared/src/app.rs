@@ -6,10 +6,10 @@
 //! the storage capability (`cx.save` + `restore`).
 
 use mobiler_core::{
-    ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, Nav, ProjectColor,
-    Spacing, Tone, Widget, badge, button, caption, card, card_button, checkbox, chip, color_dot,
-    column, grid, icon_button, nav_scaffold, row, spacer, subtitle, toggle, tab, text, text_field,
-    title,
+    ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, Icon, InputValue, MobilerApp,
+    MobilerShell, Nav, ProjectColor, Rgb, Spacing, Theme, Tone, Widget, badge, button, caption,
+    card, card_button, checkbox, chip, color_dot, column, grid, icon_button, nav_scaffold, row,
+    spacer, subtitle, toggle, tab, text, text_field, title, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -295,7 +295,15 @@ impl MobilerApp for Todo {
                 None => ("Projects".to_string(), project_list(model)),
             },
         };
-        nav_scaffold(title, model.dark_mode, tabs, body, &model.nav, Msg::Back)
+        // Dogfood the theming engine with todo's own brand: indigo, large rounded corners,
+        // rounded font (coffee uses terracotta — same engine, distinct identities).
+        let theme = Theme {
+            seed: Rgb::new(0x5C, 0x6B, 0xC0),
+            corner: Corner::Large,
+            density: Density::Comfortable,
+            font: FontFamily::Rounded,
+        };
+        with_theme(nav_scaffold(title, model.dark_mode, tabs, body, &model.nav, Msg::Back), theme)
     }
 }
 
