@@ -422,6 +422,25 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_geolocation_adds_permissions_and_plist_key() {
+        let root = skeleton();
+        add_at(&root, "geolocation").unwrap();
+
+        let kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/GeolocationPlugin.kt");
+        assert!(kt.contains("package dev.mobiler.demo"));
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"geolocation\" to GeolocationPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"geolocation\": return await GeolocationPlugin.handle"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.ACCESS_FINE_LOCATION"), "fine perm injected");
+        assert!(manifest.contains("android.permission.ACCESS_COARSE_LOCATION"), "coarse perm injected");
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("NSLocationWhenInUseUsageDescription"), "iOS usage-description injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

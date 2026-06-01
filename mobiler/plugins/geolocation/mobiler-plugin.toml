@@ -1,0 +1,15 @@
+name = "geolocation"
+summary = "Device location → \"lat,lng\" (free); requests the location permission"
+
+[android]
+sources = ["android/GeolocationPlugin.kt"]
+register = '"geolocation" to GeolocationPlugin(application)'
+# Adding the plugin IS the opt-in, so these are injected (uncommented) at mobiler:permissions.
+permissions = ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"]
+
+[ios]
+sources = ["ios/GeolocationPlugin.swift"]
+register = 'case "geolocation": return await GeolocationPlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSLocationWhenInUseUsageDescription = "Show your location in the app."
