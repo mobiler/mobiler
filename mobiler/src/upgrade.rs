@@ -2,12 +2,15 @@
 //! `mobiler-core` dependency up to the CLI's current templates, without clobbering the user's
 //! Rust app code or plugin-patched files.
 //!
-//! Existing apps record no baseline, so the command can't auto-distinguish a user's shell edits
-//! from framework drift. The default is therefore **non-destructive**: a changed shell file is
-//! written as `<file>.mobiler-new` for the user to review/merge. `--apply` overwrites in place
-//! after saving `<file>.mobiler-bak`. Files carrying plugin/user state (`Core.kt`, manifests, …)
-//! are only ever offered as `.mobiler-new` — never overwritten — since a blind copy would wipe
-//! installed plugins.
+//! `new` and `upgrade` snapshot the pristine (substituted) shell files into `.mobiler/base/`, so
+//! upgrade has the *ancestor* every managed file was generated from. With it, each file is a true
+//! **3-way merge** (`base → your file → new template`, via `diffy`): framework changes apply, your
+//! edits and plugin injections are preserved, and only genuinely overlapping edits become a
+//! conflict (written as `<file>.mobiler-new` with `<<<<<<<`/`>>>>>>>` markers — never auto-applied).
+//! A clean merge is written in place with `--apply` (saving `<file>.mobiler-bak`), or offered as
+//! `<file>.mobiler-new` by default. Apps scaffolded before baselines existed have no ancestor, so
+//! those files fall back to a conservative 2-way reconcile (anchor-aware splice / sidecar) and get
+//! a baseline written so the *next* upgrade is a real 3-way merge.
 
 use crate::templating::{Subs, is_binary, substitute, templated_path};
 use anyhow::{Context, Result, bail};
@@ -19,6 +22,10 @@ static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
 /// Project-relative path of the version stamp written by `new` + `upgrade`.
 pub(crate) const STAMP_REL: &str = ".mobiler/version";
+
+/// Project-relative dir holding the pristine template snapshot (the 3-way merge ancestor),
+/// mirroring the app layout: `.mobiler/base/<app-relative path>`.
+const BASE_REL: &str = ".mobiler/base";
 
 /// Anchor markers that mark a file as carrying plugin/user state (patched by `plugin add`).
 /// A file whose template contains any of these is MERGE-class: never auto-overwritten.
@@ -76,6 +83,8 @@ struct Report {
     changed: Vec<String>,
     updated: Vec<String>,
     merge: Vec<String>,
+    /// 3-way merges with overlapping edits — written with conflict markers for manual resolution.
+    conflict: Vec<String>,
     stamp: Option<(Option<String>, String)>,
 }
 
@@ -181,66 +190,188 @@ fn sync_file(
     let rel_disp = rel.to_string_lossy().to_string();
 
     if !dst.exists() {
-        // A file the new version introduces — additive, safe to create.
+        // A file the new version introduces — additive, safe to create (and baseline).
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
         fs::write(&dst, &desired).with_context(|| format!("writing {}", dst.display()))?;
         report.added.push(rel_disp);
+        write_baseline(root, &rel, &desired)?;
         return Ok(());
     }
 
     let current = fs::read(&dst).with_context(|| format!("reading {}", dst.display()))?;
 
-    // MERGE-class files carry plugin/user state at anchors. Rather than refuse to touch them
-    // (which would strand shell improvements — e.g. a base dependency the new shells need), we
-    // re-emit the new template and splice the user's injected lines back in above each anchor.
-    // If that can't be done safely (a marker is missing — e.g. a hand-mangled file), we fall
-    // back to the conservative behaviour: offer `.mobiler-new`, never overwrite.
-    let mut merge_failed = false;
-    let desired = if class == Class::Merge {
-        let merged = std::str::from_utf8(&desired)
-            .ok()
-            .zip(std::str::from_utf8(&current).ok())
-            .and_then(|(new_tmpl, cur)| merge_anchors(new_tmpl, cur));
-        match merged {
-            Some(m) => m.into_bytes(),
-            None => {
-                merge_failed = true; // couldn't splice safely — keep the raw template for the sidecar
-                desired
-            }
+    // Managed (non-OWN) files are text; `pristine` is the new template and the next baseline.
+    let Ok(pristine) = std::str::from_utf8(&desired).map(str::to_string) else {
+        // Non-UTF-8 managed file (not expected) — degrade to a plain shell reconcile.
+        if current == desired {
+            report.up_to_date += 1;
+        } else {
+            shell_write(&dst, &current, &desired, apply, &rel_disp, report)?;
         }
+        return Ok(());
+    };
+    let current_s = String::from_utf8_lossy(&current).into_owned();
+
+    // With a recorded ancestor we do a real 3-way merge; otherwise reconcile conservatively and
+    // leave behind a baseline so the next upgrade can.
+    let incorporated = match read_baseline(root, &rel) {
+        Some(base) => three_way(&base, &current_s, &pristine, &dst, &rel_disp, apply, report)?,
+        None => two_way(class, &current, &pristine, &dst, &rel_disp, apply, report)?,
+    };
+    if incorporated {
+        write_baseline(root, &rel, pristine.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// True 3-way merge of a single file. Returns whether the on-disk file now incorporates the new
+/// template (so the caller advances its baseline).
+fn three_way(
+    base: &str,
+    current: &str,
+    pristine: &str,
+    dst: &Path,
+    rel_disp: &str,
+    apply: bool,
+    report: &mut Report,
+) -> Result<bool> {
+    if current == pristine {
+        report.up_to_date += 1;
+        return Ok(true);
+    }
+    match diffy::merge(base, current, pristine) {
+        // Clean merge: framework changes layered onto the user's edits with no overlap.
+        Ok(merged) if merged == current => {
+            report.up_to_date += 1; // user's file already reflected the new template
+            Ok(true)
+        }
+        Ok(merged) if apply => {
+            write_sidecar(dst, "mobiler-bak", current.as_bytes())?;
+            fs::write(dst, &merged).with_context(|| format!("writing {}", dst.display()))?;
+            report.updated.push(rel_disp.to_string());
+            Ok(true)
+        }
+        Ok(merged) => {
+            write_sidecar(dst, "mobiler-new", merged.as_bytes())?;
+            report.changed.push(rel_disp.to_string());
+            Ok(false)
+        }
+        // Overlapping edits: emit the conflict-marked merge for the user to resolve; never apply.
+        Err(conflicted) => {
+            write_sidecar(dst, "mobiler-new", conflicted.as_bytes())?;
+            report.conflict.push(rel_disp.to_string());
+            Ok(false)
+        }
+    }
+}
+
+/// Baseline-free fallback for apps scaffolded before `.mobiler/base/` existed. MERGE-class files
+/// (plugin anchors) get an anchor-aware splice; other shell files are a plain overwrite/sidecar.
+fn two_way(
+    class: Class,
+    current: &[u8],
+    pristine: &str,
+    dst: &Path,
+    rel_disp: &str,
+    apply: bool,
+    report: &mut Report,
+) -> Result<bool> {
+    let mut merge_failed = false;
+    let spliced = if class == Class::Merge {
+        std::str::from_utf8(current).ok().and_then(|cur| merge_anchors(pristine, cur))
     } else {
-        desired
+        None
+    };
+    let desired: Vec<u8> = if let Some(m) = spliced {
+        m.into_bytes()
+    } else if class == Class::Merge {
+        merge_failed = true; // anchor file but couldn't splice safely — keep the raw template
+        pristine.as_bytes().to_vec()
+    } else {
+        pristine.as_bytes().to_vec()
     };
 
-    if current == desired {
+    if current == desired.as_slice() {
         report.up_to_date += 1;
-        return Ok(());
+        return Ok(true);
     }
 
-    // A successfully-merged anchor file is safe to write like a shell file (user state preserved);
-    // only a merge fallback stays hands-off.
-    let effective = match class {
-        Class::Merge if merge_failed => Class::Merge,
-        Class::Merge => Class::Shell, // merged: re-applied user injections onto the new shell
-        other => other,
-    };
-    match effective {
-        Class::Merge => {
-            write_sidecar(&dst, "mobiler-new", &desired)?;
-            report.merge.push(rel_disp);
+    // A successfully-spliced anchor file is safe to write like a shell file; a splice failure
+    // stays hands-off (offered as `.mobiler-new`).
+    if class == Class::Merge && merge_failed {
+        write_sidecar(dst, "mobiler-new", &desired)?;
+        report.merge.push(rel_disp.to_string());
+        return Ok(false);
+    }
+    shell_write(dst, current, &desired, apply, rel_disp, report)
+}
+
+/// Write a shell file: overwrite in place (saving `.mobiler-bak`) with `--apply`, else offer it as
+/// `.mobiler-new`. Returns whether the on-disk file now holds `desired`.
+fn shell_write(
+    dst: &Path,
+    current: &[u8],
+    desired: &[u8],
+    apply: bool,
+    rel_disp: &str,
+    report: &mut Report,
+) -> Result<bool> {
+    if apply {
+        write_sidecar(dst, "mobiler-bak", current)?;
+        fs::write(dst, desired).with_context(|| format!("writing {}", dst.display()))?;
+        report.updated.push(rel_disp.to_string());
+        Ok(true)
+    } else {
+        write_sidecar(dst, "mobiler-new", desired)?;
+        report.changed.push(rel_disp.to_string());
+        Ok(false)
+    }
+}
+
+/// Path of a file's recorded ancestor under `.mobiler/base/`.
+fn baseline_path(root: &Path, rel: &Path) -> PathBuf {
+    root.join(BASE_REL).join(rel)
+}
+
+/// The recorded ancestor for `rel`, if any (`None` for pre-baseline apps).
+fn read_baseline(root: &Path, rel: &Path) -> Option<String> {
+    fs::read_to_string(baseline_path(root, rel)).ok()
+}
+
+/// Record `bytes` as the ancestor for `rel` (the pristine new template).
+fn write_baseline(root: &Path, rel: &Path, bytes: &[u8]) -> Result<()> {
+    let path = baseline_path(root, rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::write(&path, bytes).with_context(|| format!("writing baseline {}", path.display()))
+}
+
+/// Snapshot every managed (non-OWN, text) template file into `.mobiler/base/` as the merge
+/// ancestor. Called by `mobiler new` so a freshly-scaffolded app upgrades via a true 3-way merge.
+pub(crate) fn seed_baseline(root: &Path, subs: &Subs) -> Result<()> {
+    seed_dir(&TEMPLATES, root, subs)
+}
+
+fn seed_dir(dir: &Dir<'_>, root: &Path, subs: &Subs) -> Result<()> {
+    for entry in dir.entries() {
+        match entry {
+            include_dir::DirEntry::Dir(sub) => seed_dir(sub, root, subs)?,
+            include_dir::DirEntry::File(file) => {
+                if is_binary(file.path()) {
+                    continue;
+                }
+                let Ok(raw) = std::str::from_utf8(file.contents()) else { continue };
+                let rel = templated_path(file.path(), subs);
+                let content = substitute(raw, subs);
+                if classify(&rel, content.as_bytes()) == Class::Own {
+                    continue;
+                }
+                write_baseline(root, &rel, content.as_bytes())?;
+            }
         }
-        Class::Shell if apply => {
-            write_sidecar(&dst, "mobiler-bak", &current)?;
-            fs::write(&dst, &desired).with_context(|| format!("writing {}", dst.display()))?;
-            report.updated.push(rel_disp);
-        }
-        Class::Shell => {
-            write_sidecar(&dst, "mobiler-new", &desired)?;
-            report.changed.push(rel_disp);
-        }
-        Class::Own => unreachable!("OWN files return early"),
     }
     Ok(())
 }
@@ -345,6 +476,9 @@ impl Report {
         for m in &self.merge {
             println!("  ! merge   {m}  (plugin/user state) -> {m}.mobiler-new");
         }
+        for c in &self.conflict {
+            println!("  ‼ conflict {c}  (overlapping edits) -> {c}.mobiler-new");
+        }
         println!("  = {} file(s) up to date", self.up_to_date);
         if let Some((prev, cur)) = &self.stamp {
             match prev {
@@ -354,10 +488,17 @@ impl Report {
         }
 
         println!();
-        let pending = self.changed.len() + self.merge.len();
+        let pending = self.changed.len() + self.merge.len() + self.conflict.len();
         if pending == 0 && self.updated.is_empty() {
             println!("Up to date. ✓");
             return;
+        }
+        if !self.conflict.is_empty() {
+            println!(
+                "{} file(s) have overlapping edits — resolve the conflict markers in their \
+                 .mobiler-new, then replace the original (never auto-applied).",
+                self.conflict.len()
+            );
         }
         if !self.changed.is_empty() {
             if apply {
@@ -433,6 +574,57 @@ mod test {
 
         // Marker missing in the user's file ⇒ refuse to merge (caller keeps it hands-off).
         assert_eq!(merge_anchors(new_tmpl, "deps {\n}\n"), None);
+    }
+
+    #[test]
+    fn three_way_applies_framework_change_preserves_edit_and_flags_conflict() {
+        let root = skeleton();
+        let dst = root.join("f.txt");
+        let side = |s: &str| PathBuf::from(format!("{}.{s}", dst.display()));
+
+        let base = "1\n2\n3\n4\n5\n6\n7\n";
+        // Clean 3-way: template changed line 2, user changed line 6 (well separated) — both land.
+        let user = "1\n2\n3\n4\n5\nSIX\n7\n";
+        let new = "1\nTWO\n3\n4\n5\n6\n7\n";
+        fs::write(&dst, user).unwrap();
+        let mut r = Report::default();
+        let inc = three_way(base, user, new, &dst, "f.txt", true, &mut r).unwrap();
+        assert!(inc, "clean merge incorporates the new template");
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "1\nTWO\n3\n4\n5\nSIX\n7\n", "both edits merged");
+        assert!(side("mobiler-bak").exists(), "backup saved");
+        assert_eq!(r.updated.len(), 1);
+
+        // Conflict: template and user both changed the SAME line → never applied; conflict sidecar.
+        let user_c = "1\n2\n3\nUSER\n5\n6\n7\n";
+        let new_c = "1\n2\n3\nTMPL\n5\n6\n7\n";
+        fs::write(&dst, user_c).unwrap();
+        let mut r2 = Report::default();
+        let inc2 = three_way(base, user_c, new_c, &dst, "f.txt", true, &mut r2).unwrap();
+        assert!(!inc2, "conflict does not advance the baseline");
+        assert_eq!(fs::read_to_string(&dst).unwrap(), user_c, "original left untouched on conflict");
+        assert_eq!(r2.conflict.len(), 1);
+        assert!(
+            fs::read_to_string(side("mobiler-new")).unwrap().contains("<<<<<<<"),
+            "conflict markers offered for resolution"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn new_seeds_baseline_so_upgrade_is_idempotent() {
+        // A freshly-baselined app that's already on the current template: upgrade is a clean no-op
+        // (3-way sees base == new, current == new) — no sidecars, nothing to merge.
+        let root = skeleton();
+        let subs = Subs::from_package("dev.mobiler.demo".into(), "Demo".into(), "30.0.14904198".into());
+        // Materialise the shell files + their baselines exactly as `mobiler new` would.
+        sync_dir(&TEMPLATES, &root, &subs, true, &mut Report::default()).unwrap();
+        seed_baseline(&root, &subs).unwrap();
+        assert!(root.join(".mobiler/base/iOS/Sources/Render.swift").exists(), "baseline seeded");
+
+        let report = upgrade_at(&root, false).unwrap();
+        assert!(report.changed.is_empty() && report.merge.is_empty() && report.conflict.is_empty(),
+            "a current, baselined app has nothing pending");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "mobiler"
-version = "0.15.1"
+version = "0.16.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -21,6 +21,7 @@ pedantic = "warn"
 [dependencies]
 anyhow.workspace = true
 clap = { version = "4", features = ["derive"] }
+diffy = "0.4"
 include_dir = "0.7"
 notify = "8"
 notify-debouncer-full = "0.7"

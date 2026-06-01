@@ -1,7 +1,9 @@
 /target
 **/*.rs.bk
 
-# `mobiler upgrade` review sidecars (the version stamp in .mobiler/ IS tracked)
+# `mobiler upgrade` review sidecars. Commit `.mobiler/` itself — the version stamp and the
+# `.mobiler/base/` template snapshot are the 3-way-merge ancestor `upgrade` needs (and they let
+# collaborators upgrade cleanly too).
 *.mobiler-new
 *.mobiler-bak
 
