@@ -3,6 +3,8 @@ package dev.mobiler.coffee
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Application
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -24,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
+import java.util.Calendar
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -142,6 +145,47 @@ class DialogPlugin : MobilerPlugin {
     }
 }
 
+/** Official, bundled plugin: native date / time pickers (request/response). op is
+ *  "date" (→ ISO "YYYY-MM-DD") or "time" (→ 24-hour "HH:MM"); ok=false on cancel.
+ *  Suspends until the user picks or dismisses. */
+class DateTimePlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
+        val now = Calendar.getInstance()
+        return withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { cont ->
+                var resumed = false
+                fun done(r: PluginResponse) {
+                    if (!resumed) { resumed = true; cont.resumeWith(Result.success(r)) }
+                }
+                when (op) {
+                    "date" -> {
+                        val dlg = DatePickerDialog(
+                            activity,
+                            { _, y, m, d -> done(PluginResponse(true, "%04d-%02d-%02d".format(y, m + 1, d))) },
+                            now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH),
+                        )
+                        dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }
+                        cont.invokeOnCancellation { dlg.dismiss() }
+                        dlg.show()
+                    }
+                    "time" -> {
+                        val dlg = TimePickerDialog(
+                            activity,
+                            { _, h, min -> done(PluginResponse(true, "%02d:%02d".format(h, min))) },
+                            now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), true,
+                        )
+                        dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }
+                        cont.invokeOnCancellation { dlg.dismiss() }
+                        dlg.show()
+                    }
+                    else -> done(PluginResponse(false, "unknown op '$op'"))
+                }
+            }
+        }
+    }
+}
+
 /**
  * Set by MainActivity: launches the system photo picker and calls back with the
  * picked image URI (null if cancelled). The ActivityResult launcher must be
@@ -235,6 +279,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "browser" to BrowserPlugin(application),
         "haptics" to HapticsPlugin(application),
         "dialog" to DialogPlugin(),
+    "datetime" to DateTimePlugin(),
         "photo" to PhotoPlugin(),
         "camera" to CameraPlugin(),
         "scanner" to ScannerPlugin(application),

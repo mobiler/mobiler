@@ -40,6 +40,12 @@ pub enum Msg {
     ConfirmBooking,
     Notifications,
     Book,
+    /// The date picked for a booking (empty string = the user cancelled the picker).
+    DatePicked(String),
+    /// The time picked for a booking (empty string = the user cancelled the picker).
+    TimePicked(String),
+    /// The result of the final confirm dialog (`true` = confirmed).
+    BookingDone(bool),
 }
 
 #[derive(Clone)]
@@ -70,6 +76,10 @@ pub struct Model {
     open_service: Option<usize>,
     /// Stars the user tapped in the booking sheet, in tenths (0 = unrated).
     user_rating: u32,
+    /// Date chosen during the FAB "book a cut" flow (`cx.pick_date` → `cx.pick_time`).
+    pending_date: Option<String>,
+    /// Time chosen during the FAB "book a cut" flow.
+    pending_time: Option<String>,
 }
 
 impl Default for Model {
@@ -95,6 +105,8 @@ impl Default for Model {
             ],
             open_service: None,
             user_rating: 0,
+            pending_date: None,
+            pending_time: None,
         }
     }
 }
@@ -128,7 +140,39 @@ impl MobilerApp for FadeHouse {
                 model.open_service = None;
             }
             Msg::Notifications => cx.toast("No new notifications"),
-            Msg::Book => cx.toast("Pick a date & time — coming next"),
+            // The FAB "book a cut" flow: native date picker → native time picker →
+            // confirm dialog. Each step is a request/response capability; the response
+            // comes back as the next Msg, and an empty string means the user cancelled.
+            Msg::Book => {
+                model.pending_date = None;
+                model.pending_time = None;
+                cx.pick_date(|r| Msg::DatePicked(if r.ok { r.output } else { String::new() }));
+            }
+            Msg::DatePicked(date) => {
+                if date.is_empty() {
+                    return; // cancelled the date picker
+                }
+                model.pending_date = Some(date);
+                cx.pick_time(|r| Msg::TimePicked(if r.ok { r.output } else { String::new() }));
+            }
+            Msg::TimePicked(time) => {
+                if time.is_empty() {
+                    model.pending_date = None; // cancelled the time picker
+                    return;
+                }
+                model.pending_time = Some(time.clone());
+                let date = model.pending_date.clone().unwrap_or_default();
+                cx.confirm("Confirm booking", format!("Book your visit for {date} at {time}?"), |r| Msg::BookingDone(r.ok));
+            }
+            Msg::BookingDone(ok) => {
+                if ok {
+                    let date = model.pending_date.clone().unwrap_or_default();
+                    let time = model.pending_time.clone().unwrap_or_default();
+                    cx.toast(format!("Booked for {date} at {time} ✓"));
+                }
+                model.pending_date = None;
+                model.pending_time = None;
+            }
         }
     }
 
@@ -374,6 +418,35 @@ mod test {
         assert_eq!(model.user_rating, 40);
         app.update(Msg::ConfirmBooking, &mut model, &mut cx);
         assert_eq!(model.open_service, None, "confirming closes the sheet");
+    }
+
+    #[test]
+    fn book_flow_holds_then_clears_pending_datetime() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::Book, &mut model, &mut cx);
+        app.update(Msg::DatePicked("2026-06-10".into()), &mut model, &mut cx);
+        assert_eq!(model.pending_date.as_deref(), Some("2026-06-10"));
+        app.update(Msg::TimePicked("14:30".into()), &mut model, &mut cx);
+        assert_eq!(model.pending_time.as_deref(), Some("14:30"));
+        // Confirming clears the pending slots (the toast fires via cx).
+        app.update(Msg::BookingDone(true), &mut model, &mut cx);
+        assert_eq!(model.pending_date, None);
+        assert_eq!(model.pending_time, None);
+    }
+
+    #[test]
+    fn book_flow_cancelling_a_picker_aborts_cleanly() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        // Cancel the date picker (empty string) — nothing is held.
+        app.update(Msg::DatePicked(String::new()), &mut model, &mut cx);
+        assert_eq!(model.pending_date, None);
+        // Cancel the time picker after a date — the date is dropped too.
+        app.update(Msg::DatePicked("2026-06-10".into()), &mut model, &mut cx);
+        app.update(Msg::TimePicked(String::new()), &mut model, &mut cx);
+        assert_eq!(model.pending_date, None);
+        assert_eq!(model.pending_time, None);
     }
 
     #[test]

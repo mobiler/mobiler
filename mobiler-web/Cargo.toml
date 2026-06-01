@@ -29,6 +29,6 @@ futures-channel = "0.3"
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
     "Document", "HtmlHeadElement", "HtmlElement", "Element", "Node",
-    "Window", "Storage", "Navigator", "Clipboard",
+    "Window", "Storage", "Navigator", "Clipboard", "EventTarget",
     "HtmlInputElement", "FileList", "File", "Blob", "Url",
 ] }
