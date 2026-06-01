@@ -66,6 +66,8 @@ pub fn run(raw_name: &str, package: Option<&str>, agentic: Option<AgenticGuide>)
     // Stamp the generating CLI version so `mobiler upgrade` (and future drift checks) have a baseline.
     crate::upgrade::write_version_stamp(&out_dir).context("writing version stamp")?;
     written += 1;
+    // Snapshot the pristine shell files so `mobiler upgrade` can do a true 3-way merge later.
+    crate::upgrade::seed_baseline(&out_dir, &subs).context("seeding upgrade baseline")?;
     if let Some(sdk_dir) = android_home.as_deref() {
         write_local_properties(&out_dir, sdk_dir)?;
         written += 1;

@@ -49,15 +49,19 @@ the updates in for you, from the app root:
 ```bash
 cargo install mobiler   # get the new CLI first
 cd myapp
-mobiler upgrade         # bump mobiler-core + write changed shells as *.mobiler-new (review)
-mobiler upgrade --apply # …or overwrite the shells in place (a *.mobiler-bak is saved)
+mobiler upgrade         # 3-way merge; review results as *.mobiler-new
+mobiler upgrade --apply # …or write the merged shells in place (a *.mobiler-bak is saved)
 ```
 
-It's **non-destructive by default**: it bumps your `mobiler-core` dependency, writes any changed
-generic shell file beside the original as `<file>.mobiler-new` for you to review/merge, and never
-touches your Rust app code (`shared/src/`) or plugin-patched files (`Core.kt`, manifests — these
-are offered as `.mobiler-new` to merge by hand, never overwritten). `--apply` overwrites the
-generic shells in place after saving a `.mobiler-bak` of each.
+It does a **true 3-way merge**. `mobiler new` snapshots the pristine shells into `.mobiler/base/`
+(the merge *ancestor*), so `upgrade` reconciles the ancestor, your current file, and the new
+template per file — like `git merge`. Framework improvements apply **and** your edits + plugin
+injections survive; only overlapping changes become a conflict (written as `<file>.mobiler-new`
+with `<<<<<<<`/`>>>>>>>` markers, never auto-applied). It bumps your `mobiler-core` dependency and
+never touches your Rust app code (`shared/src/`). By default a clean merge is offered as
+`<file>.mobiler-new`; `--apply` writes it in place after saving a `.mobiler-bak`. Commit `.mobiler/`
+(the baseline + version stamp). Apps scaffolded before baselines existed fall back to a conservative
+reconcile and get a baseline for next time.
 
 ## Plugins
 
