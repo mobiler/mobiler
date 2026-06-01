@@ -143,6 +143,13 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     if call.plugin == "camera" && call.op == "capture" {
         return take_image(true).await;
     }
+    if call.plugin == "datetime" {
+        return match call.op.as_str() {
+            "date" => take_datetime("date").await,
+            "time" => take_datetime("time").await,
+            other => PluginResponse { ok: false, output: format!("unknown datetime op '{other}'") },
+        };
+    }
     if call.plugin == "dialog" && call.op == "confirm" {
         let v: serde_json::Value = serde_json::from_str(&call.input).unwrap_or(serde_json::Value::Null);
         let title = v.get("title").and_then(serde_json::Value::as_str).unwrap_or("");
@@ -220,6 +227,57 @@ async fn take_image(capture: bool) -> PluginResponse {
 
     match rx.await {
         Ok(Some(url)) => PluginResponse { ok: true, output: url },
+        _ => PluginResponse { ok: false, output: "cancelled".into() },
+    }
+}
+
+/// Pick a date (`kind = "date"`) or time (`kind = "time"`) via a hidden native
+/// `<input>`, opening the browser's picker with `showPicker()`. Returns the value
+/// (`YYYY-MM-DD` for date, 24-hour `HH:MM` for time); `ok=false` on cancel/dismiss.
+/// Backs the `datetime` capability (`cx.pick_date` / `cx.pick_time`).
+async fn take_datetime(kind: &str) -> PluginResponse {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return PluginResponse { ok: false, output: "no document".into() };
+    };
+    let Some(input) = doc.create_element("input").ok().and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok()) else {
+        return PluginResponse { ok: false, output: "no input element".into() };
+    };
+    input.set_type(kind); // "date" or "time"
+    // showPicker() needs a connected element; keep it in the DOM but out of sight.
+    let _ = input.set_attribute("style", "position:fixed;left:-9999px;opacity:0");
+    if let Some(body) = doc.body() {
+        let _ = body.append_child(&input);
+    }
+
+    let (tx, rx) = futures_channel::oneshot::channel::<Option<String>>();
+    let tx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
+    let input_for_change = input.clone();
+    let tx_change = tx.clone();
+    let on_change = Closure::wrap(Box::new(move || {
+        let v = input_for_change.value();
+        if let Some(tx) = tx_change.borrow_mut().take() {
+            let _ = tx.send(if v.is_empty() { None } else { Some(v) });
+        }
+    }) as Box<dyn FnMut()>);
+    let tx_cancel = tx.clone();
+    let on_cancel = Closure::wrap(Box::new(move || {
+        if let Some(tx) = tx_cancel.borrow_mut().take() {
+            let _ = tx.send(None);
+        }
+    }) as Box<dyn FnMut()>);
+    let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+    let _ = input.add_event_listener_with_callback("cancel", on_cancel.as_ref().unchecked_ref());
+    if input.show_picker().is_err() {
+        input.click(); // older browsers: focus the field so the user can type a value
+    }
+    on_change.forget(); // keep the handlers alive until an event fires
+    on_cancel.forget();
+
+    let result = rx.await;
+    input.remove();
+    match result {
+        Ok(Some(v)) => PluginResponse { ok: true, output: v },
         _ => PluginResponse { ok: false, output: "cancelled".into() },
     }
 }

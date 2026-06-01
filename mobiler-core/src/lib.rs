@@ -208,6 +208,22 @@ impl<E> Cx<E> {
             .expect("serialize confirm");
         self.plugin("dialog", "confirm", input, then);
     }
+
+    /// Let the user pick a date via the native date picker (built-in `datetime`
+    /// capability). On success `response.ok` is `true` and `response.output` is the
+    /// chosen date as an ISO `YYYY-MM-DD` string; on cancel/dismiss, `ok` is `false`.
+    /// Resolves asynchronously (the user replies whenever).
+    pub fn pick_date(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("datetime", "date", "", then);
+    }
+
+    /// Let the user pick a time via the native time picker (built-in `datetime`
+    /// capability). On success `response.ok` is `true` and `response.output` is the
+    /// chosen time as a 24-hour `HH:MM` string; on cancel/dismiss, `ok` is `false`.
+    /// Resolves asynchronously (the user replies whenever).
+    pub fn pick_time(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("datetime", "time", "", then);
+    }
 }
 
 // ============================ the app trait ============================
