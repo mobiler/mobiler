@@ -19,6 +19,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,19 +35,45 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.StarHalf
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,11 +81,13 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -67,6 +96,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBarDefaults
@@ -78,6 +110,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
@@ -236,6 +269,39 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             modifier = Modifier.size(12.dp).clip(CircleShape).background(projectColorOf(widget.color)),
         )
 
+        is Widget.Avatar -> Box {
+            AsyncImage(
+                model = widget.source,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(48.dp).clip(CircleShape),
+            )
+            widget.status?.let { st ->
+                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(toneColors(st).first))
+            }
+        }
+
+        is Widget.Rating -> Row(verticalAlignment = Alignment.CenterVertically) {
+            val tint = MaterialTheme.colorScheme.primary
+            val onRate = widget.onRate
+            for (i in 1..widget.max.toInt()) {
+                val threshold = (i * 10).toUInt()
+                val ic = when {
+                    widget.value >= threshold -> Icons.Default.Star
+                    widget.value + 5u >= threshold -> Icons.Default.StarHalf
+                    else -> Icons.Default.StarBorder
+                }
+                if (onRate != null && i - 1 < onRate.size) {
+                    val token = onRate[i - 1]
+                    IconButton(onClick = { send(Action.Fired(token)) }, modifier = Modifier.size(32.dp)) {
+                        Icon(ic, contentDescription = null, tint = tint)
+                    }
+                } else {
+                    Icon(ic, contentDescription = null, tint = tint)
+                }
+            }
+        }
+
         is Widget.Divider -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
@@ -278,6 +344,18 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, elevation = elev) { CardBody(widget.child, send) }
                     else Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
                 }
+                CardStyle.BRAND -> {
+                    // Brand gradient (seed → accent, via the M3 primary → secondary scheme).
+                    val cs = MaterialTheme.colorScheme
+                    val grad = Brush.linearGradient(listOf(cs.primary, cs.secondary))
+                    val brandMod = mod
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(grad)
+                        .then(if (op != null) Modifier.clickable { send(Action.Fired(op)) } else Modifier)
+                    Box(modifier = brandMod) {
+                        CompositionLocalProvider(LocalContentColor provides Color.White) { CardBody(widget.child, send) }
+                    }
+                }
             }
         }
 
@@ -308,6 +386,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
         }
 
+        is Widget.Scroller -> Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { widget.children.forEach { Render(it, send) } }
+
         is Widget.Button -> when (widget.style) {
             ButtonStyle.FILLED -> Button(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
             ButtonStyle.OUTLINED -> OutlinedButton(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
@@ -331,6 +415,26 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        is Widget.SearchField -> OutlinedTextField(
+            value = widget.value,
+            onValueChange = { send(Action.Input(widget.id, InputValue.Text(it))) },
+            placeholder = { Text(widget.placeholder) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            singleLine = true,
+            shape = RoundedCornerShape(50),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        is Widget.Segmented -> SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            widget.segments.forEachIndexed { i, seg ->
+                SegmentedButton(
+                    selected = seg.selected,
+                    onClick = { send(Action.Fired(seg.onSelect)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = widget.segments.size),
+                ) { Text(seg.label) }
+            }
+        }
 
         is Widget.Toggle -> Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -366,6 +470,19 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             if (back != null) {
                 BackHandler { send(Action.Fired(back)) }
             }
+            // Modal bottom sheet — present in the tree ⇒ shown (a Popup, so it overlays
+            // everything regardless of where it's composed). Scrim/swipe fires on_dismiss.
+            widget.sheet?.let { sheet ->
+                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(sheet.title, style = MaterialTheme.typography.titleLarge)
+                        Render(sheet.child, send)
+                    }
+                }
+            }
             BoxWithConstraints {
                 // On a wide screen (tablet / landscape) the bottom tab-bar becomes a
                 // side navigation rail; a phone keeps its bottom tabs.
@@ -378,7 +495,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     selected = t.selected,
                                     onClick = { send(Action.Fired(t.onSelect)) },
                                     label = { Text(t.label) },
-                                    icon = {},
+                                    icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
                                 )
                             }
                         }
@@ -406,9 +523,16 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             selected = t.selected,
                                             onClick = { send(Action.Fired(t.onSelect)) },
                                             label = { Text(t.label) },
-                                            icon = {},
+                                            icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
                                         )
                                     }
+                                }
+                            }
+                        },
+                        floatingActionButton = {
+                            widget.fab?.let { fab ->
+                                FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }) {
+                                    Icon(iconFor(fab.icon), contentDescription = null)
                                 }
                             }
                         },
@@ -519,6 +643,30 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.SETTINGS -> Icons.Default.Settings
     WidgetIcon.CHECK -> Icons.Default.Check
     WidgetIcon.STAR -> Icons.Default.Star
+    WidgetIcon.INFO -> Icons.Default.Info
+    WidgetIcon.HOME -> Icons.Default.Home
+    WidgetIcon.SEARCH -> Icons.Default.Search
+    WidgetIcon.MENU -> Icons.Default.Menu
+    WidgetIcon.FILTER -> Icons.Default.FilterList
+    WidgetIcon.BACK -> Icons.AutoMirrored.Filled.ArrowBack
+    WidgetIcon.FORWARD -> Icons.AutoMirrored.Filled.ArrowForward
+    WidgetIcon.DOWN -> Icons.Default.KeyboardArrowDown
+    WidgetIcon.BELL -> Icons.Default.Notifications
+    WidgetIcon.CART -> Icons.Default.ShoppingCart
+    WidgetIcon.SHARE -> Icons.Default.Share
+    WidgetIcon.HEART -> Icons.Default.FavoriteBorder
+    WidgetIcon.HEARTFILLED -> Icons.Default.Favorite
+    WidgetIcon.PERSON -> Icons.Default.Person
+    WidgetIcon.PEOPLE -> Icons.Default.People
+    WidgetIcon.PHONE -> Icons.Default.Phone
+    WidgetIcon.MAIL -> Icons.Default.Email
+    WidgetIcon.CALENDAR -> Icons.Default.CalendarMonth
+    WidgetIcon.CLOCK -> Icons.Default.Schedule
+    WidgetIcon.MAPPIN -> Icons.Default.Place
+    WidgetIcon.CAMERA -> Icons.Default.PhotoCamera
+    WidgetIcon.PHOTO -> Icons.Default.Image
+    WidgetIcon.PLAY -> Icons.Default.PlayArrow
+    WidgetIcon.SCISSORS -> Icons.Default.ContentCut
 }
 
 @Composable

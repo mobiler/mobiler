@@ -9,7 +9,7 @@ with [Leptos](https://leptos.dev) (CSR/WASM), and fulfils the built-in capabilit
 natively in the browser — write your app once; it runs on the web with one line. Built in:
 
 <!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
-HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, and camera capture.
+HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, camera capture, the date picker, and the time picker.
 <!-- capabilities:end -->
 
 ```rust

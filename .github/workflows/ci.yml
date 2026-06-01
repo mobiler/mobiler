@@ -230,8 +230,15 @@ jobs:
   # doesn't exercise. Guards plugin-shell compile regressions (e.g. a bundled plugin .kt
   # referencing a generated `shared.types` type without importing it).
   android-demo:
-    name: Android build (demos/coffee)
+    name: Android build (${{ matrix.demo }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # coffee carries installed plugins; todo + fullstack exercise the other demo
+        # shells so Kotlin drift (new Widget variants in the exhaustive `when`) can't
+        # slip through uncaught — their Android shells aren't otherwise CI-compiled.
+        demo: [demos/coffee, demos/todo, demos/fullstack-todo/mobile]
     steps:
       - uses: actions/checkout@v5
 
@@ -257,10 +264,10 @@ jobs:
       - name: Build the mobiler CLI
         run: cargo build -p mobiler
 
-      - name: Build coffee for Android
+      - name: Build ${{ matrix.demo }} for Android
         run: |
           MOBILER="$GITHUB_WORKSPACE/target/debug/mobiler"
-          cd demos/coffee
+          cd ${{ matrix.demo }}
           "$MOBILER" build android
 
   # Coverage gate for the unit-testable logic (root workspace). The CLI's

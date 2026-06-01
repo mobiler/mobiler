@@ -116,6 +116,8 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 | Confirm | `cx.confirm(title, message, then)` | native yes/no dialog |
 | Photo | `cx.pick_photo(then)` | system photo picker → local image URI (no permission) |
 | Camera | `cx.capture_photo(then)` | system camera → local image URI |
+| Date picker | `cx.pick_date(then)` | native date picker → ISO YYYY-MM-DD string |
+| Time picker | `cx.pick_time(then)` | native time picker → 24-hour HH:MM string |
 <!-- capabilities:end -->
 
 Each maps to an opaque `{plugin, op, input}` effect, so **adding a capability is a
@@ -179,6 +181,29 @@ both backed by one Axum server:
 
 See [`demos/fullstack-todo`](demos/fullstack-todo/), [`demos/todo`](demos/todo/), and
 [`demos/coffee`](demos/coffee/).
+
+## Theming & UI vocabulary
+
+One core, one `Widget` tree — `with_theme(...)` gives each app its own brand (seed
+color, corner radius, font, density), and the widget set covers real product UI: icon
+tab bars, a floating action button, cards, star ratings, avatars, horizontal carousels,
+segmented controls, search fields, and bottom sheets — plus native capabilities like
+`cx.pick_date` / `cx.pick_time`.
+
+**Fade House** ([`demos/barbershop`](demos/barbershop/)) — a barbershop booking demo: a
+brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar
+rail with ratings, and a tap-to-book bottom sheet with a date → time → confirm flow.
+
+| Home | Booking sheet |
+|:---:|:---:|
+| <img src="demos/barbershop/screenshots/home.png" width="200" alt="Fade House home"> | <img src="demos/barbershop/screenshots/booking-sheet.png" width="200" alt="Fade House booking sheet"> |
+
+The *same* stock shells, re-themed — coffee with a terracotta brand, todo with indigo —
+no shell code changed, just a `Theme` value:
+
+| coffee (terracotta) | todo (indigo) |
+|:---:|:---:|
+| <img src="demos/coffee/screenshots/terracotta.png" width="200" alt="coffee themed terracotta"> | <img src="demos/todo/screenshots/indigo.png" width="200" alt="todo themed indigo"> |
 
 ## Quick start
 

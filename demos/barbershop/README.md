@@ -4,6 +4,10 @@ A grooming/booking app built on **Mobiler**, used as the showcase for the broade
 vocabulary. One Rust core (`app-core/`) renders on the web (here, via `mobiler-web`) and would
 render natively from a `mobiler new` scaffold pointed at the same core.
 
+| Home | Booking sheet |
+|:---:|:---:|
+| <img src="screenshots/home.png" width="220" alt="Fade House home"> | <img src="screenshots/booking-sheet.png" width="220" alt="Fade House booking sheet"> |
+
 What it exercises:
 
 - **Icon bottom-tab bar** — Home / Services / Bookings / Profile, each with an icon (`tab_icon`).
