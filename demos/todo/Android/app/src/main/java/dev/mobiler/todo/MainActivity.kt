@@ -34,12 +34,35 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -48,6 +71,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -327,7 +351,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     selected = t.selected,
                                     onClick = { send(Action.Fired(t.onSelect)) },
                                     label = { Text(t.label) },
-                                    icon = {},
+                                    icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
                                 )
                             }
                         }
@@ -355,9 +379,16 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             selected = t.selected,
                                             onClick = { send(Action.Fired(t.onSelect)) },
                                             label = { Text(t.label) },
-                                            icon = {},
+                                            icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
                                         )
                                     }
+                                }
+                            }
+                        },
+                        floatingActionButton = {
+                            widget.fab?.let { fab ->
+                                FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }) {
+                                    Icon(iconFor(fab.icon), contentDescription = null)
                                 }
                             }
                         },
@@ -468,6 +499,30 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.SETTINGS -> Icons.Default.Settings
     WidgetIcon.CHECK -> Icons.Default.Check
     WidgetIcon.STAR -> Icons.Default.Star
+    WidgetIcon.INFO -> Icons.Default.Info
+    WidgetIcon.HOME -> Icons.Default.Home
+    WidgetIcon.SEARCH -> Icons.Default.Search
+    WidgetIcon.MENU -> Icons.Default.Menu
+    WidgetIcon.FILTER -> Icons.Default.FilterList
+    WidgetIcon.BACK -> Icons.AutoMirrored.Filled.ArrowBack
+    WidgetIcon.FORWARD -> Icons.AutoMirrored.Filled.ArrowForward
+    WidgetIcon.DOWN -> Icons.Default.KeyboardArrowDown
+    WidgetIcon.BELL -> Icons.Default.Notifications
+    WidgetIcon.CART -> Icons.Default.ShoppingCart
+    WidgetIcon.SHARE -> Icons.Default.Share
+    WidgetIcon.HEART -> Icons.Default.FavoriteBorder
+    WidgetIcon.HEARTFILLED -> Icons.Default.Favorite
+    WidgetIcon.PERSON -> Icons.Default.Person
+    WidgetIcon.PEOPLE -> Icons.Default.People
+    WidgetIcon.PHONE -> Icons.Default.Phone
+    WidgetIcon.MAIL -> Icons.Default.Email
+    WidgetIcon.CALENDAR -> Icons.Default.CalendarMonth
+    WidgetIcon.CLOCK -> Icons.Default.Schedule
+    WidgetIcon.MAPPIN -> Icons.Default.Place
+    WidgetIcon.CAMERA -> Icons.Default.PhotoCamera
+    WidgetIcon.PHOTO -> Icons.Default.Image
+    WidgetIcon.PLAY -> Icons.Default.PlayArrow
+    WidgetIcon.SCISSORS -> Icons.Default.ContentCut
 }
 
 @Composable

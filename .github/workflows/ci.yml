@@ -31,6 +31,9 @@ jobs:
           # Full-stack SQLx demo: domain + Axum/SQLx server + app-core (web is separate).
           - name: demo-fullstack-sqlx
             dir: demos/fullstack-sqlx
+          # Barbershop showcase: app-core only (web is separate).
+          - name: demo-barbershop
+            dir: demos/barbershop
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
@@ -96,6 +99,7 @@ jobs:
           - demos/todo/web
           - demos/fullstack-todo/web-widgets
           - demos/fullstack-sqlx/web
+          - demos/barbershop/web
     defaults:
       run:
         working-directory: ${{ matrix.dir }}

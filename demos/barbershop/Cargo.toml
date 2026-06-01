@@ -1,0 +1,14 @@
+# Barbershop demo — a grooming/booking app showcasing the broader UI vocabulary
+# (icon tab bar, floating action button, the expanded icon set, theming). The web client
+# (WASM) is its own workspace under `web/`.
+[workspace]
+resolver = "2"
+members = ["app-core"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

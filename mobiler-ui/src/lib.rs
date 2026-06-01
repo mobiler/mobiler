@@ -67,10 +67,22 @@ pub enum Tone { Neutral, Success, Warning, Danger, Info }
 #[repr(C)]
 pub enum Spacing { Xs, Sm, Md, Lg, Xl }
 
-/// A small, finite icon set (maps to Material icons in the shell).
+/// A finite icon set (maps to Material icons / SF Symbols / web glyphs per shell).
+/// Grouped: editing, navigation/chrome, content, and domain icons.
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum Icon { Delete, Add, Edit, Close, Settings, Check, Star }
+pub enum Icon {
+    // editing / status
+    Delete, Add, Edit, Close, Settings, Check, Star, Info,
+    // navigation / chrome
+    Home, Search, Menu, Filter, Back, Forward, Down, Bell, Cart, Share, Heart, HeartFilled,
+    // people / contact
+    Person, People, Phone, Mail, Calendar, Clock, MapPin,
+    // content / media
+    Camera, Photo, Play,
+    // domain
+    Scissors,
+}
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
@@ -152,13 +164,23 @@ impl Default for Theme {
 }
 
 /// A bottom-navigation tab. `selected` marks the active one; tapping sends
-/// `on_select`.
+/// `on_select`. `icon` (optional) renders above the label for an icon tab bar.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug)]
 #[repr(C)]
 pub struct Tab {
     pub label: String,
     pub selected: bool,
     pub on_select: ActionToken,
+    /// Optional leading icon (icon tab bar). `None` = label-only (the original look).
+    pub icon: Option<Icon>,
+}
+
+/// A floating action button anchored over the scaffold body (the raised primary action).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
+#[repr(C)]
+pub struct Fab {
+    pub icon: Icon,
+    pub on_press: ActionToken,
 }
 
 // ------------------------------- widgets -------------------------------
@@ -214,6 +236,8 @@ pub enum Widget {
         /// App branding (brand color, corner, density, font). `None` = framework
         /// defaults (no visual change) — theme-as-data, the visual twin of `dark_mode`.
         theme: Option<Theme>,
+        /// Optional floating action button (raised primary action over the body).
+        fab: Option<Fab>,
         route: String,
         depth: u32,
     },
@@ -250,10 +274,11 @@ mod tests {
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),
             body: Box::new(Widget::Divider),
-            tabs: vec![Tab { label: "A".to_string(), selected: true, on_select: "t".to_string() }],
+            tabs: vec![Tab { label: "A".to_string(), selected: true, on_select: "t".to_string(), icon: Some(Icon::Home) }],
             back: Some("b".to_string()),
             dark_mode: true,
             theme: None,
+            fab: None,
             route: "r".to_string(),
             depth: 2,
         });
@@ -270,6 +295,7 @@ mod tests {
                 density: Density::Compact,
                 font: FontFamily::Rounded,
             }),
+            fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
             route: "r".to_string(),
             depth: 1,
         });
