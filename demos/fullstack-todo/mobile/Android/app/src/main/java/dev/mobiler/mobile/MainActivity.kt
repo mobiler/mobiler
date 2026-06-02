@@ -311,6 +311,41 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
         }
 
+        is Widget.Calendar -> {
+            val weekdays = listOf("S", "M", "T", "W", "T", "F", "S")
+            val months = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+            val cells = ArrayList<Int?>()
+            repeat(widget.firstWeekday.toInt()) { cells.add(null) }
+            for (d in 1..widget.onDay.size) cells.add(d)
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${months[widget.month.toInt() - 1]} ${widget.year}", style = MaterialTheme.typography.titleMedium)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    weekdays.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center) }
+                }
+                cells.chunked(7).forEach { week ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        week.forEach { day ->
+                            if (day == null) {
+                                Box(modifier = Modifier.weight(1f).height(40.dp))
+                            } else {
+                                val isSel = widget.selected?.toInt() == day
+                                val token = widget.onDay[day - 1]
+                                Box(
+                                    modifier = Modifier.weight(1f).height(40.dp).padding(2.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                        .clickable { send(Action.Fired(token)) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text("$day", color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                        repeat(7 - week.size) { Box(modifier = Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
 
         is Widget.Row -> Row(

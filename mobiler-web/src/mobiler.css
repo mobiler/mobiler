@@ -201,6 +201,18 @@ body {
 .chart-labels { display: flex; justify-content: space-between; margin-top: 4px; }
 .chart-label { font-size: 11px; color: var(--muted, #888); flex: 1; text-align: center; }
 
+/* Inline month calendar. */
+.calendar { margin: 8px 0; }
+.cal-title { font-weight: 600; text-align: center; margin-bottom: 6px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal-head { text-align: center; font-size: 11px; color: var(--muted, #888); padding: 2px 0; }
+.cal-blank { aspect-ratio: 1; }
+.cal-day { aspect-ratio: 1; border: none; background: transparent; color: var(--fg, inherit);
+  border-radius: 50%; cursor: pointer; font-size: 14px; }
+.cal-day:hover { background: var(--line); }
+.cal-sel { background: var(--accent, #5C6BC0); color: #fff; }
+.cal-sel:hover { background: var(--accent, #5C6BC0); }
+
 .spacer { flex: none; }
 .sp-xs { height: 4px; }
 .sp-sm { height: 8px; }
