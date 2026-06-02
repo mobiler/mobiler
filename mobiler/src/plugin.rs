@@ -454,6 +454,21 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_contacts_copies_both_sources_and_registers_activity() {
+        let root = skeleton();
+        add_at(&root, "contacts").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/ContactsPlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/ContactsPickerActivity.kt").contains("class ContactsPickerActivity"));
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"contacts\" to ContactsPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"contacts\": return await ContactsPlugin.handle"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android:name=\".ContactsPickerActivity\""));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

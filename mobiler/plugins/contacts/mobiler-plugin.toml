@@ -1,0 +1,13 @@
+name = "contacts"
+summary = "Pick a contact via the system picker → \"name|phone\" (free, no permission)"
+
+[android]
+# The contact picker (ACTION_PICK) grants access to just the chosen row, so no READ_CONTACTS.
+# A transparent helper Activity owns the ActivityResult (plugin add can't edit MainActivity).
+sources = ["android/ContactsPlugin.kt", "android/ContactsPickerActivity.kt"]
+register = '"contacts" to ContactsPlugin(application)'
+manifest_application = ['<activity android:name=".ContactsPickerActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />']
+
+[ios]
+sources = ["ios/ContactsPlugin.swift"]
+register = 'case "contacts": return await ContactsPlugin.handle(op: op, input: input)'
