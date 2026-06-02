@@ -1,0 +1,11 @@
+name = "review"
+summary = "Prompt for an in-app App Store / Play review (free, no permission)"
+
+[android]
+sources = ["android/ReviewPlugin.kt"]
+register = '"review" to ReviewPlugin(application)'
+gradle_deps = ["com.google.android.play:review:2.0.2"]
+
+[ios]
+sources = ["ios/ReviewPlugin.swift"]
+register = 'case "review": return await ReviewPlugin.handle(op: op, input: input)'
