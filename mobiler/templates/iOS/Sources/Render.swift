@@ -75,6 +75,15 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .skeleton:
         return AnyView(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2)).frame(height: 48).padding(.vertical, 4))
 
+    case .chart(let values, let labels, let style):
+        return AnyView(ChartView(values: values, labels: labels, style: style))
+
+    case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
+        return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
+
+    case .swipeAction(let child, let actions):
+        return AnyView(SwipeActionView(content: child, actions: actions, send: send))
+
     case .spacer(let size):
         return AnyView(Color.clear.frame(height: spacing(size)))
 
@@ -233,14 +242,15 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth):
         // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
         // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
         // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
         ActiveTheme.current = theme
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
-            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet, route: route, depth: depth, send: send
+            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet,
+            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, send: send
         ))
     }
 }
@@ -312,6 +322,118 @@ private struct AvatarView: View {
     }
 }
 
+// Simple bar/line chart — values normalized to the max, optional x-axis labels. Non-interactive.
+private struct ChartView: View {
+    let values: [Float]
+    let labels: [String]
+    let style: SharedTypes.ChartStyle
+    var body: some View {
+        let maxV = max(values.max() ?? 1, Float(0.000001))
+        let isLine: Bool = { if case .line = style { return true } else { return false } }()
+        VStack(spacing: 4) {
+            GeometryReader { geo in
+                if isLine {
+                    Path { p in
+                        let n = values.count
+                        guard n > 0 else { return }
+                        for (i, v) in values.enumerated() {
+                            let x = n == 1 ? geo.size.width / 2 : geo.size.width * CGFloat(i) / CGFloat(n - 1)
+                            let y = geo.size.height * (1 - CGFloat(v / maxV))
+                            if i == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
+                        }
+                    }.stroke(Color.accentColor, lineWidth: 2)
+                } else {
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(Array(values.enumerated()), id: \.offset) { _, v in
+                            RoundedRectangle(cornerRadius: 2).fill(Color.accentColor)
+                                .frame(height: geo.size.height * CGFloat(v / maxV))
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }.frame(height: 120)
+            if !labels.isEmpty {
+                HStack(spacing: 0) {
+                    ForEach(Array(labels.enumerated()), id: \.offset) { _, l in
+                        Text(l).font(.caption2).foregroundColor(.secondary).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+}
+
+// A list row that reveals trailing action buttons on horizontal swipe; tap an action to fire it.
+private struct SwipeActionView: View {
+    let content: SharedTypes.Widget
+    let actions: [SwipeButton]
+    let send: (Action) -> Void
+    @State private var offset: CGFloat = 0
+    private var revealWidth: CGFloat { CGFloat(actions.count) * 84 }
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 8) {
+                ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
+                    Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
+                        Text(a.label)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 76)
+                            .frame(maxHeight: .infinity)
+                            .background(toneColors(a.tone).1)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+            render(content, send)
+                .background(Color(.systemBackground))
+                .offset(x: offset)
+                .gesture(
+                    DragGesture()
+                        .onChanged { v in offset = min(0, max(-revealWidth, v.translation.width)) }
+                        .onEnded { _ in withAnimation { offset = offset < -revealWidth / 2 ? -revealWidth : 0 } }
+                )
+        }
+        .clipped()
+    }
+}
+
+// Inline month calendar — weekday header, leading blanks from `firstWeekday`, tappable days.
+private struct CalendarView: View {
+    let year: UInt32
+    let month: UInt8
+    let firstWeekday: UInt8
+    let selected: UInt8?
+    let onDay: [String]
+    let send: (Action) -> Void
+    private let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+    private let weekdays = ["S", "M", "T", "W", "T", "F", "S"]
+    private let months = ["January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December"]
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("\(months[Int(month) - 1]) \(String(year))").font(.headline)
+            LazyVGrid(columns: cols, spacing: 4) {
+                ForEach(Array(weekdays.enumerated()), id: \.offset) { _, w in
+                    Text(w).font(.caption2).foregroundColor(.secondary)
+                }
+                ForEach(0..<Int(firstWeekday), id: \.self) { _ in Color.clear.frame(height: 32) }
+                ForEach(Array(onDay.enumerated()), id: \.offset) { idx, token in
+                    let day = idx + 1
+                    let isSel = selected.map { Int($0) == day } ?? false
+                    Button(action: { send(.fired(token: token)) }) {
+                        Text("\(day)").frame(maxWidth: .infinity, minHeight: 32)
+                            .background(isSel ? Color.accentColor : Color.clear)
+                            .foregroundColor(isSel ? .white : .primary)
+                            .clipShape(Circle())
+                    }.buttonStyle(.plain)
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+}
+
 // Star rating; tappable when `onRate` carries one token per star.
 private struct RatingView: View {
     let value: UInt32
@@ -347,6 +469,8 @@ private struct ScaffoldView: View {
     let theme: Theme?
     let fab: SharedTypes.Fab?
     let sheet: SharedTypes.Sheet?
+    let onRefresh: String?
+    let refreshing: Bool
     let route: String
     let depth: UInt32
     let send: (Action) -> Void
@@ -436,11 +560,15 @@ private struct ScaffoldView: View {
             // just re-renders in place. The iOS twin of Android's AnimatedContent.
             // On a regular width the column is capped + centered so it doesn't stretch.
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) { render(self.content, send) }
+                VStack(alignment: .leading, spacing: 6) {
+                    if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                    render(self.content, send)
+                }
                     .padding(16)
                     .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
                     .frame(maxWidth: .infinity)
             }
+            .refreshableIf(onRefresh, send)
             .id(route)
             .transition(navTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -702,4 +830,22 @@ private func downsampledFileImage(at url: URL, maxPixel: CGFloat = 1400) -> UIIm
     let img = UIImage(cgImage: cg)
     fileImageCache.setObject(img, forKey: key)
     return img
+}
+
+// Pull-to-refresh, gated: attaches `.refreshable` only when the scaffold carries an on_refresh
+// token (so screens without it aren't bouncy). The event is fire-and-forget; the brief sleep keeps
+// the native pull spinner visible while the app's async reload kicks off (the model's `refreshing`
+// flag drives the in-body indicator that reflects the real reload duration).
+extension View {
+    @ViewBuilder
+    func refreshableIf(_ token: String?, _ send: @escaping (Action) -> Void) -> some View {
+        if let token = token {
+            self.refreshable {
+                send(.fired(token: token))
+                try? await Task.sleep(nanoseconds: 600_000_000)
+            }
+        } else {
+            self
+        }
+    }
 }

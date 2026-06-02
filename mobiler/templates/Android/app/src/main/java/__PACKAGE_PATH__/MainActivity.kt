@@ -83,9 +83,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -115,10 +117,29 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import {{PACKAGE}}.ui.theme.{{NAME}}Theme
@@ -126,6 +147,7 @@ import {{PACKAGE_SHARED_TYPES}}.Action
 import {{PACKAGE_SHARED_TYPES}}.BoxAlign
 import {{PACKAGE_SHARED_TYPES}}.ButtonStyle
 import {{PACKAGE_SHARED_TYPES}}.CardStyle
+import {{PACKAGE_SHARED_TYPES}}.ChartStyle
 import {{PACKAGE_SHARED_TYPES}}.Corner
 import {{PACKAGE_SHARED_TYPES}}.Density
 import {{PACKAGE_SHARED_TYPES}}.Icon as WidgetIcon
@@ -316,7 +338,107 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp)
                 .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
         )
+        is Widget.Chart -> {
+            val values = widget.values
+            val maxV = (values.maxOrNull() ?: 1f).coerceAtLeast(1e-6f)
+            val chartColor = MaterialTheme.colorScheme.primary
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
+                    if (values.isEmpty()) return@Canvas
+                    val w = size.width
+                    val h = size.height
+                    when (widget.style) {
+                        ChartStyle.LINE -> {
+                            val n = values.size
+                            val path = Path()
+                            values.forEachIndexed { i, v ->
+                                val x = if (n == 1) w / 2f else w * i / (n - 1)
+                                val y = h * (1f - v / maxV)
+                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                            }
+                            drawPath(path, chartColor, style = Stroke(width = 4f))
+                        }
+                        ChartStyle.BAR -> {
+                            val bw = w / values.size
+                            values.forEachIndexed { i, v ->
+                                val bh = h * (v / maxV)
+                                drawRect(chartColor, topLeft = Offset(i * bw + bw * 0.15f, h - bh), size = Size(bw * 0.7f, bh))
+                            }
+                        }
+                    }
+                }
+                if (widget.labels.isNotEmpty()) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        widget.labels.forEach {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                        }
+                    }
+                }
+            }
+        }
 
+        is Widget.Calendar -> {
+            val weekdays = listOf("S", "M", "T", "W", "T", "F", "S")
+            val months = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+            val cells = ArrayList<Int?>()
+            repeat(widget.firstWeekday.toInt()) { cells.add(null) }
+            for (d in 1..widget.onDay.size) cells.add(d)
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${months[widget.month.toInt() - 1]} ${widget.year}", style = MaterialTheme.typography.titleMedium)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    weekdays.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center) }
+                }
+                cells.chunked(7).forEach { week ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        week.forEach { day ->
+                            if (day == null) {
+                                Box(modifier = Modifier.weight(1f).height(40.dp))
+                            } else {
+                                val isSel = widget.selected?.toInt() == day
+                                val token = widget.onDay[day - 1]
+                                Box(
+                                    modifier = Modifier.weight(1f).height(40.dp).padding(2.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                        .clickable { send(Action.Fired(token)) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text("$day", color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                        repeat(7 - week.size) { Box(modifier = Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+        is Widget.SwipeAction -> {
+            val actions = widget.actions
+            val density = LocalDensity.current
+            val revealPx = with(density) { (actions.size * 84).dp.toPx() }
+            var offsetX by remember(widget) { mutableStateOf(0f) }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
+                    actions.forEach { a ->
+                        val (_, fg) = toneColors(a.tone)
+                        Box(
+                            modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(fg)
+                                .clickable { send(Action.Fired(a.onTap)); offsetX = 0f },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(a.label, color = Color.White, style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .offset { IntOffset(offsetX.roundToInt(), 0) }
+                        .background(MaterialTheme.colorScheme.surface)
+                        .draggable(
+                            orientation = Orientation.Horizontal,
+                            state = rememberDraggableState { delta -> offsetX = (offsetX + delta).coerceIn(-revealPx, 0f) },
+                        ),
+                ) { Render(widget.child, send) }
+            }
+        }
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
 
         is Widget.Row -> Row(
@@ -572,12 +694,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             label = "nav",
                         ) { screen ->
                             // Cap + center the content column so it doesn't stretch on a tablet.
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(padding)
-                                    .verticalScroll(rememberScrollState()),
-                            ) {
+                            val column: @Composable BoxScope.() -> Unit = {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -586,8 +703,28 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         .padding(horizontal = 16.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
+                                    if (screen.refreshing) {
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
+                                    }
                                     Render(screen.body, send)
                                 }
+                            }
+                            val onRefresh = screen.onRefresh
+                            if (onRefresh != null) {
+                                // Pull-to-refresh — the body is pull-refreshable; the spinner is
+                                // driven by the app-owned `refreshing` flag.
+                                PullToRefreshBox(
+                                    isRefreshing = screen.refreshing,
+                                    onRefresh = { send(Action.Fired(onRefresh)) },
+                                    modifier = Modifier.fillMaxSize().padding(padding),
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), content = column)
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
+                                    content = column,
+                                )
                             }
                         }
                     }
