@@ -288,6 +288,11 @@ class Core(application: Application) : AndroidViewModel(application) {
         "calendar" to CalendarPlugin(application),
         "audio" to AudioPlugin(application),
         "sensors" to SensorsPlugin(application),
+        "composer" to ComposerPlugin(application),
+        "tts" to TtsPlugin(application),
+        "review" to ReviewPlugin(application),
+        "sharefile" to SharefilePlugin(application),
+        "video" to VideoPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

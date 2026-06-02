@@ -50,6 +50,7 @@
         </provider>
 
         <activity android:name=".ContactsPickerActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity android:name=".VideoCaptureActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
     </application>
 

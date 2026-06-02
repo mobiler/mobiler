@@ -7,8 +7,8 @@ use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, caption, card, card_button, chip, column, divider, emphasis, grid, icon_button,
-    image, rating, rating_input, row, scaffold, scroller, search_field, segment, segmented, spacer,
-    stack, subtitle, tab_icon, text, title, with_fab, with_sheet, with_theme,
+    image, progress, rating, rating_input, row, scaffold, scroller, search_field, segment, segmented,
+    skeleton, spacer, stack, subtitle, tab_icon, text, title, with_fab, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -68,6 +68,22 @@ pub enum Msg {
     Recorded(String),
     PlayAudio,
     Played(String),
+
+    // --- "Get in touch" + share/voice/review (composer / tts / review / sharefile / video) ---
+    /// Email the shop via the system mail composer (`composer` plugin).
+    EmailShop,
+    /// Call the shop via the system dialer (`composer` plugin).
+    CallShop,
+    /// Speak the next-booking summary aloud (`tts` plugin).
+    SpeakBooking,
+    /// Ask for an App Store / Play review (`review` plugin).
+    RequestReview,
+    /// Record a short video with the camera (`video` plugin).
+    RecordVideo,
+    VideoRecorded(String),
+    /// Share the last recorded clip via the system share sheet (`sharefile` plugin).
+    ShareClip,
+    Shared(String),
 }
 
 #[derive(Clone)]
@@ -112,6 +128,8 @@ pub struct Model {
     device: String,
     /// URI of the last recorded clip (enables Play).
     last_audio: Option<String>,
+    /// URI of the last recorded video (enables Share).
+    last_video: Option<String>,
 }
 
 impl Default for Model {
@@ -144,6 +162,7 @@ impl Default for Model {
             signal: String::new(),
             device: String::new(),
             last_audio: None,
+            last_video: None,
         }
     }
 }
@@ -278,6 +297,58 @@ impl MobilerApp for FadeHouse {
                 }
             }
             Msg::Played(s) => model.device = format!("Playback: {s}"),
+
+            // --- Get in touch / voice / review / share (composer, tts, review, sharefile, video) ---
+            Msg::EmailShop => {
+                let input = serde_json::json!({
+                    "to": "hello@fadehouse.example",
+                    "subject": "Booking enquiry",
+                    "body": "Hi Fade House,\n\nI'd like to book an appointment.",
+                })
+                .to_string();
+                cx.plugin("composer", "email", input, |r| {
+                    Msg::Played(if r.ok { "Email composer opened".into() } else { "No mail app available".into() })
+                });
+            }
+            Msg::CallShop => {
+                let input = serde_json::json!({ "number": "+15551234567" }).to_string();
+                cx.plugin("composer", "call", input, |r| {
+                    Msg::Played(if r.ok { "Dialer opened".into() } else { "Can't place call".into() })
+                });
+            }
+            Msg::SpeakBooking => {
+                let text = match (model.pending_date.as_deref(), model.pending_time.as_deref()) {
+                    (Some(d), Some(t)) => format!("Your next visit is on {d} at {t}."),
+                    _ => "You have no upcoming bookings. Tap the calendar button to book a cut.".to_string(),
+                };
+                cx.plugin("tts", "speak", text, |_| Msg::Played("Spoke your booking".into()));
+            }
+            Msg::RequestReview => cx.plugin("review", "request", "", |_| Msg::Played("Thanks for rating us!".into())),
+            Msg::RecordVideo => {
+                model.device = "Opening camera…".into();
+                cx.plugin("video", "record", "", |r| {
+                    Msg::VideoRecorded(if r.ok { r.output } else { String::new() })
+                });
+            }
+            Msg::VideoRecorded(uri) => {
+                if uri.is_empty() {
+                    model.device = "No video recorded".into();
+                } else {
+                    model.last_video = Some(uri);
+                    model.device = "Recorded a clip ✓ — tap Share clip".into();
+                }
+            }
+            Msg::ShareClip => {
+                if let Some(uri) = model.last_video.clone().or_else(|| model.last_audio.clone()) {
+                    cx.plugin("sharefile", "file", uri, |r| Msg::Shared(r.output));
+                } else {
+                    cx.toast("Record a video or audio clip first");
+                }
+            }
+            Msg::Shared(s) => cx.toast(match s.as_str() {
+                "shared" => "Shared ✓".to_string(),
+                _ => "Share cancelled".to_string(),
+            }),
         }
     }
 
@@ -496,10 +567,30 @@ fn bookings_screen() -> Widget {
     ])
 }
 
+/// Profile completeness 0.0–1.0 — grows as the visitor exercises the app's capabilities.
+/// Drives the determinate `Progress` bar on the Profile screen.
+fn completeness(model: &Model) -> f32 {
+    let mut v = 0.25_f32;
+    if !model.client.is_empty() {
+        v += 0.25;
+    }
+    if !model.location.is_empty() {
+        v += 0.25;
+    }
+    if !model.device.is_empty() {
+        v += 0.25;
+    }
+    v.min(1.0)
+}
+
 fn profile_screen(model: &Model) -> Widget {
+    let pct = (completeness(model) * 100.0).round() as u32;
     column(vec![
         subtitle("Marcus Reed"),
         caption("marcus@example.com"),
+        // Determinate Progress bar — "profile completeness" grows as capabilities are tried.
+        caption(format!("Profile {pct}% complete")),
+        progress(Some(completeness(model))),
         divider(),
         row(vec![icon_button(Icon::Person, Msg::SelectTab(Tab::Profile)), text("Account")]),
         row(vec![icon_button(Icon::Bell, Msg::Notifications), text("Notifications")]),
@@ -518,6 +609,35 @@ fn profile_screen(model: &Model) -> Widget {
                     button("Play", ButtonStyle::Text, Msg::PlayAudio),
                 ]),
                 caption(if model.device.is_empty() { "Tap a capability to try it on device.".to_string() } else { model.device.clone() }),
+            ]),
+            CardStyle::Outlined,
+        ),
+        // Get in touch + voice + share (free bundled plugins: composer / tts / review / video / sharefile).
+        card(
+            column(vec![
+                emphasis("Get in touch"),
+                row(vec![
+                    button("Email the shop", ButtonStyle::Outlined, Msg::EmailShop),
+                    button("Call", ButtonStyle::Text, Msg::CallShop),
+                ]),
+                row(vec![
+                    button("Read my booking aloud", ButtonStyle::Outlined, Msg::SpeakBooking),
+                ]),
+                row(vec![
+                    button("Record a clip", ButtonStyle::Outlined, Msg::RecordVideo),
+                    button("Share clip", ButtonStyle::Text, Msg::ShareClip),
+                ]),
+                button("Rate Fade House", ButtonStyle::Text, Msg::RequestReview),
+            ]),
+            CardStyle::Outlined,
+        ),
+        // Skeleton placeholders — the shimmer shown while content streams in.
+        card(
+            column(vec![
+                emphasis("Loyalty"),
+                caption("Syncing your points…"),
+                skeleton(),
+                skeleton(),
             ]),
             CardStyle::Outlined,
         ),
@@ -598,6 +718,30 @@ mod test {
         app.update(Msg::TimePicked(String::new()), &mut model, &mut cx);
         assert_eq!(model.pending_date, None);
         assert_eq!(model.pending_time, None);
+    }
+
+    #[test]
+    fn completeness_grows_as_capabilities_are_exercised() {
+        let model = Model::default();
+        assert!((completeness(&model) - 0.25).abs() < f32::EPSILON, "base profile is 25%");
+        let full = Model {
+            client: "Sam|+1555".into(),
+            location: "37.77,-122.41".into(),
+            device: "accelerometer: 0,0,9.8".into(),
+            ..Model::default()
+        };
+        assert!((completeness(&full) - 1.0).abs() < f32::EPSILON, "all three tried → 100%");
+    }
+
+    #[test]
+    fn record_video_then_share_tracks_last_clip() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::VideoRecorded("file:///tmp/clip.mov".into()), &mut model, &mut cx);
+        assert_eq!(model.last_video.as_deref(), Some("file:///tmp/clip.mov"));
+        // Cancelling a later recording leaves the previous clip in place.
+        app.update(Msg::VideoRecorded(String::new()), &mut model, &mut cx);
+        assert_eq!(model.last_video.as_deref(), Some("file:///tmp/clip.mov"));
     }
 
     #[test]

@@ -43,10 +43,9 @@ targets:
         # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
         # the "Missing export compliance" question.
         ITSAppUsesNonExemptEncryption: false
-        # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
-        # requires this usage string to access the camera; the App Store flags apps that
-        # ship it without using the camera, so it's left off by default.
-        # NSCameraUsageDescription: "Take photos to use in the app."
+        # Camera usage string — required by the `video` plugin (record a video) and the
+        # camera capability. iOS requires it to access the camera.
+        NSCameraUsageDescription: "Record video and take photos."
         NSLocationWhenInUseUsageDescription: "Show your location in the app."
         NSCalendarsUsageDescription: "Add events to your calendar."
         NSCalendarsWriteOnlyAccessUsageDescription: "Add events to your calendar."
