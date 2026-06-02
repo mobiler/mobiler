@@ -237,6 +237,10 @@ pub enum Widget {
     /// A simple data chart — `values` drawn as bars or a line, normalized to the max value.
     /// `labels` (optional, one per value) annotate the x-axis. Non-interactive.
     Chart { values: Vec<f32>, labels: Vec<String>, style: ChartStyle },
+    /// An inline month calendar. `first_weekday` is the weekday of day 1 (0=Sun..6=Sat) so the
+    /// shells render leading blanks without date math; `on_day[d-1]` fires when day `d` is tapped
+    /// (length = days in the month). `selected` highlights a day.
+    Calendar { year: u32, month: u8, first_weekday: u8, selected: Option<u8>, on_day: Vec<ActionToken> },
     Spacer { size: Spacing },
     // Layout
     Row { children: Vec<Widget> },
@@ -320,6 +324,7 @@ mod tests {
         round_trips(&Widget::Text { content: "hi".to_string(), style: TextStyle::Title });
         round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
         round_trips(&Widget::Chart { values: vec![1.0, 2.5, 3.0], labels: vec!["a".to_string()], style: ChartStyle::Bar });
+        round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),

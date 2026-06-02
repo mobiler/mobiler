@@ -441,6 +441,28 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             };
             view! { <div class="chart">{svg}{label_row}</div> }.into_any()
         }
+        Widget::Calendar { year, month, first_weekday, selected, on_day } => {
+            const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"];
+            let head_label = format!("{} {year}", MONTHS.get((*month as usize).saturating_sub(1)).copied().unwrap_or(""));
+            let weekdays = ["S", "M", "T", "W", "T", "F", "S"];
+            let heads: Vec<_> = weekdays.iter().map(|w| view! { <div class="cal-head">{*w}</div> }).collect();
+            let blanks: Vec<_> = (0..*first_weekday).map(|_| view! { <div class="cal-blank"></div> }).collect();
+            let selected = *selected;
+            let days: Vec<_> = on_day.iter().enumerate().map(|(i, token)| {
+                let day = (i + 1) as u8;
+                let token = token.clone();
+                let send = send.clone();
+                let cls = if selected == Some(day) { "cal-day cal-sel" } else { "cal-day" };
+                view! { <button class=cls on:click=move |_| send(Action::Fired { token: token.clone() })>{day.to_string()}</button> }
+            }).collect();
+            view! {
+                <div class="calendar">
+                    <div class="cal-title">{head_label}</div>
+                    <div class="cal-grid">{heads}{blanks}{days}</div>
+                </div>
+            }.into_any()
+        }
         Widget::Spacer { size } => {
             view! { <div class=format!("spacer {}", spacer_class(*size))></div> }.into_any()
         }

@@ -78,6 +78,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .chart(let values, let labels, let style):
         return AnyView(ChartView(values: values, labels: labels, style: style))
 
+    case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
+        return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
+
     case .spacer(let size):
         return AnyView(Color.clear.frame(height: spacing(size)))
 
@@ -350,6 +353,41 @@ private struct ChartView: View {
                     ForEach(Array(labels.enumerated()), id: \.offset) { _, l in
                         Text(l).font(.caption2).foregroundColor(.secondary).frame(maxWidth: .infinity)
                     }
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+}
+
+// Inline month calendar — weekday header, leading blanks from `firstWeekday`, tappable days.
+private struct CalendarView: View {
+    let year: UInt32
+    let month: UInt8
+    let firstWeekday: UInt8
+    let selected: UInt8?
+    let onDay: [String]
+    let send: (Action) -> Void
+    private let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+    private let weekdays = ["S", "M", "T", "W", "T", "F", "S"]
+    private let months = ["January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December"]
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("\(months[Int(month) - 1]) \(String(year))").font(.headline)
+            LazyVGrid(columns: cols, spacing: 4) {
+                ForEach(Array(weekdays.enumerated()), id: \.offset) { _, w in
+                    Text(w).font(.caption2).foregroundColor(.secondary)
+                }
+                ForEach(0..<Int(firstWeekday), id: \.self) { _ in Color.clear.frame(height: 32) }
+                ForEach(Array(onDay.enumerated()), id: \.offset) { idx, token in
+                    let day = idx + 1
+                    let isSel = selected.map { Int($0) == day } ?? false
+                    Button(action: { send(.fired(token: token)) }) {
+                        Text("\(day)").frame(maxWidth: .infinity, minHeight: 32)
+                            .background(isSel ? Color.accentColor : Color.clear)
+                            .foregroundColor(isSel ? .white : .primary)
+                            .clipShape(Circle())
+                    }.buttonStyle(.plain)
                 }
             }
         }.padding(.vertical, 4)

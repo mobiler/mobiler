@@ -419,6 +419,34 @@ pub fn bar_chart(values: Vec<f32>, labels: Vec<String>) -> Widget {
 pub fn line_chart(values: Vec<f32>, labels: Vec<String>) -> Widget {
     Widget::Chart { values, labels, style: ChartStyle::Line }
 }
+
+/// Days in `month` (1–12) of `year`, leap-year aware.
+fn days_in_month(year: u32, month: u8) -> u8 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 29 } else { 28 },
+        _ => 30,
+    }
+}
+
+/// Weekday of `year-month-day` as 0=Sunday..6=Saturday (Sakamoto's algorithm).
+fn weekday(year: u32, month: u8, day: u8) -> u8 {
+    const T: [u32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let y = if month < 3 { year - 1 } else { year };
+    let m = month as usize - 1;
+    ((y + y / 4 - y / 100 + y / 400 + T[m] + u32::from(day)) % 7) as u8
+}
+
+/// An inline month calendar for `year`/`month` (1–12). `on_day(d)` builds the tap event for each
+/// day `d` in the month; `selected` highlights a day. Leading blanks + weekday header are handled
+/// by the shells from the computed `first_weekday`.
+#[must_use]
+pub fn calendar<E: Serialize>(year: u32, month: u8, selected: Option<u8>, on_day: impl Fn(u8) -> E) -> Widget {
+    let n = days_in_month(year, month);
+    let on_day = (1..=n).map(|d| tok(on_day(d))).collect();
+    Widget::Calendar { year, month, first_weekday: weekday(year, month, 1), selected, on_day }
+}
 #[must_use]
 pub fn spacer(size: Spacing) -> Widget { Widget::Spacer { size } }
 
@@ -888,6 +916,11 @@ mod tests {
         assert!(matches!(divider(), Widget::Divider));
         assert!(matches!(bar_chart(vec![1.0, 2.0], vec![]), Widget::Chart { style: ChartStyle::Bar, values, .. } if values.len() == 2));
         assert!(matches!(line_chart(vec![1.0], vec![]), Widget::Chart { style: ChartStyle::Line, .. }));
+        // June 2026 has 30 days and starts on a Monday (weekday 1).
+        assert!(matches!(
+            calendar(2026, 6, Some(3), |d| Ev::Open(u32::from(d))),
+            Widget::Calendar { first_weekday: 1, selected: Some(3), on_day, .. } if on_day.len() == 30
+        ));
         assert!(matches!(spacer(Spacing::Lg), Widget::Spacer { .. }));
         assert!(matches!(image("u", ImageShape::Circle, ImageRatio::Square), Widget::Image { .. }));
         assert!(matches!(badge("new", Tone::Success), Widget::Badge { .. }));
