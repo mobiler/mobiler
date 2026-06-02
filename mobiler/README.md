@@ -76,6 +76,9 @@ ABI change. Bundled free plugins:
 | 🔌 `websocket` | persistent real-time connection |
 | 🔔 `notifications` | local scheduled notifications (reminders) |
 | 🔋 `battery` | device battery level (sample) |
+| 📶 `connectivity` | network status (online/wifi/cellular/offline) |
+| 📄 `filepicker` | system document picker → file URI |
+| 📍 `geolocation` | device location → `lat,lng` |
 
 ```bash
 mobiler plugin list

@@ -33,13 +33,23 @@ If the fresh build fails, the release is effectively broken for new users — fi
 ## 3. Update auto-memory
 - Record the new published versions and any non-obvious lesson learned (a gotcha, a procedure refinement) in the project memory; update the `MEMORY.md` index line. Don't duplicate what git/start.md already capture.
 
-## 4. Screenshots for any visual change
+## 4. Sync the hand-maintained README lists
+- If the release **added a bundled plugin or a built-in capability**, update the **hand-maintained**
+  README lists — `xtask gen-readme` only regenerates the `capabilities.json`-driven sections, NOT
+  these:
+  - root `README.md`: the `## Plugins — mobiler plugin add` table **and** the one-line plugins list near the top.
+  - `mobiler/README.md`: the plugins table.
+  - (built-in capabilities: also add to `capabilities.json` + run `gen-readme`.)
+- Easy to forget because these tables aren't generated — grep the READMEs for an existing peer
+  (e.g. `scanner`) to find every place that enumerates plugins, and add the new one alongside.
+
+## 5. Screenshots for any visual change
 - If the release changed anything rendered (new/changed widgets, theming, layouts), capture fresh screenshots and update the relevant READMEs — never ship a visual change with stale images.
 - Recipe (the established one): `cd demos/<app>/web && RUSTUP_TOOLCHAIN=stable trunk build` → serve `dist/` (`python3 -m http.server`) → `google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=430,1000 --virtual-time-budget=6000 --screenshot=out.png http://localhost:<port>/`. Headless can't click, so for sheet/overlay/picker states set the model field open in `Default` temporarily, shoot, revert.
 - Commit images under each demo's `screenshots/` and reference them with repo-relative paths; keep copies in `~/mobiler-screenshots/`.
 
-## 5. Clean regenerable caches
+## 6. Clean regenerable caches
 - The repo fills disk fast. After a shipped release, clear regenerable build artifacts: all `target/` dirs (`find . -type d -name target -prune -exec rm -rf {} +`) and `~/.gradle/caches`. Leave `~/.cargo/registry` (slower to refetch).
 
-## 6. Finish
+## 7. Finish
 - Confirm `git status` is clean (the screenshot/doc updates land via **ship-pr** if they touch tracked files; `start.md` and memory are local-only).
