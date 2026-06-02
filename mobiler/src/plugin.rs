@@ -469,6 +469,21 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_calendar_registers_and_adds_plist_keys() {
+        let root = skeleton();
+        add_at(&root, "calendar").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/CalendarPlugin.kt").contains("package dev.mobiler.demo"));
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"calendar\" to CalendarPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"calendar\": return await CalendarPlugin.handle"));
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("NSCalendarsUsageDescription"), "iOS calendar usage key injected");
+        assert!(yml.contains("NSCalendarsWriteOnlyAccessUsageDescription"), "iOS 17+ write-only key injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
