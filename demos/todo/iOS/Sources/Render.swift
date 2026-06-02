@@ -75,6 +75,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .skeleton:
         return AnyView(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2)).frame(height: 48).padding(.vertical, 4))
 
+    case .chart(let values, let labels, let style):
+        return AnyView(ChartView(values: values, labels: labels, style: style))
+
     case .spacer(let size):
         return AnyView(Color.clear.frame(height: spacing(size)))
 
@@ -309,6 +312,47 @@ private struct AvatarView: View {
                         .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
                 }
             }
+    }
+}
+
+// Simple bar/line chart — values normalized to the max, optional x-axis labels. Non-interactive.
+private struct ChartView: View {
+    let values: [Float]
+    let labels: [String]
+    let style: SharedTypes.ChartStyle
+    var body: some View {
+        let maxV = max(values.max() ?? 1, Float(0.000001))
+        let isLine: Bool = { if case .line = style { return true } else { return false } }()
+        VStack(spacing: 4) {
+            GeometryReader { geo in
+                if isLine {
+                    Path { p in
+                        let n = values.count
+                        guard n > 0 else { return }
+                        for (i, v) in values.enumerated() {
+                            let x = n == 1 ? geo.size.width / 2 : geo.size.width * CGFloat(i) / CGFloat(n - 1)
+                            let y = geo.size.height * (1 - CGFloat(v / maxV))
+                            if i == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
+                        }
+                    }.stroke(Color.accentColor, lineWidth: 2)
+                } else {
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(Array(values.enumerated()), id: \.offset) { _, v in
+                            RoundedRectangle(cornerRadius: 2).fill(Color.accentColor)
+                                .frame(height: geo.size.height * CGFloat(v / maxV))
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }.frame(height: 120)
+            if !labels.isEmpty {
+                HStack(spacing: 0) {
+                    ForEach(Array(labels.enumerated()), id: \.offset) { _, l in
+                        Text(l).font(.caption2).foregroundColor(.secondary).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }.padding(.vertical, 4)
     }
 }
 

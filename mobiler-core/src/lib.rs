@@ -17,9 +17,9 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, Fab, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, Tab, TextStyle, Theme, Tone,
-    Widget,
+    Action, BoxAlign, ButtonStyle, CardStyle, ChartStyle, Corner, Density, Fab, FontFamily, Icon,
+    ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, Tab, TextStyle,
+    Theme, Tone, Widget,
 };
 
 // ============================ capabilities ============================
@@ -409,6 +409,16 @@ pub fn progress(value: Option<f32>) -> Widget { Widget::Progress { value } }
 /// A shimmer placeholder shown while content loads.
 #[must_use]
 pub fn skeleton() -> Widget { Widget::Skeleton }
+/// A bar chart of `values` (normalized to the max), with optional per-value `labels`.
+#[must_use]
+pub fn bar_chart(values: Vec<f32>, labels: Vec<String>) -> Widget {
+    Widget::Chart { values, labels, style: ChartStyle::Bar }
+}
+/// A line chart of `values` (normalized to the max), with optional per-value `labels`.
+#[must_use]
+pub fn line_chart(values: Vec<f32>, labels: Vec<String>) -> Widget {
+    Widget::Chart { values, labels, style: ChartStyle::Line }
+}
 #[must_use]
 pub fn spacer(size: Spacing) -> Widget { Widget::Spacer { size } }
 
@@ -876,6 +886,8 @@ mod tests {
         assert!(matches!(column(vec![]), Widget::Column { children } if children.is_empty()));
         assert!(matches!(grid(vec![text("a"), text("b")]), Widget::Grid { children } if children.len() == 2));
         assert!(matches!(divider(), Widget::Divider));
+        assert!(matches!(bar_chart(vec![1.0, 2.0], vec![]), Widget::Chart { style: ChartStyle::Bar, values, .. } if values.len() == 2));
+        assert!(matches!(line_chart(vec![1.0], vec![]), Widget::Chart { style: ChartStyle::Line, .. }));
         assert!(matches!(spacer(Spacing::Lg), Widget::Spacer { .. }));
         assert!(matches!(image("u", ImageShape::Circle, ImageRatio::Square), Widget::Image { .. }));
         assert!(matches!(badge("new", Tone::Success), Widget::Badge { .. }));
