@@ -88,8 +88,9 @@ ABI change. Bundled free plugins:
 | ⭐ `review` | in-app App Store / Play review prompt |
 | 📤 `sharefile` | share a file / image via the share sheet |
 | 🎬 `video` | record a video → local URI |
-| 🎤 `speech` | speech-to-text (Android; iOS in fast-follow) |
-| 🗃️ `sqlite` | on-device SQLite (Android; iOS in fast-follow) |
+| 🎤 `speech` | speech-to-text (dictation) |
+| 🗃️ `sqlite` | on-device SQLite (exec / query → JSON) |
+| 🔵 `bluetooth` | BLE scan / connect / read |
 
 ```bash
 mobiler plugin list
