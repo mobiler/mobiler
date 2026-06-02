@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -137,6 +137,9 @@ free plugins:
 | 🔌 **websocket** | persistent real-time connection | `mobiler plugin add websocket` |
 | 🔔 **notifications** | local scheduled notifications (reminders) | `mobiler plugin add notifications` |
 | 🔋 **battery** | device battery level (sample) | `mobiler plugin add battery` |
+| 📶 **connectivity** | network status (online/wifi/cellular/offline) | `mobiler plugin add connectivity` |
+| 📄 **filepicker** | system document picker → file URI | `mobiler plugin add filepicker` |
+| 📍 **geolocation** | device location → `lat,lng` | `mobiler plugin add geolocation` |
 
 ```bash
 mobiler plugin list            # see the bundled (free) plugins
