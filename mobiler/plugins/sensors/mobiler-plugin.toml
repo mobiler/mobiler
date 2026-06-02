@@ -1,0 +1,10 @@
+name = "sensors"
+summary = "Read motion sensors — accelerometer / gyroscope → \"x,y,z\" (free)"
+
+[android]
+sources = ["android/SensorsPlugin.kt"]
+register = '"sensors" to SensorsPlugin(application)'
+
+[ios]
+sources = ["ios/SensorsPlugin.swift"]
+register = 'case "sensors": return await SensorsPlugin.handle(op: op, input: input)'
