@@ -372,17 +372,20 @@ private struct SwipeActionView: View {
     private var revealWidth: CGFloat { CGFloat(actions.count) * 84 }
     var body: some View {
         ZStack(alignment: .trailing) {
-            HStack(spacing: 0) {
+            HStack(spacing: 8) {
                 ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
                     Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
                         Text(a.label)
+                            .font(.subheadline.weight(.semibold))
                             .foregroundColor(.white)
-                            .frame(width: 84)
+                            .frame(width: 76)
                             .frame(maxHeight: .infinity)
                             .background(toneColors(a.tone).1)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain)
                 }
             }
+            .padding(.vertical, 4)
             render(content, send)
                 .background(Color(.systemBackground))
                 .offset(x: offset)

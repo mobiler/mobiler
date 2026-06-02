@@ -41,9 +41,33 @@ final class BleManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 
     private func poweredOn() -> Bool { central.state == .poweredOn }
 
+    // The first call happens before CoreBluetooth finishes powering on / the user answers the
+    // permission prompt — poll briefly so the first tap works instead of needing a second.
+    private func waitForPoweredOn(timeoutMs: Int) async -> Bool {
+        var waited = 0
+        while central.state != .poweredOn && waited < timeoutMs {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            waited += 200
+        }
+        return central.state == .poweredOn
+    }
+
+    private func stateMessage() -> String {
+        switch central.state {
+        case .unauthorized: return "bluetooth permission denied"
+        case .poweredOff: return "bluetooth off"
+        case .unsupported: return "bluetooth unsupported"
+        default: return "bluetooth unavailable"
+        }
+    }
+
     // MARK: scan
     func scan() async -> PluginResponse {
-        guard poweredOn() else { return PluginResponse(ok: false, output: "bluetooth off") }
+        if !poweredOn() {
+            guard await waitForPoweredOn(timeoutMs: 6000) else {
+                return PluginResponse(ok: false, output: stateMessage())
+            }
+        }
         discovered.removeAll(); rssis.removeAll()
         return await withCheckedContinuation { cont in
             scanCont = cont
@@ -71,7 +95,9 @@ final class BleManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 
     // MARK: connect
     func connect(_ id: String) async -> PluginResponse {
-        guard poweredOn() else { return PluginResponse(ok: false, output: "bluetooth off") }
+        if !poweredOn() {
+            guard await waitForPoweredOn(timeoutMs: 6000) else { return PluginResponse(ok: false, output: stateMessage()) }
+        }
         guard let p = discovered[id] else { return PluginResponse(ok: false, output: "unknown device — scan first") }
         return await withCheckedContinuation { cont in
             connectCont = cont
