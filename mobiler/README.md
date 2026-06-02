@@ -79,6 +79,10 @@ ABI change. Bundled free plugins:
 | 📶 `connectivity` | network status (online/wifi/cellular/offline) |
 | 📄 `filepicker` | system document picker → file URI |
 | 📍 `geolocation` | device location → `lat,lng` |
+| 📇 `contacts` | system contact picker → `name|phone` |
+| 📅 `calendar` | add an event (system editor) |
+| 🎙️ `audio` | record (mic) + play |
+| 📐 `sensors` | accelerometer / gyroscope → `x,y,z` |
 
 ```bash
 mobiler plugin list
