@@ -500,6 +500,16 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_composer_copies_and_registers() {
+        let root = skeleton();
+        add_at(&root, "composer").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/ComposerPlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"composer\" to ComposerPlugin(application),"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"composer\": return await ComposerPlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
