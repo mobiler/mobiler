@@ -1,0 +1,10 @@
+name = "sharefile"
+summary = "Share a file/image via the system share sheet (free, no permission)"
+
+[android]
+sources = ["android/SharefilePlugin.kt"]
+register = '"sharefile" to SharefilePlugin(application)'
+
+[ios]
+sources = ["ios/SharefilePlugin.swift"]
+register = 'case "sharefile": return await SharefilePlugin.handle(op: op, input: input)'
