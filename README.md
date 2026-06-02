@@ -201,9 +201,9 @@ segmented controls, search fields, and bottom sheets — plus native capabilitie
 brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar
 rail with ratings, and a tap-to-book bottom sheet with a date → time → confirm flow.
 
-| Home | Booking sheet |
-|:---:|:---:|
-| <img src="demos/barbershop/screenshots/home.png" width="200" alt="Fade House home"> | <img src="demos/barbershop/screenshots/booking-sheet.png" width="200" alt="Fade House booking sheet"> |
+| Home — web | Home — iOS (native) | Booking sheet — web |
+|:---:|:---:|:---:|
+| <img src="demos/barbershop/screenshots/home.png" width="200" alt="Fade House home on web"> | <img src="demos/barbershop/screenshots/ios-home.png" width="200" alt="Fade House home on iOS"> | <img src="demos/barbershop/screenshots/booking-sheet.png" width="200" alt="Fade House booking sheet"> |
 
 The *same* stock shells, re-themed — coffee with a terracotta brand, todo with indigo —
 no shell code changed, just a `Theme` value:
