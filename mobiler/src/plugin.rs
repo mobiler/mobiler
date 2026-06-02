@@ -552,24 +552,30 @@ mod test {
     }
 
     #[test]
-    fn add_bundled_speech_android_only_registers_and_no_ios() {
+    fn add_bundled_speech_registers_both_platforms_and_plist() {
         let root = skeleton();
         add_at(&root, "speech").unwrap();
         assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/SpeechActivity.kt").contains("class SpeechActivity"));
         assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"speech\" to SpeechPlugin(application),"));
         assert!(read(&root, "Android/app/src/main/AndroidManifest.xml").contains("android:name=\".SpeechActivity\""));
-        // Android-only this release: no iOS registration.
-        assert!(!read(&root, "iOS/Sources/Core.swift").contains("SpeechPlugin"));
+        // iOS now shipped: registration + usage-description plist keys.
+        assert!(read(&root, "iOS/Sources/SpeechPlugin.swift").contains("SFSpeechRecognizer"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"speech\": return await SpeechPlugin.handle"));
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("NSSpeechRecognitionUsageDescription"));
+        assert!(yml.contains("NSMicrophoneUsageDescription"));
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn add_bundled_sqlite_android_only() {
+    fn add_bundled_sqlite_registers_both_platforms() {
         let root = skeleton();
         add_at(&root, "sqlite").unwrap();
         assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/SqlitePlugin.kt").contains("package dev.mobiler.demo"));
         assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"sqlite\" to SqlitePlugin(application),"));
-        assert!(!read(&root, "iOS/Sources/Core.swift").contains("SqlitePlugin"));
+        // iOS now shipped.
+        assert!(read(&root, "iOS/Sources/SqlitePlugin.swift").contains("import SQLite3"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"sqlite\": return await SqlitePlugin.handle"));
         let _ = fs::remove_dir_all(&root);
     }
 

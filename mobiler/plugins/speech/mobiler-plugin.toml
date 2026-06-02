@@ -1,5 +1,5 @@
 name = "speech"
-summary = "Speech-to-text dictation → recognized text (free; Android now, iOS in the fast-follow)"
+summary = "Speech-to-text dictation → recognized text (free)"
 
 [android]
 # Uses the system RecognizerIntent dialog (no RECORD_AUDIO permission — the recognizer UI
@@ -8,5 +8,11 @@ sources = ["android/SpeechPlugin.kt", "android/SpeechActivity.kt"]
 register = '"speech" to SpeechPlugin(application)'
 manifest_application = ['<activity android:name=".SpeechActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />']
 
-# iOS (SFSpeechRecognizer live-audio recognition) lands in the fast-follow release; until then
-# `cx.plugin("speech",…)` degrades gracefully on iOS (no handler → "not available").
+[ios]
+# SFSpeechRecognizer live-audio recognition (op "listen"). Requests speech + mic permission.
+sources = ["ios/SpeechPlugin.swift"]
+register = 'case "speech": return await SpeechPlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSSpeechRecognitionUsageDescription = "Transcribe your speech to text."
+NSMicrophoneUsageDescription = "Record audio for speech recognition."

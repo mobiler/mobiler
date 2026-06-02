@@ -1,9 +1,11 @@
 name = "sqlite"
-summary = "On-device SQLite — exec / query → JSON rows (free; Android now, iOS in the fast-follow)"
+summary = "On-device SQLite — exec / query → JSON rows (free)"
 
 [android]
 sources = ["android/SqlitePlugin.kt"]
 register = '"sqlite" to SqlitePlugin(application)'
 
-# iOS (libsqlite3 via the SQLite3 module) lands in the fast-follow; until then `cx.plugin("sqlite",…)`
-# degrades gracefully on iOS (no handler → "not available").
+[ios]
+# libsqlite3 via the system SQLite3 module (no extra link). Matches the Android exec/query contract.
+sources = ["ios/SqlitePlugin.swift"]
+register = 'case "sqlite": return await SqlitePlugin.handle(op: op, input: input)'
