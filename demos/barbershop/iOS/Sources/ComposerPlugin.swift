@@ -13,22 +13,28 @@ enum ComposerPlugin {
         switch op {
         case "email": return await email(obj)
         case "sms": return await sms(obj)
-        case "call": return call(obj)
+        case "call": return await call(obj)
         default: return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
     }
 
-    private static func call(_ obj: [String: Any]) -> PluginResponse {
+    private static func call(_ obj: [String: Any]) async -> PluginResponse {
         let number = ((obj["number"] as? String) ?? "").filter { !$0.isWhitespace }
-        guard let url = URL(string: "tel:\(number)"), UIApplication.shared.canOpenURL(url) else {
-            return PluginResponse(ok: false, output: "cannot place call")
+        guard let url = URL(string: "tel:\(number)") else {
+            return PluginResponse(ok: false, output: "invalid number")
         }
-        UIApplication.shared.open(url)
-        return PluginResponse(ok: true, output: "opened")
+        // Don't gate on canOpenURL: since iOS 9 it returns false for any scheme not declared
+        // in LSApplicationQueriesSchemes, false-negativing even when an app can handle it.
+        // `open(_:)` needs no whitelist and reports the real result.
+        let opened = await UIApplication.shared.open(url)
+        return PluginResponse(ok: opened, output: opened ? "opened" : "cannot place call")
     }
 
     private static func email(_ obj: [String: Any]) async -> PluginResponse {
-        guard MFMailComposeViewController.canSendMail() else { return openURLFallback("mailto:", obj) }
+        // canSendMail() only reflects Apple Mail with a configured account — it ignores
+        // third-party mail apps (Gmail, Outlook, …). So when it's false we still try the
+        // mailto: URL, which the system routes to the user's default mail app.
+        guard MFMailComposeViewController.canSendMail() else { return await openURLFallback("mailto:", obj) }
         guard let presenter = frontmostViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
@@ -45,7 +51,7 @@ enum ComposerPlugin {
     }
 
     private static func sms(_ obj: [String: Any]) async -> PluginResponse {
-        guard MFMessageComposeViewController.canSendText() else { return openURLFallback("sms:", obj) }
+        guard MFMessageComposeViewController.canSendText() else { return await openURLFallback("sms:", obj) }
         guard let presenter = frontmostViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
@@ -60,19 +66,20 @@ enum ComposerPlugin {
         }
     }
 
-    // No composer available (e.g. simulator / no mail account) → open the scheme URL.
-    private static func openURLFallback(_ scheme: String, _ obj: [String: Any]) -> PluginResponse {
+    // No Apple Mail/Messages composer → open the scheme URL, which the system routes to the
+    // user's default mail/SMS app (e.g. Gmail). No canOpenURL gate (see `call` above for why).
+    private static func openURLFallback(_ scheme: String, _ obj: [String: Any]) async -> PluginResponse {
         let to = (obj["to"] as? String) ?? ""
         var comps = URLComponents(string: "\(scheme)\(to)")
         var q: [URLQueryItem] = []
         if let s = obj["subject"] as? String, !s.isEmpty { q.append(URLQueryItem(name: "subject", value: s)) }
         if let b = obj["body"] as? String, !b.isEmpty { q.append(URLQueryItem(name: "body", value: b)) }
         if !q.isEmpty { comps?.queryItems = q }
-        guard let url = comps?.url, UIApplication.shared.canOpenURL(url) else {
-            return PluginResponse(ok: false, output: "no app to handle this")
+        guard let url = comps?.url else {
+            return PluginResponse(ok: false, output: "invalid url")
         }
-        UIApplication.shared.open(url)
-        return PluginResponse(ok: true, output: "opened")
+        let opened = await UIApplication.shared.open(url)
+        return PluginResponse(ok: opened, output: opened ? "opened" : "no app to handle this")
     }
 
     private static func frontmostViewController() -> UIViewController? {

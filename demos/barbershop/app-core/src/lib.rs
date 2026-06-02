@@ -84,6 +84,8 @@ pub enum Msg {
     /// Share the last recorded clip via the system share sheet (`sharefile` plugin).
     ShareClip,
     Shared(String),
+    /// Show a transient toast (feedback for the fire-and-forget capability demos above).
+    Notify(String),
 }
 
 #[derive(Clone)]
@@ -307,13 +309,17 @@ impl MobilerApp for FadeHouse {
                 })
                 .to_string();
                 cx.plugin("composer", "email", input, |r| {
-                    Msg::Played(if r.ok { "Email composer opened".into() } else { "No mail app available".into() })
+                    Msg::Notify(if r.ok {
+                        "Opening your mail app…".into()
+                    } else {
+                        "No mail app set up to handle email on this device".into()
+                    })
                 });
             }
             Msg::CallShop => {
                 let input = serde_json::json!({ "number": "+15551234567" }).to_string();
                 cx.plugin("composer", "call", input, |r| {
-                    Msg::Played(if r.ok { "Dialer opened".into() } else { "Can't place call".into() })
+                    Msg::Notify(if r.ok { "Opening the dialer…".into() } else { "Can't place a call on this device".into() })
                 });
             }
             Msg::SpeakBooking => {
@@ -321,9 +327,19 @@ impl MobilerApp for FadeHouse {
                     (Some(d), Some(t)) => format!("Your next visit is on {d} at {t}."),
                     _ => "You have no upcoming bookings. Tap the calendar button to book a cut.".to_string(),
                 };
-                cx.plugin("tts", "speak", text, |_| Msg::Played("Spoke your booking".into()));
+                cx.plugin("tts", "speak", text, |r| {
+                    Msg::Notify(if r.ok { "Speaking your booking aloud 🔊".into() } else { "Couldn't speak right now".into() })
+                });
             }
-            Msg::RequestReview => cx.plugin("review", "request", "", |_| Msg::Played("Thanks for rating us!".into())),
+            // The StoreKit / Play review prompt is system rate-limited and is suppressed in
+            // TestFlight / dev builds — it only appears in store-distributed builds.
+            Msg::RequestReview => cx.plugin("review", "request", "", |r| {
+                Msg::Notify(if r.ok {
+                    "Review requested (the prompt only shows in App Store builds)".into()
+                } else {
+                    "Review unavailable".into()
+                })
+            }),
             Msg::RecordVideo => {
                 model.device = "Opening camera…".into();
                 cx.plugin("video", "record", "", |r| {
@@ -349,6 +365,7 @@ impl MobilerApp for FadeHouse {
                 "shared" => "Shared ✓".to_string(),
                 _ => "Share cancelled".to_string(),
             }),
+            Msg::Notify(s) => cx.toast(s),
         }
     }
 
