@@ -293,6 +293,9 @@ class Core(application: Application) : AndroidViewModel(application) {
         "review" to ReviewPlugin(application),
         "sharefile" to SharefilePlugin(application),
         "video" to VideoPlugin(application),
+        "sqlite" to SqlitePlugin(application),
+        "speech" to SpeechPlugin(application),
+        "bluetooth" to BluetoothPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

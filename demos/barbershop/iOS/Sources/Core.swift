@@ -90,6 +90,9 @@ enum Plugins {
         case "review": return await ReviewPlugin.handle(op: op, input: input)
         case "sharefile": return await SharefilePlugin.handle(op: op, input: input)
         case "video": return await VideoPlugin.handle(op: op, input: input)
+        case "sqlite": return await SqlitePlugin.handle(op: op, input: input)
+        case "speech": return await SpeechPlugin.handle(op: op, input: input)
+        case "bluetooth": return await BluetoothPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
