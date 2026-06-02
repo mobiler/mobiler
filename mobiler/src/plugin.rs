@@ -564,6 +564,16 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_sqlite_android_only() {
+        let root = skeleton();
+        add_at(&root, "sqlite").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/SqlitePlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"sqlite\" to SqlitePlugin(application),"));
+        assert!(!read(&root, "iOS/Sources/Core.swift").contains("SqlitePlugin"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

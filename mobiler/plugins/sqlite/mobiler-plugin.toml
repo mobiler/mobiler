@@ -1,0 +1,9 @@
+name = "sqlite"
+summary = "On-device SQLite — exec / query → JSON rows (free; Android now, iOS in the fast-follow)"
+
+[android]
+sources = ["android/SqlitePlugin.kt"]
+register = '"sqlite" to SqlitePlugin(application)'
+
+# iOS (libsqlite3 via the SQLite3 module) lands in the fast-follow; until then `cx.plugin("sqlite",…)`
+# degrades gracefully on iOS (no handler → "not available").
