@@ -510,6 +510,16 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_tts_copies_and_registers() {
+        let root = skeleton();
+        add_at(&root, "tts").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/TtsPlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"tts\" to TtsPlugin(application),"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"tts\": return await TtsPlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

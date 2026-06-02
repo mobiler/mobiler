@@ -1,0 +1,10 @@
+name = "tts"
+summary = "Text-to-speech — speak a string aloud (free, no permission)"
+
+[android]
+sources = ["android/TtsPlugin.kt"]
+register = '"tts" to TtsPlugin(application)'
+
+[ios]
+sources = ["ios/TtsPlugin.swift"]
+register = 'case "tts": return await TtsPlugin.handle(op: op, input: input)'
