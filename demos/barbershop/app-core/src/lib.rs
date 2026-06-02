@@ -46,6 +46,28 @@ pub enum Msg {
     TimePicked(String),
     /// The result of the final confirm dialog (`true` = confirmed).
     BookingDone(bool),
+
+    // --- Native capability demos (free bundled plugins via `mobiler plugin add`) ---
+    /// Pick a client for the booking from the system contact picker (`contacts` plugin).
+    PickClient,
+    GotClient(String),
+    /// Add the booking to the device calendar via the system editor (`calendar` plugin).
+    AddToCalendar,
+    CalendarDone(String),
+    /// Find the nearest shop using the device location (`geolocation` plugin).
+    FindNearest,
+    GotLocation(String),
+    /// Check network connectivity (`connectivity` plugin).
+    CheckSignal,
+    GotSignal(String),
+    /// Read the accelerometer (`sensors` plugin).
+    ReadMotion,
+    GotMotion(String),
+    /// Record 3s from the mic then play it back (`audio` plugin).
+    RecordAudio,
+    Recorded(String),
+    PlayAudio,
+    Played(String),
 }
 
 #[derive(Clone)]
@@ -80,6 +102,16 @@ pub struct Model {
     pending_date: Option<String>,
     /// Time chosen during the FAB "book a cut" flow.
     pending_time: Option<String>,
+    /// Client picked from contacts ("name|phone"), shown in the booking sheet.
+    client: String,
+    /// Nearest-shop location ("lat,lng") from geolocation.
+    location: String,
+    /// Network status from the connectivity plugin.
+    signal: String,
+    /// Last result line for the Profile "Device & capabilities" panel (sensors/audio).
+    device: String,
+    /// URI of the last recorded clip (enables Play).
+    last_audio: Option<String>,
 }
 
 impl Default for Model {
@@ -107,6 +139,11 @@ impl Default for Model {
             user_rating: 0,
             pending_date: None,
             pending_time: None,
+            client: String::new(),
+            location: String::new(),
+            signal: String::new(),
+            device: String::new(),
+            last_audio: None,
         }
     }
 }
@@ -173,6 +210,74 @@ impl MobilerApp for FadeHouse {
                 model.pending_date = None;
                 model.pending_time = None;
             }
+
+            // --- Native capability demos ---
+            Msg::PickClient => cx.plugin("contacts", "pick", "", |r| {
+                Msg::GotClient(if r.ok { r.output } else { String::new() })
+            }),
+            Msg::GotClient(c) => {
+                if !c.is_empty() {
+                    model.client = c;
+                }
+            }
+            Msg::AddToCalendar => {
+                let title = model.open_service.and_then(|i| model.services.get(i)).map_or_else(
+                    || "Fade House appointment".to_string(),
+                    |s| format!("Fade House — {}", s.name),
+                );
+                let notes = if model.client.is_empty() {
+                    "Booked via Fade House".to_string()
+                } else {
+                    format!("Client: {}", model.client)
+                };
+                let input = serde_json::json!({ "title": title, "notes": notes }).to_string();
+                cx.plugin("calendar", "add", input, |r| Msg::CalendarDone(r.output));
+            }
+            Msg::CalendarDone(s) => cx.toast(match s.as_str() {
+                "saved" | "opened" => "Added to your calendar ✓".to_string(),
+                _ => "Calendar not updated".to_string(),
+            }),
+            Msg::FindNearest => cx.plugin("geolocation", "get", "", |r| {
+                Msg::GotLocation(if r.ok { r.output } else { String::new() })
+            }),
+            Msg::GotLocation(loc) => {
+                if loc.is_empty() {
+                    cx.toast("Location unavailable — grant permission and retry");
+                } else {
+                    model.location = loc;
+                    cx.toast("Found shops near you ✓");
+                }
+            }
+            Msg::CheckSignal => cx.plugin("connectivity", "status", "", |r| Msg::GotSignal(r.output)),
+            Msg::GotSignal(s) => model.signal = s,
+            Msg::ReadMotion => cx.plugin("sensors", "read", "accelerometer", |r| {
+                Msg::GotMotion(if r.ok { r.output } else { String::new() })
+            }),
+            Msg::GotMotion(m) => {
+                model.device = if m.is_empty() { "accelerometer: unavailable".into() } else { format!("accelerometer: {m}") };
+            }
+            Msg::RecordAudio => {
+                model.device = "Recording 3s…".into();
+                cx.plugin("audio", "record", "3", |r| {
+                    Msg::Recorded(if r.ok { r.output } else { String::new() })
+                });
+            }
+            Msg::Recorded(uri) => {
+                if uri.is_empty() {
+                    model.device = "Record failed (grant mic permission, then retry)".into();
+                } else {
+                    model.last_audio = Some(uri);
+                    model.device = "Recorded 3s ✓ — tap Play".into();
+                }
+            }
+            Msg::PlayAudio => {
+                if let Some(uri) = model.last_audio.clone() {
+                    cx.plugin("audio", "play", uri, |r| Msg::Played(r.output));
+                } else {
+                    cx.toast("Record something first");
+                }
+            }
+            Msg::Played(s) => model.device = format!("Playback: {s}"),
         }
     }
 
@@ -203,30 +308,42 @@ impl MobilerApp for FadeHouse {
             Tab::Home => ("Fade House", home(model)),
             Tab::Services => ("Services", services_screen(model)),
             Tab::Bookings => ("Bookings", bookings_screen()),
-            Tab::Profile => ("Profile", profile_screen()),
+            Tab::Profile => ("Profile", profile_screen(model)),
         };
         // Themed Scaffold + icon tab bar + a "book now" floating action button.
         let mut root = with_fab(scaffold(title_text, true, tabs, body), Icon::Calendar, Msg::Book);
         // Tapping a service opens a booking bottom sheet (Sheet).
         if let Some(s) = model.open_service.and_then(|i| model.services.get(i)) {
-            root = with_sheet(root, format!("Book {}", s.name), booking_sheet(s, model.user_rating), Msg::CloseSheet);
+            root = with_sheet(root, format!("Book {}", s.name), booking_sheet(s, model.user_rating, &model.client), Msg::CloseSheet);
         }
         with_theme(root, theme)
     }
 }
 
-fn booking_sheet(s: &Service, user_rating: u32) -> Widget {
+fn booking_sheet(s: &Service, user_rating: u32, client: &str) -> Widget {
+    // Client line: pick from the device contacts (contacts plugin).
+    let client_line = if client.is_empty() {
+        button("Pick client from contacts", ButtonStyle::Outlined, Msg::PickClient)
+    } else {
+        row(vec![emphasis(format!("Client: {client}")), button("Change", ButtonStyle::Text, Msg::PickClient)])
+    };
     column(vec![
         row(vec![
             image(s.image, ImageShape::Rounded, ImageRatio::Square),
             column(vec![title(s.name), text(s.price), rating(tenths(s.rating), 5)]),
         ]),
         spacer(Spacing::Sm),
+        client_line,
+        spacer(Spacing::Sm),
         emphasis("Rate your last visit"),
         // Tappable star rating (Rating with on_rate) — one event per star.
         rating_input(user_rating, 5, vec![Msg::Rate(1), Msg::Rate(2), Msg::Rate(3), Msg::Rate(4), Msg::Rate(5)]),
         spacer(Spacing::Sm),
-        button("Confirm booking", ButtonStyle::Filled, Msg::ConfirmBooking),
+        row(vec![
+            button("Confirm booking", ButtonStyle::Filled, Msg::ConfirmBooking),
+            // Add the appointment to the device calendar (calendar plugin).
+            button("Add to calendar", ButtonStyle::Outlined, Msg::AddToCalendar),
+        ]),
     ])
 }
 
@@ -269,6 +386,19 @@ fn audience_segmented(model: &Model) -> Widget {
 }
 
 fn home(model: &Model) -> Widget {
+    // Native: nearest-shop (geolocation) + connection status (connectivity).
+    let nearby = if model.location.is_empty() && model.signal.is_empty() {
+        caption("Find shops near you, or check your connection.")
+    } else {
+        let mut parts = Vec::new();
+        if !model.location.is_empty() {
+            parts.push(format!("📍 {}", model.location));
+        }
+        if !model.signal.is_empty() {
+            parts.push(format!("signal: {}", model.signal));
+        }
+        caption(parts.join("   ·   "))
+    };
     let hero = stack(
         BoxAlign::BottomStart,
         true,
@@ -296,6 +426,11 @@ fn home(model: &Model) -> Widget {
             CardStyle::Brand,
             Msg::Book,
         ),
+        row(vec![
+            button("Find nearest", ButtonStyle::Outlined, Msg::FindNearest),
+            button("Check signal", ButtonStyle::Text, Msg::CheckSignal),
+        ]),
+        nearby,
         audience_segmented(model),
         category_carousel(model),
         subtitle("Our barbers"),
@@ -361,7 +496,7 @@ fn bookings_screen() -> Widget {
     ])
 }
 
-fn profile_screen() -> Widget {
+fn profile_screen(model: &Model) -> Widget {
     column(vec![
         subtitle("Marcus Reed"),
         caption("marcus@example.com"),
@@ -370,6 +505,22 @@ fn profile_screen() -> Widget {
         row(vec![icon_button(Icon::Bell, Msg::Notifications), text("Notifications")]),
         row(vec![icon_button(Icon::Heart, Msg::SelectTab(Tab::Profile)), text("Favorites")]),
         row(vec![icon_button(Icon::Settings, Msg::SelectTab(Tab::Profile)), text("Settings")]),
+        spacer(Spacing::Md),
+        // Device capability demos (free bundled plugins: sensors + audio).
+        card(
+            column(vec![
+                emphasis("Device & capabilities"),
+                row(vec![
+                    button("Read accelerometer", ButtonStyle::Outlined, Msg::ReadMotion),
+                ]),
+                row(vec![
+                    button("Record 3s", ButtonStyle::Outlined, Msg::RecordAudio),
+                    button("Play", ButtonStyle::Text, Msg::PlayAudio),
+                ]),
+                caption(if model.device.is_empty() { "Tap a capability to try it on device.".to_string() } else { model.device.clone() }),
+            ]),
+            CardStyle::Outlined,
+        ),
     ])
 }
 

@@ -17,6 +17,15 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which publishes the
   this release). `cargo package` has silently dropped an embedded dir before (the `templates/`
   bug), which would publish a CLI that builds but scaffolds/`plugin add`s nothing. Never tag
   until this list looks right.
+- **Device-demo new capabilities (when the release adds free plugins / capabilities / UI widgets):**
+  CI + a throwaway `mobiler build android` only prove things *compile* — they don't prove the
+  capability actually works on a device. Before publishing a release that introduces new
+  user-facing capabilities, **wire them into a demo app** (barbershop or coffee — `plugin add`
+  the plugins + add UI that calls them) and **ship a TestFlight / emulator build** so they can be
+  validated on real hardware (this is also where permission prompts, pickers, and sensors first
+  truly run). Wiring into a demo doubles as CI compile-coverage for the plugin-in-a-real-app.
+  Don't ship a capability that has never run on a device. (Heavy native UI/permission flows
+  especially — location, mic, contacts, calendar.)
 
 ## 2. THE IRREVERSIBLE STEP — tag + push
 - **Confirm with the user before tagging** (AskUserQuestion: tag vX.Y.Z now, yes/wait). A standing "deploy the patch" approval from the user covers this; otherwise ask.

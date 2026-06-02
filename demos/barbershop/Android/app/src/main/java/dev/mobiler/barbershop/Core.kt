@@ -282,6 +282,12 @@ class Core(application: Application) : AndroidViewModel(application) {
         "datetime" to DateTimePlugin(),
         "photo" to PhotoPlugin(),
         "camera" to CameraPlugin(),
+        "connectivity" to ConnectivityPlugin(application),
+        "geolocation" to GeolocationPlugin(application),
+        "contacts" to ContactsPlugin(application),
+        "calendar" to CalendarPlugin(application),
+        "audio" to AudioPlugin(application),
+        "sensors" to SensorsPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

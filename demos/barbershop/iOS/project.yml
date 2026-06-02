@@ -47,6 +47,10 @@ targets:
         # requires this usage string to access the camera; the App Store flags apps that
         # ship it without using the camera, so it's left off by default.
         # NSCameraUsageDescription: "Take photos to use in the app."
+        NSLocationWhenInUseUsageDescription: "Show your location in the app."
+        NSCalendarsUsageDescription: "Add events to your calendar."
+        NSCalendarsWriteOnlyAccessUsageDescription: "Add events to your calendar."
+        NSMicrophoneUsageDescription: "Record audio."
         # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:
