@@ -119,6 +119,19 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import dev.mobiler.todo.ui.theme.TodoTheme
@@ -344,6 +357,33 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         repeat(7 - week.size) { Box(modifier = Modifier.weight(1f)) }
                     }
                 }
+            }
+        }
+        is Widget.SwipeAction -> {
+            val actions = widget.actions
+            val density = LocalDensity.current
+            val revealPx = with(density) { (actions.size * 84).dp.toPx() }
+            var offsetX by remember(widget) { mutableStateOf(0f) }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
+                    actions.forEach { a ->
+                        val (_, fg) = toneColors(a.tone)
+                        Box(
+                            modifier = Modifier.fillMaxHeight().width(84.dp).background(fg)
+                                .clickable { send(Action.Fired(a.onTap)); offsetX = 0f },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(a.label, color = Color.White, style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .offset { IntOffset(offsetX.roundToInt(), 0) }
+                        .background(MaterialTheme.colorScheme.surface)
+                        .draggable(
+                            orientation = Orientation.Horizontal,
+                            state = rememberDraggableState { delta -> offsetX = (offsetX + delta).coerceIn(-revealPx, 0f) },
+                        ),
+                ) { Render(widget.child, send) }
             }
         }
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))

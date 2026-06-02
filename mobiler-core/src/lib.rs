@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
     Action, BoxAlign, ButtonStyle, CardStyle, ChartStyle, Corner, Density, Fab, FontFamily, Icon,
-    ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, Tab, TextStyle,
-    Theme, Tone, Widget,
+    ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
+    TextStyle, Theme, Tone, Widget,
 };
 
 // ============================ capabilities ============================
@@ -446,6 +446,19 @@ pub fn calendar<E: Serialize>(year: u32, month: u8, selected: Option<u8>, on_day
     let n = days_in_month(year, month);
     let on_day = (1..=n).map(|d| tok(on_day(d))).collect();
     Widget::Calendar { year, month, first_weekday: weekday(year, month, 1), selected, on_day }
+}
+
+/// A list row that reveals trailing `actions` (label, tone, event) on horizontal swipe; each is
+/// tappable. On web the actions render inline (no gesture).
+#[must_use]
+pub fn swipe_action<S: Into<String>, E: Serialize>(child: Widget, actions: Vec<(S, Tone, E)>) -> Widget {
+    Widget::SwipeAction {
+        child: Box::new(child),
+        actions: actions
+            .into_iter()
+            .map(|(label, tone, ev)| SwipeButton { label: label.into(), tone, on_tap: tok(ev) })
+            .collect(),
+    }
 }
 #[must_use]
 pub fn spacer(size: Spacing) -> Widget { Widget::Spacer { size } }
@@ -920,6 +933,10 @@ mod tests {
         assert!(matches!(
             calendar(2026, 6, Some(3), |d| Ev::Open(u32::from(d))),
             Widget::Calendar { first_weekday: 1, selected: Some(3), on_day, .. } if on_day.len() == 30
+        ));
+        assert!(matches!(
+            swipe_action(text("row"), vec![("Delete", Tone::Danger, Ev::Tap)]),
+            Widget::SwipeAction { actions, .. } if actions.len() == 1
         ));
         assert!(matches!(spacer(Spacing::Lg), Widget::Spacer { .. }));
         assert!(matches!(image("u", ImageShape::Circle, ImageRatio::Square), Widget::Image { .. }));

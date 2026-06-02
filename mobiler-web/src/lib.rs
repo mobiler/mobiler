@@ -463,6 +463,22 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 </div>
             }.into_any()
         }
+        Widget::SwipeAction { child, actions } => {
+            // Web has no swipe gesture — render the actions inline as a trailing button row.
+            let acts: Vec<_> = actions.iter().map(|a| {
+                let token = a.on_tap.clone();
+                let send = send.clone();
+                let cls = format!("swipe-act {}", tone_class(a.tone));
+                let label = a.label.clone();
+                view! { <button class=cls on:click=move |_| send(Action::Fired { token: token.clone() })>{label}</button> }
+            }).collect();
+            view! {
+                <div class="swipe-row">
+                    <div class="swipe-content">{render(child, send)}</div>
+                    <div class="swipe-actions">{acts}</div>
+                </div>
+            }.into_any()
+        }
         Widget::Spacer { size } => {
             view! { <div class=format!("spacer {}", spacer_class(*size))></div> }.into_any()
         }
