@@ -9,6 +9,10 @@ tree, no per-platform UI code.
 |:---:|:---:|:---:|:---:|
 | <img src="screenshots/home.png" width="200" alt="Fade House home on web"> | <img src="screenshots/ios-home.png" width="200" alt="Fade House home on iOS"> | <img src="screenshots/booking-sheet.png" width="200" alt="Fade House booking sheet"> | <img src="screenshots/profile.png" width="200" alt="Fade House profile — Progress bar, capability plugins, Skeleton placeholders"> |
 
+| Bookings — Chart · Calendar · SwipeAction · pull-to-refresh |
+|:---:|
+| <img src="screenshots/bookings.png" width="240" alt="Fade House bookings — bar chart, inline calendar, swipe-to-cancel rows, pull-to-refresh"> |
+
 What it exercises:
 
 - **Icon bottom-tab bar** — Home / Services / Bookings / Profile, each with an icon (`tab_icon`).
@@ -22,11 +26,16 @@ What it exercises:
 Later vocabulary phases extend it: a search bar + category carousel, segmented filters, star
 ratings, avatars, a booking bottom sheet, and a native date/time picker.
 
+The **Bookings** tab showcases the heavier widgets: a bar **`Chart`** ("this week"), an inline
+month **`Calendar`** (tap a day), **`SwipeAction`** rows (swipe a booking to reveal *Cancel*), and
+**pull-to-refresh** on the tab (`Scaffold.on_refresh`/`refreshing`).
+
 The **Profile** tab showcases the newer widgets + free bundled plugins (native only): a
-determinate **`Progress`** bar ("profile completeness"), **`Skeleton`** shimmer placeholders, and
+determinate **`Progress`** bar ("profile completeness"), **`Skeleton`** shimmer placeholders,
 "Get in touch" capability demos — email/call (`composer`), speak a booking (`tts`), record →
-share a clip (`video` → `sharefile`), and an App Store review prompt (`review`), alongside the
-earlier `sensors`/`audio`/`contacts`/`calendar`/`geolocation`/`connectivity` demos.
+share a clip (`video` → `sharefile`), an App Store review prompt (`review`) — and "Notes & devices":
+a note saved/loaded via on-device **`sqlite`**, dictated via **`speech`**, plus a **`bluetooth`**
+BLE scan, alongside the earlier `sensors`/`audio`/`contacts`/`calendar`/`geolocation`/`connectivity` demos.
 
 ## Run (web)
 
