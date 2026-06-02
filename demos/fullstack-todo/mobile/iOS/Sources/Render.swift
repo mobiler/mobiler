@@ -81,6 +81,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
         return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
 
+    case .swipeAction(let child, let actions):
+        return AnyView(SwipeActionView(content: child, actions: actions, send: send))
+
     case .spacer(let size):
         return AnyView(Color.clear.frame(height: spacing(size)))
 
@@ -356,6 +359,39 @@ private struct ChartView: View {
                 }
             }
         }.padding(.vertical, 4)
+    }
+}
+
+// A list row that reveals trailing action buttons on horizontal swipe; tap an action to fire it.
+private struct SwipeActionView: View {
+    let content: SharedTypes.Widget
+    let actions: [SwipeButton]
+    let send: (Action) -> Void
+    @State private var offset: CGFloat = 0
+    private var revealWidth: CGFloat { CGFloat(actions.count) * 84 }
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
+                    Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
+                        Text(a.label)
+                            .foregroundColor(.white)
+                            .frame(width: 84)
+                            .frame(maxHeight: .infinity)
+                            .background(toneColors(a.tone).1)
+                    }.buttonStyle(.plain)
+                }
+            }
+            render(content, send)
+                .background(Color(.systemBackground))
+                .offset(x: offset)
+                .gesture(
+                    DragGesture()
+                        .onChanged { v in offset = min(0, max(-revealWidth, v.translation.width)) }
+                        .onEnded { _ in withAnimation { offset = offset < -revealWidth / 2 ? -revealWidth : 0 } }
+                )
+        }
+        .clipped()
     }
 }
 

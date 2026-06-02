@@ -212,6 +212,15 @@ pub struct Sheet {
     pub on_dismiss: ActionToken,
 }
 
+/// One revealed action in a `SwipeAction` row (swipe to reveal, tap to fire).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug)]
+#[repr(C)]
+pub struct SwipeButton {
+    pub label: String,
+    pub tone: Tone,
+    pub on_tap: ActionToken,
+}
+
 // ------------------------------- widgets -------------------------------
 
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
@@ -241,6 +250,9 @@ pub enum Widget {
     /// shells render leading blanks without date math; `on_day[d-1]` fires when day `d` is tapped
     /// (length = days in the month). `selected` highlights a day.
     Calendar { year: u32, month: u8, first_weekday: u8, selected: Option<u8>, on_day: Vec<ActionToken> },
+    /// A list row that reveals trailing `actions` on horizontal swipe (each tappable). On web the
+    /// actions render inline as a trailing button row (no gesture).
+    SwipeAction { child: Box<Widget>, actions: Vec<SwipeButton> },
     Spacer { size: Spacing },
     // Layout
     Row { children: Vec<Widget> },
@@ -325,6 +337,7 @@ mod tests {
         round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
         round_trips(&Widget::Chart { values: vec![1.0, 2.5, 3.0], labels: vec!["a".to_string()], style: ChartStyle::Bar });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
+        round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),
