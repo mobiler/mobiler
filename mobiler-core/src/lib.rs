@@ -570,7 +570,7 @@ pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bo
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, depth: 1 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1 }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -579,7 +579,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, depth: 2 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2 }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -608,6 +608,8 @@ where
         theme: None,
         fab: None,
         sheet: None,
+        on_refresh: None,
+        refreshing: false,
         route: nav.route_key(),
         depth: nav.depth(),
     }
@@ -618,7 +620,7 @@ where
 /// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
 pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -627,6 +629,8 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
             theme: Some(theme),
             fab,
             sheet,
+            on_refresh,
+            refreshing,
             route,
             depth,
         },
@@ -638,7 +642,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
 /// No-op on any other widget: `with_fab(scaffold(...), Icon::Add, Msg::New)`.
 pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -647,6 +651,8 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
             theme,
             fab: Some(Fab { icon, on_press: tok(on_press) }),
             sheet,
+            on_refresh,
+            refreshing,
             route,
             depth,
         },
@@ -658,7 +664,7 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
 /// the model: `with_sheet(scaffold(...), title, sheet_body, Msg::CloseSheet)`.
 pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child: Widget, on_dismiss: E) -> Widget {
     match widget {
-        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, .. } => Widget::Scaffold {
             title: t,
             body,
             tabs,
@@ -667,6 +673,31 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
             theme,
             fab,
             sheet: Some(Sheet { title: title.into(), child: Box::new(child), on_dismiss: tok(on_dismiss) }),
+            on_refresh,
+            refreshing,
+            route,
+            depth,
+        },
+        other => other,
+    }
+}
+
+/// Enable pull-to-refresh on a scaffold's body: the body becomes pull-refreshable and fires
+/// `on_refresh` on pull. `refreshing` is app-owned — set it true when the pull fires and clear it
+/// when the async reload completes (the shell shows a spinner while true). No-op on other widgets.
+pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: E) -> Widget {
+    match widget {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, .. } => Widget::Scaffold {
+            title,
+            body,
+            tabs,
+            back,
+            dark_mode,
+            theme,
+            fab,
+            sheet,
+            on_refresh: Some(tok(on_refresh)),
+            refreshing,
             route,
             depth,
         },

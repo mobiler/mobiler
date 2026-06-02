@@ -84,6 +84,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -692,12 +694,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             label = "nav",
                         ) { screen ->
                             // Cap + center the content column so it doesn't stretch on a tablet.
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(padding)
-                                    .verticalScroll(rememberScrollState()),
-                            ) {
+                            val column: @Composable BoxScope.() -> Unit = {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -706,8 +703,28 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         .padding(horizontal = 16.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
+                                    if (screen.refreshing) {
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
+                                    }
                                     Render(screen.body, send)
                                 }
+                            }
+                            val onRefresh = screen.onRefresh
+                            if (onRefresh != null) {
+                                // Pull-to-refresh — the body is pull-refreshable; the spinner is
+                                // driven by the app-owned `refreshing` flag.
+                                PullToRefreshBox(
+                                    isRefreshing = screen.refreshing,
+                                    onRefresh = { send(Action.Fired(onRefresh)) },
+                                    modifier = Modifier.fillMaxSize().padding(padding),
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), content = column)
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
+                                    content = column,
+                                )
                             }
                         }
                     }
