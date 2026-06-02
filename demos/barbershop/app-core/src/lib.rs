@@ -109,6 +109,8 @@ pub enum Msg {
     /// Scan for nearby Bluetooth LE devices (`bluetooth` plugin).
     ScanBt,
     BtScanned(String),
+    /// Deep-link to the app's iOS Settings page (to re-enable a denied permission).
+    OpenAppSettings,
 }
 
 #[derive(Clone)]
@@ -167,6 +169,8 @@ pub struct Model {
     saved_note: String,
     /// Bluetooth scan status / result line.
     bt_status: String,
+    /// Bluetooth permission was denied — offer an "Open Settings" affordance.
+    bt_denied: bool,
 }
 
 impl Default for Model {
@@ -210,6 +214,7 @@ impl Default for Model {
             note: String::new(),
             saved_note: String::new(),
             bt_status: String::new(),
+            bt_denied: false,
         }
     }
 }
@@ -477,21 +482,27 @@ impl MobilerApp for FadeHouse {
             }
             Msg::ScanBt => {
                 model.bt_status = "Scanning…".into();
-                cx.plugin("bluetooth", "scan", "", |r| {
-                    Msg::BtScanned(if r.ok { r.output } else { String::new() })
-                });
+                model.bt_denied = false;
+                // Pass the plugin's output through on failure too, so the real reason shows.
+                cx.plugin("bluetooth", "scan", "", |r| Msg::BtScanned(r.output));
             }
-            Msg::BtScanned(json) => {
-                let n = serde_json::from_str::<serde_json::Value>(&json)
-                    .ok()
-                    .and_then(|v| v.as_array().map(|a| a.len()))
-                    .unwrap_or(0);
-                model.bt_status = if json.is_empty() {
-                    "Bluetooth unavailable (grant permission / use a real device)".into()
+            Msg::BtScanned(out) => {
+                if let Ok(serde_json::Value::Array(devs)) = serde_json::from_str::<serde_json::Value>(&out) {
+                    model.bt_denied = false;
+                    model.bt_status = format!("Found {} nearby device(s)", devs.len());
                 } else {
-                    format!("Found {n} nearby device(s)")
-                };
+                    // A failure message from the plugin (denied / off / unavailable).
+                    model.bt_denied = out.contains("denied");
+                    model.bt_status = match out.as_str() {
+                        "denied" => "Bluetooth denied — re-enable it in Settings, then scan again.".into(),
+                        "bluetooth off" => "Bluetooth is off — turn it on, then scan again.".into(),
+                        "" => "Bluetooth unavailable (use a real device).".into(),
+                        other => other.to_string(),
+                    };
+                }
             }
+            // iOS won't re-show the permission prompt once denied — deep-link to the app's Settings.
+            Msg::OpenAppSettings => cx.notify("browser", "open", "app-settings:"),
         }
     }
 
@@ -765,6 +776,19 @@ fn completeness(model: &Model) -> f32 {
     v.min(1.0)
 }
 
+/// Bluetooth scan controls — adds an "Open Settings" affordance when the permission was denied
+/// (iOS won't re-prompt once denied; the user must re-enable it in Settings).
+fn bt_section(model: &Model) -> Widget {
+    let mut items = vec![
+        button("Scan Bluetooth devices", ButtonStyle::Outlined, Msg::ScanBt),
+        caption(if model.bt_status.is_empty() { "Find nearby BLE devices (real device only).".to_string() } else { model.bt_status.clone() }),
+    ];
+    if model.bt_denied {
+        items.push(button("Open Settings", ButtonStyle::Text, Msg::OpenAppSettings));
+    }
+    column(items)
+}
+
 fn profile_screen(model: &Model) -> Widget {
     let pct = (completeness(model) * 100.0).round() as u32;
     column(vec![
@@ -825,8 +849,7 @@ fn profile_screen(model: &Model) -> Widget {
                 ]),
                 caption(if model.saved_note.is_empty() { "Saved note appears here.".to_string() } else { format!("Saved: {}", model.saved_note) }),
                 divider(),
-                button("Scan Bluetooth devices", ButtonStyle::Outlined, Msg::ScanBt),
-                caption(if model.bt_status.is_empty() { "Find nearby BLE devices (real device only).".to_string() } else { model.bt_status.clone() }),
+                bt_section(model),
             ]),
             CardStyle::Outlined,
         ),

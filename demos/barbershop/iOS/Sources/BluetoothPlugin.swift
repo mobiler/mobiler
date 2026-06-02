@@ -42,19 +42,23 @@ final class BleManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     private func poweredOn() -> Bool { central.state == .poweredOn }
 
     // The first call happens before CoreBluetooth finishes powering on / the user answers the
-    // permission prompt — poll briefly so the first tap works instead of needing a second.
-    private func waitForPoweredOn(timeoutMs: Int) async -> Bool {
-        var waited = 0
-        while central.state != .poweredOn && waited < timeoutMs {
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            waited += 200
+    // permission prompt — poll briefly so the first tap works instead of needing a second. But
+    // only wait on a transient state (.unknown/.resetting); a terminal state (denied/off/unsupported)
+    // returns immediately so the user gets an actionable message, not a 6s hang.
+    private func ensurePoweredOn() async -> Bool {
+        if central.state == .unknown || central.state == .resetting {
+            var waited = 0
+            while central.state != .poweredOn && waited < 6000 {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                waited += 200
+            }
         }
-        return central.state == .poweredOn
+        return poweredOn()
     }
 
     private func stateMessage() -> String {
         switch central.state {
-        case .unauthorized: return "bluetooth permission denied"
+        case .unauthorized: return "denied"
         case .poweredOff: return "bluetooth off"
         case .unsupported: return "bluetooth unsupported"
         default: return "bluetooth unavailable"
@@ -63,11 +67,7 @@ final class BleManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 
     // MARK: scan
     func scan() async -> PluginResponse {
-        if !poweredOn() {
-            guard await waitForPoweredOn(timeoutMs: 6000) else {
-                return PluginResponse(ok: false, output: stateMessage())
-            }
-        }
+        guard await ensurePoweredOn() else { return PluginResponse(ok: false, output: stateMessage()) }
         discovered.removeAll(); rssis.removeAll()
         return await withCheckedContinuation { cont in
             scanCont = cont
@@ -95,9 +95,7 @@ final class BleManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 
     // MARK: connect
     func connect(_ id: String) async -> PluginResponse {
-        if !poweredOn() {
-            guard await waitForPoweredOn(timeoutMs: 6000) else { return PluginResponse(ok: false, output: stateMessage()) }
-        }
+        guard await ensurePoweredOn() else { return PluginResponse(ok: false, output: stateMessage()) }
         guard let p = discovered[id] else { return PluginResponse(ok: false, output: "unknown device — scan first") }
         return await withCheckedContinuation { cont in
             connectCont = cont
