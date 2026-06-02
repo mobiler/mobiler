@@ -6,9 +6,10 @@
 use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
-    badge, button, caption, card, card_button, chip, column, divider, emphasis, grid, icon_button,
-    image, progress, rating, rating_input, row, scaffold, scroller, search_field, segment, segmented,
-    skeleton, spacer, stack, subtitle, tab_icon, text, title, with_fab, with_sheet, with_theme,
+    badge, bar_chart, button, calendar, caption, card, card_button, chip, column, divider, emphasis,
+    grid, icon_button, image, progress, rating, rating_input, row, scaffold, scroller, search_field,
+    segment, segmented, skeleton, spacer, stack, subtitle, swipe_action, tab_icon, text, text_field,
+    title, with_fab, with_refresh, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -86,6 +87,28 @@ pub enum Msg {
     Shared(String),
     /// Show a transient toast (feedback for the fire-and-forget capability demos above).
     Notify(String),
+
+    // --- Bookings tab: new widgets (Chart, Calendar, SwipeAction, pull-to-refresh) ---
+    /// Pull-to-refresh on the Bookings tab (`Scaffold.on_refresh`) — reload availability.
+    RefreshBookings,
+    BookingsRefreshed,
+    /// Tap a day in the inline `Calendar`.
+    PickDay(u8),
+    /// Swipe a booking row and tap "Cancel" (`SwipeAction`).
+    CancelBooking(u32),
+
+    // --- Profile "Notes & devices": sqlite / speech / bluetooth ---
+    /// Persist the note to on-device SQLite (`sqlite` plugin).
+    SaveNote,
+    /// Load the saved note back from SQLite.
+    LoadNote,
+    NoteLoaded(String),
+    /// Dictate the note via speech-to-text (`speech` plugin).
+    DictateNote,
+    Dictated(String),
+    /// Scan for nearby Bluetooth LE devices (`bluetooth` plugin).
+    ScanBt,
+    BtScanned(String),
 }
 
 #[derive(Clone)]
@@ -132,6 +155,18 @@ pub struct Model {
     last_audio: Option<String>,
     /// URI of the last recorded video (enables Share).
     last_video: Option<String>,
+    /// Bookings-tab pull-to-refresh in flight (`Scaffold.refreshing`).
+    refreshing: bool,
+    /// Sample upcoming bookings (swipe a row to cancel).
+    bookings: Vec<String>,
+    /// Day tapped in the inline calendar.
+    picked_day: Option<u8>,
+    /// Note text (edited in Profile; saved/loaded via SQLite, dictated via speech).
+    note: String,
+    /// Last note loaded back from SQLite.
+    saved_note: String,
+    /// Bluetooth scan status / result line.
+    bt_status: String,
 }
 
 impl Default for Model {
@@ -165,6 +200,16 @@ impl Default for Model {
             device: String::new(),
             last_audio: None,
             last_video: None,
+            refreshing: false,
+            bookings: vec![
+                "Skin Fade · Fri 10:00".to_string(),
+                "Beard Trim · Sat 14:30".to_string(),
+                "Hot Towel Shave · Mon 09:15".to_string(),
+            ],
+            picked_day: None,
+            note: String::new(),
+            saved_note: String::new(),
+            bt_status: String::new(),
         }
     }
 }
@@ -366,13 +411,93 @@ impl MobilerApp for FadeHouse {
                 _ => "Share cancelled".to_string(),
             }),
             Msg::Notify(s) => cx.toast(s),
+
+            // --- Bookings tab: Chart / Calendar / SwipeAction / pull-to-refresh ---
+            Msg::RefreshBookings => {
+                model.refreshing = true;
+                // No real backend — simulate a reload that clears the flag (a real app would
+                // resolve `BookingsRefreshed` from an http/plugin response).
+                cx.plugin("connectivity", "status", "", |_| Msg::BookingsRefreshed);
+            }
+            Msg::BookingsRefreshed => {
+                model.refreshing = false;
+                cx.toast("Bookings up to date ✓");
+            }
+            Msg::PickDay(d) => {
+                model.picked_day = Some(d);
+                cx.toast(format!("Selected day {d}"));
+            }
+            Msg::CancelBooking(i) => {
+                let i = i as usize;
+                if i < model.bookings.len() {
+                    let b = model.bookings.remove(i);
+                    cx.toast(format!("Cancelled {b}"));
+                }
+            }
+
+            // --- Profile "Notes & devices": sqlite / speech / bluetooth ---
+            Msg::SaveNote => {
+                let input = serde_json::json!({
+                    "sql": "INSERT OR REPLACE INTO note(id, body) VALUES (1, ?)",
+                    "args": [model.note],
+                })
+                .to_string();
+                cx.plugin("sqlite", "exec", input, |r| {
+                    Msg::Notify(if r.ok { "Note saved to SQLite ✓".into() } else { format!("Save failed: {}", r.output) })
+                });
+            }
+            Msg::LoadNote => cx.plugin("sqlite", "query", "SELECT body FROM note WHERE id = 1", |r| {
+                Msg::NoteLoaded(if r.ok { r.output } else { String::new() })
+            }),
+            Msg::NoteLoaded(json) => {
+                // The sqlite plugin returns rows as a JSON array of {column: value} objects.
+                let body = serde_json::from_str::<serde_json::Value>(&json)
+                    .ok()
+                    .and_then(|v| v.get(0).and_then(|r| r.get("body")).and_then(|b| b.as_str().map(String::from)));
+                model.saved_note = body.unwrap_or_else(|| "(no saved note yet)".to_string());
+            }
+            Msg::DictateNote => cx.plugin("speech", "listen", "", |r| {
+                Msg::Dictated(if r.ok { r.output } else { String::new() })
+            }),
+            Msg::Dictated(text) => {
+                if text.is_empty() {
+                    cx.toast("Didn't catch that");
+                } else {
+                    model.note = text;
+                    cx.toast("Dictated ✓ — tap Save");
+                }
+            }
+            Msg::ScanBt => {
+                model.bt_status = "Scanning…".into();
+                cx.plugin("bluetooth", "scan", "", |r| {
+                    Msg::BtScanned(if r.ok { r.output } else { String::new() })
+                });
+            }
+            Msg::BtScanned(json) => {
+                let n = serde_json::from_str::<serde_json::Value>(&json)
+                    .ok()
+                    .and_then(|v| v.as_array().map(|a| a.len()))
+                    .unwrap_or(0);
+                model.bt_status = if json.is_empty() {
+                    "Bluetooth unavailable (grant permission / use a real device)".into()
+                } else {
+                    format!("Found {n} nearby device(s)")
+                };
+            }
         }
     }
 
+    /// Create the note table once at startup so Save/Load just write/read it.
+    fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
+        cx.notify("sqlite", "exec", "CREATE TABLE IF NOT EXISTS note(id INTEGER PRIMARY KEY, body TEXT)");
+    }
+
     fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
-        if id == "search" {
-            if let InputValue::Text(t) = value {
-                model.search = t;
+        if let InputValue::Text(t) = value {
+            match id {
+                "search" => model.search = t,
+                "note" => model.note = t,
+                _ => {}
             }
         }
     }
@@ -395,11 +520,15 @@ impl MobilerApp for FadeHouse {
         let (title_text, body) = match model.tab {
             Tab::Home => ("Fade House", home(model)),
             Tab::Services => ("Services", services_screen(model)),
-            Tab::Bookings => ("Bookings", bookings_screen()),
+            Tab::Bookings => ("Bookings", bookings_screen(model)),
             Tab::Profile => ("Profile", profile_screen(model)),
         };
         // Themed Scaffold + icon tab bar + a "book now" floating action button.
         let mut root = with_fab(scaffold(title_text, true, tabs, body), Icon::Calendar, Msg::Book);
+        // The Bookings tab is pull-to-refresh (the app owns `refreshing`).
+        if model.tab == Tab::Bookings {
+            root = with_refresh(root, model.refreshing, Msg::RefreshBookings);
+        }
         // Tapping a service opens a booking bottom sheet (Sheet).
         if let Some(s) = model.open_service.and_then(|i| model.services.get(i)) {
             root = with_sheet(root, format!("Book {}", s.name), booking_sheet(s, model.user_rating, &model.client), Msg::CloseSheet);
@@ -570,17 +699,39 @@ fn service_card(index: u32, s: &Service) -> Widget {
     )
 }
 
-fn bookings_screen() -> Widget {
+fn bookings_screen(model: &Model) -> Widget {
+    // Visits-per-day bar Chart (Mon–Sun).
+    let visits = bar_chart(
+        vec![2.0, 3.0, 1.0, 4.0, 3.0, 5.0, 2.0],
+        vec!["M".into(), "T".into(), "W".into(), "T".into(), "F".into(), "S".into(), "S".into()],
+    );
+    // Inline month Calendar — tap a day to pick it (June 2026).
+    let month = calendar(2026, 6, model.picked_day, Msg::PickDay);
+    // Upcoming bookings — swipe a row to reveal "Cancel" (SwipeAction).
+    let rows: Vec<Widget> = if model.bookings.is_empty() {
+        vec![caption("No upcoming bookings — pull to refresh or book a cut.")]
+    } else {
+        model
+            .bookings
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                swipe_action(
+                    card(emphasis(b.clone()), CardStyle::Filled),
+                    vec![("Cancel", Tone::Danger, Msg::CancelBooking(i as u32))],
+                )
+            })
+            .collect()
+    };
     column(vec![
+        caption("Pull down to refresh availability."),
+        subtitle("This week"),
+        card(visits, CardStyle::Outlined),
+        subtitle("Pick a date"),
+        card(month, CardStyle::Outlined),
         subtitle("Upcoming"),
-        card(
-            column(vec![
-                emphasis("No upcoming bookings"),
-                caption("Tap the calendar button to book your next visit."),
-                button("Book now", ButtonStyle::Filled, Msg::Book),
-            ]),
-            CardStyle::Outlined,
-        ),
+        column(rows),
+        button("Book now", ButtonStyle::Filled, Msg::Book),
     ])
 }
 
@@ -648,6 +799,23 @@ fn profile_screen(model: &Model) -> Widget {
             ]),
             CardStyle::Outlined,
         ),
+        // Notes & devices — on-device SQLite (sqlite), dictation (speech), BLE scan (bluetooth).
+        card(
+            column(vec![
+                emphasis("Notes & devices"),
+                text_field("note", "Type or dictate a note…", model.note.as_str()),
+                row(vec![
+                    button("Save", ButtonStyle::Outlined, Msg::SaveNote),
+                    button("Load", ButtonStyle::Text, Msg::LoadNote),
+                    button("Dictate", ButtonStyle::Text, Msg::DictateNote),
+                ]),
+                caption(if model.saved_note.is_empty() { "Saved note appears here.".to_string() } else { format!("Saved: {}", model.saved_note) }),
+                divider(),
+                button("Scan Bluetooth devices", ButtonStyle::Outlined, Msg::ScanBt),
+                caption(if model.bt_status.is_empty() { "Find nearby BLE devices (real device only).".to_string() } else { model.bt_status.clone() }),
+            ]),
+            CardStyle::Outlined,
+        ),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![
@@ -676,6 +844,38 @@ mod test {
         let (_, model) = app();
         assert_eq!(model.tab, Tab::Home);
         assert_eq!(model.services.len(), 6);
+    }
+
+    #[test]
+    fn cancel_booking_removes_the_row() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        let before = model.bookings.len();
+        app.update(Msg::CancelBooking(0), &mut model, &mut cx);
+        assert_eq!(model.bookings.len(), before - 1);
+        // Out-of-range index is a no-op (doesn't panic).
+        app.update(Msg::CancelBooking(99), &mut model, &mut cx);
+        assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn refresh_sets_then_clears_the_flag() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::RefreshBookings, &mut model, &mut cx);
+        assert!(model.refreshing, "pull sets the spinner");
+        app.update(Msg::BookingsRefreshed, &mut model, &mut cx);
+        assert!(!model.refreshing, "the reload response clears it");
+    }
+
+    #[test]
+    fn pick_day_and_dictate_update_the_model() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::PickDay(12), &mut model, &mut cx);
+        assert_eq!(model.picked_day, Some(12));
+        app.update(Msg::Dictated("call me tomorrow".into()), &mut model, &mut cx);
+        assert_eq!(model.note, "call me tomorrow");
     }
 
     #[test]

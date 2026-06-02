@@ -50,6 +50,8 @@ targets:
         NSCalendarsUsageDescription: "Add events to your calendar."
         NSCalendarsWriteOnlyAccessUsageDescription: "Add events to your calendar."
         NSMicrophoneUsageDescription: "Record audio."
+        NSSpeechRecognitionUsageDescription: "Transcribe your speech to text."
+        NSBluetoothAlwaysUsageDescription: "Discover and connect to nearby Bluetooth devices."
         # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:
