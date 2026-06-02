@@ -1,0 +1,21 @@
+name = "bluetooth"
+summary = "Bluetooth LE — scan / connect / read a characteristic (free; needs a real device)"
+
+[android]
+# Best-effort runtime perms (BLUETOOTH_SCAN/CONNECT on API 31+, falls back to ACCESS_FINE_LOCATION
+# on older). No MainActivity edit needed — uses the app context + GATT callbacks. Cannot be tested
+# on an emulator (no BLE radio).
+sources = ["android/BluetoothPlugin.kt"]
+register = '"bluetooth" to BluetoothPlugin(application)'
+permissions = [
+    "android.permission.BLUETOOTH_SCAN",
+    "android.permission.BLUETOOTH_CONNECT",
+    "android.permission.ACCESS_FINE_LOCATION",
+]
+
+[ios]
+sources = ["ios/BluetoothPlugin.swift"]
+register = 'case "bluetooth": return await BluetoothPlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSBluetoothAlwaysUsageDescription = "Discover and connect to nearby Bluetooth devices."

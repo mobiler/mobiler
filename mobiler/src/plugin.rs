@@ -580,6 +580,21 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_bluetooth_adds_perms_registration_and_plist() {
+        let root = skeleton();
+        add_at(&root, "bluetooth").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/BluetoothPlugin.kt").contains("BluetoothGattCallback"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"bluetooth\" to BluetoothPlugin(application),"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.BLUETOOTH_SCAN"));
+        assert!(manifest.contains("android.permission.BLUETOOTH_CONNECT"));
+        assert!(read(&root, "iOS/Sources/BluetoothPlugin.swift").contains("CBCentralManager"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"bluetooth\": return await BluetoothPlugin.handle"));
+        assert!(read(&root, "iOS/project.yml").contains("NSBluetoothAlwaysUsageDescription"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
