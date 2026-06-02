@@ -540,6 +540,18 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_video_registers_activity_and_plist_keys() {
+        let root = skeleton();
+        add_at(&root, "video").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/VideoCaptureActivity.kt").contains("class VideoCaptureActivity"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"video\" to VideoPlugin(application),"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"video\": return await VideoPlugin.handle"));
+        assert!(read(&root, "Android/app/src/main/AndroidManifest.xml").contains("android:name=\".VideoCaptureActivity\""));
+        assert!(read(&root, "iOS/project.yml").contains("NSCameraUsageDescription"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

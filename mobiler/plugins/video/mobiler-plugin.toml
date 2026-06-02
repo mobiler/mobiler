@@ -1,0 +1,17 @@
+name = "video"
+summary = "Record a video with the camera → local URI (free)"
+
+[android]
+# ACTION_VIDEO_CAPTURE needs an ActivityResult, so the plugin ships a transparent helper
+# Activity (plugin add can't edit MainActivity). No CAMERA permission — the camera app handles it.
+sources = ["android/VideoPlugin.kt", "android/VideoCaptureActivity.kt"]
+register = '"video" to VideoPlugin(application)'
+manifest_application = ['<activity android:name=".VideoCaptureActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />']
+
+[ios]
+sources = ["ios/VideoPlugin.swift"]
+register = 'case "video": return await VideoPlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSCameraUsageDescription = "Record video."
+NSMicrophoneUsageDescription = "Record video with audio."
