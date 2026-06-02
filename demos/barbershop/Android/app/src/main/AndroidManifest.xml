@@ -10,6 +10,10 @@
     <!-- Uncomment to enable the haptics capability (cx.haptic):
     <uses-permission android:name="android.permission.VIBRATE" /> -->
 
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- mobiler:permissions (plugin add inserts uses-permission lines above this line) -->
 
     <application
@@ -45,6 +49,7 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <activity android:name=".ContactsPickerActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
     </application>
 

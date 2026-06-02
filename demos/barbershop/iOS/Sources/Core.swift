@@ -79,6 +79,12 @@ enum Plugins {
         case "datetime": return await DateTimePlugin.handle(op: op, input: input)
         case "photo": return await PhotoPlugin.handle(op: op, input: input)
         case "camera": return await CameraPlugin.handle(op: op, input: input)
+        case "connectivity": return await ConnectivityPlugin.handle(op: op, input: input)
+        case "geolocation": return await GeolocationPlugin.handle(op: op, input: input)
+        case "contacts": return await ContactsPlugin.handle(op: op, input: input)
+        case "calendar": return await CalendarPlugin.handle(op: op, input: input)
+        case "audio": return await AudioPlugin.handle(op: op, input: input)
+        case "sensors": return await SensorsPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
