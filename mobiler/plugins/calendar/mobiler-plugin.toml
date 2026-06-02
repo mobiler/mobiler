@@ -1,0 +1,15 @@
+name = "calendar"
+summary = "Add an event via the system calendar editor (free)"
+
+[android]
+# ACTION_INSERT opens the calendar app's event editor (no permission — the user saves there).
+sources = ["android/CalendarPlugin.kt"]
+register = '"calendar" to CalendarPlugin(application)'
+
+[ios]
+sources = ["ios/CalendarPlugin.swift"]
+register = 'case "calendar": return await CalendarPlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSCalendarsUsageDescription = "Add events to your calendar."
+NSCalendarsWriteOnlyAccessUsageDescription = "Add events to your calendar."
