@@ -1,0 +1,14 @@
+name = "audio"
+summary = "Record from the mic (→ file URI) and play audio (free)"
+
+[android]
+sources = ["android/AudioPlugin.kt"]
+register = '"audio" to AudioPlugin(application)'
+permissions = ["android.permission.RECORD_AUDIO"]
+
+[ios]
+sources = ["ios/AudioPlugin.swift"]
+register = 'case "audio": return await AudioPlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSMicrophoneUsageDescription = "Record audio."

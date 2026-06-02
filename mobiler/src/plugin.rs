@@ -484,6 +484,22 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_audio_adds_record_permission_and_mic_plist_key() {
+        let root = skeleton();
+        add_at(&root, "audio").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/AudioPlugin.kt").contains("package dev.mobiler.demo"));
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"audio\" to AudioPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"audio\": return await AudioPlugin.handle"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.RECORD_AUDIO"), "RECORD_AUDIO injected");
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("NSMicrophoneUsageDescription"), "mic usage key injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
