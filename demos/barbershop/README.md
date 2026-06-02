@@ -5,9 +5,9 @@ vocabulary. One Rust core (`app-core/` + the native `shared/` crate) renders on 
 `mobiler-web`) **and natively on iOS + Android** through the generic shells — the same `Widget`
 tree, no per-platform UI code.
 
-| Home — web | Home — iOS (native) | Booking sheet — web |
-|:---:|:---:|:---:|
-| <img src="screenshots/home.png" width="220" alt="Fade House home on web"> | <img src="screenshots/ios-home.png" width="220" alt="Fade House home on iOS"> | <img src="screenshots/booking-sheet.png" width="220" alt="Fade House booking sheet"> |
+| Home — web | Home — iOS (native) | Booking sheet — web | Profile — capabilities & widgets |
+|:---:|:---:|:---:|:---:|
+| <img src="screenshots/home.png" width="200" alt="Fade House home on web"> | <img src="screenshots/ios-home.png" width="200" alt="Fade House home on iOS"> | <img src="screenshots/booking-sheet.png" width="200" alt="Fade House booking sheet"> | <img src="screenshots/profile.png" width="200" alt="Fade House profile — Progress bar, capability plugins, Skeleton placeholders"> |
 
 What it exercises:
 
@@ -21,6 +21,12 @@ What it exercises:
 
 Later vocabulary phases extend it: a search bar + category carousel, segmented filters, star
 ratings, avatars, a booking bottom sheet, and a native date/time picker.
+
+The **Profile** tab showcases the newer widgets + free bundled plugins (native only): a
+determinate **`Progress`** bar ("profile completeness"), **`Skeleton`** shimmer placeholders, and
+"Get in touch" capability demos — email/call (`composer`), speak a booking (`tts`), record →
+share a clip (`video` → `sharefile`), and an App Store review prompt (`review`), alongside the
+earlier `sensors`/`audio`/`contacts`/`calendar`/`geolocation`/`connectivity` demos.
 
 ## Run (web)
 
