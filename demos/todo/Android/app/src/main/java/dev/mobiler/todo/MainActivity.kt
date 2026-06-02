@@ -77,6 +77,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -252,6 +253,18 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         }
 
         is Widget.Divider -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        is Widget.Progress -> {
+            val v = widget.value
+            if (v != null) {
+                LinearProgressIndicator(progress = { v }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+            }
+        }
+        is Widget.Skeleton -> Box(
+            modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp)
+                .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+        )
 
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
 

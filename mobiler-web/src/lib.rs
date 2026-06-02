@@ -401,6 +401,14 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             view! { <span class="rating">{stars}</span> }.into_any()
         }
         Widget::Divider => view! { <hr class="divider" /> }.into_any(),
+        Widget::Progress { value } => match value {
+            Some(v) => {
+                let pct = (v.clamp(0.0, 1.0) * 100.0) as u32;
+                view! { <div class="progress"><div class="progress-bar" style=format!("width:{pct}%")></div></div> }.into_any()
+            }
+            None => view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> }.into_any(),
+        },
+        Widget::Skeleton => view! { <div class="skeleton"></div> }.into_any(),
         Widget::Spacer { size } => {
             view! { <div class=format!("spacer {}", spacer_class(*size))></div> }.into_any()
         }
