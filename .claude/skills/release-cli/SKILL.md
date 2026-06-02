@@ -11,6 +11,12 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which publishes the
 - `mobiler/Cargo.toml` `version` is already bumped (minor for features, patch for fixes) **and merged to `main`** via ship-pr, with CI green.
 - If this CLI release also depends on newly-published libs, those must already be live on crates.io first (see **release-libs**) — the template pins published lib versions.
 - Working tree clean; on `main` at the intended commit.
+- **Packaging pre-check (mandatory — the CLI ships embedded assets via `include_dir!`):** run
+  `cargo package -p mobiler --allow-dirty --list` and confirm every asset the binary embeds is
+  present — **all of `templates/**` and every `plugins/<name>/**`** (especially any dirs added
+  this release). `cargo package` has silently dropped an embedded dir before (the `templates/`
+  bug), which would publish a CLI that builds but scaffolds/`plugin add`s nothing. Never tag
+  until this list looks right.
 
 ## 2. THE IRREVERSIBLE STEP — tag + push
 - **Confirm with the user before tagging** (AskUserQuestion: tag vX.Y.Z now, yes/wait). A standing "deploy the patch" approval from the user covers this; otherwise ask.
