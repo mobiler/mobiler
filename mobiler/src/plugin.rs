@@ -552,6 +552,18 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_speech_android_only_registers_and_no_ios() {
+        let root = skeleton();
+        add_at(&root, "speech").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/SpeechActivity.kt").contains("class SpeechActivity"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"speech\" to SpeechPlugin(application),"));
+        assert!(read(&root, "Android/app/src/main/AndroidManifest.xml").contains("android:name=\".SpeechActivity\""));
+        // Android-only this release: no iOS registration.
+        assert!(!read(&root, "iOS/Sources/Core.swift").contains("SpeechPlugin"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

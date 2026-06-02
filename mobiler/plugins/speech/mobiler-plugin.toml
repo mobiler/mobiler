@@ -1,0 +1,12 @@
+name = "speech"
+summary = "Speech-to-text dictation → recognized text (free; Android now, iOS in the fast-follow)"
+
+[android]
+# Uses the system RecognizerIntent dialog (no RECORD_AUDIO permission — the recognizer UI
+# handles the mic). A transparent helper Activity owns the ActivityResult.
+sources = ["android/SpeechPlugin.kt", "android/SpeechActivity.kt"]
+register = '"speech" to SpeechPlugin(application)'
+manifest_application = ['<activity android:name=".SpeechActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />']
+
+# iOS (SFSpeechRecognizer live-audio recognition) lands in the fast-follow release; until then
+# `cx.plugin("speech",…)` degrades gracefully on iOS (no handler → "not available").
