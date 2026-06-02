@@ -530,6 +530,16 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_sharefile_copies_and_registers() {
+        let root = skeleton();
+        add_at(&root, "sharefile").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/SharefilePlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"sharefile\" to SharefilePlugin(application),"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"sharefile\": return await SharefilePlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
