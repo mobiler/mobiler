@@ -454,7 +454,15 @@ impl MobilerApp for FadeHouse {
                 let body = serde_json::from_str::<serde_json::Value>(&json)
                     .ok()
                     .and_then(|v| v.get(0).and_then(|r| r.get("body")).and_then(|b| b.as_str().map(String::from)));
-                model.saved_note = body.unwrap_or_else(|| "(no saved note yet)".to_string());
+                if let Some(b) = body {
+                    model.saved_note = b.clone();
+                    // Pre-fill the editable field too (so a restart shows the persisted note).
+                    if model.note.is_empty() {
+                        model.note = b;
+                    }
+                } else {
+                    model.saved_note = "(no saved note yet)".to_string();
+                }
             }
             Msg::DictateNote => cx.plugin("speech", "listen", "", |r| {
                 Msg::Dictated(if r.ok { r.output } else { String::new() })
@@ -487,9 +495,15 @@ impl MobilerApp for FadeHouse {
         }
     }
 
-    /// Create the note table once at startup so Save/Load just write/read it.
+    /// Ensure the note table exists, then load any saved note so it shows on launch/restart
+    /// (the data persists in SQLite; the model doesn't, so we re-read it at startup).
     fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
-        cx.notify("sqlite", "exec", "CREATE TABLE IF NOT EXISTS note(id INTEGER PRIMARY KEY, body TEXT)");
+        cx.plugin(
+            "sqlite",
+            "exec",
+            "CREATE TABLE IF NOT EXISTS note(id INTEGER PRIMARY KEY, body TEXT)",
+            |_| Msg::LoadNote,
+        );
     }
 
     fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {

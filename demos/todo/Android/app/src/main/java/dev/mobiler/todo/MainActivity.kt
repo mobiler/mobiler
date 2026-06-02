@@ -371,7 +371,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     actions.forEach { a ->
                         val (_, fg) = toneColors(a.tone)
                         Box(
-                            modifier = Modifier.fillMaxHeight().width(84.dp).background(fg)
+                            modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(fg)
                                 .clickable { send(Action.Fired(a.onTap)); offsetX = 0f },
                             contentAlignment = Alignment.Center,
                         ) { Text(a.label, color = Color.White, style = MaterialTheme.typography.labelMedium) }
