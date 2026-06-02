@@ -441,6 +441,19 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_sensors_copies_and_registers() {
+        let root = skeleton();
+        add_at(&root, "sensors").unwrap();
+        let kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/SensorsPlugin.kt");
+        assert!(kt.contains("package dev.mobiler.demo"));
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"sensors\" to SensorsPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"sensors\": return await SensorsPlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
