@@ -403,6 +403,12 @@ pub fn color_dot(color: ProjectColor) -> Widget {
 }
 #[must_use]
 pub fn divider() -> Widget { Widget::Divider }
+/// A progress bar (`Some(0.0..=1.0)`) or an indeterminate spinner (`None`).
+#[must_use]
+pub fn progress(value: Option<f32>) -> Widget { Widget::Progress { value } }
+/// A shimmer placeholder shown while content loads.
+#[must_use]
+pub fn skeleton() -> Widget { Widget::Skeleton }
 #[must_use]
 pub fn spacer(size: Spacing) -> Widget { Widget::Spacer { size } }
 

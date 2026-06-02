@@ -225,6 +225,10 @@ pub enum Widget {
     /// Small non-interactive colored dot — a project/identity hint.
     ColorDot { color: ProjectColor },
     Divider,
+    /// Progress indicator: `value` 0.0–1.0 for a determinate bar, `None` for an indeterminate spinner.
+    Progress { value: Option<f32> },
+    /// Shimmer placeholder shown while content loads.
+    Skeleton,
     Spacer { size: Spacing },
     // Layout
     Row { children: Vec<Widget> },
