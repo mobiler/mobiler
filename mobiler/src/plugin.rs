@@ -520,6 +520,16 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_review_registers_and_adds_gradle_dep() {
+        let root = skeleton();
+        add_at(&root, "review").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"review\" to ReviewPlugin(application),"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"review\": return await ReviewPlugin.handle"));
+        assert!(read(&root, "Android/app/build.gradle.kts").contains("com.google.android.play:review"), "gradle dep injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
