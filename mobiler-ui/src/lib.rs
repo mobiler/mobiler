@@ -63,6 +63,11 @@ pub enum CardStyle { Elevated, Outlined, Filled, Brand }
 #[repr(C)]
 pub enum Tone { Neutral, Success, Warning, Danger, Info }
 
+/// How a `Chart` draws its values.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum ChartStyle { Bar, Line }
+
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum Spacing { Xs, Sm, Md, Lg, Xl }
@@ -229,6 +234,9 @@ pub enum Widget {
     Progress { value: Option<f32> },
     /// Shimmer placeholder shown while content loads.
     Skeleton,
+    /// A simple data chart — `values` drawn as bars or a line, normalized to the max value.
+    /// `labels` (optional, one per value) annotate the x-axis. Non-interactive.
+    Chart { values: Vec<f32>, labels: Vec<String>, style: ChartStyle },
     Spacer { size: Spacing },
     // Layout
     Row { children: Vec<Widget> },
@@ -311,6 +319,7 @@ mod tests {
     fn widget_round_trips() {
         round_trips(&Widget::Text { content: "hi".to_string(), style: TextStyle::Title });
         round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
+        round_trips(&Widget::Chart { values: vec![1.0, 2.5, 3.0], labels: vec!["a".to_string()], style: ChartStyle::Bar });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),

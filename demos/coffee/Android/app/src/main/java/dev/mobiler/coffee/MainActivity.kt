@@ -115,6 +115,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -126,6 +132,7 @@ import dev.mobiler.coffee.shared.types.Action
 import dev.mobiler.coffee.shared.types.BoxAlign
 import dev.mobiler.coffee.shared.types.ButtonStyle
 import dev.mobiler.coffee.shared.types.CardStyle
+import dev.mobiler.coffee.shared.types.ChartStyle
 import dev.mobiler.coffee.shared.types.Corner
 import dev.mobiler.coffee.shared.types.Density
 import dev.mobiler.coffee.shared.types.Icon as WidgetIcon
@@ -316,6 +323,44 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp)
                 .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
         )
+        is Widget.Chart -> {
+            val values = widget.values
+            val maxV = (values.maxOrNull() ?: 1f).coerceAtLeast(1e-6f)
+            val chartColor = MaterialTheme.colorScheme.primary
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
+                    if (values.isEmpty()) return@Canvas
+                    val w = size.width
+                    val h = size.height
+                    when (widget.style) {
+                        ChartStyle.LINE -> {
+                            val n = values.size
+                            val path = Path()
+                            values.forEachIndexed { i, v ->
+                                val x = if (n == 1) w / 2f else w * i / (n - 1)
+                                val y = h * (1f - v / maxV)
+                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                            }
+                            drawPath(path, chartColor, style = Stroke(width = 4f))
+                        }
+                        ChartStyle.BAR -> {
+                            val bw = w / values.size
+                            values.forEachIndexed { i, v ->
+                                val bh = h * (v / maxV)
+                                drawRect(chartColor, topLeft = Offset(i * bw + bw * 0.15f, h - bh), size = Size(bw * 0.7f, bh))
+                            }
+                        }
+                    }
+                }
+                if (widget.labels.isNotEmpty()) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        widget.labels.forEach {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                        }
+                    }
+                }
+            }
+        }
 
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
 

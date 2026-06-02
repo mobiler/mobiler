@@ -20,9 +20,9 @@ use std::sync::Arc;
 use crux_core::{App, Core};
 use leptos::prelude::*;
 use mobiler_core::{
-    Action, BoxAlign, ButtonStyle, CardStyle, Corner, Density, Effect, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, ProjectColor, Spacing,
-    TextStyle, Theme, Tone, Widget,
+    Action, BoxAlign, ButtonStyle, CardStyle, ChartStyle, Corner, Density, Effect, FontFamily, Icon,
+    ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, ProjectColor,
+    Spacing, TextStyle, Theme, Tone, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -409,6 +409,38 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             None => view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> }.into_any(),
         },
         Widget::Skeleton => view! { <div class="skeleton"></div> }.into_any(),
+        Widget::Chart { values, labels, style } => {
+            let max = values.iter().copied().fold(0.0_f32, f32::max).max(1e-6);
+            let n = values.len().max(1);
+            let label_row = if labels.is_empty() {
+                None
+            } else {
+                let items: Vec<_> = labels.iter().map(|l| view! { <span class="chart-label">{l.clone()}</span> }).collect();
+                Some(view! { <div class="chart-labels">{items}</div> })
+            };
+            let svg = match style {
+                ChartStyle::Bar => {
+                    let bw = 100.0 / n as f32;
+                    let bars: Vec<_> = values.iter().enumerate().map(|(i, v)| {
+                        let h = (v / max).clamp(0.0, 1.0) * 48.0;
+                        let x = i as f32 * bw + bw * 0.15;
+                        let w = bw * 0.7;
+                        let y = 50.0 - h;
+                        view! { <rect x=format!("{x}") y=format!("{y}") width=format!("{w}") height=format!("{h}") class="chart-bar"></rect> }
+                    }).collect();
+                    view! { <svg viewBox="0 0 100 50" preserveAspectRatio="none" class="chart-svg">{bars}</svg> }.into_any()
+                }
+                ChartStyle::Line => {
+                    let pts = values.iter().enumerate().map(|(i, v)| {
+                        let x = if n == 1 { 50.0 } else { i as f32 * (100.0 / (n as f32 - 1.0)) };
+                        let y = 50.0 - (v / max).clamp(0.0, 1.0) * 48.0;
+                        format!("{x},{y}")
+                    }).collect::<Vec<_>>().join(" ");
+                    view! { <svg viewBox="0 0 100 50" preserveAspectRatio="none" class="chart-svg"><polyline points=pts class="chart-line"></polyline></svg> }.into_any()
+                }
+            };
+            view! { <div class="chart">{svg}{label_row}</div> }.into_any()
+        }
         Widget::Spacer { size } => {
             view! { <div class=format!("spacer {}", spacer_class(*size))></div> }.into_any()
         }
