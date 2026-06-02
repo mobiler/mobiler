@@ -691,7 +691,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth } => {
             let back_btn = back.clone().map(|token| {
                 let send = send.clone();
                 view! {
@@ -745,6 +745,17 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // `theme-dark` flips the CSS variables for the whole shell — theme-as-data,
             // the web twin of the native shells' `preferredColorScheme`/Material theme.
             let class = if *dark_mode { "scaffold theme-dark" } else { "scaffold" };
+            // Pull-to-refresh — web has no pull gesture, so expose a top-bar refresh button +
+            // an indeterminate bar at the top of the body while `refreshing`.
+            let refresh_btn = on_refresh.clone().map(|token| {
+                let send = send.clone();
+                view! {
+                    <button class="refresh-btn" on:click=move |_| send(Action::Fired { token: token.clone() })>"↻"</button>
+                }
+            });
+            let refresh_bar = refreshing.then(|| {
+                view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> }
+            });
             let body_class = format!("scaffold-body {}", nav_class(route, *depth));
             // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
             // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
@@ -755,8 +766,9 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                     <div class="topbar">
                         {back_btn}
                         <span class="title">{title}</span>
+                        {refresh_btn}
                     </div>
-                    <div class=body_class data-route=route.clone()>{body}</div>
+                    <div class=body_class data-route=route.clone()>{refresh_bar}{body}</div>
                     {fab_btn}
                     {tabbar}
                     {sheet_overlay}

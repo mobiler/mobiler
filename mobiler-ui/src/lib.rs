@@ -303,6 +303,11 @@ pub enum Widget {
         fab: Option<Fab>,
         /// Optional modal bottom sheet over the body (a scrim + a panel from the bottom).
         sheet: Option<Sheet>,
+        /// Pull-to-refresh: when set, the body is pull-refreshable and fires this event on pull.
+        /// The app owns `refreshing` — set it true when the pull fires, clear it when the async
+        /// reload completes (the shell shows a spinner while it's true).
+        on_refresh: Option<ActionToken>,
+        refreshing: bool,
         route: String,
         depth: u32,
     },
@@ -348,6 +353,8 @@ mod tests {
             theme: None,
             fab: None,
             sheet: None,
+            on_refresh: None,
+            refreshing: false,
             route: "r".to_string(),
             depth: 2,
         });
@@ -367,6 +374,8 @@ mod tests {
             }),
             fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
             sheet: Some(Sheet { title: "S".to_string(), child: Box::new(Widget::Divider), on_dismiss: "d".to_string() }),
+            on_refresh: Some("r".to_string()),
+            refreshing: true,
             route: "r".to_string(),
             depth: 1,
         });

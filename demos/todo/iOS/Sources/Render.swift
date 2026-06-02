@@ -242,14 +242,15 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth):
         // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
         // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
         // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
         ActiveTheme.current = theme
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
-            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet, route: route, depth: depth, send: send
+            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet,
+            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, send: send
         ))
     }
 }
@@ -465,6 +466,8 @@ private struct ScaffoldView: View {
     let theme: Theme?
     let fab: SharedTypes.Fab?
     let sheet: SharedTypes.Sheet?
+    let onRefresh: String?
+    let refreshing: Bool
     let route: String
     let depth: UInt32
     let send: (Action) -> Void
@@ -554,11 +557,15 @@ private struct ScaffoldView: View {
             // just re-renders in place. The iOS twin of Android's AnimatedContent.
             // On a regular width the column is capped + centered so it doesn't stretch.
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) { render(self.content, send) }
+                VStack(alignment: .leading, spacing: 6) {
+                    if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                    render(self.content, send)
+                }
                     .padding(16)
                     .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
                     .frame(maxWidth: .infinity)
             }
+            .refreshableIf(onRefresh, send)
             .id(route)
             .transition(navTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -820,4 +827,22 @@ private func downsampledFileImage(at url: URL, maxPixel: CGFloat = 1400) -> UIIm
     let img = UIImage(cgImage: cg)
     fileImageCache.setObject(img, forKey: key)
     return img
+}
+
+// Pull-to-refresh, gated: attaches `.refreshable` only when the scaffold carries an on_refresh
+// token (so screens without it aren't bouncy). The event is fire-and-forget; the brief sleep keeps
+// the native pull spinner visible while the app's async reload kicks off (the model's `refreshing`
+// flag drives the in-body indicator that reflects the real reload duration).
+extension View {
+    @ViewBuilder
+    func refreshableIf(_ token: String?, _ send: @escaping (Action) -> Void) -> some View {
+        if let token = token {
+            self.refreshable {
+                send(.fired(token: token))
+                try? await Task.sleep(nanoseconds: 600_000_000)
+            }
+        } else {
+            self
+        }
+    }
 }
