@@ -1,0 +1,10 @@
+name = "composer"
+summary = "Compose email / SMS / phone call via the system apps (free, no permission)"
+
+[android]
+sources = ["android/ComposerPlugin.kt"]
+register = '"composer" to ComposerPlugin(application)'
+
+[ios]
+sources = ["ios/ComposerPlugin.swift"]
+register = 'case "composer": return await ComposerPlugin.handle(op: op, input: input)'
