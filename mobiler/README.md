@@ -83,6 +83,13 @@ ABI change. Bundled free plugins:
 | 📅 `calendar` | add an event (system editor) |
 | 🎙️ `audio` | record (mic) + play |
 | 📐 `sensors` | accelerometer / gyroscope → `x,y,z` |
+| ✉️ `composer` | email / SMS / phone call via the system apps |
+| 🗣️ `tts` | text-to-speech (speak a string aloud) |
+| ⭐ `review` | in-app App Store / Play review prompt |
+| 📤 `sharefile` | share a file / image via the share sheet |
+| 🎬 `video` | record a video → local URI |
+| 🎤 `speech` | speech-to-text (Android; iOS in fast-follow) |
+| 🗃️ `sqlite` | on-device SQLite (Android; iOS in fast-follow) |
 
 ```bash
 mobiler plugin list

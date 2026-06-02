@@ -66,6 +66,15 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .divider:
         return AnyView(Divider())
 
+    case .progress(let value):
+        if let v = value {
+            return AnyView(ProgressView(value: Double(v)).progressViewStyle(.linear).padding(.vertical, 4))
+        }
+        return AnyView(ProgressView().padding(.vertical, 4))
+
+    case .skeleton:
+        return AnyView(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2)).frame(height: 48).padding(.vertical, 4))
+
     case .spacer(let size):
         return AnyView(Color.clear.frame(height: spacing(size)))
 

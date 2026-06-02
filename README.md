@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -144,6 +144,13 @@ free plugins:
 | 📅 **calendar** | add an event (system editor) | `mobiler plugin add calendar` |
 | 🎙️ **audio** | record (mic) + play | `mobiler plugin add audio` |
 | 📐 **sensors** | accelerometer / gyroscope → `x,y,z` | `mobiler plugin add sensors` |
+| ✉️ **composer** | email / SMS / phone call via the system apps | `mobiler plugin add composer` |
+| 🗣️ **tts** | text-to-speech (speak a string aloud) | `mobiler plugin add tts` |
+| ⭐ **review** | in-app App Store / Play review prompt | `mobiler plugin add review` |
+| 📤 **sharefile** | share a file / image via the share sheet | `mobiler plugin add sharefile` |
+| 🎬 **video** | record a video → local URI | `mobiler plugin add video` |
+| 🎤 **speech** | speech-to-text (Android; iOS in fast-follow) | `mobiler plugin add speech` |
+| 🗃️ **sqlite** | on-device SQLite (Android; iOS in fast-follow) | `mobiler plugin add sqlite` |
 
 ```bash
 mobiler plugin list            # see the bundled (free) plugins
