@@ -210,9 +210,10 @@ body {
 /* RegionChart — variable-width stacked-region / coverage-gap chart (absolute-positioned). */
 /* A fixed left gutter (y-axis labels) + a right margin (value chips / bracket) are reserved, and
    the x-axis row is inset by the same amounts, so the irregular x-ticks line up with the bands. */
-.rchart { margin: 8px 0; --rchart-gutter: 48px; --rchart-chip: 66px; }
+.rchart { margin: 8px 0; --rchart-gutter: 40px; --rchart-chip: 58px; }
 .rchart-row { display: flex; }
-.rchart-yaxis { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; width: var(--rchart-gutter); height: 300px; padding-right: 5px; box-sizing: border-box; }
+.rchart-yaxis { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; width: var(--rchart-gutter); height: 300px; padding-right: 4px; box-sizing: border-box; }
+.rchart-yaxis .chart-tick { font-size: 9px; }
 .rchart-plotwrap { position: relative; flex: 1; height: 300px; min-width: 0; }
 .rchart-plot { position: absolute; left: 0; top: 0; bottom: 0; right: var(--rchart-chip); border-left: 2px solid var(--ink, #222); border-bottom: 2px solid var(--ink, #222); }
 .rchart-ytick { position: absolute; left: 0; width: 6px; height: 0; border-top: 2px solid var(--ink, #222); }
@@ -222,7 +223,7 @@ body {
 .rchart-label-v { transform: rotate(-90deg); white-space: nowrap; }
 .rchart-refline { position: absolute; left: 0; right: 0; border-top: 2px solid #c0392b; }
 .rchart-refline-dashed { border-top-style: dashed; }
-.rchart-chip { position: absolute; right: 0; transform: translateY(50%); background: #ffffff; color: #1a1a1a; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: 600; white-space: nowrap; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+.rchart-chip { position: absolute; right: 0; transform: translateY(50%); background: #ffffff; color: #1a1a1a; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 4px; padding: 1px 4px; font-size: 9px; font-weight: 600; white-space: nowrap; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
 .rchart-bracket { position: absolute; right: calc(var(--rchart-chip) - 6px); width: 6px; border: 1.5px solid var(--muted, #888); border-left: none; }
 .rchart-bracket span { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 60px; font-size: 9px; line-height: 1.2; color: var(--muted, #888); }
 .rchart-xaxis { position: relative; height: 16px; margin-top: 3px; margin-left: var(--rchart-gutter); margin-right: var(--rchart-chip); }

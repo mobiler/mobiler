@@ -4,13 +4,13 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
-    BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    BoxAlign, ButtonStyle, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart, emphasis,
     gauge_chart, grid, icon_button, image, progress, rating, rating_input, region_chart, rings_chart,
     row, scaffold, scroller, search_field, segment, segmented, skeleton, spacer, stack,
-    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_bracket,
+    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title,
     with_fab, with_refresh, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
@@ -854,7 +854,7 @@ fn coverage_chart() -> Widget {
             ChartLegendItem::new("Gap", gap),
         ],
     );
-    with_bracket(chart, ChartBracket::new(80_000.0, 90_000.0, "Max insured 90'000"))
+    chart
 }
 
 fn profile_screen(model: &Model) -> Widget {
