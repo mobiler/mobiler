@@ -1247,6 +1247,17 @@ fn region_chart_view(
         view! { <span class="rchart-xtick" style=style>{label}</span> }
     }).collect();
 
+    // Axis tick marks (notches on the L-shaped axis): horizontal on the y-axis at each value,
+    // vertical on the x-axis at each irregular break — drawn over the bands at the plot edges.
+    let ytick_marks: Vec<_> = (0..=4).map(|k| {
+        let style = format!("bottom:{:.3}%", k as f32 * 25.0);
+        view! { <div class="rchart-ytick" style=style></div> }
+    }).collect();
+    let xtick_marks: Vec<_> = ticks.iter().map(|t| {
+        let style = format!("left:{:.3}%", (t.at / xm * 100.0).clamp(0.0, 100.0));
+        view! { <div class="rchart-xtickmark" style=style></div> }
+    }).collect();
+
     let legend_row = if legend.is_empty() {
         None
     } else {
@@ -1262,7 +1273,7 @@ fn region_chart_view(
         <div class="rchart">
             <div class="rchart-row">
                 <div class="rchart-yaxis">{yticks}</div>
-                <div class="rchart-plot">{region_divs}{ref_divs}{bracket_div}</div>
+                <div class="rchart-plot">{region_divs}{ytick_marks}{xtick_marks}{ref_divs}{bracket_div}</div>
             </div>
             <div class="rchart-xaxis">{xticks}</div>
             {legend_row}

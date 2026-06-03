@@ -543,6 +543,17 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     drawLine(bracketColor, Offset(x, yt), Offset(x - 6f, yt), strokeWidth = 2f)
                                     drawLine(bracketColor, Offset(x, yb), Offset(x - 6f, yb), strokeWidth = 2f)
                                 }
+                                val axisColor = Color(0xFF888888)
+                                drawLine(axisColor, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                                drawLine(axisColor, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
+                                for (k in 0..4) {
+                                    val y = size.height * k / 4f
+                                    drawLine(axisColor, Offset(0f, y), Offset(6f, y), strokeWidth = 1.5f)
+                                }
+                                widget.ticks.forEach { t ->
+                                    val tx = size.width * (t.at / xm)
+                                    drawLine(axisColor, Offset(tx, size.height), Offset(tx, size.height - 6f), strokeWidth = 1.5f)
+                                }
                             }
                             widget.refLines.forEach { rl ->
                                 val y = ph * (1f - rl.value / ym)
