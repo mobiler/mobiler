@@ -564,8 +564,8 @@ private struct RegionChartView: View {
         let ym = max(yMax, 1e-6)
         VStack(spacing: 6) {
             Canvas { ctx, size in
-                let gutter: CGFloat = 52
-                let chipW: CGFloat = 72
+                let gutter: CGFloat = 42
+                let chipW: CGFloat = 58
                 let plotX = gutter
                 let plotTop: CGFloat = 6
                 let plotBottom = size.height - 22
@@ -581,7 +581,14 @@ private struct RegionChartView: View {
                     ctx.fill(Path(rect), with: .color(color(i)))
                     ctx.stroke(Path(rect), with: .color(.white.opacity(0.4)), lineWidth: 0.5)
                     if !r.label.isEmpty {
-                        let t = ctx.resolve(Text(r.label).font(.caption2).foregroundColor(textOn(i)))
+                        let avail = r.vertical ? (rect.height - 6) : (rect.width - 6)
+                        var fs: CGFloat = 11
+                        var t = ctx.resolve(Text(r.label).font(.system(size: fs)).foregroundColor(textOn(i)))
+                        let mw = t.measure(in: CGSize(width: 4000, height: 4000)).width
+                        if avail > 1, mw > avail {
+                            fs = max(7, fs * avail / mw)
+                            t = ctx.resolve(Text(r.label).font(.system(size: fs)).foregroundColor(textOn(i)))
+                        }
                         if r.vertical {
                             var c = ctx
                             c.translateBy(x: rect.midX, y: rect.midY)
@@ -616,7 +623,7 @@ private struct RegionChartView: View {
                     let y = py(v)
                     var p = Path(); p.move(to: CGPoint(x: plotX - 6, y: y)); p.addLine(to: CGPoint(x: plotX, y: y))
                     ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
-                    ctx.draw(ctx.resolve(Text(fmtTick(v)).font(.caption2).foregroundColor(.secondary)), at: CGPoint(x: plotX - 9, y: y), anchor: .trailing)
+                    ctx.draw(ctx.resolve(Text(fmtTick(v)).font(.system(size: 9)).foregroundColor(.secondary)), at: CGPoint(x: plotX - 6, y: y), anchor: .trailing)
                 }
                 for t in ticks {
                     let x = px(t.at)
@@ -626,7 +633,7 @@ private struct RegionChartView: View {
                 }
                 for rl in refLines {
                     let y = py(rl.value)
-                    let ct = ctx.resolve(Text(rl.label).font(.system(size: 10).weight(.semibold)).foregroundColor(Color(white: 0.1)))
+                    let ct = ctx.resolve(Text(rl.label).font(.system(size: 9).weight(.semibold)).foregroundColor(Color(white: 0.1)))
                     let sz = ct.measure(in: CGSize(width: chipW, height: 40))
                     let cx = plotX + plotW + chipW / 2
                     let box = CGRect(x: cx - sz.width / 2 - 4, y: y - sz.height / 2 - 2, width: sz.width + 8, height: sz.height + 4)

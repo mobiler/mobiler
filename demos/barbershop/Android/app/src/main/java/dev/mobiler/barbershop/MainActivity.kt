@@ -127,6 +127,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -548,12 +549,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        modifier = Modifier.width(44.dp).height(300.dp).padding(end = 4.dp),
+                        modifier = Modifier.width(40.dp).height(300.dp).padding(end = 3.dp),
                         verticalArrangement = Arrangement.SpaceBetween,
                         horizontalAlignment = Alignment.End,
                     ) {
                         for (k in 4 downTo 0) {
-                            Text(fmtTick(ym * k / 4f), style = MaterialTheme.typography.labelSmall, color = labelColor, maxLines = 1)
+                            Text(fmtTick(ym * k / 4f), style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = labelColor, maxLines = 1)
                         }
                     }
                     Column(modifier = Modifier.weight(1f)) {
@@ -613,6 +614,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     Text(
                                         rl.label,
                                         style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp,
                                         color = Color(0xFF1A1A1A),
                                         modifier = Modifier
                                             .background(Color.White, RoundedCornerShape(4.dp))
