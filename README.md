@@ -96,6 +96,31 @@ your app's types.
 - **Theme-as-data** — e.g. dark mode is a value in the `Widget` tree; the shell themes
   the whole app from it.
 
+## Widgets
+
+The `Widget` vocabulary renders identically on Android, iOS, and web:
+
+- **Layout** — rows, columns, grids, cards, scrollers, boxes, spacers, dividers.
+- **Inputs** — buttons, text fields, toggles, segmented controls, search fields, rating.
+- **Navigation** — `Scaffold` with a top bar, bottom **tabs**, a **FAB**, and bottom **sheets**
+  (it goes adaptive on tablets: a side rail + capped width).
+- **Media & feedback** — images, avatars, progress bars, shimmer skeletons, swipe actions,
+  an inline month **calendar**.
+- **Charts** — `Chart` in **eight styles**: bar, line, stacked bar, 100%-stacked bar, pie,
+  donut, concentric fitness-style **progress rings**, and a radial **gauge** — multi-series with
+  an optional y-axis and legend. Plus a variable-width stacked-region / coverage-gap
+  **`RegionChart`** for value-band visualizations.
+
+  ```rust
+  // a two-series weekly bar chart with axis + legend
+  chart(
+      vec![ChartSeries::new("Alex", vec![1.0, 2.0, 3.0]),
+           ChartSeries::new("Sam",  vec![1.0, 1.0, 2.0])],
+      vec!["Mon".into(), "Tue".into(), "Wed".into()],
+      ChartStyle::StackedBar, /* axis */ true, /* legend */ true,
+  )
+  ```
+
 ## Built-in capabilities
 
 Device APIs are **capabilities** — async effects the generic shell fulfils natively on

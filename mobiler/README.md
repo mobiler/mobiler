@@ -17,6 +17,11 @@ its `view` returns a `Widget` tree that thin, **app-agnostic** shells render int
 native widgets. Each shell is generic — built once from a fixed wire ABI and reused for
 every app — so you write the app once, in Rust, and it runs natively everywhere.
 
+The `Widget` set spans layout, inputs, navigation (tabs/FAB/sheets, tablet-adaptive), media,
+feedback, an inline calendar, and **data-viz charts** — eight `Chart` styles (bar, line, stacked,
+100%-stacked, pie, donut, fitness-style progress rings, radial gauge) plus a variable-width
+coverage-gap `RegionChart`.
+
 ## Install
 
 ```bash

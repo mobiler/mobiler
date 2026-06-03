@@ -13,6 +13,13 @@ Because these types never change per app, a single native shell is built **once*
 renders *any* Mobiler app — it only ever knows these types, never an app's domain
 events or widgets.
 
+The `Widget` vocabulary covers layout (rows/columns/grids/cards/scrollers), inputs
+(text fields, toggles, segmented, search, rating), navigation (scaffold + tabs + FAB +
+sheets), media (images, avatars), feedback (progress, skeleton, swipe actions), an inline
+calendar, and **data-viz charts** — `Chart` in eight styles (bar, line, stacked,
+100%-stacked, pie, donut, fitness-style progress rings, and a radial gauge) plus a
+variable-width stacked-region / coverage-gap `RegionChart`.
+
 You usually don't depend on this crate directly. Use
 [`mobiler-core`](https://crates.io/crates/mobiler-core), which re-exports it and
 provides the `MobilerApp` trait plus the typed widget builders.

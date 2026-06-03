@@ -207,6 +207,22 @@ body {
 .chart-legend-item { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted, #888); }
 .chart-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 
+/* RegionChart — variable-width stacked-region / coverage-gap chart (absolute-positioned). */
+.rchart { margin: 8px 0; }
+.rchart-row { display: flex; }
+.rchart-yaxis { display: flex; flex-direction: column; justify-content: space-between; height: 300px; padding-right: 6px; }
+.rchart-plot { position: relative; flex: 1; height: 300px; min-width: 0; border-left: 1px solid var(--border, #ccc); border-bottom: 1px solid var(--border, #ccc); }
+.rchart-region { position: absolute; display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; border: 0.5px solid rgba(255, 255, 255, 0.45); }
+.rchart-label { font-size: 11px; font-weight: 600; color: #1a1a1a; text-align: center; padding: 2px; line-height: 1.2; }
+.rchart-label-v { transform: rotate(-90deg); white-space: nowrap; }
+.rchart-refline { position: absolute; left: 0; right: 0; border-top: 2px solid #c0392b; }
+.rchart-refline-dashed { border-top-style: dashed; }
+.rchart-chip { position: absolute; right: 2px; transform: translateY(50%); background: var(--surface, #fff); border: 1px solid var(--border, #ccc); border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 600; white-space: nowrap; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+.rchart-bracket { position: absolute; right: -5px; width: 8px; border: 2px solid var(--muted, #888); border-left: none; }
+.rchart-bracket span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 88px; font-size: 10px; line-height: 1.25; color: var(--muted, #888); }
+.rchart-xaxis { position: relative; height: 16px; margin-top: 3px; }
+.rchart-xtick { position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--muted, #888); white-space: nowrap; }
+
 /* Inline month calendar. */
 .calendar { margin: 8px 0; }
 .cal-title { font-weight: 600; text-align: center; margin-bottom: 6px; }
