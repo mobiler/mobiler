@@ -562,16 +562,16 @@ private struct RegionChartView: View {
         let ym = max(yMax, 1e-6)
         VStack(spacing: 4) {
             HStack(spacing: 4) {
-                VStack {
-                    Text(fmtTick(ym)).font(.caption2).foregroundColor(.secondary)
+                VStack(alignment: .trailing) {
+                    Text(fmtTick(ym)).font(.caption2).foregroundColor(.secondary).fixedSize()
                     Spacer()
-                    Text(fmtTick(ym * 0.75)).font(.caption2).foregroundColor(.secondary)
+                    Text(fmtTick(ym * 0.75)).font(.caption2).foregroundColor(.secondary).fixedSize()
                     Spacer()
-                    Text(fmtTick(ym * 0.5)).font(.caption2).foregroundColor(.secondary)
+                    Text(fmtTick(ym * 0.5)).font(.caption2).foregroundColor(.secondary).fixedSize()
                     Spacer()
-                    Text(fmtTick(ym * 0.25)).font(.caption2).foregroundColor(.secondary)
+                    Text(fmtTick(ym * 0.25)).font(.caption2).foregroundColor(.secondary).fixedSize()
                     Spacer()
-                    Text(fmtTick(0)).font(.caption2).foregroundColor(.secondary)
+                    Text(fmtTick(0)).font(.caption2).foregroundColor(.secondary).fixedSize()
                 }.frame(height: 300)
                 GeometryReader { geo in
                     let w = geo.size.width
@@ -610,6 +610,20 @@ private struct RegionChartView: View {
                                 p.move(to: CGPoint(x: x, y: yb)); p.addLine(to: CGPoint(x: x - 6, y: yb))
                                 ctx.stroke(p, with: .color(.gray), lineWidth: 2)
                             }
+                            var axes = Path()
+                            axes.move(to: CGPoint(x: 0, y: 0)); axes.addLine(to: CGPoint(x: 0, y: size.height))
+                            axes.move(to: CGPoint(x: 0, y: size.height)); axes.addLine(to: CGPoint(x: size.width, y: size.height))
+                            ctx.stroke(axes, with: .color(.secondary), lineWidth: 1.5)
+                            var marks = Path()
+                            for k in 0 ... 4 {
+                                let y = size.height * CGFloat(k) / 4
+                                marks.move(to: CGPoint(x: 0, y: y)); marks.addLine(to: CGPoint(x: 6, y: y))
+                            }
+                            for t in ticks {
+                                let x = size.width * CGFloat(t.at / xm)
+                                marks.move(to: CGPoint(x: x, y: size.height)); marks.addLine(to: CGPoint(x: x, y: size.height - 6))
+                            }
+                            ctx.stroke(marks, with: .color(.secondary), lineWidth: 1)
                         }
                         ForEach(Array(refLines.enumerated()), id: \.offset) { _, rl in
                             let y = h * CGFloat(1 - rl.value / ym)
