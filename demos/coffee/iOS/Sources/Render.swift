@@ -572,7 +572,8 @@ private struct RegionChartView: View {
                     Text(fmtTick(ym * 0.25)).font(.caption2).foregroundColor(.secondary).fixedSize()
                     Spacer()
                     Text(fmtTick(0)).font(.caption2).foregroundColor(.secondary).fixedSize()
-                }.frame(height: 300)
+                }.frame(width: 44, height: 300)
+                VStack(spacing: 0) {
                 GeometryReader { geo in
                     let w = geo.size.width
                     let h = geo.size.height
@@ -632,17 +633,18 @@ private struct RegionChartView: View {
                                 .background(RoundedRectangle(cornerRadius: 4).fill(Color.white))
                                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.2), lineWidth: 0.5))
                                 .fixedSize()
-                                .position(x: w - 40, y: y)
+                                .position(x: w - 40, y: y + 11)
                         }
                     }
                 }.frame(height: 300)
-            }
-            GeometryReader { geo in
-                ForEach(Array(ticks.enumerated()), id: \.offset) { _, t in
-                    Text(t.label).font(.caption2).foregroundColor(.secondary).fixedSize()
-                        .position(x: geo.size.width * CGFloat(t.at / xm), y: 8)
+                    GeometryReader { geo in
+                        ForEach(Array(ticks.enumerated()), id: \.offset) { _, t in
+                            Text(t.label).font(.caption2).foregroundColor(.secondary).fixedSize()
+                                .position(x: geo.size.width * CGFloat(t.at / xm), y: 8)
+                        }
+                    }.frame(height: 16)
                 }
-            }.frame(height: 16)
+            }
             if !legend.isEmpty {
                 let rows = (legend.count + 2) / 3
                 VStack(spacing: 2) {
