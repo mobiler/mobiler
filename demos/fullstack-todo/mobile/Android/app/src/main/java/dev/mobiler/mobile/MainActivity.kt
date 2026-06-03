@@ -125,7 +125,10 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -461,6 +464,125 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(colorFor(i)))
                                 Text(s.name, style = MaterialTheme.typography.labelSmall, color = labelColor)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        is Widget.RegionChart -> {
+            // Variable-width stacked-region ("coverage-gap") chart: absolute-positioned region
+            // rectangles in the [0,xMax]×[0,yMax] plane + ref lines/chips + irregular x-ticks +
+            // optional right bracket + legend. The Android twin of mobiler-web's region_chart_view.
+            val xm = widget.xMax.coerceAtLeast(1e-6f)
+            val ym = widget.yMax.coerceAtLeast(1e-6f)
+            val palette = listOf(
+                Color(0xFFE0772C), Color(0xFF2EA06A), Color(0xFFC0466B),
+                Color(0xFF8A5CC0), Color(0xFFC9A227), Color(0xFF3FA7D6),
+            )
+            fun regionColor(i: Int): Color {
+                val c = widget.regions.getOrNull(i)?.color
+                return if (c != null) Color(c.r.toInt(), c.g.toInt(), c.b.toInt()) else palette[i % palette.size]
+            }
+            fun fmtTick(v: Float): String =
+                if (kotlin.math.abs(v - kotlin.math.round(v)) < 0.05f) "${v.toInt()}" else "%.1f".format(v)
+            val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+            val refColor = Color(0xFFC0392B)
+            val bracketColor = Color(0xFF888888)
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.height(300.dp).padding(end = 4.dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        for (k in 4 downTo 0) {
+                            Text(fmtTick(ym * k / 4f), style = MaterialTheme.typography.labelSmall, color = labelColor)
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(300.dp)) {
+                            val pw = maxWidth
+                            val ph = maxHeight
+                            widget.regions.forEachIndexed { i, r ->
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = pw * (r.x0 / xm), y = ph * (1f - r.y1 / ym))
+                                        .width(pw * ((r.x1 - r.x0) / xm))
+                                        .height(ph * ((r.y1 - r.y0) / ym))
+                                        .background(regionColor(i))
+                                        .border(0.5.dp, Color.White.copy(alpha = 0.4f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (r.label.isNotEmpty()) {
+                                        Text(
+                                            r.label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF1A1A1A),
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 2,
+                                            modifier = if (r.vertical) Modifier.rotate(-90f) else Modifier,
+                                        )
+                                    }
+                                }
+                            }
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                widget.refLines.forEach { rl ->
+                                    val y = size.height * (1f - rl.value / ym)
+                                    val effect = if (rl.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 8f)) else null
+                                    drawLine(refColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 2f, pathEffect = effect)
+                                }
+                                widget.bracket?.let { b ->
+                                    val yt = size.height * (1f - b.y1 / ym)
+                                    val yb = size.height * (1f - b.y0 / ym)
+                                    val x = size.width - 2f
+                                    drawLine(bracketColor, Offset(x, yt), Offset(x, yb), strokeWidth = 2f)
+                                    drawLine(bracketColor, Offset(x, yt), Offset(x - 6f, yt), strokeWidth = 2f)
+                                    drawLine(bracketColor, Offset(x, yb), Offset(x - 6f, yb), strokeWidth = 2f)
+                                }
+                            }
+                            widget.refLines.forEach { rl ->
+                                val y = ph * (1f - rl.value / ym)
+                                Box(modifier = Modifier.offset(x = pw - 78.dp, y = y - 9.dp)) {
+                                    Text(
+                                        rl.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF1A1A1A),
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
+                                            .border(0.5.dp, labelColor, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                        }
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(16.dp)) {
+                            val pw = maxWidth
+                            widget.ticks.forEach { t ->
+                                Text(
+                                    t.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = labelColor,
+                                    maxLines = 1,
+                                    modifier = Modifier.offset(x = (pw * (t.at / xm)) - 24.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                if (widget.legend.isNotEmpty()) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                        widget.legend.chunked(3).forEach { rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                            ) {
+                                rowItems.forEach { li ->
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(Color(li.color.r.toInt(), li.color.g.toInt(), li.color.b.toInt())))
+                                        Text(li.label, style = MaterialTheme.typography.labelSmall, color = labelColor)
+                                    }
+                                }
                             }
                         }
                     }

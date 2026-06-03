@@ -17,7 +17,8 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, CardStyle, ChartSeries, ChartStyle, Corner, Density, Fab, FontFamily, Icon,
+    Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, Widget,
 };
@@ -463,6 +464,33 @@ pub fn rings_chart(series: Vec<ChartSeries>) -> Widget {
 #[must_use]
 pub fn gauge_chart(series: ChartSeries) -> Widget {
     chart(vec![series], vec![], ChartStyle::Gauge, false, false)
+}
+
+/// A variable-width stacked-region ("coverage-gap" / Marimekko) chart. `regions` are rectangles in
+/// the `[0, x_max] × [0, y_max]` plane (build with [`ChartRegion::new`]); `ticks` label the
+/// irregular x-axis; `ref_lines` are horizontal target/max lines ([`ChartRefLine::target`]/`::max`);
+/// `legend` names the colors. Add a right-side bracket annotation with [`with_bracket`].
+#[must_use]
+pub fn region_chart(
+    regions: Vec<ChartRegion>,
+    ticks: Vec<ChartTick>,
+    x_max: f32,
+    y_max: f32,
+    ref_lines: Vec<ChartRefLine>,
+    legend: Vec<ChartLegendItem>,
+) -> Widget {
+    Widget::RegionChart { regions, ticks, x_max, y_max, ref_lines, bracket: None, legend }
+}
+
+/// Attach a right-side bracket annotation to a [`region_chart`] (no-op on any other widget).
+#[must_use]
+pub fn with_bracket(widget: Widget, bracket: ChartBracket) -> Widget {
+    match widget {
+        Widget::RegionChart { regions, ticks, x_max, y_max, ref_lines, legend, .. } => {
+            Widget::RegionChart { regions, ticks, x_max, y_max, ref_lines, bracket: Some(bracket), legend }
+        }
+        other => other,
+    }
 }
 
 /// Days in `month` (1–12) of `year`, leap-year aware.
@@ -1007,6 +1035,17 @@ mod tests {
         assert!(matches!(line_chart(vec![1.0], vec![]), Widget::Chart { style: ChartStyle::Line, .. }));
         assert!(matches!(donut_chart(vec![ChartSeries::new("a", vec![1.0])]), Widget::Chart { style: ChartStyle::Donut, legend: true, .. }));
         assert!(matches!(gauge_chart(ChartSeries::new("g", vec![3.0]).with_goal(5.0)), Widget::Chart { style: ChartStyle::Gauge, series, .. } if series[0].goal == Some(5.0)));
+        let rc = with_bracket(
+            region_chart(
+                vec![ChartRegion::new(0.0, 3.0, 0.0, 80.0, "80%").vertical()],
+                vec![ChartTick::new(3.0, "3 Mt.")],
+                65.0, 80.0,
+                vec![ChartRefLine::target(80.0, "CHF 80'000"), ChartRefLine::max(90.0, "CHF 90'000")],
+                vec![ChartLegendItem::new("Gap", Rgb::new(0x5A, 0x7D, 0x9A))],
+            ),
+            ChartBracket::new(60.0, 80.0, "Ceiling"),
+        );
+        assert!(matches!(rc, Widget::RegionChart { bracket: Some(_), regions, ref_lines, .. } if regions[0].vertical && ref_lines[1].dashed));
         // June 2026 has 30 days and starts on a Monday (weekday 1).
         assert!(matches!(
             calendar(2026, 6, Some(3), |d| Ev::Open(u32::from(d))),

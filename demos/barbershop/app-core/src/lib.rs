@@ -4,12 +4,14 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
-    BoxAlign, ButtonStyle, CardStyle, ChartSeries, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
+    BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart, emphasis,
-    gauge_chart, grid, icon_button, image, progress, rating, rating_input, rings_chart, row, scaffold,
-    scroller, search_field, segment, segmented, skeleton, spacer, stack, stacked_bar_chart, subtitle,
-    swipe_action, tab_icon, text, text_field, title, with_fab, with_refresh, with_sheet, with_theme,
+    gauge_chart, grid, icon_button, image, progress, rating, rating_input, region_chart, rings_chart,
+    row, scaffold, scroller, search_field, segment, segmented, skeleton, spacer, stack,
+    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_bracket,
+    with_fab, with_refresh, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -814,6 +816,47 @@ fn bt_section(model: &Model) -> Widget {
     column(items)
 }
 
+/// A `RegionChart` showcase — a variable-width "coverage-gap" chart (the Swiss insurance /
+/// pension style): colored value bands across an irregular timeline, a solid target line + a
+/// dashed ceiling, a right-side bracket, and a legend. Illustrative data.
+fn coverage_chart() -> Widget {
+    // Brand-ish palette for the bands.
+    let teal = Rgb::new(0x8E, 0xC6, 0xBA);
+    let teal_l = Rgb::new(0xCF, 0xE8, 0xE1);
+    let teal_l2 = Rgb::new(0xB4, 0xDB, 0xD1);
+    let blue = Rgb::new(0x9E, 0xC5, 0xF0);
+    let green = Rgb::new(0x5E, 0x8C, 0x52);
+    let gap = Rgb::new(0x5A, 0x7D, 0x9A);
+    // x timeline (illustrative positions): 0 → 3 Mt. → 21 Mt. → Children 18/25 → 65 J.
+    let (t3, t21, tc, t65) = (12.0, 25.0, 62.0, 100.0);
+    let regions = vec![
+        ChartRegion::new(0.0, t3, 0.0, 80_000.0, "80% CHF 80'000").vertical().with_color(Rgb::new(0xFF, 0xFF, 0xFF)),
+        ChartRegion::new(t3, t21, 0.0, 80_000.0, "80% CHF 80'000").vertical().with_color(teal),
+        ChartRegion::new(t21, t65, 0.0, 13_058.0, "CHF 13'058").with_color(teal_l),
+        ChartRegion::new(t21, t65, 13_058.0, 34_906.0, "CHF 21'848").with_color(teal_l2),
+        ChartRegion::new(t21, tc, 34_906.0, 47_002.0, "2 × 6'048 = 12'096").with_color(blue),
+        ChartRegion::new(t21, tc, 47_002.0, 55_742.0, "2 × 4'369 = 8'739").with_color(green),
+        ChartRegion::new(t21, tc, 55_742.0, 80_000.0, "CHF 24'258").with_color(gap),
+        ChartRegion::new(tc, t65, 34_906.0, 80_000.0, "CHF 45'093").with_color(gap),
+    ];
+    let chart = region_chart(
+        regions,
+        vec![ChartTick::new(t3, "3 Mt."), ChartTick::new(t21, "21 Mt."), ChartTick::new(tc, "Children 18/25"), ChartTick::new(t65, "65 J.")],
+        100.0,
+        90_000.0,
+        vec![ChartRefLine::target(80_000.0, "CHF 80'000"), ChartRefLine::max(90_000.0, "CHF 90'000")],
+        vec![
+            ChartLegendItem::new("Daily sickness", teal),
+            ChartLegendItem::new("IV pension", teal_l),
+            ChartLegendItem::new("PK IV pension", teal_l2),
+            ChartLegendItem::new("Children", blue),
+            ChartLegendItem::new("PK children", green),
+            ChartLegendItem::new("Gap", gap),
+        ],
+    );
+    with_bracket(chart, ChartBracket::new(80_000.0, 90_000.0, "Max insured 90'000"))
+}
+
 fn profile_screen(model: &Model) -> Widget {
     let pct = (completeness(model) * 100.0).round() as u32;
     column(vec![
@@ -875,6 +918,15 @@ fn profile_screen(model: &Model) -> Widget {
                 caption(if model.saved_note.is_empty() { "Saved note appears here.".to_string() } else { format!("Saved: {}", model.saved_note) }),
                 divider(),
                 bt_section(model),
+            ]),
+            CardStyle::Outlined,
+        ),
+        // RegionChart showcase — a variable-width "coverage-gap" chart.
+        card(
+            column(vec![
+                emphasis("Coverage"),
+                caption("Income protection across your career (a RegionChart)."),
+                coverage_chart(),
             ]),
             CardStyle::Outlined,
         ),

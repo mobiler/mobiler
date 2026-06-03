@@ -78,6 +78,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .chart(let series, let labels, let style, let axis, let legend):
         return AnyView(ChartView(series: series, labels: labels, style: style, axis: axis, legend: legend))
 
+    case .regionChart(let regions, let ticks, let xMax, let yMax, let refLines, let bracket, let legend):
+        return AnyView(RegionChartView(regions: regions, ticks: ticks, xMax: xMax, yMax: yMax, refLines: refLines, bracket: bracket, legend: legend))
+
     case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
         return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
 
@@ -514,6 +517,122 @@ private struct ChartView: View {
                 }
             }
         }
+    }
+}
+
+// Variable-width stacked-region / coverage-gap chart: absolute-positioned region rectangles in the
+// [0,xMax]×[0,yMax] plane + ref lines/chips + irregular x-ticks + optional right bracket + legend.
+// The iOS twin of mobiler-web's region_chart_view. Non-interactive.
+private struct RegionChartView: View {
+    let regions: [ChartRegion]
+    let ticks: [ChartTick]
+    let xMax: Float
+    let yMax: Float
+    let refLines: [ChartRefLine]
+    let bracket: ChartBracket?
+    let legend: [ChartLegendItem]
+
+    private func color(_ i: Int) -> Color {
+        if i < regions.count, let c = regions[i].color {
+            return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+        }
+        return chartPalette[i % chartPalette.count]
+    }
+    private func fmtTick(_ v: Float) -> String {
+        abs(v - v.rounded()) < 0.05 ? "\(Int(v))" : String(format: "%.1f", v)
+    }
+
+    var body: some View {
+        let xm = max(xMax, 1e-6)
+        let ym = max(yMax, 1e-6)
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                VStack {
+                    Text(fmtTick(ym)).font(.caption2).foregroundColor(.secondary)
+                    Spacer()
+                    Text(fmtTick(ym * 0.75)).font(.caption2).foregroundColor(.secondary)
+                    Spacer()
+                    Text(fmtTick(ym * 0.5)).font(.caption2).foregroundColor(.secondary)
+                    Spacer()
+                    Text(fmtTick(ym * 0.25)).font(.caption2).foregroundColor(.secondary)
+                    Spacer()
+                    Text(fmtTick(0)).font(.caption2).foregroundColor(.secondary)
+                }.frame(height: 300)
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    let h = geo.size.height
+                    ZStack(alignment: .topLeading) {
+                        ForEach(Array(regions.enumerated()), id: \.offset) { i, r in
+                            let rw = w * CGFloat((r.x1 - r.x0) / xm)
+                            let rh = h * CGFloat((r.y1 - r.y0) / ym)
+                            let rx = w * CGFloat(r.x0 / xm)
+                            let ry = h * CGFloat(1 - r.y1 / ym)
+                            ZStack {
+                                Rectangle().fill(color(i))
+                                    .overlay(Rectangle().stroke(Color.white.opacity(0.4), lineWidth: 0.5))
+                                if !r.label.isEmpty {
+                                    Text(r.label).font(.caption2).foregroundColor(Color(white: 0.1))
+                                        .multilineTextAlignment(.center)
+                                        .rotationEffect(r.vertical ? .degrees(-90) : .degrees(0))
+                                        .fixedSize()
+                                }
+                            }.frame(width: rw, height: rh).position(x: rx + rw / 2, y: ry + rh / 2)
+                        }
+                        Canvas { ctx, size in
+                            for rl in refLines {
+                                let y = size.height * CGFloat(1 - rl.value / ym)
+                                var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y))
+                                let style = rl.dashed ? StrokeStyle(lineWidth: 2, dash: [6, 5]) : StrokeStyle(lineWidth: 2)
+                                ctx.stroke(p, with: .color(Color(red: 0.75, green: 0.22, blue: 0.17)), style: style)
+                            }
+                            if let b = bracket {
+                                let yt = size.height * CGFloat(1 - b.y1 / ym)
+                                let yb = size.height * CGFloat(1 - b.y0 / ym)
+                                let x = size.width - 2
+                                var p = Path()
+                                p.move(to: CGPoint(x: x, y: yt)); p.addLine(to: CGPoint(x: x, y: yb))
+                                p.move(to: CGPoint(x: x, y: yt)); p.addLine(to: CGPoint(x: x - 6, y: yt))
+                                p.move(to: CGPoint(x: x, y: yb)); p.addLine(to: CGPoint(x: x - 6, y: yb))
+                                ctx.stroke(p, with: .color(.gray), lineWidth: 2)
+                            }
+                        }
+                        ForEach(Array(refLines.enumerated()), id: \.offset) { _, rl in
+                            let y = h * CGFloat(1 - rl.value / ym)
+                            Text(rl.label).font(.caption2).foregroundColor(Color(white: 0.1))
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color(UIColor.systemBackground)))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary, lineWidth: 0.5))
+                                .fixedSize()
+                                .position(x: w - 40, y: y)
+                        }
+                    }
+                }.frame(height: 300)
+            }
+            GeometryReader { geo in
+                ForEach(Array(ticks.enumerated()), id: \.offset) { _, t in
+                    Text(t.label).font(.caption2).foregroundColor(.secondary).fixedSize()
+                        .position(x: geo.size.width * CGFloat(t.at / xm), y: 8)
+                }
+            }.frame(height: 16)
+            if !legend.isEmpty {
+                let rows = (legend.count + 2) / 3
+                VStack(spacing: 2) {
+                    ForEach(0 ..< rows, id: \.self) { row in
+                        HStack(spacing: 12) {
+                            ForEach(Array((row * 3) ..< min(row * 3 + 3, legend.count)), id: \.self) { idx in
+                                let li = legend[idx]
+                                HStack(spacing: 4) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color(red: Double(li.color.r) / 255, green: Double(li.color.g) / 255, blue: Double(li.color.b) / 255))
+                                        .frame(width: 10, height: 10)
+                                    Text(li.label).font(.caption2).foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }.padding(.vertical, 4)
     }
 }
 

@@ -41,6 +41,9 @@ pub type App = MobilerShell<Counter>;
   ABI; the generic shell fulfils them natively on Android, iOS, and the web.
 - **Navigation** — a core-owned `Nav<Route>` stack + `nav_scaffold`.
 - **Theme-as-data** — dark mode etc. flow through the `Widget` tree.
+- **Charts** — typed builders for data viz: `bar_chart`/`line_chart`, multi-series
+  `chart`/`stacked_bar_chart`/`pct_stacked_bar_chart`, `pie_chart`/`donut_chart`, fitness-style
+  `rings_chart`, a `gauge_chart`, and `region_chart` (variable-width coverage-gap bands).
 
 Most users go through the [`mobiler`](https://crates.io/crates/mobiler) CLI, which
 scaffolds a project wired to this crate and a generic native shell.

@@ -111,6 +111,118 @@ impl ChartSeries {
     }
 }
 
+// ----------------------------- region chart -----------------------------
+//
+// A [`Widget::RegionChart`] is a variable-width stacked-region ("Marimekko" / coverage-gap)
+// chart: arbitrary colored rectangles placed in a 2-D `[0, x_max] × [0, y_max]` plane, each with
+// an in-cell label, plus horizontal reference lines, an irregular x-axis, an optional right-side
+// bracket annotation, and a legend. The app computes the geometry; the shells map domain→pixels.
+
+/// One rectangle in a [`Widget::RegionChart`], spanning `[x0, x1]` horizontally and `[y0, y1]`
+/// vertically in the chart's domain. `label` is centered inside (empty = none); `vertical` rotates
+/// it 90° for narrow columns. `color` overrides the auto-assigned palette slot.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct ChartRegion {
+    pub x0: f32,
+    pub x1: f32,
+    pub y0: f32,
+    pub y1: f32,
+    pub color: Option<Rgb>,
+    pub label: String,
+    pub vertical: bool,
+}
+
+/// A horizontal reference line across a [`Widget::RegionChart`] at `value`, with a right-edge
+/// `label` chip. `dashed` draws it dashed (e.g. a "max insured" ceiling) vs solid (a target).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct ChartRefLine {
+    pub value: f32,
+    pub label: String,
+    pub dashed: bool,
+}
+
+/// A right-side bracket annotation spanning `[y0, y1]` with a `label` note (e.g. a ceiling band).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct ChartBracket {
+    pub y0: f32,
+    pub y1: f32,
+    pub label: String,
+}
+
+/// An x-axis tick on a [`Widget::RegionChart`] at domain position `at`, labelled `label`. Ticks
+/// are irregular (the app places them), so shells position them by fraction, not even spacing.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct ChartTick {
+    pub at: f32,
+    pub label: String,
+}
+
+/// One legend entry (swatch + name) for a [`Widget::RegionChart`].
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct ChartLegendItem {
+    pub label: String,
+    pub color: Rgb,
+}
+
+impl ChartRegion {
+    /// A region spanning `[x0,x1] × [y0,y1]` with a centered `label` (palette color, horizontal).
+    #[must_use]
+    pub fn new(x0: f32, x1: f32, y0: f32, y1: f32, label: impl Into<String>) -> Self {
+        Self { x0, x1, y0, y1, color: None, label: label.into(), vertical: false }
+    }
+    /// Override the fill color.
+    #[must_use]
+    pub fn with_color(mut self, color: Rgb) -> Self {
+        self.color = Some(color);
+        self
+    }
+    /// Render the label rotated 90° (for tall, narrow regions).
+    #[must_use]
+    pub fn vertical(mut self) -> Self {
+        self.vertical = true;
+        self
+    }
+}
+
+impl ChartRefLine {
+    /// A solid target line at `value` with a right-edge chip.
+    #[must_use]
+    pub fn target(value: f32, label: impl Into<String>) -> Self {
+        Self { value, label: label.into(), dashed: false }
+    }
+    /// A dashed "max"/ceiling line at `value`.
+    #[must_use]
+    pub fn max(value: f32, label: impl Into<String>) -> Self {
+        Self { value, label: label.into(), dashed: true }
+    }
+}
+
+impl ChartTick {
+    #[must_use]
+    pub fn new(at: f32, label: impl Into<String>) -> Self {
+        Self { at, label: label.into() }
+    }
+}
+
+impl ChartLegendItem {
+    #[must_use]
+    pub fn new(label: impl Into<String>, color: Rgb) -> Self {
+        Self { label: label.into(), color }
+    }
+}
+
+impl ChartBracket {
+    #[must_use]
+    pub fn new(y0: f32, y1: f32, label: impl Into<String>) -> Self {
+        Self { y0, y1, label: label.into() }
+    }
+}
+
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum Spacing { Xs, Sm, Md, Lg, Xl }
@@ -290,6 +402,20 @@ pub enum Widget {
     /// `labels` (optional) annotate the x-axis for cartesian styles. `axis` shows y gridlines +
     /// tick values (cartesian only); `legend` shows a series swatch+name row. Non-interactive.
     Chart { series: Vec<ChartSeries>, labels: Vec<String>, style: ChartStyle, axis: bool, legend: bool },
+    /// A variable-width stacked-region ("Marimekko" / coverage-gap) chart: `regions` are arbitrary
+    /// colored rectangles in the `[0, x_max] × [0, y_max]` plane (each with an in-cell label),
+    /// `ticks` annotate the irregular x-axis, `ref_lines` are horizontal target/max lines with
+    /// right-edge chips, `bracket` is an optional right-side range annotation, and `legend` names
+    /// the colors. The app supplies all geometry; shells map domain→pixels. Non-interactive.
+    RegionChart {
+        regions: Vec<ChartRegion>,
+        ticks: Vec<ChartTick>,
+        x_max: f32,
+        y_max: f32,
+        ref_lines: Vec<ChartRefLine>,
+        bracket: Option<ChartBracket>,
+        legend: Vec<ChartLegendItem>,
+    },
     /// An inline month calendar. `first_weekday` is the weekday of day 1 (0=Sun..6=Sat) so the
     /// shells render leading blanks without date math; `on_day[d-1]` fires when day `d` is tapped
     /// (length = days in the month). `selected` highlights a day.
@@ -390,6 +516,16 @@ mod tests {
             style: ChartStyle::Bar,
             axis: true,
             legend: false,
+        });
+        round_trips(&Widget::RegionChart {
+            regions: vec![ChartRegion::new(0.0, 3.0, 0.0, 80.0, "80%").vertical(),
+                          ChartRegion::new(3.0, 21.0, 0.0, 80.0, "CHF 80'000").with_color(Rgb::new(0x8E, 0xC6, 0xBA))],
+            ticks: vec![ChartTick { at: 3.0, label: "3 Mt.".to_string() }, ChartTick { at: 65.0, label: "65 J.".to_string() }],
+            x_max: 65.0,
+            y_max: 80.0,
+            ref_lines: vec![ChartRefLine { value: 80.0, label: "CHF 80'000".to_string(), dashed: false }],
+            bracket: Some(ChartBracket { y0: 60.0, y1: 80.0, label: "Ceiling".to_string() }),
+            legend: vec![ChartLegendItem { label: "Gap".to_string(), color: Rgb::new(0x5A, 0x7D, 0x9A) }],
         });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
         round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });

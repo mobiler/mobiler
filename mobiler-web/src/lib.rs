@@ -20,7 +20,8 @@ use std::sync::Arc;
 use crux_core::{App, Core};
 use leptos::prelude::*;
 use mobiler_core::{
-    Action, BoxAlign, ButtonStyle, CardStyle, ChartSeries, ChartStyle, Corner, Density, Effect, FontFamily, Icon,
+    Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, ProjectColor,
     Rgb, Spacing, TextStyle, Theme, Tone, Widget,
 };
@@ -411,6 +412,9 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         Widget::Skeleton => view! { <div class="skeleton"></div> }.into_any(),
         Widget::Chart { series, labels, style, axis, legend } => {
             chart_view(series, labels, *style, *axis, *legend)
+        }
+        Widget::RegionChart { regions, ticks, x_max, y_max, ref_lines, bracket, legend } => {
+            region_chart_view(regions, ticks, *x_max, *y_max, ref_lines, bracket, legend)
         }
         Widget::Calendar { year, month, first_weekday, selected, on_day } => {
             const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June",
@@ -1160,4 +1164,91 @@ fn chart_view(series: &[ChartSeries], labels: &[String], style: ChartStyle, axis
     };
 
     view! { <div class="chart">{plot}{label_row}{legend_row}</div> }.into_any()
+}
+
+// --------------------------- region chart ---------------------------
+
+fn region_color(i: usize, r: &ChartRegion) -> String {
+    match r.color {
+        Some(c) => hex(c),
+        None => CHART_PALETTE[i % CHART_PALETTE.len()].to_string(),
+    }
+}
+
+// A variable-width stacked-region / coverage-gap chart: absolute-positioned region rectangles in
+// the [0,x_max]×[0,y_max] plane, horizontal ref lines + chips, an irregular x-axis, an optional
+// right-side bracket, and a legend. The web twin of the Compose/SwiftUI RegionChart renderers.
+fn region_chart_view(
+    regions: &[ChartRegion],
+    ticks: &[ChartTick],
+    x_max: f32,
+    y_max: f32,
+    ref_lines: &[ChartRefLine],
+    bracket: &Option<ChartBracket>,
+    legend: &[ChartLegendItem],
+) -> AnyView {
+    let xm = x_max.max(1e-6);
+    let ym = y_max.max(1e-6);
+
+    let region_divs: Vec<_> = regions.iter().enumerate().map(|(i, r)| {
+        let left = (r.x0 / xm * 100.0).clamp(0.0, 100.0);
+        let width = ((r.x1 - r.x0) / xm * 100.0).clamp(0.0, 100.0);
+        let bottom = (r.y0 / ym * 100.0).clamp(0.0, 100.0);
+        let height = ((r.y1 - r.y0) / ym * 100.0).clamp(0.0, 100.0);
+        let style = format!("left:{left:.3}%;width:{width:.3}%;bottom:{bottom:.3}%;height:{height:.3}%;background:{}", region_color(i, r));
+        let label_class = if r.vertical { "rchart-label rchart-label-v" } else { "rchart-label" };
+        let label = r.label.clone();
+        view! { <div class="rchart-region" style=style><span class=label_class>{label}</span></div> }
+    }).collect();
+
+    let ref_divs: Vec<_> = ref_lines.iter().map(|rl| {
+        let style = format!("bottom:{:.3}%", (rl.value / ym * 100.0).clamp(0.0, 100.0));
+        let cls = if rl.dashed { "rchart-refline rchart-refline-dashed" } else { "rchart-refline" };
+        let label = rl.label.clone();
+        view! {
+            <div class=cls style=style.clone()></div>
+            <div class="rchart-chip" style=style>{label}</div>
+        }
+    }).collect();
+
+    let bracket_div = bracket.as_ref().map(|b| {
+        let bottom = (b.y0 / ym * 100.0).clamp(0.0, 100.0);
+        let height = ((b.y1 - b.y0) / ym * 100.0).clamp(0.0, 100.0);
+        let style = format!("bottom:{bottom:.3}%;height:{height:.3}%");
+        let label = b.label.clone();
+        view! { <div class="rchart-bracket" style=style><span>{label}</span></div> }
+    });
+
+    let yticks: Vec<_> = (0..=4).rev().map(|k| {
+        let v = ym * k as f32 / 4.0;
+        view! { <span class="chart-tick">{fmt_tick(v)}</span> }
+    }).collect();
+
+    let xticks: Vec<_> = ticks.iter().map(|t| {
+        let style = format!("left:{:.3}%", (t.at / xm * 100.0).clamp(0.0, 100.0));
+        let label = t.label.clone();
+        view! { <span class="rchart-xtick" style=style>{label}</span> }
+    }).collect();
+
+    let legend_row = if legend.is_empty() {
+        None
+    } else {
+        let items: Vec<_> = legend.iter().map(|l| {
+            let sw = format!("background:{}", hex(l.color));
+            let name = l.label.clone();
+            view! { <span class="chart-legend-item"><span class="chart-swatch" style=sw></span>{name}</span> }
+        }).collect();
+        Some(view! { <div class="chart-legend">{items}</div> })
+    };
+
+    view! {
+        <div class="rchart">
+            <div class="rchart-row">
+                <div class="rchart-yaxis">{yticks}</div>
+                <div class="rchart-plot">{region_divs}{ref_divs}{bracket_div}</div>
+            </div>
+            <div class="rchart-xaxis">{xticks}</div>
+            {legend_row}
+        </div>
+    }.into_any()
 }
