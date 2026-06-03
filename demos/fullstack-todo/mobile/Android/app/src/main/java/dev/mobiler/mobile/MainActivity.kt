@@ -485,6 +485,9 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 val c = widget.regions.getOrNull(i)?.color
                 return if (c != null) Color(c.r.toInt(), c.g.toInt(), c.b.toInt()) else palette[i % palette.size]
             }
+            // Black or white label text, whichever reads on the band's fill (perceived luminance).
+            fun textOn(c: Color): Color =
+                if (0.299f * c.red + 0.587f * c.green + 0.114f * c.blue > 0.55f) Color(0xFF1A1A1A) else Color(0xFFF5F5F5)
             fun fmtTick(v: Float): String =
                 if (kotlin.math.abs(v - kotlin.math.round(v)) < 0.05f) "${v.toInt()}" else "%.1f".format(v)
             val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -518,7 +521,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         Text(
                                             r.label,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF1A1A1A),
+                                            color = textOn(regionColor(i)),
                                             textAlign = TextAlign.Center,
                                             maxLines = 2,
                                             modifier = if (r.vertical) Modifier.rotate(-90f) else Modifier,
@@ -549,8 +552,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color(0xFF1A1A1A),
                                         modifier = Modifier
-                                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
-                                            .border(0.5.dp, labelColor, RoundedCornerShape(4.dp))
+                                            .background(Color.White, RoundedCornerShape(4.dp))
+                                            .border(0.5.dp, Color(0x33000000), RoundedCornerShape(4.dp))
                                             .padding(horizontal = 4.dp, vertical = 1.dp),
                                     )
                                 }
