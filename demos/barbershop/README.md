@@ -9,9 +9,9 @@ tree, no per-platform UI code.
 |:---:|:---:|:---:|:---:|
 | <img src="screenshots/home.png" width="200" alt="Fade House home on web"> | <img src="screenshots/ios-home.png" width="200" alt="Fade House home on iOS"> | <img src="screenshots/booking-sheet.png" width="200" alt="Fade House booking sheet"> | <img src="screenshots/profile.png" width="200" alt="Fade House profile — Progress bar, capability plugins, Skeleton placeholders"> |
 
-| Bookings — Chart · Calendar · SwipeAction · pull-to-refresh |
+| Bookings — multi-series Charts (stacked bar · donut · gauge · rings) · Calendar · SwipeAction · pull-to-refresh |
 |:---:|
-| <img src="screenshots/bookings.png" width="240" alt="Fade House bookings — bar chart, inline calendar, swipe-to-cancel rows, pull-to-refresh"> |
+| <img src="screenshots/bookings.png" width="240" alt="Fade House bookings — a stacked-bar chart with y-axis + legend, a service-mix donut, a today's-target gauge, weekly-goal rings, inline calendar, swipe-to-cancel rows, pull-to-refresh"> |
 
 What it exercises:
 
@@ -26,9 +26,10 @@ What it exercises:
 Later vocabulary phases extend it: a search bar + category carousel, segmented filters, star
 ratings, avatars, a booking bottom sheet, and a native date/time picker.
 
-The **Bookings** tab showcases the heavier widgets: a bar **`Chart`** ("this week"), an inline
-month **`Calendar`** (tap a day), **`SwipeAction`** rows (swipe a booking to reveal *Cancel*), and
-**pull-to-refresh** on the tab (`Scaffold.on_refresh`/`refreshing`).
+The **Bookings** tab showcases the heavier widgets: multi-series **`Chart`**s — a stacked bar with
+y-axis + legend ("this week", split by barber), a service-mix **donut**, a today's-target **gauge**,
+and weekly-goal **rings** — plus an inline month **`Calendar`** (tap a day), **`SwipeAction`** rows
+(swipe a booking to reveal *Cancel*), and **pull-to-refresh** (`Scaffold.on_refresh`/`refreshing`).
 
 The **Profile** tab showcases the newer widgets + free bundled plugins (native only): a
 determinate **`Progress`** bar ("profile completeness"), **`Skeleton`** shimmer placeholders,
