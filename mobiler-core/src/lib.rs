@@ -17,7 +17,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, CardStyle, ChartStyle, Corner, Density, Fab, FontFamily, Icon,
+    Action, BoxAlign, ButtonStyle, CardStyle, ChartSeries, ChartStyle, Corner, Density, Fab, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, Widget,
 };
@@ -409,15 +409,60 @@ pub fn progress(value: Option<f32>) -> Widget { Widget::Progress { value } }
 /// A shimmer placeholder shown while content loads.
 #[must_use]
 pub fn skeleton() -> Widget { Widget::Skeleton }
+/// A single unnamed series wrapping `values` — the back-compat shape for `bar_chart`/`line_chart`.
+fn one_series(values: Vec<f32>) -> Vec<ChartSeries> {
+    vec![ChartSeries { name: String::new(), values, color: None, goal: None }]
+}
+
 /// A bar chart of `values` (normalized to the max), with optional per-value `labels`.
+/// Single-series, no axis or legend — for richer charts use [`chart`].
 #[must_use]
 pub fn bar_chart(values: Vec<f32>, labels: Vec<String>) -> Widget {
-    Widget::Chart { values, labels, style: ChartStyle::Bar }
+    Widget::Chart { series: one_series(values), labels, style: ChartStyle::Bar, axis: false, legend: false }
 }
 /// A line chart of `values` (normalized to the max), with optional per-value `labels`.
+/// Single-series, no axis or legend — for richer charts use [`chart`].
 #[must_use]
 pub fn line_chart(values: Vec<f32>, labels: Vec<String>) -> Widget {
-    Widget::Chart { values, labels, style: ChartStyle::Line }
+    Widget::Chart { series: one_series(values), labels, style: ChartStyle::Line, axis: false, legend: false }
+}
+/// A multi-series chart in the given `style`, with optional x-axis `labels`, y-`axis` gridlines/
+/// ticks (cartesian styles), and a series `legend`. The general builder behind the convenience
+/// constructors below.
+#[must_use]
+pub fn chart(series: Vec<ChartSeries>, labels: Vec<String>, style: ChartStyle, axis: bool, legend: bool) -> Widget {
+    Widget::Chart { series, labels, style, axis, legend }
+}
+/// Bars stacked to a total per x-slot. Axis + legend on by default.
+#[must_use]
+pub fn stacked_bar_chart(series: Vec<ChartSeries>, labels: Vec<String>) -> Widget {
+    chart(series, labels, ChartStyle::StackedBar, true, true)
+}
+/// Bars where each x-slot fills to 100% — series as proportions. Legend on, no value axis.
+#[must_use]
+pub fn pct_stacked_bar_chart(series: Vec<ChartSeries>, labels: Vec<String>) -> Widget {
+    chart(series, labels, ChartStyle::StackedBar100, false, true)
+}
+/// A pie chart — each series is one wedge sized by its magnitude. Legend on.
+#[must_use]
+pub fn pie_chart(series: Vec<ChartSeries>) -> Widget {
+    chart(series, vec![], ChartStyle::Pie, false, true)
+}
+/// A donut chart (pie with a center hole). Legend on.
+#[must_use]
+pub fn donut_chart(series: Vec<ChartSeries>) -> Widget {
+    chart(series, vec![], ChartStyle::Donut, false, true)
+}
+/// Concentric progress rings — one per series, swept by `sum(values) / goal`. Legend on.
+/// Give each series a goal via [`ChartSeries::with_goal`].
+#[must_use]
+pub fn rings_chart(series: Vec<ChartSeries>) -> Widget {
+    chart(series, vec![], ChartStyle::Rings, false, true)
+}
+/// A single radial gauge — the first series' `value / goal` with the number in the center.
+#[must_use]
+pub fn gauge_chart(series: ChartSeries) -> Widget {
+    chart(vec![series], vec![], ChartStyle::Gauge, false, false)
 }
 
 /// Days in `month` (1–12) of `year`, leap-year aware.
@@ -958,8 +1003,10 @@ mod tests {
         assert!(matches!(column(vec![]), Widget::Column { children } if children.is_empty()));
         assert!(matches!(grid(vec![text("a"), text("b")]), Widget::Grid { children } if children.len() == 2));
         assert!(matches!(divider(), Widget::Divider));
-        assert!(matches!(bar_chart(vec![1.0, 2.0], vec![]), Widget::Chart { style: ChartStyle::Bar, values, .. } if values.len() == 2));
+        assert!(matches!(bar_chart(vec![1.0, 2.0], vec![]), Widget::Chart { style: ChartStyle::Bar, series, .. } if series[0].values.len() == 2));
         assert!(matches!(line_chart(vec![1.0], vec![]), Widget::Chart { style: ChartStyle::Line, .. }));
+        assert!(matches!(donut_chart(vec![ChartSeries::new("a", vec![1.0])]), Widget::Chart { style: ChartStyle::Donut, legend: true, .. }));
+        assert!(matches!(gauge_chart(ChartSeries::new("g", vec![3.0]).with_goal(5.0)), Widget::Chart { style: ChartStyle::Gauge, series, .. } if series[0].goal == Some(5.0)));
         // June 2026 has 30 days and starts on a Monday (weekday 1).
         assert!(matches!(
             calendar(2026, 6, Some(3), |d| Ev::Open(u32::from(d))),

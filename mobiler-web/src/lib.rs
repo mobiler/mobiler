@@ -20,9 +20,9 @@ use std::sync::Arc;
 use crux_core::{App, Core};
 use leptos::prelude::*;
 use mobiler_core::{
-    Action, BoxAlign, ButtonStyle, CardStyle, ChartStyle, Corner, Density, Effect, FontFamily, Icon,
+    Action, BoxAlign, ButtonStyle, CardStyle, ChartSeries, ChartStyle, Corner, Density, Effect, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, ProjectColor,
-    Spacing, TextStyle, Theme, Tone, Widget,
+    Rgb, Spacing, TextStyle, Theme, Tone, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -409,37 +409,8 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             None => view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> }.into_any(),
         },
         Widget::Skeleton => view! { <div class="skeleton"></div> }.into_any(),
-        Widget::Chart { values, labels, style } => {
-            let max = values.iter().copied().fold(0.0_f32, f32::max).max(1e-6);
-            let n = values.len().max(1);
-            let label_row = if labels.is_empty() {
-                None
-            } else {
-                let items: Vec<_> = labels.iter().map(|l| view! { <span class="chart-label">{l.clone()}</span> }).collect();
-                Some(view! { <div class="chart-labels">{items}</div> })
-            };
-            let svg = match style {
-                ChartStyle::Bar => {
-                    let bw = 100.0 / n as f32;
-                    let bars: Vec<_> = values.iter().enumerate().map(|(i, v)| {
-                        let h = (v / max).clamp(0.0, 1.0) * 48.0;
-                        let x = i as f32 * bw + bw * 0.15;
-                        let w = bw * 0.7;
-                        let y = 50.0 - h;
-                        view! { <rect x=format!("{x}") y=format!("{y}") width=format!("{w}") height=format!("{h}") class="chart-bar"></rect> }
-                    }).collect();
-                    view! { <svg viewBox="0 0 100 50" preserveAspectRatio="none" class="chart-svg">{bars}</svg> }.into_any()
-                }
-                ChartStyle::Line => {
-                    let pts = values.iter().enumerate().map(|(i, v)| {
-                        let x = if n == 1 { 50.0 } else { i as f32 * (100.0 / (n as f32 - 1.0)) };
-                        let y = 50.0 - (v / max).clamp(0.0, 1.0) * 48.0;
-                        format!("{x},{y}")
-                    }).collect::<Vec<_>>().join(" ");
-                    view! { <svg viewBox="0 0 100 50" preserveAspectRatio="none" class="chart-svg"><polyline points=pts class="chart-line"></polyline></svg> }.into_any()
-                }
-            };
-            view! { <div class="chart">{svg}{label_row}</div> }.into_any()
+        Widget::Chart { series, labels, style, axis, legend } => {
+            chart_view(series, labels, *style, *axis, *legend)
         }
         Widget::Calendar { year, month, first_weekday, selected, on_day } => {
             const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June",
@@ -968,4 +939,225 @@ fn align_class(a: BoxAlign) -> &'static str {
         BoxAlign::BottomCenter => "align-bottom-center",
         BoxAlign::BottomEnd => "align-bottom-end",
     }
+}
+
+// ------------------------------- charts -------------------------------
+
+/// Distinct fallback colors for series 1.. (series 0 with no override rides the theme accent).
+const CHART_PALETTE: [&str; 6] = ["#E0772C", "#2EA06A", "#C0466B", "#8A5CC0", "#C9A227", "#3FA7D6"];
+
+fn hex(c: Rgb) -> String {
+    format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+}
+
+/// Color for series `i`: explicit override → theme accent (i==0) → palette.
+fn chart_color(i: usize, s: &ChartSeries) -> String {
+    match s.color {
+        Some(c) => hex(c),
+        None if i == 0 => "var(--accent, #5C6BC0)".to_string(),
+        None => CHART_PALETTE[(i - 1) % CHART_PALETTE.len()].to_string(),
+    }
+}
+
+/// A series' single magnitude for circular charts (sum of its values).
+fn chart_mag(s: &ChartSeries) -> f32 {
+    s.values.iter().copied().sum()
+}
+
+/// Point on a circle: `ang` in radians, 0 = top (12 o'clock), increasing clockwise.
+fn polar(cx: f32, cy: f32, r: f32, ang: f32) -> (f32, f32) {
+    (cx + r * ang.sin(), cy - r * ang.cos())
+}
+
+/// An open arc path (for ring/donut/gauge strokes).
+fn arc_path(cx: f32, cy: f32, r: f32, a0: f32, a1: f32) -> String {
+    let (x0, y0) = polar(cx, cy, r, a0);
+    let (x1, y1) = polar(cx, cy, r, a1);
+    let large = if (a1 - a0).abs() > std::f32::consts::PI { 1 } else { 0 };
+    format!("M {x0:.2} {y0:.2} A {r:.2} {r:.2} 0 {large} 1 {x1:.2} {y1:.2}")
+}
+
+/// A filled wedge from the center (for pie/donut slices).
+fn wedge_path(cx: f32, cy: f32, r: f32, a0: f32, a1: f32) -> String {
+    let (x0, y0) = polar(cx, cy, r, a0);
+    let (x1, y1) = polar(cx, cy, r, a1);
+    let large = if (a1 - a0).abs() > std::f32::consts::PI { 1 } else { 0 };
+    format!("M {cx:.2} {cy:.2} L {x0:.2} {y0:.2} A {r:.2} {r:.2} 0 {large} 1 {x1:.2} {y1:.2} Z")
+}
+
+fn fmt_tick(v: f32) -> String {
+    if (v - v.round()).abs() < 0.05 { format!("{}", v.round() as i64) } else { format!("{v:.1}") }
+}
+
+fn is_cartesian(style: ChartStyle) -> bool {
+    matches!(style, ChartStyle::Bar | ChartStyle::Line | ChartStyle::StackedBar | ChartStyle::StackedBar100)
+}
+
+/// The y-axis denominator for a cartesian chart.
+fn cartesian_max(series: &[ChartSeries], style: ChartStyle, nslots: usize) -> f32 {
+    match style {
+        ChartStyle::StackedBar => (0..nslots)
+            .map(|j| series.iter().map(|s| *s.values.get(j).unwrap_or(&0.0)).sum::<f32>())
+            .fold(0.0, f32::max)
+            .max(1e-6),
+        ChartStyle::StackedBar100 => 1.0,
+        _ => series.iter().flat_map(|s| s.values.iter().copied()).fold(0.0, f32::max).max(1e-6),
+    }
+}
+
+fn cartesian_svg(series: &[ChartSeries], style: ChartStyle, axis: bool, max: f32, nslots: usize) -> AnyView {
+    // plot area: y in [2, 48] of the 0..50 viewBox
+    let mut nodes: Vec<AnyView> = Vec::new();
+    if axis {
+        for k in 0..=4 {
+            let y = 2.0 + k as f32 * (46.0 / 4.0);
+            nodes.push(view! { <line x1="0" y1=format!("{y:.2}") x2="100" y2=format!("{y:.2}") class="chart-gridline"></line> }.into_any());
+        }
+    }
+    match style {
+        ChartStyle::Line => {
+            for (i, s) in series.iter().enumerate() {
+                let n = s.values.len().max(1);
+                let pts = s.values.iter().enumerate().map(|(j, v)| {
+                    let x = if n == 1 { 50.0 } else { j as f32 * (100.0 / (n as f32 - 1.0)) };
+                    let y = 2.0 + (1.0 - (v / max).clamp(0.0, 1.0)) * 46.0;
+                    format!("{x:.2},{y:.2}")
+                }).collect::<Vec<_>>().join(" ");
+                let st = format!("fill:none;stroke:{};stroke-width:1.5;vector-effect:non-scaling-stroke", chart_color(i, s));
+                nodes.push(view! { <polyline points=pts style=st></polyline> }.into_any());
+            }
+        }
+        ChartStyle::Bar => {
+            let sw = 100.0 / nslots as f32;
+            let ns = series.len().max(1);
+            for (i, s) in series.iter().enumerate() {
+                let st = format!("fill:{}", chart_color(i, s));
+                for (j, v) in s.values.iter().enumerate() {
+                    let h = (v / max).clamp(0.0, 1.0) * 46.0;
+                    let bw = sw * 0.8 / ns as f32;
+                    let x = j as f32 * sw + sw * 0.1 + i as f32 * bw;
+                    let y = 48.0 - h;
+                    nodes.push(view! { <rect x=format!("{x:.2}") y=format!("{y:.2}") width=format!("{bw:.2}") height=format!("{h:.2}") style=st.clone()></rect> }.into_any());
+                }
+            }
+        }
+        ChartStyle::StackedBar | ChartStyle::StackedBar100 => {
+            let sw = 100.0 / nslots as f32;
+            for j in 0..nslots {
+                let slot_total = series.iter().map(|s| *s.values.get(j).unwrap_or(&0.0)).sum::<f32>().max(1e-6);
+                let denom = if matches!(style, ChartStyle::StackedBar100) { slot_total } else { max };
+                let mut acc = 0.0_f32;
+                for (i, s) in series.iter().enumerate() {
+                    let v = *s.values.get(j).unwrap_or(&0.0);
+                    let h = (v / denom).clamp(0.0, 1.0) * 46.0;
+                    let x = j as f32 * sw + sw * 0.15;
+                    let bw = sw * 0.7;
+                    let y = 48.0 - acc - h;
+                    let st = format!("fill:{}", chart_color(i, s));
+                    nodes.push(view! { <rect x=format!("{x:.2}") y=format!("{y:.2}") width=format!("{bw:.2}") height=format!("{h:.2}") style=st></rect> }.into_any());
+                    acc += h;
+                }
+            }
+        }
+        _ => {}
+    }
+    view! { <svg viewBox="0 0 100 50" preserveAspectRatio="none" class="chart-svg">{nodes}</svg> }.into_any()
+}
+
+fn circular_svg(series: &[ChartSeries], style: ChartStyle) -> AnyView {
+    use std::f32::consts::PI;
+    let mut nodes: Vec<AnyView> = Vec::new();
+    match style {
+        ChartStyle::Pie | ChartStyle::Donut => {
+            let total = series.iter().map(chart_mag).sum::<f32>().max(1e-6);
+            let mut a = 0.0_f32;
+            for (i, s) in series.iter().enumerate() {
+                let frac = chart_mag(s) / total;
+                let st = format!("fill:{}", chart_color(i, s));
+                if frac >= 0.999 {
+                    nodes.push(view! { <circle cx="50" cy="50" r="45" style=st></circle> }.into_any());
+                } else if frac > 0.0 {
+                    let d = wedge_path(50.0, 50.0, 45.0, a, a + frac * 2.0 * PI);
+                    nodes.push(view! { <path d=d style=st></path> }.into_any());
+                }
+                a += frac * 2.0 * PI;
+            }
+            if matches!(style, ChartStyle::Donut) {
+                nodes.push(view! { <circle cx="50" cy="50" r="24" style="fill:var(--surface, #ffffff)"></circle> }.into_any());
+            }
+        }
+        ChartStyle::Rings => {
+            let n = series.len().max(1);
+            for (i, s) in series.iter().enumerate() {
+                let r = 45.0 - i as f32 * (34.0 / n as f32);
+                let goal = s.goal.unwrap_or_else(|| chart_mag(s)).max(1e-6);
+                let prog = (chart_mag(s) / goal).clamp(0.0, 1.0);
+                nodes.push(view! { <circle cx="50" cy="50" r=format!("{r:.2}") style="fill:none;stroke:var(--border, #e6e6e6);stroke-width:6"></circle> }.into_any());
+                let st = format!("fill:none;stroke:{};stroke-width:6;stroke-linecap:round", chart_color(i, s));
+                if prog >= 0.999 {
+                    nodes.push(view! { <circle cx="50" cy="50" r=format!("{r:.2}") style=st></circle> }.into_any());
+                } else if prog > 0.0 {
+                    let d = arc_path(50.0, 50.0, r, 0.0, prog * 2.0 * PI);
+                    nodes.push(view! { <path d=d style=st></path> }.into_any());
+                }
+            }
+        }
+        ChartStyle::Gauge => {
+            let s = match series.first() { Some(s) => s, None => return view! { <svg viewBox="0 0 100 100" class="chart-svg"></svg> }.into_any() };
+            let goal = s.goal.unwrap_or_else(|| chart_mag(s)).max(1e-6);
+            let prog = (chart_mag(s) / goal).clamp(0.0, 1.0);
+            let a0 = -0.75 * PI; // 270° sweep, gap at the bottom
+            let a1 = 0.75 * PI;
+            nodes.push(view! { <path d=arc_path(50.0, 50.0, 42.0, a0, a1) style="fill:none;stroke:var(--border, #e6e6e6);stroke-width:8;stroke-linecap:round"></path> }.into_any());
+            if prog > 0.0 {
+                let st = format!("fill:none;stroke:{};stroke-width:8;stroke-linecap:round", chart_color(0, s));
+                nodes.push(view! { <path d=arc_path(50.0, 50.0, 42.0, a0, a0 + prog * 1.5 * PI) style=st></path> }.into_any());
+            }
+            let pct = format!("{}%", (prog * 100.0).round() as i64);
+            nodes.push(view! { <text x="50" y="56" style="fill:var(--fg, #222);font-size:20px;font-weight:700;text-anchor:middle">{pct}</text> }.into_any());
+        }
+        _ => {}
+    }
+    view! { <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" class="chart-svg">{nodes}</svg> }.into_any()
+}
+
+fn chart_view(series: &[ChartSeries], labels: &[String], style: ChartStyle, axis: bool, legend: bool) -> AnyView {
+    let cartesian = is_cartesian(style);
+    let nslots = series.iter().map(|s| s.values.len()).max().unwrap_or(0).max(1);
+    let max = cartesian_max(series, style, nslots);
+
+    let plot = if cartesian {
+        let svg = cartesian_svg(series, style, axis, max, nslots);
+        let yaxis = if axis {
+            let ticks: Vec<_> = [max, max / 2.0, 0.0].iter()
+                .map(|t| view! { <span class="chart-tick">{fmt_tick(*t)}</span> })
+                .collect();
+            Some(view! { <div class="chart-yaxis">{ticks}</div> })
+        } else {
+            None
+        };
+        view! { <div class="chart-plot">{yaxis}{svg}</div> }.into_any()
+    } else {
+        circular_svg(series, style).into_any()
+    };
+
+    let label_row = if cartesian && !labels.is_empty() {
+        let items: Vec<_> = labels.iter().map(|l| view! { <span class="chart-label">{l.clone()}</span> }).collect();
+        Some(view! { <div class="chart-labels">{items}</div> })
+    } else {
+        None
+    };
+
+    let legend_row = if legend {
+        let items: Vec<_> = series.iter().enumerate().map(|(i, s)| {
+            let sw = format!("background:{}", chart_color(i, s));
+            let name = s.name.clone();
+            view! { <span class="chart-legend-item"><span class="chart-swatch" style=sw></span>{name}</span> }
+        }).collect();
+        Some(view! { <div class="chart-legend">{items}</div> })
+    } else {
+        None
+    };
+
+    view! { <div class="chart">{plot}{label_row}{legend_row}</div> }.into_any()
 }

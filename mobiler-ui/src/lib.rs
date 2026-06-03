@@ -63,10 +63,53 @@ pub enum CardStyle { Elevated, Outlined, Filled, Brand }
 #[repr(C)]
 pub enum Tone { Neutral, Success, Warning, Danger, Info }
 
-/// How a `Chart` draws its values.
+/// How a `Chart` draws its series.
+///
+/// **Cartesian** styles plot every series over the shared `labels` x-axis:
+/// `Bar`/`Line` (grouped bars / one polyline per series), `StackedBar` (series stack to a total
+/// per x-slot), `StackedBar100` (each x-slot fills to 100% — series as proportions).
+///
+/// **Circular** styles ignore the x-axis and the `axis` flag: `Pie`/`Donut` turn **each series**
+/// into one wedge sized by its magnitude (`Donut` leaves a center hole); `Rings` draws concentric
+/// progress arcs (Apple-Watch fitness style), one per series, swept by `sum(values) / goal`;
+/// `Gauge` draws a single arc for the first series' `value / goal` with the number in the center.
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum ChartStyle { Bar, Line }
+pub enum ChartStyle { Bar, Line, StackedBar, StackedBar100, Pie, Donut, Rings, Gauge }
+
+/// One named data series in a [`Widget::Chart`]. Cartesian styles plot `values` across the chart's
+/// x-axis `labels`; circular styles (pie/donut/rings/gauge) collapse the series to a single
+/// magnitude (`values` summed). `color` overrides the auto-assigned palette slot; `goal` is the
+/// denominator for `Rings`/`Gauge` progress (ignored by the other styles).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct ChartSeries {
+    pub name: String,
+    pub values: Vec<f32>,
+    pub color: Option<Rgb>,
+    pub goal: Option<f32>,
+}
+
+impl ChartSeries {
+    /// A named series carrying `values`. Color falls back to the chart palette; no goal.
+    #[must_use]
+    pub fn new(name: impl Into<String>, values: Vec<f32>) -> Self {
+        Self { name: name.into(), values, color: None, goal: None }
+    }
+    /// Override the auto-assigned palette color for this series.
+    #[must_use]
+    pub fn with_color(mut self, color: Rgb) -> Self {
+        self.color = Some(color);
+        self
+    }
+    /// Set the denominator for `Rings`/`Gauge` progress (`sum(values) / goal`). Ignored by
+    /// cartesian and pie/donut styles.
+    #[must_use]
+    pub fn with_goal(mut self, goal: f32) -> Self {
+        self.goal = Some(goal);
+        self
+    }
+}
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
@@ -243,9 +286,10 @@ pub enum Widget {
     Progress { value: Option<f32> },
     /// Shimmer placeholder shown while content loads.
     Skeleton,
-    /// A simple data chart — `values` drawn as bars or a line, normalized to the max value.
-    /// `labels` (optional, one per value) annotate the x-axis. Non-interactive.
-    Chart { values: Vec<f32>, labels: Vec<String>, style: ChartStyle },
+    /// A data chart drawing one or more named `series` in the given `style` (see [`ChartStyle`]).
+    /// `labels` (optional) annotate the x-axis for cartesian styles. `axis` shows y gridlines +
+    /// tick values (cartesian only); `legend` shows a series swatch+name row. Non-interactive.
+    Chart { series: Vec<ChartSeries>, labels: Vec<String>, style: ChartStyle, axis: bool, legend: bool },
     /// An inline month calendar. `first_weekday` is the weekday of day 1 (0=Sun..6=Sat) so the
     /// shells render leading blanks without date math; `on_day[d-1]` fires when day `d` is tapped
     /// (length = days in the month). `selected` highlights a day.
@@ -340,7 +384,13 @@ mod tests {
     fn widget_round_trips() {
         round_trips(&Widget::Text { content: "hi".to_string(), style: TextStyle::Title });
         round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
-        round_trips(&Widget::Chart { values: vec![1.0, 2.5, 3.0], labels: vec!["a".to_string()], style: ChartStyle::Bar });
+        round_trips(&Widget::Chart {
+            series: vec![ChartSeries { name: "s".to_string(), values: vec![1.0, 2.5, 3.0], color: None, goal: None }],
+            labels: vec!["a".to_string()],
+            style: ChartStyle::Bar,
+            axis: true,
+            legend: false,
+        });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
         round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });
         // Un-themed scaffold (theme: None) — the default, must round-trip.

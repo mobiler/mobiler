@@ -193,13 +193,19 @@ body {
   background-size: 400% 100%; animation: mobiler-shimmer 1.4s ease infinite; }
 @keyframes mobiler-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
-/* Chart — bar / line, normalized to the max value. */
+/* Chart — multi-series bar/line/stacked + circular pie/donut/rings/gauge, with optional
+   y-axis gridlines/ticks and a series legend. */
 .chart { margin: 8px 0; }
-.chart-svg { width: 100%; height: 120px; display: block; }
-.chart-bar { fill: var(--accent, #5C6BC0); }
-.chart-line { fill: none; stroke: var(--accent, #5C6BC0); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.chart-plot { display: flex; align-items: stretch; }
+.chart-svg { width: 100%; height: 120px; display: block; flex: 1; min-width: 0; }
+.chart-yaxis { display: flex; flex-direction: column; justify-content: space-between; padding-right: 6px; height: 120px; }
+.chart-tick { font-size: 10px; color: var(--muted, #888); line-height: 1; }
+.chart-gridline { stroke: var(--border, #e6e6e6); stroke-width: 0.5; vector-effect: non-scaling-stroke; }
 .chart-labels { display: flex; justify-content: space-between; margin-top: 4px; }
 .chart-label { font-size: 11px; color: var(--muted, #888); flex: 1; text-align: center; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; justify-content: center; }
+.chart-legend-item { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted, #888); }
+.chart-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 
 /* Inline month calendar. */
 .calendar { margin: 8px 0; }
