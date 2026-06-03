@@ -335,6 +335,12 @@ private let chartPalette: [Color] = [
     Color(red: 63.0 / 255, green: 167.0 / 255, blue: 214.0 / 255),
 ]
 
+// Palette as RGB (parallel to chartPalette) so RegionChart can compute per-band label contrast.
+private let regionPaletteRGB: [(Double, Double, Double)] = [
+    (224.0 / 255, 119.0 / 255, 44.0 / 255), (46.0 / 255, 160.0 / 255, 106.0 / 255), (192.0 / 255, 70.0 / 255, 107.0 / 255),
+    (138.0 / 255, 92.0 / 255, 192.0 / 255), (201.0 / 255, 162.0 / 255, 39.0 / 255), (63.0 / 255, 167.0 / 255, 214.0 / 255),
+]
+
 // Multi-series chart: cartesian (bar/line/stacked) with optional y-axis + legend, or circular
 // (pie/donut/rings/gauge). Drawn with SwiftUI Canvas; the iOS twin of the Compose Chart arm and
 // mobiler-web's chart_view. Non-interactive.
@@ -532,11 +538,20 @@ private struct RegionChartView: View {
     let bracket: ChartBracket?
     let legend: [ChartLegendItem]
 
-    private func color(_ i: Int) -> Color {
+    private func rgbOf(_ i: Int) -> (Double, Double, Double) {
         if i < regions.count, let c = regions[i].color {
-            return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+            return (Double(c.r) / 255, Double(c.g) / 255, Double(c.b) / 255)
         }
-        return chartPalette[i % chartPalette.count]
+        return regionPaletteRGB[i % regionPaletteRGB.count]
+    }
+    private func color(_ i: Int) -> Color {
+        let (r, g, b) = rgbOf(i)
+        return Color(red: r, green: g, blue: b)
+    }
+    // Black or white label text, whichever reads on the band's fill (perceived luminance).
+    private func textOn(_ i: Int) -> Color {
+        let (r, g, b) = rgbOf(i)
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 0.55 ? Color(white: 0.1) : Color(white: 0.96)
     }
     private func fmtTick(_ v: Float) -> String {
         abs(v - v.rounded()) < 0.05 ? "\(Int(v))" : String(format: "%.1f", v)
@@ -571,7 +586,7 @@ private struct RegionChartView: View {
                                 Rectangle().fill(color(i))
                                     .overlay(Rectangle().stroke(Color.white.opacity(0.4), lineWidth: 0.5))
                                 if !r.label.isEmpty {
-                                    Text(r.label).font(.caption2).foregroundColor(Color(white: 0.1))
+                                    Text(r.label).font(.caption2).foregroundColor(textOn(i))
                                         .multilineTextAlignment(.center)
                                         .rotationEffect(r.vertical ? .degrees(-90) : .degrees(0))
                                         .fixedSize()
@@ -600,8 +615,8 @@ private struct RegionChartView: View {
                             let y = h * CGFloat(1 - rl.value / ym)
                             Text(rl.label).font(.caption2).foregroundColor(Color(white: 0.1))
                                 .padding(.horizontal, 4).padding(.vertical, 1)
-                                .background(RoundedRectangle(cornerRadius: 4).fill(Color(UIColor.systemBackground)))
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary, lineWidth: 0.5))
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.2), lineWidth: 0.5))
                                 .fixedSize()
                                 .position(x: w - 40, y: y)
                         }

@@ -1168,11 +1168,27 @@ fn chart_view(series: &[ChartSeries], labels: &[String], style: ChartStyle, axis
 
 // --------------------------- region chart ---------------------------
 
-fn region_color(i: usize, r: &ChartRegion) -> String {
+/// Palette as RGB (parallel to `CHART_PALETTE`) so region charts can compute label contrast.
+const CHART_PALETTE_RGB: [(u8, u8, u8); 6] =
+    [(0xE0, 0x77, 0x2C), (0x2E, 0xA0, 0x6A), (0xC0, 0x46, 0x6B), (0x8A, 0x5C, 0xC0), (0xC9, 0xA2, 0x27), (0x3F, 0xA7, 0xD6)];
+
+/// The resolved fill RGB for region `i` (explicit override → palette).
+fn region_rgb(i: usize, r: &ChartRegion) -> (u8, u8, u8) {
     match r.color {
-        Some(c) => hex(c),
-        None => CHART_PALETTE[i % CHART_PALETTE.len()].to_string(),
+        Some(c) => (c.r, c.g, c.b),
+        None => CHART_PALETTE_RGB[i % CHART_PALETTE_RGB.len()],
     }
+}
+
+/// Black or white label text, whichever reads on the given fill (perceived luminance).
+fn contrast_text((r, g, b): (u8, u8, u8)) -> &'static str {
+    let lum = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    if lum > 140.0 { "#1a1a1a" } else { "#f5f5f5" }
+}
+
+fn region_color(i: usize, r: &ChartRegion) -> String {
+    let (r8, g8, b8) = region_rgb(i, r);
+    format!("#{r8:02x}{g8:02x}{b8:02x}")
 }
 
 // A variable-width stacked-region / coverage-gap chart: absolute-positioned region rectangles in
@@ -1197,8 +1213,9 @@ fn region_chart_view(
         let height = ((r.y1 - r.y0) / ym * 100.0).clamp(0.0, 100.0);
         let style = format!("left:{left:.3}%;width:{width:.3}%;bottom:{bottom:.3}%;height:{height:.3}%;background:{}", region_color(i, r));
         let label_class = if r.vertical { "rchart-label rchart-label-v" } else { "rchart-label" };
+        let label_style = format!("color:{}", contrast_text(region_rgb(i, r)));
         let label = r.label.clone();
-        view! { <div class="rchart-region" style=style><span class=label_class>{label}</span></div> }
+        view! { <div class="rchart-region" style=style><span class=label_class style=label_style>{label}</span></div> }
     }).collect();
 
     let ref_divs: Vec<_> = ref_lines.iter().map(|rl| {
