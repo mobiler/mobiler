@@ -288,38 +288,180 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
         )
         is Widget.Chart -> {
-            val values = widget.values
-            val maxV = (values.maxOrNull() ?: 1f).coerceAtLeast(1e-6f)
-            val chartColor = MaterialTheme.colorScheme.primary
+            // Multi-series chart: cartesian (bar/line/stacked) with optional y-axis + legend, or
+            // circular (pie/donut/rings/gauge). Series colors: explicit override → theme primary
+            // (series 0) → a fixed palette. See mobiler-web's chart_view for the shared model.
+            val series = widget.series
+            val style = widget.style
+            val primary = MaterialTheme.colorScheme.primary
+            val trackColor = MaterialTheme.colorScheme.surfaceVariant
+            val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+            val palette = listOf(
+                Color(0xFFE0772C), Color(0xFF2EA06A), Color(0xFFC0466B),
+                Color(0xFF8A5CC0), Color(0xFFC9A227), Color(0xFF3FA7D6),
+            )
+            fun colorFor(i: Int): Color {
+                val c = series.getOrNull(i)?.color
+                return when {
+                    c != null -> Color(c.r.toInt(), c.g.toInt(), c.b.toInt())
+                    i == 0 -> primary
+                    else -> palette[(i - 1) % palette.size]
+                }
+            }
+            fun mag(i: Int): Float = series.getOrNull(i)?.values?.sum() ?: 0f
+            fun fmtTick(v: Float): String =
+                if (kotlin.math.abs(v - kotlin.math.round(v)) < 0.05f) "${v.toInt()}" else "%.1f".format(v)
+            val cartesian = style == ChartStyle.BAR || style == ChartStyle.LINE ||
+                style == ChartStyle.STACKEDBAR || style == ChartStyle.STACKEDBAR100
+            val nslots = (series.maxOfOrNull { it.values.size } ?: 0).coerceAtLeast(1)
+            val maxV = when (style) {
+                ChartStyle.STACKEDBAR -> (0 until nslots)
+                    .map { j -> series.sumOf { (it.values.getOrNull(j) ?: 0f).toDouble() }.toFloat() }
+                    .maxOrNull() ?: 1f
+                ChartStyle.STACKEDBAR100 -> 1f
+                else -> series.flatMap { it.values }.maxOrNull() ?: 1f
+            }.coerceAtLeast(1e-6f)
+            val capRound = androidx.compose.ui.graphics.StrokeCap.Round
+
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
-                    if (values.isEmpty()) return@Canvas
-                    val w = size.width
-                    val h = size.height
-                    when (widget.style) {
-                        ChartStyle.LINE -> {
-                            val n = values.size
-                            val path = Path()
-                            values.forEachIndexed { i, v ->
-                                val x = if (n == 1) w / 2f else w * i / (n - 1)
-                                val y = h * (1f - v / maxV)
-                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                if (cartesian) {
+                    Row(modifier = Modifier.fillMaxWidth().height(120.dp)) {
+                        if (widget.axis) {
+                            Column(
+                                modifier = Modifier.fillMaxHeight().padding(end = 4.dp),
+                                verticalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                listOf(maxV, maxV / 2f, 0f).forEach {
+                                    Text(fmtTick(it), style = MaterialTheme.typography.labelSmall, color = labelColor)
+                                }
                             }
-                            drawPath(path, chartColor, style = Stroke(width = 4f))
                         }
-                        ChartStyle.BAR -> {
-                            val bw = w / values.size
-                            values.forEachIndexed { i, v ->
-                                val bh = h * (v / maxV)
-                                drawRect(chartColor, topLeft = Offset(i * bw + bw * 0.15f, h - bh), size = Size(bw * 0.7f, bh))
+                        Canvas(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                            val w = size.width
+                            val top = 2f
+                            val plot = (size.height - 4f).coerceAtLeast(1f)
+                            val bottom = top + plot
+                            if (widget.axis) {
+                                for (k in 0..4) {
+                                    val y = top + k * plot / 4f
+                                    drawLine(trackColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+                                }
+                            }
+                            when (style) {
+                                ChartStyle.LINE -> series.forEachIndexed { i, s ->
+                                    val n = s.values.size.coerceAtLeast(1)
+                                    val path = Path()
+                                    s.values.forEachIndexed { j, v ->
+                                        val x = if (n == 1) w / 2f else w * j / (n - 1)
+                                        val y = top + (1f - (v / maxV).coerceIn(0f, 1f)) * plot
+                                        if (j == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                    }
+                                    drawPath(path, colorFor(i), style = Stroke(width = 3f, cap = capRound))
+                                }
+                                ChartStyle.BAR -> {
+                                    val sw = w / nslots
+                                    val ns = series.size.coerceAtLeast(1)
+                                    series.forEachIndexed { i, s ->
+                                        s.values.forEachIndexed { j, v ->
+                                            val bh = (v / maxV).coerceIn(0f, 1f) * plot
+                                            val bw = sw * 0.8f / ns
+                                            val x = j * sw + sw * 0.1f + i * bw
+                                            drawRect(colorFor(i), topLeft = Offset(x, bottom - bh), size = Size(bw, bh))
+                                        }
+                                    }
+                                }
+                                else -> {
+                                    val sw = w / nslots
+                                    for (j in 0 until nslots) {
+                                        val slotTotal = series
+                                            .sumOf { (it.values.getOrNull(j) ?: 0f).toDouble() }
+                                            .toFloat().coerceAtLeast(1e-6f)
+                                        val denom = if (style == ChartStyle.STACKEDBAR100) slotTotal else maxV
+                                        var acc = 0f
+                                        series.forEachIndexed { i, s ->
+                                            val v = s.values.getOrNull(j) ?: 0f
+                                            val bh = (v / denom).coerceIn(0f, 1f) * plot
+                                            val x = j * sw + sw * 0.15f
+                                            drawRect(colorFor(i), topLeft = Offset(x, bottom - acc - bh), size = Size(sw * 0.7f, bh))
+                                            acc += bh
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+                    if (widget.labels.isNotEmpty()) {
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            widget.labels.forEach {
+                                Text(it, style = MaterialTheme.typography.labelSmall, color = labelColor, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                } else {
+                    val gaugePct = if (style == ChartStyle.GAUGE) {
+                        val g = series.firstOrNull()?.goal ?: mag(0)
+                        ((mag(0) / (if (g <= 0f) 1e-6f else g)).coerceIn(0f, 1f) * 100f).toInt()
+                    } else {
+                        0
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
+                        Canvas(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
+                            val cx = size.width / 2f
+                            val cy = size.height / 2f
+                            val rad = (minOf(size.width, size.height) / 2f) - 6f
+                            when (style) {
+                                ChartStyle.PIE, ChartStyle.DONUT -> {
+                                    val total = (0 until series.size).sumOf { mag(it).toDouble() }.toFloat().coerceAtLeast(1e-6f)
+                                    var start = -90f
+                                    series.forEachIndexed { i, _ ->
+                                        val sweep = mag(i) / total * 360f
+                                        if (style == ChartStyle.DONUT) {
+                                            val r = rad - 10f
+                                            drawArc(colorFor(i), start, sweep, useCenter = false, topLeft = Offset(cx - r, cy - r), size = Size(r * 2f, r * 2f), style = Stroke(width = 20f))
+                                        } else {
+                                            drawArc(colorFor(i), start, sweep, useCenter = true, topLeft = Offset(cx - rad, cy - rad), size = Size(rad * 2f, rad * 2f))
+                                        }
+                                        start += sweep
+                                    }
+                                }
+                                ChartStyle.RINGS -> {
+                                    val n = series.size.coerceAtLeast(1)
+                                    series.forEachIndexed { i, s ->
+                                        val r = rad - i * (rad * 0.62f / n) - 2f
+                                        val tl = Offset(cx - r, cy - r)
+                                        val sz = Size(r * 2f, r * 2f)
+                                        val g = s.goal ?: mag(i)
+                                        val prog = (mag(i) / (if (g <= 0f) 1e-6f else g)).coerceIn(0f, 1f)
+                                        drawArc(trackColor, 0f, 360f, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 10f))
+                                        drawArc(colorFor(i), -90f, 360f * prog, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 10f, cap = capRound))
+                                    }
+                                }
+                                else -> {
+                                    val r = rad - 4f
+                                    val tl = Offset(cx - r, cy - r)
+                                    val sz = Size(r * 2f, r * 2f)
+                                    val g = series.firstOrNull()?.goal ?: mag(0)
+                                    val prog = (mag(0) / (if (g <= 0f) 1e-6f else g)).coerceIn(0f, 1f)
+                                    drawArc(trackColor, 135f, 270f, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 12f, cap = capRound))
+                                    drawArc(colorFor(0), 135f, 270f * prog, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 12f, cap = capRound))
+                                }
+                            }
+                        }
+                        if (style == ChartStyle.GAUGE) {
+                            Text("$gaugePct%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
                 }
-                if (widget.labels.isNotEmpty()) {
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        widget.labels.forEach {
-                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                if (widget.legend && series.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                    ) {
+                        series.forEachIndexed { i, s ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(colorFor(i)))
+                                Text(s.name, style = MaterialTheme.typography.labelSmall, color = labelColor)
+                            }
                         }
                     }
                 }

@@ -4,12 +4,12 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
-    BoxAlign, ButtonStyle, CardStyle, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
+    BoxAlign, ButtonStyle, CardStyle, ChartSeries, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
-    badge, bar_chart, button, calendar, caption, card, card_button, chip, column, divider, emphasis,
-    grid, icon_button, image, progress, rating, rating_input, row, scaffold, scroller, search_field,
-    segment, segmented, skeleton, spacer, stack, subtitle, swipe_action, tab_icon, text, text_field,
-    title, with_fab, with_refresh, with_sheet, with_theme,
+    badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart, emphasis,
+    gauge_chart, grid, icon_button, image, progress, rating, rating_input, rings_chart, row, scaffold,
+    scroller, search_field, segment, segmented, skeleton, spacer, stack, stacked_bar_chart, subtitle,
+    swipe_action, tab_icon, text, text_field, title, with_fab, with_refresh, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -725,11 +725,30 @@ fn service_card(index: u32, s: &Service) -> Widget {
 }
 
 fn bookings_screen(model: &Model) -> Widget {
-    // Visits-per-day bar Chart (Mon–Sun).
-    let visits = bar_chart(
-        vec![2.0, 3.0, 1.0, 4.0, 3.0, 5.0, 2.0],
-        vec!["M".into(), "T".into(), "W".into(), "T".into(), "F".into(), "S".into(), "S".into()],
+    // Visits-per-day, stacked by barber (Mon–Sun) — axis + legend on.
+    let week = vec!["M".into(), "T".into(), "W".into(), "T".into(), "F".into(), "S".into(), "S".into()];
+    let visits = stacked_bar_chart(
+        vec![
+            ChartSeries::new("Alex", vec![1.0, 2.0, 1.0, 2.0, 2.0, 3.0, 1.0]),
+            ChartSeries::new("Sam", vec![1.0, 1.0, 0.0, 2.0, 1.0, 2.0, 1.0]).with_color(Rgb::new(0x3F, 0xA7, 0xD6)),
+        ],
+        week,
     );
+    // Service mix this week (Donut) — each series is one slice.
+    let mix = donut_chart(vec![
+        ChartSeries::new("Cut", vec![18.0]),
+        ChartSeries::new("Beard", vec![9.0]),
+        ChartSeries::new("Shave", vec![5.0]),
+        ChartSeries::new("Color", vec![3.0]),
+    ]);
+    // Today's progress toward the daily target (radial Gauge).
+    let today = gauge_chart(ChartSeries::new("Bookings", vec![7.0]).with_goal(10.0));
+    // Weekly goals as concentric progress Rings (fitness-style).
+    let goals = rings_chart(vec![
+        ChartSeries::new("Revenue", vec![1280.0]).with_goal(1500.0),
+        ChartSeries::new("Bookings", vec![34.0]).with_goal(40.0),
+        ChartSeries::new("New clients", vec![6.0]).with_goal(8.0),
+    ]);
     // Inline month Calendar — tap a day to pick it (June 2026).
     let month = calendar(2026, 6, model.picked_day, Msg::PickDay);
     // Upcoming bookings — swipe a row to reveal "Cancel" (SwipeAction).
@@ -752,6 +771,12 @@ fn bookings_screen(model: &Model) -> Widget {
         caption("Pull down to refresh availability."),
         subtitle("This week"),
         card(visits, CardStyle::Outlined),
+        row(vec![
+            card(column(vec![caption("Service mix"), mix]), CardStyle::Outlined),
+            card(column(vec![caption("Today's target"), today]), CardStyle::Outlined),
+        ]),
+        subtitle("Weekly goals"),
+        card(goals, CardStyle::Outlined),
         subtitle("Pick a date"),
         card(month, CardStyle::Outlined),
         subtitle("Upcoming"),
