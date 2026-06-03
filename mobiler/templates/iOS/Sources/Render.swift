@@ -75,8 +75,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .skeleton:
         return AnyView(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2)).frame(height: 48).padding(.vertical, 4))
 
-    case .chart(let values, let labels, let style):
-        return AnyView(ChartView(values: values, labels: labels, style: style))
+    case .chart(let series, let labels, let style, let axis, let legend):
+        return AnyView(ChartView(series: series, labels: labels, style: style, axis: axis, legend: legend))
 
     case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
         return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
@@ -322,44 +322,198 @@ private struct AvatarView: View {
     }
 }
 
-// Simple bar/line chart — values normalized to the max, optional x-axis labels. Non-interactive.
+// Distinct fallback colors for series 1.. (series 0 with no override rides the accent color).
+private let chartPalette: [Color] = [
+    Color(red: 224.0 / 255, green: 119.0 / 255, blue: 44.0 / 255),
+    Color(red: 46.0 / 255, green: 160.0 / 255, blue: 106.0 / 255),
+    Color(red: 192.0 / 255, green: 70.0 / 255, blue: 107.0 / 255),
+    Color(red: 138.0 / 255, green: 92.0 / 255, blue: 192.0 / 255),
+    Color(red: 201.0 / 255, green: 162.0 / 255, blue: 39.0 / 255),
+    Color(red: 63.0 / 255, green: 167.0 / 255, blue: 214.0 / 255),
+]
+
+// Multi-series chart: cartesian (bar/line/stacked) with optional y-axis + legend, or circular
+// (pie/donut/rings/gauge). Drawn with SwiftUI Canvas; the iOS twin of the Compose Chart arm and
+// mobiler-web's chart_view. Non-interactive.
 private struct ChartView: View {
-    let values: [Float]
+    let series: [ChartSeries]
     let labels: [String]
     let style: SharedTypes.ChartStyle
+    let axis: Bool
+    let legend: Bool
+
+    private func color(_ i: Int) -> Color {
+        if i < series.count, let c = series[i].color {
+            return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+        }
+        return i == 0 ? Color.accentColor : chartPalette[(i - 1) % chartPalette.count]
+    }
+    private func mag(_ i: Int) -> Float { i < series.count ? series[i].values.reduce(0, +) : 0 }
+    private func fmtTick(_ v: Float) -> String {
+        abs(v - v.rounded()) < 0.05 ? "\(Int(v))" : String(format: "%.1f", v)
+    }
+    private var isCartesian: Bool {
+        switch style { case .bar, .line, .stackedBar, .stackedBar100: return true; default: return false }
+    }
+    private var nslots: Int { max(series.map { $0.values.count }.max() ?? 0, 1) }
+    private func slotVal(_ s: ChartSeries, _ j: Int) -> Float { s.values.indices.contains(j) ? s.values[j] : 0 }
+    private var maxV: Float {
+        switch style {
+        case .stackedBar:
+            let totals = (0 ..< nslots).map { j in series.reduce(Float(0)) { $0 + slotVal($1, j) } }
+            return max(totals.max() ?? 1, 1e-6)
+        case .stackedBar100: return 1
+        default: return max(series.flatMap { $0.values }.max() ?? 1, 1e-6)
+        }
+    }
+    private var gaugePct: Int {
+        guard !series.isEmpty else { return 0 }
+        let g = series[0].goal ?? mag(0)
+        return Int((min(mag(0) / (g <= 0 ? 1e-6 : g), 1) * 100).rounded())
+    }
+
     var body: some View {
-        let maxV = max(values.max() ?? 1, Float(0.000001))
-        let isLine: Bool = { if case .line = style { return true } else { return false } }()
         VStack(spacing: 4) {
-            GeometryReader { geo in
-                if isLine {
-                    Path { p in
-                        let n = values.count
-                        guard n > 0 else { return }
-                        for (i, v) in values.enumerated() {
-                            let x = n == 1 ? geo.size.width / 2 : geo.size.width * CGFloat(i) / CGFloat(n - 1)
-                            let y = geo.size.height * (1 - CGFloat(v / maxV))
-                            if i == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
-                        }
-                    }.stroke(Color.accentColor, lineWidth: 2)
-                } else {
-                    HStack(alignment: .bottom, spacing: 3) {
-                        ForEach(Array(values.enumerated()), id: \.offset) { _, v in
-                            RoundedRectangle(cornerRadius: 2).fill(Color.accentColor)
-                                .frame(height: geo.size.height * CGFloat(v / maxV))
-                                .frame(maxWidth: .infinity)
+            if isCartesian {
+                HStack(spacing: 4) {
+                    if axis {
+                        VStack(alignment: .trailing) {
+                            Text(fmtTick(maxV)).font(.caption2).foregroundColor(.secondary)
+                            Spacer()
+                            Text(fmtTick(maxV / 2)).font(.caption2).foregroundColor(.secondary)
+                            Spacer()
+                            Text(fmtTick(0)).font(.caption2).foregroundColor(.secondary)
+                        }.frame(height: 120)
+                    }
+                    cartesianCanvas.frame(height: 120)
+                }
+                if !labels.isEmpty {
+                    HStack(spacing: 0) {
+                        ForEach(Array(labels.enumerated()), id: \.offset) { _, l in
+                            Text(l).font(.caption2).foregroundColor(.secondary).frame(maxWidth: .infinity)
                         }
                     }
                 }
-            }.frame(height: 120)
-            if !labels.isEmpty {
-                HStack(spacing: 0) {
-                    ForEach(Array(labels.enumerated()), id: \.offset) { _, l in
-                        Text(l).font(.caption2).foregroundColor(.secondary).frame(maxWidth: .infinity)
+            } else {
+                ZStack {
+                    circularCanvas
+                    if case .gauge = style { Text("\(gaugePct)%").font(.title2).bold() }
+                }.frame(height: 140)
+            }
+            if legend, !series.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(Array(series.enumerated()), id: \.offset) { i, s in
+                        HStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 2).fill(color(i)).frame(width: 10, height: 10)
+                            Text(s.name).font(.caption2).foregroundColor(.secondary)
+                        }
                     }
                 }
             }
         }.padding(.vertical, 4)
+    }
+
+    private var cartesianCanvas: some View {
+        Canvas { ctx, size in
+            let w = size.width
+            let top: CGFloat = 2
+            let plot = max(size.height - 4, 1)
+            let bottom = top + plot
+            if axis {
+                for k in 0 ... 4 {
+                    let y = top + CGFloat(k) * plot / 4
+                    var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+                    ctx.stroke(p, with: .color(.gray.opacity(0.25)), lineWidth: 0.5)
+                }
+            }
+            switch style {
+            case .line:
+                for (i, s) in series.enumerated() {
+                    let n = max(s.values.count, 1)
+                    var p = Path()
+                    for (j, v) in s.values.enumerated() {
+                        let x = n == 1 ? w / 2 : w * CGFloat(j) / CGFloat(n - 1)
+                        let y = top + (1 - CGFloat(min(max(v / maxV, 0), 1))) * plot
+                        if j == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                    ctx.stroke(p, with: .color(color(i)), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                }
+            case .bar:
+                let sw = w / CGFloat(nslots)
+                let ns = CGFloat(max(series.count, 1))
+                for (i, s) in series.enumerated() {
+                    for (j, v) in s.values.enumerated() {
+                        let bh = CGFloat(min(max(v / maxV, 0), 1)) * plot
+                        let bw = sw * 0.8 / ns
+                        let x = CGFloat(j) * sw + sw * 0.1 + CGFloat(i) * bw
+                        ctx.fill(Path(CGRect(x: x, y: bottom - bh, width: bw, height: bh)), with: .color(color(i)))
+                    }
+                }
+            default: // stackedBar / stackedBar100
+                let sw = w / CGFloat(nslots)
+                for j in 0 ..< nslots {
+                    let slotTotal = max(series.reduce(Float(0)) { $0 + slotVal($1, j) }, 1e-6)
+                    let denom: Float = { if case .stackedBar100 = style { return slotTotal } else { return maxV } }()
+                    var acc: CGFloat = 0
+                    for (i, s) in series.enumerated() {
+                        let bh = CGFloat(min(max(slotVal(s, j) / denom, 0), 1)) * plot
+                        let x = CGFloat(j) * sw + sw * 0.15
+                        ctx.fill(Path(CGRect(x: x, y: bottom - acc - bh, width: sw * 0.7, height: bh)), with: .color(color(i)))
+                        acc += bh
+                    }
+                }
+            }
+        }
+    }
+
+    private var circularCanvas: some View {
+        Canvas { ctx, size in
+            let cx = size.width / 2, cy = size.height / 2
+            let center = CGPoint(x: cx, y: cy)
+            let rad = min(size.width, size.height) / 2 - 6
+            func ring(_ r: CGFloat, _ from: Double, _ to: Double) -> Path {
+                var p = Path()
+                p.addArc(center: center, radius: r, startAngle: .degrees(from), endAngle: .degrees(to), clockwise: false)
+                return p
+            }
+            switch style {
+            case .pie, .donut:
+                let total = max((0 ..< series.count).reduce(Float(0)) { $0 + mag($1) }, 1e-6)
+                var start = -90.0
+                for i in 0 ..< series.count {
+                    let sweep = Double(mag(i) / total) * 360
+                    if case .donut = style {
+                        ctx.stroke(ring(rad - 10, start, start + sweep), with: .color(color(i)), lineWidth: 20)
+                    } else {
+                        var p = Path()
+                        p.move(to: center)
+                        p.addArc(center: center, radius: rad, startAngle: .degrees(start), endAngle: .degrees(start + sweep), clockwise: false)
+                        p.closeSubpath()
+                        ctx.fill(p, with: .color(color(i)))
+                    }
+                    start += sweep
+                }
+            case .rings:
+                let n = max(series.count, 1)
+                for i in 0 ..< series.count {
+                    let r = rad - CGFloat(i) * (rad * 0.62 / CGFloat(n)) - 2
+                    ctx.stroke(Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)), with: .color(.gray.opacity(0.2)), lineWidth: 10)
+                    let g = series[i].goal ?? mag(i)
+                    let prog = Double(min(max(mag(i) / (g <= 0 ? 1e-6 : g), 0), 1))
+                    if prog > 0 {
+                        ctx.stroke(ring(r, -90, -90 + 360 * prog), with: .color(color(i)), style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    }
+                }
+            default: // gauge
+                let r = rad - 4
+                ctx.stroke(ring(r, 135, 135 + 270), with: .color(.gray.opacity(0.2)), style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                if !series.isEmpty {
+                    let g = series[0].goal ?? mag(0)
+                    let prog = Double(min(max(mag(0) / (g <= 0 ? 1e-6 : g), 0), 1))
+                    ctx.stroke(ring(r, 135, 135 + 270 * prog), with: .color(color(0)), style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                }
+            }
+        }
     }
 }
 

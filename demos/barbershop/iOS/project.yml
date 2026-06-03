@@ -57,6 +57,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.barbershop
         SWIFT_VERSION: "5.9"
+        # TestFlight requires a unique (version, build) pair per upload. The charts feature
+        # ships as 1.1 build 1 — a fresh version string, so it's accepted regardless of any
+        # prior 1.0 builds. Bump CURRENT_PROJECT_VERSION for each subsequent 1.1 upload.
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "1"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]
