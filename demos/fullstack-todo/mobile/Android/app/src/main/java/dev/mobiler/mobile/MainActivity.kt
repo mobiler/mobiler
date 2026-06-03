@@ -492,7 +492,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 if (kotlin.math.abs(v - kotlin.math.round(v)) < 0.05f) "${v.toInt()}" else "%.1f".format(v)
             val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
             val refColor = Color(0xFFC0392B)
-            val bracketColor = Color(0xFF888888)
+            val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+            val bracketColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Column(
@@ -544,7 +545,6 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     drawLine(bracketColor, Offset(x, yt), Offset(x - 6f, yt), strokeWidth = 2f)
                                     drawLine(bracketColor, Offset(x, yb), Offset(x - 6f, yb), strokeWidth = 2f)
                                 }
-                                val axisColor = Color(0xFF888888)
                                 drawLine(axisColor, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
                                 drawLine(axisColor, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
                                 for (k in 0..4) {

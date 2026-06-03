@@ -614,7 +614,7 @@ private struct RegionChartView: View {
                             var axes = Path()
                             axes.move(to: CGPoint(x: 0, y: 0)); axes.addLine(to: CGPoint(x: 0, y: size.height))
                             axes.move(to: CGPoint(x: 0, y: size.height)); axes.addLine(to: CGPoint(x: size.width, y: size.height))
-                            ctx.stroke(axes, with: .color(.secondary), lineWidth: 1.5)
+                            ctx.stroke(axes, with: .color(.primary.opacity(0.75)), lineWidth: 2)
                             var marks = Path()
                             for k in 0 ... 4 {
                                 let y = size.height * CGFloat(k) / 4
@@ -624,7 +624,7 @@ private struct RegionChartView: View {
                                 let x = size.width * CGFloat(t.at / xm)
                                 marks.move(to: CGPoint(x: x, y: size.height)); marks.addLine(to: CGPoint(x: x, y: size.height - 6))
                             }
-                            ctx.stroke(marks, with: .color(.secondary), lineWidth: 1)
+                            ctx.stroke(marks, with: .color(.primary.opacity(0.75)), lineWidth: 1.5)
                         }
                         ForEach(Array(refLines.enumerated()), id: \.offset) { _, rl in
                             let y = h * CGFloat(1 - rl.value / ym)
