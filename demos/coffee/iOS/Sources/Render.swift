@@ -548,7 +548,6 @@ private struct RegionChartView: View {
         let (r, g, b) = rgbOf(i)
         return Color(red: r, green: g, blue: b)
     }
-    // Black or white label text, whichever reads on the band's fill (perceived luminance).
     private func textOn(_ i: Int) -> Color {
         let (r, g, b) = rgbOf(i)
         return (0.299 * r + 0.587 * g + 0.114 * b) > 0.55 ? Color(white: 0.1) : Color(white: 0.96)
@@ -557,94 +556,86 @@ private struct RegionChartView: View {
         abs(v - v.rounded()) < 0.05 ? "\(Int(v))" : String(format: "%.1f", v)
     }
 
+    // Everything is drawn in ONE Canvas coordinate space: a reserved left gutter (y labels) +
+    // plot + right margin (chips/bracket). Regions, axes, ticks, and x-labels all map through the
+    // same px()/py(), so they line up by construction. The iOS twin of mobiler-web's region chart.
     var body: some View {
         let xm = max(xMax, 1e-6)
         let ym = max(yMax, 1e-6)
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                VStack(alignment: .trailing) {
-                    Text(fmtTick(ym)).font(.caption2).foregroundColor(.secondary).fixedSize()
-                    Spacer()
-                    Text(fmtTick(ym * 0.75)).font(.caption2).foregroundColor(.secondary).fixedSize()
-                    Spacer()
-                    Text(fmtTick(ym * 0.5)).font(.caption2).foregroundColor(.secondary).fixedSize()
-                    Spacer()
-                    Text(fmtTick(ym * 0.25)).font(.caption2).foregroundColor(.secondary).fixedSize()
-                    Spacer()
-                    Text(fmtTick(0)).font(.caption2).foregroundColor(.secondary).fixedSize()
-                }.frame(width: 44, height: 300)
-                VStack(spacing: 0) {
-                GeometryReader { geo in
-                    let w = geo.size.width
-                    let h = geo.size.height
-                    ZStack(alignment: .topLeading) {
-                        ForEach(Array(regions.enumerated()), id: \.offset) { i, r in
-                            let rw = w * CGFloat((r.x1 - r.x0) / xm)
-                            let rh = h * CGFloat((r.y1 - r.y0) / ym)
-                            let rx = w * CGFloat(r.x0 / xm)
-                            let ry = h * CGFloat(1 - r.y1 / ym)
-                            ZStack {
-                                Rectangle().fill(color(i))
-                                    .overlay(Rectangle().stroke(Color.white.opacity(0.4), lineWidth: 0.5))
-                                if !r.label.isEmpty {
-                                    Text(r.label).font(.caption2).foregroundColor(textOn(i))
-                                        .multilineTextAlignment(.center)
-                                        .rotationEffect(r.vertical ? .degrees(-90) : .degrees(0))
-                                        .fixedSize()
-                                }
-                            }.frame(width: rw, height: rh).position(x: rx + rw / 2, y: ry + rh / 2)
-                        }
-                        Canvas { ctx, size in
-                            for rl in refLines {
-                                let y = size.height * CGFloat(1 - rl.value / ym)
-                                var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y))
-                                let style = rl.dashed ? StrokeStyle(lineWidth: 2, dash: [6, 5]) : StrokeStyle(lineWidth: 2)
-                                ctx.stroke(p, with: .color(Color(red: 0.75, green: 0.22, blue: 0.17)), style: style)
-                            }
-                            if let b = bracket {
-                                let yt = size.height * CGFloat(1 - b.y1 / ym)
-                                let yb = size.height * CGFloat(1 - b.y0 / ym)
-                                let x = size.width - 2
-                                var p = Path()
-                                p.move(to: CGPoint(x: x, y: yt)); p.addLine(to: CGPoint(x: x, y: yb))
-                                p.move(to: CGPoint(x: x, y: yt)); p.addLine(to: CGPoint(x: x - 6, y: yt))
-                                p.move(to: CGPoint(x: x, y: yb)); p.addLine(to: CGPoint(x: x - 6, y: yb))
-                                ctx.stroke(p, with: .color(.gray), lineWidth: 2)
-                            }
-                            var axes = Path()
-                            axes.move(to: CGPoint(x: 0, y: 0)); axes.addLine(to: CGPoint(x: 0, y: size.height))
-                            axes.move(to: CGPoint(x: 0, y: size.height)); axes.addLine(to: CGPoint(x: size.width, y: size.height))
-                            ctx.stroke(axes, with: .color(.primary.opacity(0.75)), lineWidth: 2)
-                            var marks = Path()
-                            for k in 0 ... 4 {
-                                let y = size.height * CGFloat(k) / 4
-                                marks.move(to: CGPoint(x: 0, y: y)); marks.addLine(to: CGPoint(x: 6, y: y))
-                            }
-                            for t in ticks {
-                                let x = size.width * CGFloat(t.at / xm)
-                                marks.move(to: CGPoint(x: x, y: size.height)); marks.addLine(to: CGPoint(x: x, y: size.height - 6))
-                            }
-                            ctx.stroke(marks, with: .color(.primary.opacity(0.75)), lineWidth: 1.5)
-                        }
-                        ForEach(Array(refLines.enumerated()), id: \.offset) { _, rl in
-                            let y = h * CGFloat(1 - rl.value / ym)
-                            Text(rl.label).font(.caption2).foregroundColor(Color(white: 0.1))
-                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white))
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.2), lineWidth: 0.5))
-                                .fixedSize()
-                                .position(x: w - 40, y: y + 11)
+        VStack(spacing: 6) {
+            Canvas { ctx, size in
+                let gutter: CGFloat = 52
+                let chipW: CGFloat = 72
+                let plotX = gutter
+                let plotTop: CGFloat = 6
+                let plotBottom = size.height - 22
+                let plotH = max(plotBottom - plotTop, 1)
+                let plotW = max(size.width - gutter - chipW, 1)
+                let px: (Float) -> CGFloat = { plotX + CGFloat(min(max($0 / xm, 0), 1)) * plotW }
+                let py: (Float) -> CGFloat = { plotTop + CGFloat(1 - min(max($0 / ym, 0), 1)) * plotH }
+                let axisColor = Color.primary.opacity(0.8)
+                let red = Color(red: 0.75, green: 0.22, blue: 0.17)
+
+                for (i, r) in regions.enumerated() {
+                    let rect = CGRect(x: px(r.x0), y: py(r.y1), width: px(r.x1) - px(r.x0), height: py(r.y0) - py(r.y1))
+                    ctx.fill(Path(rect), with: .color(color(i)))
+                    ctx.stroke(Path(rect), with: .color(.white.opacity(0.4)), lineWidth: 0.5)
+                    if !r.label.isEmpty {
+                        let t = ctx.resolve(Text(r.label).font(.caption2).foregroundColor(textOn(i)))
+                        if r.vertical {
+                            var c = ctx
+                            c.translateBy(x: rect.midX, y: rect.midY)
+                            c.rotate(by: .degrees(-90))
+                            c.draw(t, at: .zero, anchor: .center)
+                        } else {
+                            ctx.draw(t, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
                         }
                     }
-                }.frame(height: 300)
-                    GeometryReader { geo in
-                        ForEach(Array(ticks.enumerated()), id: \.offset) { _, t in
-                            Text(t.label).font(.caption2).foregroundColor(.secondary).fixedSize()
-                                .position(x: geo.size.width * CGFloat(t.at / xm), y: 8)
-                        }
-                    }.frame(height: 16)
+                }
+                for rl in refLines {
+                    let y = py(rl.value)
+                    var p = Path(); p.move(to: CGPoint(x: plotX, y: y)); p.addLine(to: CGPoint(x: plotX + plotW, y: y))
+                    ctx.stroke(p, with: .color(red), style: rl.dashed ? StrokeStyle(lineWidth: 2, dash: [6, 5]) : StrokeStyle(lineWidth: 2))
+                }
+                if let b = bracket {
+                    let bx = plotX + plotW + 4
+                    let yt = py(b.y1); let yb = py(b.y0)
+                    var p = Path()
+                    p.move(to: CGPoint(x: bx, y: yt)); p.addLine(to: CGPoint(x: bx, y: yb))
+                    p.move(to: CGPoint(x: bx, y: yt)); p.addLine(to: CGPoint(x: bx - 5, y: yt))
+                    p.move(to: CGPoint(x: bx, y: yb)); p.addLine(to: CGPoint(x: bx - 5, y: yb))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(b.label).font(.system(size: 8)).foregroundColor(.secondary)), at: CGPoint(x: bx + 4, y: (yt + yb) / 2), anchor: .leading)
+                }
+                var ax = Path()
+                ax.move(to: CGPoint(x: plotX, y: plotTop)); ax.addLine(to: CGPoint(x: plotX, y: plotBottom))
+                ax.move(to: CGPoint(x: plotX, y: plotBottom)); ax.addLine(to: CGPoint(x: plotX + plotW, y: plotBottom))
+                ctx.stroke(ax, with: .color(axisColor), lineWidth: 2)
+                for k in 0 ... 4 {
+                    let v = ym * Float(k) / 4
+                    let y = py(v)
+                    var p = Path(); p.move(to: CGPoint(x: plotX - 6, y: y)); p.addLine(to: CGPoint(x: plotX, y: y))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(fmtTick(v)).font(.caption2).foregroundColor(.secondary)), at: CGPoint(x: plotX - 9, y: y), anchor: .trailing)
+                }
+                for t in ticks {
+                    let x = px(t.at)
+                    var p = Path(); p.move(to: CGPoint(x: x, y: plotBottom)); p.addLine(to: CGPoint(x: x, y: plotBottom + 5))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(t.label).font(.caption2).foregroundColor(.secondary)), at: CGPoint(x: x, y: plotBottom + 13), anchor: .center)
+                }
+                for rl in refLines {
+                    let y = py(rl.value)
+                    let ct = ctx.resolve(Text(rl.label).font(.system(size: 10).weight(.semibold)).foregroundColor(Color(white: 0.1)))
+                    let sz = ct.measure(in: CGSize(width: chipW, height: 40))
+                    let cx = plotX + plotW + chipW / 2
+                    let box = CGRect(x: cx - sz.width / 2 - 4, y: y - sz.height / 2 - 2, width: sz.width + 8, height: sz.height + 4)
+                    ctx.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(.white))
+                    ctx.stroke(Path(roundedRect: box, cornerRadius: 4), with: .color(.black.opacity(0.2)), lineWidth: 0.5)
+                    ctx.draw(ct, at: CGPoint(x: cx, y: y), anchor: .center)
                 }
             }
+            .frame(height: 312)
             if !legend.isEmpty {
                 let rows = (legend.count + 2) / 3
                 VStack(spacing: 2) {
