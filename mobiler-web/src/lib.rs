@@ -1218,14 +1218,17 @@ fn region_chart_view(
         view! { <div class="rchart-region" style=style><span class=label_class style=label_style>{label}</span></div> }
     }).collect();
 
-    let ref_divs: Vec<_> = ref_lines.iter().map(|rl| {
+    // The reference lines span the full plot width; their value chips sit in the right margin
+    // (outside the plot), like the original — so the line clearly runs to the plot's edge.
+    let ref_line_divs: Vec<_> = ref_lines.iter().map(|rl| {
         let style = format!("bottom:{:.3}%", (rl.value / ym * 100.0).clamp(0.0, 100.0));
         let cls = if rl.dashed { "rchart-refline rchart-refline-dashed" } else { "rchart-refline" };
+        view! { <div class=cls style=style></div> }
+    }).collect();
+    let chip_divs: Vec<_> = ref_lines.iter().map(|rl| {
+        let style = format!("bottom:{:.3}%", (rl.value / ym * 100.0).clamp(0.0, 100.0));
         let label = rl.label.clone();
-        view! {
-            <div class=cls style=style.clone()></div>
-            <div class="rchart-chip" style=style>{label}</div>
-        }
+        view! { <div class="rchart-chip" style=style>{label}</div> }
     }).collect();
 
     let bracket_div = bracket.as_ref().map(|b| {
@@ -1273,7 +1276,10 @@ fn region_chart_view(
         <div class="rchart">
             <div class="rchart-row">
                 <div class="rchart-yaxis">{yticks}</div>
-                <div class="rchart-plot">{region_divs}{ytick_marks}{xtick_marks}{ref_divs}{bracket_div}</div>
+                <div class="rchart-plotwrap">
+                    <div class="rchart-plot">{region_divs}{ytick_marks}{xtick_marks}{ref_line_divs}</div>
+                    {chip_divs}{bracket_div}
+                </div>
             </div>
             <div class="rchart-xaxis">{xticks}</div>
             {legend_row}

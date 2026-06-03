@@ -547,11 +547,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        modifier = Modifier.height(300.dp).padding(end = 4.dp),
+                        modifier = Modifier.width(44.dp).height(300.dp).padding(end = 4.dp),
                         verticalArrangement = Arrangement.SpaceBetween,
+                        horizontalAlignment = Alignment.End,
                     ) {
                         for (k in 4 downTo 0) {
-                            Text(fmtTick(ym * k / 4f), style = MaterialTheme.typography.labelSmall, color = labelColor)
+                            Text(fmtTick(ym * k / 4f), style = MaterialTheme.typography.labelSmall, color = labelColor, maxLines = 1)
                         }
                     }
                     Column(modifier = Modifier.weight(1f)) {
@@ -608,7 +609,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             }
                             widget.refLines.forEach { rl ->
                                 val y = ph * (1f - rl.value / ym)
-                                Box(modifier = Modifier.offset(x = pw - 78.dp, y = y - 9.dp)) {
+                                Box(modifier = Modifier.offset(x = pw - 78.dp, y = y + 2.dp)) {
                                     Text(
                                         rl.label,
                                         style = MaterialTheme.typography.labelSmall,
