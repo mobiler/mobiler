@@ -197,9 +197,9 @@ feedback and contributions welcome):
 
 **Inputs, media & UI**
 - Video playback / streaming (HLS + MP4; any URL source — e.g. Bunny Stream)
+- In-app PDF viewer (display a backend-generated report)
 - Lazy / virtualized lists (large feeds, tables)
 - Tablet master-detail (two-pane) layouts
-- Localization (i18n) + locale-aware number / date / currency formatting
 
 **Connectivity & data**
 - Plugin → core streaming / events (live data, BLE notify, infinite scroll)
@@ -209,9 +209,9 @@ feedback and contributions welcome):
 **Platform & monetization**
 - In-app purchases / subscriptions
 - Deep links / universal links
-- Embedded WebView · Maps · PDF export / print
+- Embedded WebView · Maps
 
-_Recently shipped: rich form fields (secure/password, keyboard types, multiline, inline validation) + the `oauth` plugin (OAuth 2.0 / OIDC login). Next up: i18n/currency formatting and PDF export._
+_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), and **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD). Next up: an in-app PDF viewer._
 
 ## Repository layout
 

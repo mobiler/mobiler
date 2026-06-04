@@ -21,6 +21,10 @@ tree, no per-platform UI code.
 |:---:|
 | <img src="screenshots/signin-form.png" width="260" alt="Fade House sign-in form — an email field with a validation error, a phone field, a masked password field with a min-length error, and a multi-line note; each picks the right keyboard and shows inline errors"> |
 
+| Profile → Locale formatting — one amount/date rendered per locale (`mobiler_core::format`) |
+|:---:|
+| <img src="screenshots/locale-formatting.png" width="260" alt="Fade House locale formatting — the same CHF 1234.5 and date rendered for de-CH (CHF 1'234.50), de-DE (1.234,50 €), fr-FR, en-US ($1,234.50), and Serbian Latin/Cyrillic (din./дин.), plus localized long dates"> |
+
 What it exercises:
 
 - **Icon bottom-tab bar** — Home / Services / Bookings / Profile, each with an icon (`tab_icon`).
@@ -52,6 +56,10 @@ tick marks, and a legend) — the Swiss-insurance-style visualization the widget
 …and a **"Sign in" form** showing the rich text-field kinds — `email_field` / `phone_field` /
 `secure_field` (masked) / `multiline_field`, each picking the right keyboard, plus inline validation
 via `with_error(..)` (a bad email and a too-short password show errors live).
+
+…and a **"Locale formatting"** card rendering the same amount + date across locales with
+`mobiler_core::format` (`format_currency` / `format_date_long`) — Swiss `CHF 1'234.50`, German
+`1.234,50 €`, US `$1,234.50`, Serbian `din.`/`дин.` — pure synchronous Rust in the core.
 
 ## Run (web)
 

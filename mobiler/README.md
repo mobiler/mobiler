@@ -157,12 +157,13 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
 demand-driven): video playback/streaming
-(HLS + MP4, any URL source), lazy/virtualized lists, tablet master-detail, i18n + locale-aware
-currency/date formatting, a plugin→core streaming/events
+(HLS + MP4, any URL source), an in-app PDF viewer, lazy/virtualized lists, tablet master-detail,
+a plugin→core streaming/events
 primitive (live data, BLE notify, infinite scroll), remote push (APNs/FCM),
-in-app purchases, deep links, embedded WebView, maps, and PDF export. The full list lives on
-[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields (secure /
-keyboard types / multiline / validation) + the `oauth` plugin (OAuth/OIDC login). Next up: i18n/currency, PDF._
+in-app purchases, deep links, embedded WebView, and maps. The full list lives on
+[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields, the
+`oauth` plugin (OAuth/OIDC login), and locale-aware number/currency/date formatting
+(`mobiler_core::format`). Next up: in-app PDF viewer._
 
 ## Links
 
