@@ -1043,9 +1043,9 @@ mod tests {
                 vec![ChartRefLine::target(80.0, "CHF 80'000"), ChartRefLine::max(90.0, "CHF 90'000")],
                 vec![ChartLegendItem::new("Gap", Rgb::new(0x5A, 0x7D, 0x9A))],
             ),
-            ChartBracket::new(60.0, 80.0, "Ceiling"),
+            ChartBracket::new(60.0, 80.0, "Ceiling").with_info(),
         );
-        assert!(matches!(rc, Widget::RegionChart { bracket: Some(_), regions, ref_lines, .. } if regions[0].vertical && ref_lines[1].dashed));
+        assert!(matches!(rc, Widget::RegionChart { bracket: Some(b), regions, ref_lines, .. } if regions[0].vertical && ref_lines[1].dashed && b.info));
         // June 2026 has 30 days and starts on a Monday (weekday 1).
         assert!(matches!(
             calendar(2026, 6, Some(3), |d| Ev::Open(u32::from(d))),
