@@ -176,6 +176,8 @@ enum DevicePlugin {
         case "model":
             let d = UIDevice.current
             return PluginResponse(ok: true, output: "Apple \(d.model) (\(d.systemName) \(d.systemVersion))")
+        case "locale":
+            return PluginResponse(ok: true, output: Locale.preferredLanguages.first ?? Locale.current.identifier)
         default:
             return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }

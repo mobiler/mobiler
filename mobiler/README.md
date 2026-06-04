@@ -162,8 +162,8 @@ a plugin→core streaming/events
 primitive (live data, BLE notify, infinite scroll), remote push (APNs/FCM),
 in-app purchases, deep links, embedded WebView, and maps. The full list lives on
 [GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields, the
-`oauth` plugin (OAuth/OIDC login), and locale-aware number/currency/date formatting
-(`mobiler_core::format`). Next up: in-app PDF viewer._
+`oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
+(`mobiler_core::format`), and a device-locale getter (`cx.device_locale`). Next up: in-app PDF viewer._
 
 ## Links
 

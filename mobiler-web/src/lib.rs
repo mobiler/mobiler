@@ -133,10 +133,14 @@ where
 /// browser's user-agent string (the web analogue of a device model).
 async fn perform(call: &PluginCall) -> PluginResponse {
     if call.plugin == "device" {
-        let ua = web_sys::window()
-            .and_then(|w| w.navigator().user_agent().ok())
-            .unwrap_or_default();
-        return PluginResponse { ok: true, output: ua };
+        let nav = web_sys::window().map(|w| w.navigator());
+        let output = if call.op == "locale" {
+            // The browser's preferred language as a BCP-47 tag (e.g. "de-CH").
+            nav.and_then(|n| n.language()).unwrap_or_else(|| "en-US".into())
+        } else {
+            nav.and_then(|n| n.user_agent().ok()).unwrap_or_default()
+        };
+        return PluginResponse { ok: true, output };
     }
     if call.plugin == "photo" && call.op == "pick" {
         return take_image(false).await;

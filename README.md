@@ -211,7 +211,7 @@ feedback and contributions welcome):
 - Deep links / universal links
 - Embedded WebView · Maps
 
-_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), and **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD). Next up: an in-app PDF viewer._
+_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), and a **device-locale getter** (`cx.device_locale`, iOS/Android/web). Next up: an in-app PDF viewer._
 
 ## Repository layout
 
