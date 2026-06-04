@@ -188,6 +188,32 @@ Call a plugin from Rust via the generic escape hatch — `cx.plugin("scanner", "
 native sources); `mobiler plugin add` also accepts a **local package directory**, which is how
 commercial/licensed plugins (e.g. NFC) are delivered.
 
+## Roadmap
+
+Mobiler is production-bound. On top of the [built-in capabilities](#built-in-capabilities) and
+[plugins](#plugins--mobiler-plugin-add) above, these are **planned** (order is demand-driven;
+feedback and contributions welcome):
+
+**Inputs, media & UI**
+- Richer form fields — secure/password, keyboard types (email/number/phone), multiline, validation
+- Video playback / streaming (HLS + MP4; any URL source — e.g. Bunny Stream)
+- Lazy / virtualized lists (large feeds, tables)
+- Tablet master-detail (two-pane) layouts
+- Localization (i18n) + locale-aware number / date / currency formatting
+
+**Connectivity & data**
+- Plugin → core streaming / events (live data, BLE notify, infinite scroll)
+- Auth / OAuth login flow
+- Remote push notifications (APNs / FCM)
+- File read/write & downloads
+
+**Platform & monetization**
+- In-app purchases / subscriptions
+- Deep links / universal links
+- Embedded WebView · Maps · PDF export / print
+
+_Next up: richer form fields, i18n/currency formatting, and PDF export._
+
 ## Repository layout
 
 | Path | What |
