@@ -152,6 +152,16 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 [`mobiler-ui`](https://crates.io/crates/mobiler-ui) and
 [`mobiler-core`](https://crates.io/crates/mobiler-core) crates.
 
+## Roadmap
+
+Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
+demand-driven): richer form fields (secure / keyboard types / validation), video playback/streaming
+(HLS + MP4, any URL source), lazy/virtualized lists, tablet master-detail, i18n + locale-aware
+currency/date formatting, a plugin→core streaming/events
+primitive (live data, BLE notify, infinite scroll), auth / OAuth login, remote push (APNs/FCM),
+in-app purchases, deep links, embedded WebView, maps, and PDF export. The full list lives on
+[GitHub](https://github.com/mobiler/mobiler#roadmap). _Next up: form fields, i18n/currency, PDF._
+
 ## Links
 
 - Source, demos, and guide: <https://github.com/mobiler/mobiler>
