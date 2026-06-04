@@ -40,6 +40,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -154,6 +158,7 @@ import {{PACKAGE_SHARED_TYPES}}.CardStyle
 import {{PACKAGE_SHARED_TYPES}}.ChartStyle
 import {{PACKAGE_SHARED_TYPES}}.Corner
 import {{PACKAGE_SHARED_TYPES}}.Density
+import {{PACKAGE_SHARED_TYPES}}.FieldKind
 import {{PACKAGE_SHARED_TYPES}}.Icon as WidgetIcon
 import {{PACKAGE_SHARED_TYPES}}.ImageRatio
 import {{PACKAGE_SHARED_TYPES}}.ImageShape
@@ -837,13 +842,30 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             label = { Text(widget.label) },
         )
 
-        is Widget.TextField -> OutlinedTextField(
-            value = widget.value,
-            onValueChange = { send(Action.Input(widget.id, InputValue.Text(it))) },
-            placeholder = { Text(widget.placeholder) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        is Widget.TextField -> {
+            val multiline = widget.kind == FieldKind.MULTILINE
+            val kbType = when (widget.kind) {
+                FieldKind.EMAIL -> KeyboardType.Email
+                FieldKind.NUMBER -> KeyboardType.Number
+                FieldKind.DECIMAL -> KeyboardType.Decimal
+                FieldKind.PHONE -> KeyboardType.Phone
+                FieldKind.URL -> KeyboardType.Uri
+                FieldKind.SECURE -> KeyboardType.Password
+                else -> KeyboardType.Text
+            }
+            OutlinedTextField(
+                value = widget.value,
+                onValueChange = { send(Action.Input(widget.id, InputValue.Text(it))) },
+                placeholder = { Text(widget.placeholder) },
+                singleLine = !multiline,
+                minLines = if (multiline) 3 else 1,
+                visualTransformation = if (widget.kind == FieldKind.SECURE) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(keyboardType = kbType),
+                isError = widget.error != null,
+                supportingText = widget.error?.let { msg -> { Text(msg) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         is Widget.SearchField -> OutlinedTextField(
             value = widget.value,

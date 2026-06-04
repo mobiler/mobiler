@@ -162,13 +162,42 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }.buttonStyle(.plain)
         )
 
-    case .textField(let id, let placeholder, let value):
+    case .textField(let id, let placeholder, let value, let kind, let error):
+        let binding = Binding(
+            get: { value },
+            set: { send(.input(id: id, value: .text($0))) }
+        )
+        let lowercase = (kind == .email || kind == .url)
+        let kb: UIKeyboardType
+        switch kind {
+        case .email: kb = .emailAddress
+        case .number: kb = .numberPad
+        case .decimal: kb = .decimalPad
+        case .phone: kb = .phonePad
+        case .url: kb = .URL
+        default: kb = .default
+        }
+        let control: AnyView
+        switch kind {
+        case .secure:
+            control = AnyView(SecureField(placeholder, text: binding).textFieldStyle(.roundedBorder))
+        case .multiline:
+            control = AnyView(TextField(placeholder, text: binding, axis: .vertical)
+                .lineLimit(3...6).textFieldStyle(.roundedBorder))
+        default:
+            control = AnyView(TextField(placeholder, text: binding)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(kb)
+                .textInputAutocapitalization(lowercase ? .never : .sentences)
+                .autocorrectionDisabled(lowercase))
+        }
         return AnyView(
-            TextField(placeholder, text: Binding(
-                get: { value },
-                set: { send(.input(id: id, value: .text($0))) }
-            ))
-            .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 4) {
+                control
+                if let error = error {
+                    Text(error).font(.caption).foregroundColor(.red)
+                }
+            }
         )
 
     case .searchField(let id, let placeholder, let value):
