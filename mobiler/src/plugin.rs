@@ -595,6 +595,23 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_oauth_copies_sources_registers_and_declares_redirect_activity() {
+        let root = skeleton();
+        add_at(&root, "oauth").unwrap();
+        // Both Android sources copied with the package substituted.
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/OAuthPlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/OAuthActivity.kt").contains("class OAuthActivity"));
+        // Registered in both shells.
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"oauth\" to OAuthPlugin(application),"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"oauth\": return await OAuthPlugin.handle"));
+        // Redirect-catcher Activity declared in the manifest, keyed on ${applicationId}.
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android:name=\".OAuthActivity\""), "redirect activity declared");
+        assert!(manifest.contains("android:scheme=\"${applicationId}\""), "redirect scheme = applicationId");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
