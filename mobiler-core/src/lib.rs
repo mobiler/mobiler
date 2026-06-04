@@ -176,6 +176,14 @@ impl<E> Cx<E> {
         self.plugin("device", "model", "", then);
     }
 
+    /// Query the device's preferred locale as a BCP-47 language tag (e.g. `"de-CH"`, `"en-US"`)
+    /// via the built-in `device` capability; `then` receives it in `response.output`. Pair with
+    /// [`Locale::from_tag`](crate::format::Locale::from_tag) to choose the app's language /
+    /// formatting locale at startup. Works on iOS, Android, and web.
+    pub fn device_locale(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("device", "locale", "", then);
+    }
+
     /// Let the user pick an image (built-in `photo` capability — the system photo
     /// picker, no permission required). `then` receives the result: on success
     /// `response.ok` is `true` and `response.output` is a local image URI you can
@@ -1054,6 +1062,16 @@ mod tests {
         assert_eq!(cx.requests.len(), 1);
         let (call, _) = &cx.requests[0];
         assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("device", "model", ""));
+    }
+
+    #[test]
+    fn cx_device_locale_requests_the_device_locale_op() {
+        let mut cx = Cx::<Ev>::default();
+        cx.device_locale(|_| Ev::Tap);
+        assert!(cx.notifications.is_empty());
+        assert_eq!(cx.requests.len(), 1);
+        let (call, _) = &cx.requests[0];
+        assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("device", "locale", ""));
     }
 
     #[test]

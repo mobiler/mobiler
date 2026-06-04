@@ -48,6 +48,7 @@ class ToastPlugin(private val context: Context) : MobilerPlugin {
 class DevicePlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
+        "locale" -> PluginResponse(true, java.util.Locale.getDefault().toLanguageTag())
         else -> PluginResponse(false, "unknown op '$op'")
     }
 }

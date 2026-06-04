@@ -122,6 +122,9 @@ pub enum Msg {
     OAuthLogin,
     /// OAuth result: (ok, redirect-URL-or-error).
     OAuthDone(bool, String),
+
+    /// The device's preferred locale tag (built-in `device` "locale" capability).
+    GotDeviceLocale(String),
 }
 
 #[derive(Clone)]
@@ -189,6 +192,8 @@ pub struct Model {
     bio: String,
     /// Status line for the OAuth sign-in demo.
     oauth_status: String,
+    /// Device locale tag detected at startup (e.g. "de-CH").
+    device_locale: String,
 }
 
 impl Default for Model {
@@ -238,6 +243,7 @@ impl Default for Model {
             password: String::new(),
             bio: String::new(),
             oauth_status: String::new(),
+            device_locale: String::new(),
         }
     }
 }
@@ -547,6 +553,7 @@ impl MobilerApp for FadeHouse {
                 let input = format!(r#"{{"url":"{url}","scheme":"dev.mobiler.barbershop"}}"#);
                 cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.output));
             }
+            Msg::GotDeviceLocale(tag) => model.device_locale = tag,
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
                     match query_param(&output, "code") {
@@ -569,6 +576,9 @@ impl MobilerApp for FadeHouse {
             "CREATE TABLE IF NOT EXISTS note(id INTEGER PRIMARY KEY, body TEXT)",
             |_| Msg::LoadNote,
         );
+        // Detect the device's preferred locale (built-in `device` capability) so the
+        // formatting card can show it — works on iOS, Android, and web.
+        cx.device_locale(|r| Msg::GotDeviceLocale(r.output));
     }
 
     fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
@@ -877,7 +887,7 @@ fn bt_section(model: &Model) -> Widget {
 /// dashed ceiling, a right-side bracket, and a legend. Illustrative data.
 /// Locale-aware formatting showcase: one amount + today's date rendered across locales using
 /// `mobiler_core::format` (pure Rust, synchronous — runs in the core, not via a platform formatter).
-fn format_card() -> Widget {
+fn format_card(device_locale: &str) -> Widget {
     let amount = 1234.5;
     let row_for = |label: &str, value: String| {
         row(vec![
@@ -885,6 +895,18 @@ fn format_card() -> Widget {
             spacer(Spacing::Sm),
             text(value),
         ])
+    };
+    // The device's preferred locale (detected at startup) mapped to a formatting Locale.
+    let detected = if device_locale.is_empty() {
+        caption("Detecting your device locale…")
+    } else {
+        match Locale::from_tag(device_locale) {
+            Some(loc) => row_for(
+                "Your device",
+                format!("{device_locale} → {}", format::format_currency(amount, Currency::Chf, loc)),
+            ),
+            None => caption(format!("Your device: {device_locale} (unsupported — using default)")),
+        }
     };
     card(
         column(vec![
@@ -899,6 +921,8 @@ fn format_card() -> Widget {
             divider(),
             row_for("de-CH", format::format_date_long(2026, 6, 4, Locale::DeCh)),
             row_for("sr-Cyrl", format::format_date_long(2026, 6, 4, Locale::SrCyrl)),
+            divider(),
+            detected,
         ]),
         CardStyle::Outlined,
     )
@@ -1047,7 +1071,7 @@ fn profile_screen(model: &Model) -> Widget {
         ),
         // Locale-aware formatting showcase — the same amount/date rendered per locale
         // (mobiler_core::format; pure Rust, synchronous, runs in the core).
-        format_card(),
+        format_card(&model.device_locale),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![
