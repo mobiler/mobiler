@@ -158,6 +158,7 @@ import dev.mobiler.coffee.shared.types.CardStyle
 import dev.mobiler.coffee.shared.types.ChartStyle
 import dev.mobiler.coffee.shared.types.Corner
 import dev.mobiler.coffee.shared.types.Density
+import dev.mobiler.coffee.shared.types.FieldKind
 import dev.mobiler.coffee.shared.types.Icon as WidgetIcon
 import dev.mobiler.coffee.shared.types.ImageRatio
 import dev.mobiler.coffee.shared.types.ImageShape

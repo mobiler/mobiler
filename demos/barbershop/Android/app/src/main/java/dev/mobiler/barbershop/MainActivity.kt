@@ -158,6 +158,7 @@ import dev.mobiler.barbershop.shared.types.CardStyle
 import dev.mobiler.barbershop.shared.types.ChartStyle
 import dev.mobiler.barbershop.shared.types.Corner
 import dev.mobiler.barbershop.shared.types.Density
+import dev.mobiler.barbershop.shared.types.FieldKind
 import dev.mobiler.barbershop.shared.types.Icon as WidgetIcon
 import dev.mobiler.barbershop.shared.types.ImageRatio
 import dev.mobiler.barbershop.shared.types.ImageShape

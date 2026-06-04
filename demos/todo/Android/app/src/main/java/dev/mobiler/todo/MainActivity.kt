@@ -152,6 +152,7 @@ import dev.mobiler.todo.shared.types.CardStyle
 import dev.mobiler.todo.shared.types.ChartStyle
 import dev.mobiler.todo.shared.types.Corner
 import dev.mobiler.todo.shared.types.Density
+import dev.mobiler.todo.shared.types.FieldKind
 import dev.mobiler.todo.shared.types.Icon as WidgetIcon
 import dev.mobiler.todo.shared.types.ImageRatio
 import dev.mobiler.todo.shared.types.ImageShape
