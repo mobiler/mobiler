@@ -15,6 +15,7 @@ use mobiler_core::{
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_error,
     with_fab, with_refresh, with_sheet, with_theme,
 };
+use mobiler_core::format::{self, Currency, Locale};
 use serde::{Deserialize, Serialize};
 
 const HERO: &str = "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=1200&q=80";
@@ -874,6 +875,35 @@ fn bt_section(model: &Model) -> Widget {
 /// A `RegionChart` showcase — a variable-width "coverage-gap" chart (the Swiss insurance /
 /// pension style): colored value bands across an irregular timeline, a solid target line + a
 /// dashed ceiling, a right-side bracket, and a legend. Illustrative data.
+/// Locale-aware formatting showcase: one amount + today's date rendered across locales using
+/// `mobiler_core::format` (pure Rust, synchronous — runs in the core, not via a platform formatter).
+fn format_card() -> Widget {
+    let amount = 1234.5;
+    let row_for = |label: &str, value: String| {
+        row(vec![
+            caption(label.to_string()),
+            spacer(Spacing::Sm),
+            text(value),
+        ])
+    };
+    card(
+        column(vec![
+            emphasis("Locale formatting"),
+            caption("The same CHF 1234.5 / date, formatted per locale:"),
+            row_for("de-CH", format::format_currency(amount, Currency::Chf, Locale::DeCh)),
+            row_for("de-DE", format::format_currency(amount, Currency::Eur, Locale::DeDe)),
+            row_for("fr-FR", format::format_currency(amount, Currency::Eur, Locale::FrFr)),
+            row_for("en-US", format::format_currency(amount, Currency::Usd, Locale::EnUs)),
+            row_for("sr-Latn", format::format_currency(amount, Currency::Rsd, Locale::SrLatn)),
+            row_for("sr-Cyrl", format::format_currency(amount, Currency::Rsd, Locale::SrCyrl)),
+            divider(),
+            row_for("de-CH", format::format_date_long(2026, 6, 4, Locale::DeCh)),
+            row_for("sr-Cyrl", format::format_date_long(2026, 6, 4, Locale::SrCyrl)),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 fn coverage_chart() -> Widget {
     // Brand-ish palette for the bands.
     let teal = Rgb::new(0x8E, 0xC6, 0xBA);
@@ -1015,6 +1045,9 @@ fn profile_screen(model: &Model) -> Widget {
             ]),
             CardStyle::Outlined,
         ),
+        // Locale-aware formatting showcase — the same amount/date rendered per locale
+        // (mobiler_core::format; pure Rust, synchronous, runs in the core).
+        format_card(),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![
