@@ -17,6 +17,10 @@ tree, no per-platform UI code.
 |:---:|
 | <img src="screenshots/coverage.png" width="260" alt="Fade House coverage — a RegionChart: colored value bands across an irregular timeline (3 Mt./21 Mt./Children/65 J.), solid + dashed reference lines with value chips, y-axis + tick marks, and a legend"> |
 
+| Profile → Sign in — rich form fields (keyboard kinds, secure masking, multiline) with inline validation |
+|:---:|
+| <img src="screenshots/signin-form.png" width="260" alt="Fade House sign-in form — an email field with a validation error, a phone field, a masked password field with a min-length error, and a multi-line note; each picks the right keyboard and shows inline errors"> |
+
 What it exercises:
 
 - **Icon bottom-tab bar** — Home / Services / Bookings / Profile, each with an icon (`tab_icon`).
@@ -44,6 +48,10 @@ BLE scan, alongside the earlier `sensors`/`audio`/`contacts`/`calendar`/`geoloca
 It also hosts a **`RegionChart`** ("Coverage") — a variable-width stacked-region / coverage-gap chart
 (arbitrary value bands across an irregular timeline, solid/dashed reference lines with chips, axis
 tick marks, and a legend) — the Swiss-insurance-style visualization the widget was built for.
+
+…and a **"Sign in" form** showing the rich text-field kinds — `email_field` / `phone_field` /
+`secure_field` (masked) / `multiline_field`, each picking the right keyboard, plus inline validation
+via `with_error(..)` (a bad email and a too-short password show errors live).
 
 ## Run (web)
 
