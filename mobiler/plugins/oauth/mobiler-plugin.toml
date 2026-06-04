@@ -1,0 +1,35 @@
+# Free, bundled Mobiler plugin: OAuth 2.0 / OpenID Connect login. Opens the system auth browser
+# (ASWebAuthenticationSession on iOS, Chrome Custom Tabs on Android), waits for the provider to
+# redirect back to your app's custom URL scheme, and returns that redirect URL. Call from Rust:
+#
+#   let input = serde_json::json!({ "url": authorize_url, "scheme": app_id }).to_string();
+#   cx.plugin("oauth", "login", input, |r| Msg::LoggedIn(r.ok, r.output));
+#   // r.ok==true → r.output is the full redirect URL (e.g. "<scheme>://oauth?code=…&state=…");
+#   // parse `code` + `state`, then exchange the code for tokens with `cx.http` (POST the token
+#   // endpoint) and persist them with the `securestore` plugin. r.ok==false on cancel/error.
+#
+# This plugin owns ONLY the browser redirect step — token exchange (http) and token storage
+# (securestore) are already covered by those capabilities/plugins. PKCE/state are built by your
+# Rust core into the authorize URL.
+#
+# Redirect scheme: use your app's bundle/application id (Mobiler sets the SAME id on iOS + Android).
+# Register "<your.app.id>://oauth" (any path) as the redirect URI with your provider and pass
+# `scheme = "<your.app.id>"`. On iOS any scheme works; on Android the redirect is caught by an
+# intent-filter on `${applicationId}`, so the scheme MUST equal the application id (for a different
+# scheme, add your own <intent-filter> to OAuthActivity).
+#
+# Install:  mobiler plugin add oauth
+name = "oauth"
+summary = "OAuth 2.0 / OIDC login — system auth browser → redirect URL (free)"
+
+[android]
+# A self-contained Activity launches the Custom Tab and catches the redirect deep link, so the
+# plugin needs no edit to the app's MainActivity (which `plugin add` can't do).
+sources = ["android/OAuthPlugin.kt", "android/OAuthActivity.kt"]
+register = '"oauth" to OAuthPlugin(application)'
+gradle_deps = ["androidx.browser:browser:1.8.0"]
+manifest_application = ['<activity android:name=".OAuthActivity" android:exported="true" android:launchMode="singleTask"><intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="${applicationId}" /></intent-filter></activity>']
+
+[ios]
+sources = ["ios/OAuthPlugin.swift"]
+register = 'case "oauth": return await OAuthPlugin.handle(op: op, input: input)'

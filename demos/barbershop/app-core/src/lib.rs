@@ -115,6 +115,12 @@ pub enum Msg {
     BtScanned(String),
     /// Deep-link to the app's iOS Settings page (to re-enable a denied permission).
     OpenAppSettings,
+
+    // --- Profile "Sign in": OAuth login flow (`oauth` plugin) ---
+    /// Start an OAuth login in the system auth browser (`oauth` plugin).
+    OAuthLogin,
+    /// OAuth result: (ok, redirect-URL-or-error).
+    OAuthDone(bool, String),
 }
 
 #[derive(Clone)]
@@ -180,6 +186,8 @@ pub struct Model {
     phone: String,
     password: String,
     bio: String,
+    /// Status line for the OAuth sign-in demo.
+    oauth_status: String,
 }
 
 impl Default for Model {
@@ -228,6 +236,7 @@ impl Default for Model {
             phone: String::new(),
             password: String::new(),
             bio: String::new(),
+            oauth_status: String::new(),
         }
     }
 }
@@ -235,6 +244,16 @@ impl Default for Model {
 /// Parse a "4.8"-style rating into tenths (48) for the `rating` widget.
 fn tenths(s: &str) -> u32 {
     (s.parse::<f32>().unwrap_or(0.0) * 10.0).round() as u32
+}
+
+/// Pull a query parameter out of a redirect URL (tiny, dependency-free) — used to read the
+/// OAuth `code` from the redirect the `oauth` plugin returns.
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let query = url.split_once('?').map(|(_, q)| q)?;
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then(|| v.to_string())
+    })
 }
 
 #[derive(Default)]
@@ -516,6 +535,27 @@ impl MobilerApp for FadeHouse {
             }
             // iOS won't re-show the permission prompt once denied — deep-link to the app's Settings.
             Msg::OpenAppSettings => cx.notify("browser", "open", "app-settings:"),
+
+            // OAuth sign-in demo. A real flow points `url` at the provider's authorize endpoint;
+            // here we use an httpbin 302 → our custom scheme, so the full redirect round-trip
+            // (open browser → redirect → capture → return) runs end-to-end without an IdP. The
+            // app's id (= redirect scheme on both platforms) is dev.mobiler.barbershop.
+            Msg::OAuthLogin => {
+                model.oauth_status = "Opening sign-in…".into();
+                let url = "https://httpbin.org/redirect-to?url=dev.mobiler.barbershop%3A%2F%2Foauth%3Fcode%3Ddemo123&status_code=302";
+                let input = format!(r#"{{"url":"{url}","scheme":"dev.mobiler.barbershop"}}"#);
+                cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.output));
+            }
+            Msg::OAuthDone(ok, output) => {
+                model.oauth_status = if ok {
+                    match query_param(&output, "code") {
+                        Some(code) => format!("Signed in ✓ — got auth code: {code}"),
+                        None => format!("Redirected: {output}"),
+                    }
+                } else {
+                    format!("Sign-in cancelled/failed: {output}")
+                };
+            }
         }
     }
 
@@ -955,6 +995,14 @@ fn profile_screen(model: &Model) -> Widget {
                     } else { f }
                 },
                 multiline_field("bio", "Anything your stylist should know…", model.bio.as_str()),
+                divider(),
+                // OAuth login via the system auth browser (`oauth` plugin).
+                button("Sign in with OAuth", ButtonStyle::Filled, Msg::OAuthLogin),
+                caption(if model.oauth_status.is_empty() {
+                    "Opens the system auth browser and captures the redirect (demo flow).".to_string()
+                } else {
+                    model.oauth_status.clone()
+                }),
             ]),
             CardStyle::Outlined,
         ),

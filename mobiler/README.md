@@ -96,6 +96,7 @@ ABI change. Bundled free plugins:
 | 🎤 `speech` | speech-to-text (dictation) |
 | 🗃️ `sqlite` | on-device SQLite (exec / query → JSON) |
 | 🔵 `bluetooth` | BLE scan / connect / read |
+| 🔑 `oauth` | OAuth 2.0 / OIDC login (system auth browser → redirect) |
 
 ```bash
 mobiler plugin list
@@ -158,10 +159,10 @@ Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** 
 demand-driven): video playback/streaming
 (HLS + MP4, any URL source), lazy/virtualized lists, tablet master-detail, i18n + locale-aware
 currency/date formatting, a plugin→core streaming/events
-primitive (live data, BLE notify, infinite scroll), auth / OAuth login, remote push (APNs/FCM),
+primitive (live data, BLE notify, infinite scroll), remote push (APNs/FCM),
 in-app purchases, deep links, embedded WebView, maps, and PDF export. The full list lives on
 [GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields (secure /
-keyboard types / multiline / validation). Next up: i18n/currency, PDF._
+keyboard types / multiline / validation) + the `oauth` plugin (OAuth/OIDC login). Next up: i18n/currency, PDF._
 
 ## Links
 

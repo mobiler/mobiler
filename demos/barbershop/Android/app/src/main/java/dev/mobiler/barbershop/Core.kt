@@ -296,6 +296,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "sqlite" to SqlitePlugin(application),
         "speech" to SpeechPlugin(application),
         "bluetooth" to BluetoothPlugin(application),
+        "oauth" to OAuthPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

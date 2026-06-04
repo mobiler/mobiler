@@ -63,6 +63,7 @@ dependencies {
     // HTTP capability (Core.kt HttpPlugin)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.android.play:review:2.0.2")
+    implementation("androidx.browser:browser:1.8.0")
     // mobiler:gradle-deps — `mobiler plugin add` inserts plugin Gradle dependencies above this line
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

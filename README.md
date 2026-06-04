@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login)
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -177,6 +177,7 @@ free plugins:
 | 🎤 **speech** | speech-to-text (dictation) | `mobiler plugin add speech` |
 | 🗃️ **sqlite** | on-device SQLite (exec / query → JSON) | `mobiler plugin add sqlite` |
 | 🔵 **bluetooth** | BLE scan / connect / read | `mobiler plugin add bluetooth` |
+| 🔑 **oauth** | OAuth 2.0 / OIDC login (system auth browser → redirect) | `mobiler plugin add oauth` |
 
 ```bash
 mobiler plugin list            # see the bundled (free) plugins
@@ -202,7 +203,6 @@ feedback and contributions welcome):
 
 **Connectivity & data**
 - Plugin → core streaming / events (live data, BLE notify, infinite scroll)
-- Auth / OAuth login flow
 - Remote push notifications (APNs / FCM)
 - File read/write & downloads
 
@@ -211,7 +211,7 @@ feedback and contributions welcome):
 - Deep links / universal links
 - Embedded WebView · Maps · PDF export / print
 
-_Recently shipped: rich form fields — secure/password, keyboard types (email/number/decimal/phone/url), multiline, inline validation. Next up: i18n/currency formatting and PDF export._
+_Recently shipped: rich form fields (secure/password, keyboard types, multiline, inline validation) + the `oauth` plugin (OAuth 2.0 / OIDC login). Next up: i18n/currency formatting and PDF export._
 
 ## Repository layout
 
