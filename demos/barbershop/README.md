@@ -13,6 +13,10 @@ tree, no per-platform UI code.
 |:---:|
 | <img src="screenshots/bookings.png" width="240" alt="Fade House bookings — a stacked-bar chart with y-axis + legend, a service-mix donut, a today's-target gauge, weekly-goal rings, inline calendar, swipe-to-cancel rows, pull-to-refresh"> |
 
+| Profile → Coverage — a `RegionChart` (variable-width stacked-region / coverage-gap chart) |
+|:---:|
+| <img src="screenshots/coverage.png" width="260" alt="Fade House coverage — a RegionChart: colored value bands across an irregular timeline (3 Mt./21 Mt./Children/65 J.), solid + dashed reference lines with value chips, y-axis + tick marks, and a legend"> |
+
 What it exercises:
 
 - **Icon bottom-tab bar** — Home / Services / Bookings / Profile, each with an icon (`tab_icon`).
@@ -37,6 +41,9 @@ determinate **`Progress`** bar ("profile completeness"), **`Skeleton`** shimmer 
 share a clip (`video` → `sharefile`), an App Store review prompt (`review`) — and "Notes & devices":
 a note saved/loaded via on-device **`sqlite`**, dictated via **`speech`**, plus a **`bluetooth`**
 BLE scan, alongside the earlier `sensors`/`audio`/`contacts`/`calendar`/`geolocation`/`connectivity` demos.
+It also hosts a **`RegionChart`** ("Coverage") — a variable-width stacked-region / coverage-gap chart
+(arbitrary value bands across an irregular timeline, solid/dashed reference lines with chips, axis
+tick marks, and a legend) — the Swiss-insurance-style visualization the widget was built for.
 
 ## Run (web)
 
