@@ -195,7 +195,6 @@ Mobiler is production-bound. On top of the [built-in capabilities](#built-in-cap
 feedback and contributions welcome):
 
 **Inputs, media & UI**
-- Richer form fields — secure/password, keyboard types (email/number/phone), multiline, validation
 - Video playback / streaming (HLS + MP4; any URL source — e.g. Bunny Stream)
 - Lazy / virtualized lists (large feeds, tables)
 - Tablet master-detail (two-pane) layouts
@@ -212,7 +211,7 @@ feedback and contributions welcome):
 - Deep links / universal links
 - Embedded WebView · Maps · PDF export / print
 
-_Next up: richer form fields, i18n/currency formatting, and PDF export._
+_Recently shipped: rich form fields — secure/password, keyboard types (email/number/decimal/phone/url), multiline, inline validation. Next up: i18n/currency formatting and PDF export._
 
 ## Repository layout
 
