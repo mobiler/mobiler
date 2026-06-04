@@ -526,7 +526,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             style = MaterialTheme.typography.labelSmall,
                                             color = textOn(regionColor(i)),
                                             textAlign = TextAlign.Center,
-                                            maxLines = 2,
+                                            maxLines = 3,
                                             modifier = if (r.vertical) Modifier.rotate(-90f) else Modifier,
                                         )
                                     }
@@ -569,6 +569,19 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             .background(Color.White, RoundedCornerShape(4.dp))
                                             .border(0.5.dp, Color(0x33000000), RoundedCornerShape(4.dp))
                                             .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            widget.bracket?.let { b ->
+                                val yc = ph * (1f - (b.y0 + b.y1) / 2f / ym)
+                                Box(modifier = Modifier.offset(x = pw - 70.dp, y = yc - 14.dp).width(64.dp)) {
+                                    Text(
+                                        (if (b.info) "ⓘ\n" else "") + b.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 8.sp,
+                                        color = labelColor,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 4,
                                     )
                                 }
                             }

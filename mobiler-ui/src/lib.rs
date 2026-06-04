@@ -150,6 +150,9 @@ pub struct ChartBracket {
     pub y0: f32,
     pub y1: f32,
     pub label: String,
+    /// Show an ⓘ info marker above the label (e.g. a "Ceiling max …" note). `label` may contain
+    /// `\n` for multiple lines.
+    pub info: bool,
 }
 
 /// An x-axis tick on a [`Widget::RegionChart`] at domain position `at`, labelled `label`. Ticks
@@ -219,7 +222,13 @@ impl ChartLegendItem {
 impl ChartBracket {
     #[must_use]
     pub fn new(y0: f32, y1: f32, label: impl Into<String>) -> Self {
-        Self { y0, y1, label: label.into() }
+        Self { y0, y1, label: label.into(), info: false }
+    }
+    /// Show an ⓘ info marker above the label.
+    #[must_use]
+    pub fn with_info(mut self) -> Self {
+        self.info = true;
+        self
     }
 }
 
@@ -524,7 +533,7 @@ mod tests {
             x_max: 65.0,
             y_max: 80.0,
             ref_lines: vec![ChartRefLine { value: 80.0, label: "CHF 80'000".to_string(), dashed: false }],
-            bracket: Some(ChartBracket { y0: 60.0, y1: 80.0, label: "Ceiling".to_string() }),
+            bracket: Some(ChartBracket { y0: 60.0, y1: 80.0, label: "Ceiling".to_string(), info: true }),
             legend: vec![ChartLegendItem { label: "Gap".to_string(), color: Rgb::new(0x5A, 0x7D, 0x9A) }],
         });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });

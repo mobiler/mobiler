@@ -1235,7 +1235,7 @@ fn region_chart_view(
         let bottom = (b.y0 / ym * 100.0).clamp(0.0, 100.0);
         let height = ((b.y1 - b.y0) / ym * 100.0).clamp(0.0, 100.0);
         let style = format!("bottom:{bottom:.3}%;height:{height:.3}%");
-        let label = b.label.clone();
+        let label = if b.info { format!("ⓘ\n{}", b.label) } else { b.label.clone() };
         view! { <div class="rchart-bracket" style=style><span>{label}</span></div> }
     });
 

@@ -219,13 +219,13 @@ body {
 .rchart-ytick { position: absolute; left: 0; width: 6px; height: 0; border-top: 2px solid var(--ink, #222); }
 .rchart-xtickmark { position: absolute; bottom: 0; width: 0; height: 6px; border-left: 2px solid var(--ink, #222); }
 .rchart-region { position: absolute; display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; border: 0.5px solid rgba(255, 255, 255, 0.45); }
-.rchart-label { font-size: 11px; font-weight: 600; color: #1a1a1a; text-align: center; padding: 2px; line-height: 1.2; }
-.rchart-label-v { transform: rotate(-90deg); white-space: nowrap; }
+.rchart-label { font-size: 11px; font-weight: 600; color: #1a1a1a; text-align: center; padding: 2px; line-height: 1.2; white-space: pre-line; }
+.rchart-label-v { transform: rotate(-90deg); white-space: pre; }
 .rchart-refline { position: absolute; left: 0; right: 0; border-top: 2px solid #c0392b; }
 .rchart-refline-dashed { border-top-style: dashed; }
 .rchart-chip { position: absolute; right: 0; transform: translateY(50%); background: #ffffff; color: #1a1a1a; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 4px; padding: 1px 4px; font-size: 9px; font-weight: 600; white-space: nowrap; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
 .rchart-bracket { position: absolute; right: calc(var(--rchart-chip) - 6px); width: 6px; border: 1.5px solid var(--muted, #888); border-left: none; }
-.rchart-bracket span { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 60px; font-size: 9px; line-height: 1.2; color: var(--muted, #888); }
+.rchart-bracket span { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 60px; font-size: 9px; line-height: 1.25; color: var(--muted, #888); white-space: pre-line; text-align: center; }
 .rchart-xaxis { position: relative; height: 16px; margin-top: 3px; margin-left: var(--rchart-gutter); margin-right: var(--rchart-chip); }
 .rchart-xtick { position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--muted, #888); white-space: nowrap; }
 
