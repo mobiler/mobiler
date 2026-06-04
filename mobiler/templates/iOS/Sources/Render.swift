@@ -78,6 +78,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .chart(let series, let labels, let style, let axis, let legend):
         return AnyView(ChartView(series: series, labels: labels, style: style, axis: axis, legend: legend))
 
+    case .regionChart(let regions, let ticks, let xMax, let yMax, let refLines, let bracket, let legend):
+        return AnyView(RegionChartView(regions: regions, ticks: ticks, xMax: xMax, yMax: yMax, refLines: refLines, bracket: bracket, legend: legend))
+
     case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
         return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
 
@@ -323,7 +326,10 @@ private struct AvatarView: View {
 }
 
 // Distinct fallback colors for series 1.. (series 0 with no override rides the accent color).
-private let chartPalette: [Color] = [
+private let chartPalette: [Color]
+
+// Palette as RGB (parallel to chartPalette) so RegionChart can compute per-band label contrast.
+private let regionPaletteRGB: [(Double, Double, Double)] = [
     Color(red: 224.0 / 255, green: 119.0 / 255, blue: 44.0 / 255),
     Color(red: 46.0 / 255, green: 160.0 / 255, blue: 106.0 / 255),
     Color(red: 192.0 / 255, green: 70.0 / 255, blue: 107.0 / 255),
@@ -516,6 +522,146 @@ private struct ChartView: View {
         }
     }
 }
+
+// Variable-width stacked-region / coverage-gap chart: absolute-positioned region rectangles in the
+// [0,xMax]×[0,yMax] plane + ref lines/chips + irregular x-ticks + optional right bracket + legend.
+// The iOS twin of mobiler-web's region_chart_view. Non-interactive.
+private struct RegionChartView: View {
+    let regions: [ChartRegion]
+    let ticks: [ChartTick]
+    let xMax: Float
+    let yMax: Float
+    let refLines: [ChartRefLine]
+    let bracket: ChartBracket?
+    let legend: [ChartLegendItem]
+
+    private func rgbOf(_ i: Int) -> (Double, Double, Double) {
+        if i < regions.count, let c = regions[i].color {
+            return (Double(c.r) / 255, Double(c.g) / 255, Double(c.b) / 255)
+        }
+        return regionPaletteRGB[i % regionPaletteRGB.count]
+    }
+    private func color(_ i: Int) -> Color {
+        let (r, g, b) = rgbOf(i)
+        return Color(red: r, green: g, blue: b)
+    }
+    private func textOn(_ i: Int) -> Color {
+        let (r, g, b) = rgbOf(i)
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 0.55 ? Color(white: 0.1) : Color(white: 0.96)
+    }
+    private func fmtTick(_ v: Float) -> String {
+        abs(v - v.rounded()) < 0.05 ? "\(Int(v))" : String(format: "%.1f", v)
+    }
+
+    // Everything is drawn in ONE Canvas coordinate space: a reserved left gutter (y labels) +
+    // plot + right margin (chips/bracket). Regions, axes, ticks, and x-labels all map through the
+    // same px()/py(), so they line up by construction. The iOS twin of mobiler-web's region chart.
+    var body: some View {
+        let xm = max(xMax, 1e-6)
+        let ym = max(yMax, 1e-6)
+        VStack(spacing: 6) {
+            Canvas { ctx, size in
+                let gutter: CGFloat = 42
+                let chipW: CGFloat = 58
+                let plotX = gutter
+                let plotTop: CGFloat = 6
+                let plotBottom = size.height - 22
+                let plotH = max(plotBottom - plotTop, 1)
+                let plotW = max(size.width - gutter - chipW, 1)
+                let px: (Float) -> CGFloat = { plotX + CGFloat(min(max($0 / xm, 0), 1)) * plotW }
+                let py: (Float) -> CGFloat = { plotTop + CGFloat(1 - min(max($0 / ym, 0), 1)) * plotH }
+                let axisColor = Color.primary.opacity(0.8)
+                let red = Color(red: 0.75, green: 0.22, blue: 0.17)
+
+                for (i, r) in regions.enumerated() {
+                    let rect = CGRect(x: px(r.x0), y: py(r.y1), width: px(r.x1) - px(r.x0), height: py(r.y0) - py(r.y1))
+                    ctx.fill(Path(rect), with: .color(color(i)))
+                    ctx.stroke(Path(rect), with: .color(.white.opacity(0.4)), lineWidth: 0.5)
+                    if !r.label.isEmpty {
+                        let avail = r.vertical ? (rect.height - 6) : (rect.width - 6)
+                        var fs: CGFloat = 11
+                        var t = ctx.resolve(Text(r.label).font(.system(size: fs)).foregroundColor(textOn(i)))
+                        let mw = t.measure(in: CGSize(width: 4000, height: 4000)).width
+                        if avail > 1, mw > avail {
+                            fs = max(7, fs * avail / mw)
+                            t = ctx.resolve(Text(r.label).font(.system(size: fs)).foregroundColor(textOn(i)))
+                        }
+                        if r.vertical {
+                            var c = ctx
+                            c.translateBy(x: rect.midX, y: rect.midY)
+                            c.rotate(by: .degrees(-90))
+                            c.draw(t, at: .zero, anchor: .center)
+                        } else {
+                            ctx.draw(t, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+                        }
+                    }
+                }
+                for rl in refLines {
+                    let y = py(rl.value)
+                    var p = Path(); p.move(to: CGPoint(x: plotX, y: y)); p.addLine(to: CGPoint(x: plotX + plotW, y: y))
+                    ctx.stroke(p, with: .color(red), style: rl.dashed ? StrokeStyle(lineWidth: 2, dash: [6, 5]) : StrokeStyle(lineWidth: 2))
+                }
+                if let b = bracket {
+                    let bx = plotX + plotW + 4
+                    let yt = py(b.y1); let yb = py(b.y0)
+                    var p = Path()
+                    p.move(to: CGPoint(x: bx, y: yt)); p.addLine(to: CGPoint(x: bx, y: yb))
+                    p.move(to: CGPoint(x: bx, y: yt)); p.addLine(to: CGPoint(x: bx - 5, y: yt))
+                    p.move(to: CGPoint(x: bx, y: yb)); p.addLine(to: CGPoint(x: bx - 5, y: yb))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(b.label).font(.system(size: 8)).foregroundColor(.secondary)), at: CGPoint(x: bx + 4, y: (yt + yb) / 2), anchor: .leading)
+                }
+                var ax = Path()
+                ax.move(to: CGPoint(x: plotX, y: plotTop)); ax.addLine(to: CGPoint(x: plotX, y: plotBottom))
+                ax.move(to: CGPoint(x: plotX, y: plotBottom)); ax.addLine(to: CGPoint(x: plotX + plotW, y: plotBottom))
+                ctx.stroke(ax, with: .color(axisColor), lineWidth: 2)
+                for k in 0 ... 4 {
+                    let v = ym * Float(k) / 4
+                    let y = py(v)
+                    var p = Path(); p.move(to: CGPoint(x: plotX - 6, y: y)); p.addLine(to: CGPoint(x: plotX, y: y))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(fmtTick(v)).font(.system(size: 9)).foregroundColor(.secondary)), at: CGPoint(x: plotX - 6, y: y), anchor: .trailing)
+                }
+                for t in ticks {
+                    let x = px(t.at)
+                    var p = Path(); p.move(to: CGPoint(x: x, y: plotBottom)); p.addLine(to: CGPoint(x: x, y: plotBottom + 5))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(t.label).font(.caption2).foregroundColor(.secondary)), at: CGPoint(x: x, y: plotBottom + 13), anchor: .center)
+                }
+                for rl in refLines {
+                    let y = py(rl.value)
+                    let ct = ctx.resolve(Text(rl.label).font(.system(size: 9).weight(.semibold)).foregroundColor(Color(white: 0.1)))
+                    let sz = ct.measure(in: CGSize(width: chipW, height: 40))
+                    let cx = plotX + plotW + chipW / 2
+                    let box = CGRect(x: cx - sz.width / 2 - 4, y: y - sz.height / 2 - 2, width: sz.width + 8, height: sz.height + 4)
+                    ctx.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(.white))
+                    ctx.stroke(Path(roundedRect: box, cornerRadius: 4), with: .color(.black.opacity(0.2)), lineWidth: 0.5)
+                    ctx.draw(ct, at: CGPoint(x: cx, y: y), anchor: .center)
+                }
+            }
+            .frame(height: 312)
+            if !legend.isEmpty {
+                let rows = (legend.count + 2) / 3
+                VStack(spacing: 2) {
+                    ForEach(0 ..< rows, id: \.self) { row in
+                        HStack(spacing: 12) {
+                            ForEach(Array((row * 3) ..< min(row * 3 + 3, legend.count)), id: \.self) { idx in
+                                let li = legend[idx]
+                                HStack(spacing: 4) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color(red: Double(li.color.r) / 255, green: Double(li.color.g) / 255, blue: Double(li.color.b) / 255))
+                                        .frame(width: 10, height: 10)
+                                    Text(li.label).font(.caption2).foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+}
+
 
 // A list row that reveals trailing action buttons on horizontal swipe; tap an action to fire it.
 private struct SwipeActionView: View {
