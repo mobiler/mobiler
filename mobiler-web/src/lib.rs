@@ -21,7 +21,7 @@ use crux_core::{App, Core};
 use leptos::prelude::*;
 use mobiler_core::{
     Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
-    ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FontFamily, Icon,
+    ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, ProjectColor,
     Rgb, Spacing, TextStyle, Theme, Tone, Widget,
 };
@@ -547,21 +547,53 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             }
             .into_any()
         }
-        Widget::TextField { id, placeholder, value } => {
+        Widget::TextField { id, placeholder, value, kind, error } => {
             let (send, id) = (send.clone(), id.clone());
             let (placeholder, value) = (placeholder.clone(), value.clone());
-            view! {
-                <input
-                    class="field"
-                    placeholder=placeholder
-                    prop:value=value
-                    on:input=move |ev| send(Action::Input {
-                        id: id.clone(),
-                        value: InputValue::Text(event_target_value(&ev)),
-                    })
-                />
-            }
-            .into_any()
+            let invalid = error.is_some();
+            let err_view = error.clone().map(|m| view! { <div class="field-error">{m}</div> });
+            // (input type, inputmode) per FieldKind. Multiline renders a <textarea> below.
+            let (itype, imode): (&str, &str) = match kind {
+                FieldKind::Secure => ("password", ""),
+                FieldKind::Email => ("email", "email"),
+                FieldKind::Number => ("text", "numeric"),
+                FieldKind::Decimal => ("text", "decimal"),
+                FieldKind::Phone => ("tel", "tel"),
+                FieldKind::Url => ("url", "url"),
+                FieldKind::Text | FieldKind::Multiline => ("text", ""),
+            };
+            let field_class = if invalid { "field field-invalid" } else { "field" };
+            let control = if matches!(kind, FieldKind::Multiline) {
+                view! {
+                    <textarea
+                        class=field_class
+                        rows="3"
+                        placeholder=placeholder
+                        prop:value=value
+                        on:input=move |ev| send(Action::Input {
+                            id: id.clone(),
+                            value: InputValue::Text(event_target_value(&ev)),
+                        })
+                    ></textarea>
+                }
+                .into_any()
+            } else {
+                view! {
+                    <input
+                        class=field_class
+                        r#type=itype
+                        inputmode=imode
+                        placeholder=placeholder
+                        prop:value=value
+                        on:input=move |ev| send(Action::Input {
+                            id: id.clone(),
+                            value: InputValue::Text(event_target_value(&ev)),
+                        })
+                    />
+                }
+                .into_any()
+            };
+            view! { <div class="field-wrap">{control}{err_view}</div> }.into_any()
         }
         Widget::SearchField { id, placeholder, value } => {
             let (send, id) = (send.clone(), id.clone());

@@ -293,7 +293,12 @@ body {
   font-size: 15px;
   background: var(--surface);
   color: var(--ink);
+  box-sizing: border-box;
 }
+textarea.field { resize: vertical; font-family: inherit; }
+.field-wrap { display: flex; flex-direction: column; gap: 4px; }
+.field-invalid { border-color: var(--danger, #d33); }
+.field-error { font-size: 12px; color: var(--danger, #d33); padding-left: 2px; }
 
 .check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 15px; }
 .check input { width: 18px; height: 18px; accent-color: var(--primary); }

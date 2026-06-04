@@ -58,6 +58,17 @@ pub enum ButtonStyle { Filled, Outlined, Text }
 #[repr(C)]
 pub enum CardStyle { Elevated, Outlined, Filled, Brand }
 
+/// What a [`Widget::TextField`] accepts — selects the on-screen keyboard,
+/// secure (masked) entry, and single- vs multi-line layout in one axis.
+///
+/// `Text` is the plain default. `Secure` masks input (passwords). `Email`,
+/// `Number` (integer), `Decimal`, `Phone`, and `Url` pick the matching native
+/// keyboard / input mode without masking. `Multiline` is a growable multi-row
+/// text area (plain keyboard).
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum FieldKind { Text, Secure, Email, Number, Decimal, Phone, Url, Multiline }
+
 /// Semantic status color (distinct from brand/identity color).
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
@@ -450,7 +461,10 @@ pub enum Widget {
     Button { label: String, style: ButtonStyle, on_press: ActionToken },
     IconButton { icon: Icon, on_press: ActionToken },
     Chip { label: String, selected: bool, on_press: ActionToken },
-    TextField { id: String, placeholder: String, value: String },
+    /// A text input. `kind` selects keyboard / secure entry / multiline
+    /// (see [`FieldKind`]); `error`, when `Some`, shows an inline validation
+    /// message below the field and marks it invalid. Emits `Input { id, Text }`.
+    TextField { id: String, placeholder: String, value: String, kind: FieldKind, error: Option<String> },
     /// A search input (leading magnifier, pill shape); emits `Input { id, Text }` like `TextField`.
     SearchField { id: String, placeholder: String, value: String },
     /// A single-choice segmented control — exclusive options in a pill (e.g. Men/Women/Kids).
@@ -536,6 +550,8 @@ mod tests {
             bracket: Some(ChartBracket { y0: 60.0, y1: 80.0, label: "Ceiling".to_string(), info: true }),
             legend: vec![ChartLegendItem { label: "Gap".to_string(), color: Rgb::new(0x5A, 0x7D, 0x9A) }],
         });
+        round_trips(&Widget::TextField { id: "email".to_string(), placeholder: "you@co".to_string(), value: "".to_string(), kind: FieldKind::Email, error: None });
+        round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
         round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
