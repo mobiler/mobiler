@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
     Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
-    ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FontFamily, Icon,
+    ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FieldKind, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, Widget,
 };
@@ -591,7 +591,59 @@ pub fn chip<E: Serialize>(label: impl Into<String>, selected: bool, on_press: E)
 }
 #[must_use]
 pub fn text_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
-    Widget::TextField { id: id.into(), placeholder: placeholder.into(), value: value.into() }
+    Widget::TextField { id: id.into(), placeholder: placeholder.into(), value: value.into(), kind: FieldKind::Text, error: None }
+}
+/// A text field with full control over [`FieldKind`] and an optional inline
+/// validation `error`. The kind-specific helpers below ([`secure_field`],
+/// [`email_field`], …) wrap this for the common cases.
+#[must_use]
+pub fn field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>, kind: FieldKind, error: Option<String>) -> Widget {
+    Widget::TextField { id: id.into(), placeholder: placeholder.into(), value: value.into(), kind, error }
+}
+/// A masked password field ([`FieldKind::Secure`]).
+#[must_use]
+pub fn secure_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    field(id, placeholder, value, FieldKind::Secure, None)
+}
+/// An email-keyboard field ([`FieldKind::Email`]).
+#[must_use]
+pub fn email_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    field(id, placeholder, value, FieldKind::Email, None)
+}
+/// A whole-number keypad field ([`FieldKind::Number`]).
+#[must_use]
+pub fn number_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    field(id, placeholder, value, FieldKind::Number, None)
+}
+/// A decimal keypad field ([`FieldKind::Decimal`]).
+#[must_use]
+pub fn decimal_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    field(id, placeholder, value, FieldKind::Decimal, None)
+}
+/// A phone-keypad field ([`FieldKind::Phone`]).
+#[must_use]
+pub fn phone_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    field(id, placeholder, value, FieldKind::Phone, None)
+}
+/// A URL-keyboard field ([`FieldKind::Url`]).
+#[must_use]
+pub fn url_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    field(id, placeholder, value, FieldKind::Url, None)
+}
+/// A growable multi-line text area ([`FieldKind::Multiline`]).
+#[must_use]
+pub fn multiline_field(id: impl Into<String>, placeholder: impl Into<String>, value: impl Into<String>) -> Widget {
+    field(id, placeholder, value, FieldKind::Multiline, None)
+}
+/// Attach an inline validation message to a [`Widget::TextField`], marking it
+/// invalid. No-op on any other widget.
+#[must_use]
+pub fn with_error(widget: Widget, message: impl Into<String>) -> Widget {
+    match widget {
+        Widget::TextField { id, placeholder, value, kind, .. } =>
+            Widget::TextField { id, placeholder, value, kind, error: Some(message.into()) },
+        other => other,
+    }
 }
 /// A search input (leading magnifier, pill); emits `Input { id, Text }` like [`text_field`].
 #[must_use]
@@ -1066,7 +1118,12 @@ mod tests {
 
     #[test]
     fn input_builders_carry_ids_values_and_event_tokens() {
-        assert!(matches!(text_field("id", "ph", "v"), Widget::TextField { .. }));
+        assert!(matches!(text_field("id", "ph", "v"), Widget::TextField { kind: FieldKind::Text, error: None, .. }));
+        assert!(matches!(secure_field("pw", "Password", ""), Widget::TextField { kind: FieldKind::Secure, .. }));
+        assert!(matches!(email_field("e", "", ""), Widget::TextField { kind: FieldKind::Email, .. }));
+        assert!(matches!(multiline_field("note", "", ""), Widget::TextField { kind: FieldKind::Multiline, .. }));
+        assert!(matches!(with_error(email_field("e", "", "x"), "Invalid"), Widget::TextField { error: Some(m), kind: FieldKind::Email, .. } if m == "Invalid"));
+        assert!(matches!(with_error(divider(), "ignored"), Widget::Divider));
         assert!(matches!(toggle("t", "l", true), Widget::Toggle { value: true, .. }));
         assert!(matches!(checkbox("c", "l", false), Widget::Checkbox { value: false, .. }));
         assert!(matches!(slider("s", 3, 10), Widget::Slider { value: 3, max: 10, .. }));

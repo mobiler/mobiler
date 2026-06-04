@@ -7,10 +7,12 @@ use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
-    badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart, emphasis,
-    gauge_chart, grid, icon_button, image, progress, rating, rating_input, region_chart, rings_chart,
-    row, scaffold, scroller, search_field, segment, segmented, skeleton, spacer, stack,
-    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title,
+    badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart,
+    email_field, emphasis,
+    gauge_chart, grid, icon_button, image, multiline_field, phone_field, progress, rating,
+    rating_input, region_chart, rings_chart,
+    row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton, spacer, stack,
+    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_error,
     with_fab, with_refresh, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
@@ -173,6 +175,11 @@ pub struct Model {
     bt_status: String,
     /// Bluetooth permission was denied — offer an "Open Settings" affordance.
     bt_denied: bool,
+    /// "Sign in" showcase form — exercises the form-field kinds + inline validation.
+    email: String,
+    phone: String,
+    password: String,
+    bio: String,
 }
 
 impl Default for Model {
@@ -217,6 +224,10 @@ impl Default for Model {
             saved_note: String::new(),
             bt_status: String::new(),
             bt_denied: false,
+            email: String::new(),
+            phone: String::new(),
+            password: String::new(),
+            bio: String::new(),
         }
     }
 }
@@ -524,6 +535,10 @@ impl MobilerApp for FadeHouse {
             match id {
                 "search" => model.search = t,
                 "note" => model.note = t,
+                "email" => model.email = t,
+                "phone" => model.phone = t,
+                "password" => model.password = t,
+                "bio" => model.bio = t,
                 _ => {}
             }
         }
@@ -918,6 +933,28 @@ fn profile_screen(model: &Model) -> Widget {
                 caption(if model.saved_note.is_empty() { "Saved note appears here.".to_string() } else { format!("Saved: {}", model.saved_note) }),
                 divider(),
                 bt_section(model),
+            ]),
+            CardStyle::Outlined,
+        ),
+        // Form-field showcase — kinds (email/phone/secure/multiline) + inline validation.
+        card(
+            column(vec![
+                emphasis("Sign in"),
+                caption("Form fields: email, phone, password, and a multi-line note — each with the right keyboard, masking, and inline validation."),
+                {
+                    let f = email_field("email", "you@example.com", model.email.as_str());
+                    if !model.email.is_empty() && !model.email.contains('@') {
+                        with_error(f, "Enter a valid email address")
+                    } else { f }
+                },
+                phone_field("phone", "+41 79 123 45 67", model.phone.as_str()),
+                {
+                    let f = secure_field("password", "Password", model.password.as_str());
+                    if !model.password.is_empty() && model.password.len() < 8 {
+                        with_error(f, "At least 8 characters")
+                    } else { f }
+                },
+                multiline_field("bio", "Anything your stylist should know…", model.bio.as_str()),
             ]),
             CardStyle::Outlined,
         ),
