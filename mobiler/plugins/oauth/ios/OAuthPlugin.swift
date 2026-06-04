@@ -15,10 +15,13 @@ import UIKit
 // on success, parses the code/state, exchanges via cx.http, and stores tokens via securestore.
 @MainActor
 enum OAuthPlugin {
-    // Retained for the lifetime of the in-flight session (ASWebAuthenticationSession and its
-    // presentation-context provider must outlive `handle`'s synchronous return).
-    private static var session: ASWebAuthenticationSession?
-    private static let presenter = OAuthPresenter()
+    // Retained for the lifetime of the in-flight session — ASWebAuthenticationSession must outlive
+    // `handle`'s synchronous return, and its `presentationContextProvider` is held *weakly*, so the
+    // provider must be retained too. `nonisolated(unsafe)`: the session's completion handler is a
+    // nonisolated closure but always runs on the main thread (single-shot), so these are safe to
+    // clear from it.
+    nonisolated(unsafe) private static var session: ASWebAuthenticationSession?
+    nonisolated(unsafe) private static var presenter: OAuthPresenter?
 
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "login" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
@@ -30,32 +33,32 @@ enum OAuthPlugin {
         let scheme = (obj["scheme"] as? String) ?? ""
 
         return await withCheckedContinuation { (cont: CheckedContinuation<PluginResponse, Never>) in
-            var resumed = false
-            func finish(_ r: PluginResponse) {
-                if resumed { return }
-                resumed = true
-                Self.session = nil
-                cont.resume(returning: r)
-            }
+            let presenter = OAuthPresenter()
             let session = ASWebAuthenticationSession(
                 url: url,
                 callbackURLScheme: scheme.isEmpty ? nil : scheme
             ) { callbackURL, error in
+                // Exactly one of this completion / the start()-failed branch runs, so resume once.
+                Self.session = nil
+                Self.presenter = nil
                 if let cb = callbackURL {
-                    finish(PluginResponse(ok: true, output: cb.absoluteString))
+                    cont.resume(returning: PluginResponse(ok: true, output: cb.absoluteString))
                 } else if let err = error as? ASWebAuthenticationSessionError, err.code == .canceledLogin {
-                    finish(PluginResponse(ok: false, output: "cancelled"))
+                    cont.resume(returning: PluginResponse(ok: false, output: "cancelled"))
                 } else {
-                    finish(PluginResponse(ok: false, output: error?.localizedDescription ?? "failed"))
+                    cont.resume(returning: PluginResponse(ok: false, output: error?.localizedDescription ?? "failed"))
                 }
             }
-            session.presentationContextProvider = Self.presenter
+            session.presentationContextProvider = presenter
             // false = allow the system browser's existing session (SSO). Set true for a private,
             // cookie-less session that never reuses an existing login.
             session.prefersEphemeralWebBrowserSession = false
             Self.session = session
+            Self.presenter = presenter
             if !session.start() {
-                finish(PluginResponse(ok: false, output: "could not start auth session"))
+                Self.session = nil
+                Self.presenter = nil
+                cont.resume(returning: PluginResponse(ok: false, output: "could not start auth session"))
             }
         }
     }
