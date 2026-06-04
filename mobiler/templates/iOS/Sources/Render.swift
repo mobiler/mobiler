@@ -609,7 +609,7 @@ private struct RegionChartView: View {
                     p.move(to: CGPoint(x: bx, y: yt)); p.addLine(to: CGPoint(x: bx - 5, y: yt))
                     p.move(to: CGPoint(x: bx, y: yb)); p.addLine(to: CGPoint(x: bx - 5, y: yb))
                     ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
-                    ctx.draw(ctx.resolve(Text(b.label).font(.system(size: 8)).foregroundColor(.secondary)), at: CGPoint(x: bx + 4, y: (yt + yb) / 2), anchor: .leading)
+                    ctx.draw(ctx.resolve(Text(b.info ? "ⓘ\n" + b.label : b.label).font(.system(size: 8)).foregroundColor(.secondary)), at: CGPoint(x: bx + 4, y: (yt + yb) / 2), anchor: .leading)
                 }
                 var ax = Path()
                 ax.move(to: CGPoint(x: plotX, y: plotTop)); ax.addLine(to: CGPoint(x: plotX, y: plotBottom))
@@ -661,7 +661,6 @@ private struct RegionChartView: View {
         }.padding(.vertical, 4)
     }
 }
-
 
 // A list row that reveals trailing action buttons on horizontal swipe; tap an action to fire it.
 private struct SwipeActionView: View {
