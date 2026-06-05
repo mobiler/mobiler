@@ -202,7 +202,6 @@ feedback and contributions welcome):
 - Tablet master-detail (two-pane) layouts
 
 **Connectivity & data**
-- Plugin → core streaming / events (live data, BLE notify, infinite scroll)
 - Remote push notifications (APNs / FCM)
 - File read/write & downloads
 
@@ -211,7 +210,7 @@ feedback and contributions welcome):
 - Deep links / universal links
 - Embedded WebView · Maps
 
-_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), and an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`). Next up: lazy / virtualized lists._
+_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`), and a **native → core streaming primitive** (`cx.subscribe`/`unsubscribe` — a source pushes N events over time into `update`; iOS/Android/web, with a built-in `ticker`). Next up: remote push (APNs/FCM) and lazy / virtualized lists, both on the streaming primitive._
 
 ## Repository layout
 
