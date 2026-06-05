@@ -126,6 +126,10 @@ pub enum Msg {
 
     /// The device's preferred locale tag (built-in `device` "locale" capability).
     GotDeviceLocale(String),
+    /// Toggle the "Live" ticker subscription on/off (the streaming primitive demo).
+    ToggleLive,
+    /// A streamed tick from the `ticker` subscription (the counter value as a string).
+    Tick(String),
 }
 
 #[derive(Clone)]
@@ -195,6 +199,11 @@ pub struct Model {
     oauth_status: String,
     /// Device locale tag detected at startup (e.g. "de-CH").
     device_locale: String,
+    /// "Live" streaming demo (cx.subscribe to the built-in `ticker`): whether the
+    /// subscription is active, how many events have streamed in, and the last value.
+    live_on: bool,
+    live_count: u32,
+    live_last: String,
 }
 
 impl Default for Model {
@@ -245,6 +254,9 @@ impl Default for Model {
             bio: String::new(),
             oauth_status: String::new(),
             device_locale: String::new(),
+            live_on: false,
+            live_count: 0,
+            live_last: String::new(),
         }
     }
 }
@@ -555,6 +567,21 @@ impl MobilerApp for FadeHouse {
                 cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.output));
             }
             Msg::GotDeviceLocale(tag) => model.device_locale = tag,
+            Msg::ToggleLive => {
+                model.live_on = !model.live_on;
+                if model.live_on {
+                    model.live_count = 0;
+                    // Subscribe to the built-in `ticker` stream: one event/second, each
+                    // re-entering update as Msg::Tick — the streaming primitive in action.
+                    cx.subscribe("ticker", "ticker", "start", "1000", |r| Msg::Tick(r.output));
+                } else {
+                    cx.unsubscribe("ticker");
+                }
+            }
+            Msg::Tick(value) => {
+                model.live_count += 1;
+                model.live_last = value;
+            }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
                     match query_param(&output, "code") {
@@ -888,6 +915,29 @@ fn bt_section(model: &Model) -> Widget {
 /// dashed ceiling, a right-side bracket, and a legend. Illustrative data.
 /// Locale-aware formatting showcase: one amount + today's date rendered across locales using
 /// `mobiler_core::format` (pure Rust, synchronous — runs in the core, not via a platform formatter).
+/// The "Live" streaming card — a button that subscribes to / unsubscribes from the
+/// built-in `ticker` stream (`cx.subscribe`/`unsubscribe`), and a status line that
+/// updates every second as ticks stream in. Proves the streaming primitive: a native
+/// source pushing N events over time into `update`.
+fn live_card(on: bool, count: u32, last: &str) -> Widget {
+    let status = if on {
+        caption(format!("● live — {count} tick(s) received (last: {last})"))
+    } else if count > 0 {
+        caption(format!("Stopped after {count} tick(s)."))
+    } else {
+        caption("Tap Start to stream live updates pushed from a native source.")
+    };
+    card(
+        column(vec![
+            emphasis("Live"),
+            caption("A push stream from the device (cx.subscribe → the built-in `ticker`)."),
+            status,
+            button(if on { "Stop" } else { "Start" }, ButtonStyle::Filled, Msg::ToggleLive),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 fn format_card(device_locale: &str) -> Widget {
     let amount = 1234.5;
     let row_for = |label: &str, value: String| {
@@ -1082,6 +1132,9 @@ fn profile_screen(model: &Model) -> Widget {
             ]),
             CardStyle::Outlined,
         ),
+        // Live streaming demo (cx.subscribe → built-in `ticker`): a native source
+        // pushes N events over time into update(), each re-rendering this card.
+        live_card(model.live_on, model.live_count, &model.live_last),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![

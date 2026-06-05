@@ -37,6 +37,11 @@ pub enum Effect {
     PluginNotify(PluginNotify),
     /// Request/response plugin call (shell resolves with a [`PluginResponse`]).
     Plugin(PluginCall),
+    /// Long-lived subscription: the shell starts a native source and resolves
+    /// **repeatedly** (a [`PluginResponse`] per event) until it's torn down. Powers
+    /// [`Cx::subscribe`]. Stop it with [`Cx::unsubscribe`] (a `stream`/`unsubscribe`
+    /// notify keyed by [`PluginStreamCall::key`]).
+    PluginStream(PluginStreamCall),
 }
 
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -59,6 +64,20 @@ impl Operation for PluginCall {
     type Output = PluginResponse;
 }
 
+/// A streaming plugin subscription (powers [`Effect::PluginStream`]). Like
+/// [`PluginCall`] but carries a caller-chosen `key` so the subscription can be torn
+/// down ([`Cx::unsubscribe`]) — the shell registers the native source under `key`.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PluginStreamCall {
+    pub key: String,
+    pub plugin: String,
+    pub op: String,
+    pub input: String,
+}
+impl Operation for PluginStreamCall {
+    type Output = PluginResponse;
+}
+
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PluginResponse {
     pub ok: bool,
@@ -66,17 +85,20 @@ pub struct PluginResponse {
 }
 
 type Continuation<E> = Box<dyn FnOnce(PluginResponse) -> E + Send>;
+/// A streaming continuation — fires once **per event** (so `Fn`, not `FnOnce`).
+type StreamContinuation<E> = Box<dyn Fn(PluginResponse) -> E + Send>;
 
 /// Effects an app requests during `update`, generic over the app event type so
 /// continuations stay fully typed.
 pub struct Cx<E> {
     notifications: Vec<PluginNotify>,
     requests: Vec<(PluginCall, Continuation<E>)>,
+    streams: Vec<(PluginStreamCall, StreamContinuation<E>)>,
 }
 
 impl<E> Default for Cx<E> {
     fn default() -> Self {
-        Self { notifications: Vec::new(), requests: Vec::new() }
+        Self { notifications: Vec::new(), requests: Vec::new(), streams: Vec::new() }
     }
 }
 
@@ -97,6 +119,34 @@ impl<E> Cx<E> {
     ) {
         self.requests
             .push((PluginCall { plugin: plugin.into(), op: op.into(), input: input.into() }, Box::new(then)));
+    }
+
+    /// Subscribe to a streaming plugin: the shell starts a native source and delivers
+    /// **every** event it produces to `on_event` (which fires repeatedly, once per
+    /// event), each producing a typed event into your `update`. `key` is a
+    /// caller-chosen id for this subscription — pass the same `key` to
+    /// [`unsubscribe`](Self::unsubscribe) to stop it. Call `subscribe` **once** per
+    /// key (e.g. in [`init`](MobilerApp::init) or on a connect event); calling it
+    /// again with a live key starts a second source.
+    pub fn subscribe(
+        &mut self,
+        key: impl Into<String>,
+        plugin: impl Into<String>,
+        op: impl Into<String>,
+        input: impl Into<String>,
+        on_event: impl Fn(PluginResponse) -> E + Send + 'static,
+    ) {
+        self.streams.push((
+            PluginStreamCall { key: key.into(), plugin: plugin.into(), op: op.into(), input: input.into() },
+            Box::new(on_event),
+        ));
+    }
+
+    /// Stop the streaming subscription started under `key` by [`subscribe`](Self::subscribe).
+    /// The shell tears down the native source registered under `key`, so it stops
+    /// producing events. No-op if `key` isn't subscribed.
+    pub fn unsubscribe(&mut self, key: impl Into<String>) {
+        self.notify("stream", "unsubscribe", key);
     }
 
     /// Persist `data` (handed back to [`MobilerApp::restore`] on next startup).
@@ -301,6 +351,13 @@ impl<A: MobilerApp> App for MobilerShell<A> {
         }
         for (op, then) in cx.requests {
             commands.push(Command::request_from_shell(op).then_send(move |response: PluginResponse| {
+                Action::Fired { token: serde_json::to_string(&then(response)).expect("serialize event") }
+            }));
+        }
+        for (op, then) in cx.streams {
+            // A long-lived shell stream: `then_send` fires `then` once per emitted
+            // event (it's `Fn`), each re-entering `update` as a `Fired` action.
+            commands.push(Command::stream_from_shell(op).then_send(move |response: PluginResponse| {
                 Action::Fired { token: serde_json::to_string(&then(response)).expect("serialize event") }
             }));
         }
@@ -1077,6 +1134,38 @@ mod tests {
         assert_eq!(cx.requests.len(), 1);
         let (call, _) = &cx.requests[0];
         assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("device", "locale", ""));
+    }
+
+    #[test]
+    fn cx_subscribe_enqueues_a_keyed_stream_and_maps_each_event() {
+        let mut cx = Cx::<Ev>::default();
+        cx.subscribe("ws", "websocket", "stream", "wss://h/x", |r| if r.ok { Ev::Tap } else { Ev::Open(0) });
+        // It's a stream, not a one-shot request or a notification.
+        assert!(cx.notifications.is_empty());
+        assert!(cx.requests.is_empty());
+        assert_eq!(cx.streams.len(), 1);
+        let (call, on_event) = &cx.streams[0];
+        assert_eq!(
+            (call.key.as_str(), call.plugin.as_str(), call.op.as_str(), call.input.as_str()),
+            ("ws", "websocket", "stream", "wss://h/x")
+        );
+        // The continuation is `Fn` — it can map MANY events, not just one.
+        assert!(matches!(on_event(PluginResponse { ok: true, output: "frame1".into() }), Ev::Tap));
+        assert!(matches!(on_event(PluginResponse { ok: true, output: "frame2".into() }), Ev::Tap));
+        assert!(matches!(on_event(PluginResponse { ok: false, output: "closed".into() }), Ev::Open(0)));
+    }
+
+    #[test]
+    fn cx_unsubscribe_enqueues_the_teardown_notify_keyed_by_subscription() {
+        let mut cx = Cx::<Ev>::default();
+        cx.unsubscribe("ws");
+        assert!(cx.streams.is_empty());
+        assert_eq!(cx.notifications.len(), 1);
+        // The shell tears down the native source registered under this key.
+        assert_eq!(
+            cx.notifications[0],
+            PluginNotify { plugin: "stream".into(), op: "unsubscribe".into(), input: "ws".into() }
+        );
     }
 
     #[test]

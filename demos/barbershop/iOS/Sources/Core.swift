@@ -21,6 +21,9 @@ final class Core: ObservableObject {
     @Published private(set) var view: Widget
 
     private let core = CoreFfi()
+    // Live streaming subscriptions (cx.subscribe), keyed by subscription key, so
+    // cx.unsubscribe(key) can cancel the matching native source.
+    private var streamTasks: [String: Task<Void, Never>] = [:]
 
     init() {
         // First frame straight from the core's view model.
@@ -42,9 +45,15 @@ final class Core: ObservableObject {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
 
-            // Fire-and-forget: dispatch, ignore the result, don't resolve.
+            // Fire-and-forget: dispatch, ignore the result, don't resolve. The
+            // `stream`/`unsubscribe` control notify cancels a live subscription.
             case .pluginNotify(let notify):
-                Task { _ = await Plugins.handle(plugin: notify.plugin, op: notify.op, input: notify.input) }
+                if notify.plugin == "stream", notify.op == "unsubscribe" {
+                    streamTasks[notify.input]?.cancel()
+                    streamTasks[notify.input] = nil
+                } else {
+                    Task { _ = await Plugins.handle(plugin: notify.plugin, op: notify.op, input: notify.input) }
+                }
 
             // Request/response: dispatch (awaiting async work), resolve the core
             // with the response, then process the effects that produces.
@@ -55,6 +64,21 @@ final class Core: ObservableObject {
                     let next = core.resolve(id: id, data: Data(try! resp.bincodeSerialize()))
                     process(next)
                 }
+
+            // Streaming subscription: start a native source that resolves the SAME
+            // request id repeatedly (one PluginResponse per event). `emit` hops to the
+            // main actor to touch the core/view. Parked by key for unsubscribe.
+            case .pluginStream(let call):
+                let id = request.id
+                let emit: @Sendable (PluginResponse) -> Void = { [weak self] resp in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.process(self.core.resolve(id: id, data: Data(try! resp.bincodeSerialize())))
+                    }
+                }
+                streamTasks[call.key] = Task {
+                    await Plugins.subscribe(plugin: call.plugin, op: call.op, input: call.input, emit: emit)
+                }
             }
         }
     }
@@ -62,9 +86,35 @@ final class Core: ObservableObject {
 
 // MARK: - Capability plugins (the iOS twin of the Android plugin registry)
 
+/// Built-in `ticker` stream: emits an incrementing counter every `input` ms until the
+/// subscription's Task is cancelled (cx.unsubscribe). The deterministic demonstrator
+/// for the streaming primitive (cx.subscribe).
+enum TickerStream {
+    static func run(input: String, emit: @Sendable (PluginResponse) -> Void) async {
+        let ms = UInt64(input) ?? 1000
+        var count = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: ms * 1_000_000)
+            if Task.isCancelled { break }
+            count += 1
+            emit(PluginResponse(ok: true, output: String(count)))
+        }
+    }
+}
+
 /// Dispatches the opaque `{plugin, op, input}` envelope by name. Adding a plugin
 /// never touches the wire ABI — only this registry.
 enum Plugins {
+    /// Streaming dispatch (cx.subscribe): start a long-lived source that calls `emit`
+    /// per event until cancelled. Streaming-capable capabilities are matched here.
+    static func subscribe(plugin: String, op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        switch plugin {
+        case "ticker": await TickerStream.run(input: input, emit: emit)
+        // mobiler:plugins-stream — streaming plugins inserted above this line
+        default: break
+        }
+    }
+
     static func handle(plugin: String, op: String, input: String) async -> PluginResponse {
         switch plugin {
         case "http": return await HttpPlugin.handle(op: op, input: input)
