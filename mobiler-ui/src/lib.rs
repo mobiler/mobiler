@@ -408,6 +408,11 @@ pub enum Widget {
     Badge { label: String, tone: Tone },
     /// A circular avatar image with an optional colored status dot.
     Avatar { source: String, status: Option<Tone> },
+    /// An in-app PDF viewer showing the document at `url` (a remote https URL or a local
+    /// file URI). Each shell uses its native renderer — PDFKit on iOS, a paged `PdfRenderer`
+    /// on Android, an `<iframe>` on web — so the app only supplies the URL (e.g. a
+    /// backend-generated report). Fills its width; give it room (place in a sized container).
+    PdfView { url: String },
     /// A star rating. `value` is in tenths (e.g. `48` = 4.8 of `max` stars). When `on_rate`
     /// is set (one token per star), the stars are tappable — star *i* fires `on_rate[i]`.
     Rating { value: u32, max: u8, on_rate: Option<Vec<ActionToken>> },
@@ -550,6 +555,7 @@ mod tests {
             bracket: Some(ChartBracket { y0: 60.0, y1: 80.0, label: "Ceiling".to_string(), info: true }),
             legend: vec![ChartLegendItem { label: "Gap".to_string(), color: Rgb::new(0x5A, 0x7D, 0x9A) }],
         });
+        round_trips(&Widget::PdfView { url: "https://example.com/report.pdf".to_string() });
         round_trips(&Widget::TextField { id: "email".to_string(), placeholder: "you@co".to_string(), value: "".to_string(), kind: FieldKind::Email, error: None });
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });

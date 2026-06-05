@@ -421,6 +421,11 @@ pub fn progress(value: Option<f32>) -> Widget { Widget::Progress { value } }
 /// A shimmer placeholder shown while content loads.
 #[must_use]
 pub fn skeleton() -> Widget { Widget::Skeleton }
+/// An in-app PDF viewer for the document at `url` (remote https URL or local file URI) — rendered
+/// natively per platform (PDFKit / `PdfRenderer` / `<iframe>`). The app just supplies the URL, e.g.
+/// a backend-generated report. Give it room (place in a sized container or a scroller).
+#[must_use]
+pub fn pdf_view(url: impl Into<String>) -> Widget { Widget::PdfView { url: url.into() } }
 /// A single unnamed series wrapping `values` — the back-compat shape for `bar_chart`/`line_chart`.
 fn one_series(values: Vec<f32>) -> Vec<ChartSeries> {
     vec![ChartSeries { name: String::new(), values, color: None, goal: None }]
@@ -1140,6 +1145,7 @@ mod tests {
     #[test]
     fn input_builders_carry_ids_values_and_event_tokens() {
         assert!(matches!(text_field("id", "ph", "v"), Widget::TextField { kind: FieldKind::Text, error: None, .. }));
+        assert!(matches!(pdf_view("https://x/report.pdf"), Widget::PdfView { url } if url == "https://x/report.pdf"));
         assert!(matches!(secure_field("pw", "Password", ""), Widget::TextField { kind: FieldKind::Secure, .. }));
         assert!(matches!(email_field("e", "", ""), Widget::TextField { kind: FieldKind::Email, .. }));
         assert!(matches!(multiline_field("note", "", ""), Widget::TextField { kind: FieldKind::Multiline, .. }));

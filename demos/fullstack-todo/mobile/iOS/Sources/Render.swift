@@ -2,6 +2,7 @@ import SwiftUI
 import SharedTypes
 import UIKit
 import ImageIO
+import PDFKit
 
 // The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
 // (what to draw) + `Action` (what to send back). No app-specific types; this exact
@@ -59,6 +60,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 
     case .avatar(let source, let status):
         return AnyView(AvatarView(source: source, status: status))
+
+    case .pdfView(let url):
+        return AnyView(PDFKitView(urlString: url).frame(minHeight: 480))
 
     case .rating(let value, let max, let onRate):
         return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
@@ -1177,6 +1181,33 @@ extension View {
             }
         } else {
             self
+        }
+    }
+}
+
+
+// In-app PDF viewer (Widget.PdfView) — PDFKit renders the document at `urlString`
+// (a remote https URL is downloaded; a file:// URL loads directly). `autoScales` fits the page.
+struct PDFKitView: UIViewRepresentable {
+    let urlString: String
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        load(into: view)
+        return view
+    }
+    func updateUIView(_ view: PDFView, context: Context) {}
+    private func load(into view: PDFView) {
+        guard let url = URL(string: urlString) else { return }
+        if url.isFileURL {
+            view.document = PDFDocument(url: url)
+            return
+        }
+        Task { @MainActor in
+            if let (data, _) = try? await URLSession.shared.data(from: url),
+               let doc = PDFDocument(data: data) {
+                view.document = doc
+            }
         }
     }
 }
