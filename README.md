@@ -105,7 +105,8 @@ The `Widget` vocabulary renders identically on Android, iOS, and web:
 - **Navigation** — `Scaffold` with a top bar, bottom **tabs**, a **FAB**, and bottom **sheets**
   (it goes adaptive on tablets: a side rail + capped width).
 - **Media & feedback** — images, avatars, progress bars, shimmer skeletons, swipe actions,
-  an inline month **calendar**.
+  an inline month **calendar**, and an in-app **PDF viewer** (`PdfView` — display a
+  backend-generated report).
 - **Charts** — `Chart` in **eight styles**: bar, line, stacked bar, 100%-stacked bar, pie,
   donut, concentric fitness-style **progress rings**, and a radial **gauge** — multi-series with
   an optional y-axis and legend. Plus a variable-width stacked-region / coverage-gap
@@ -197,7 +198,6 @@ feedback and contributions welcome):
 
 **Inputs, media & UI**
 - Video playback / streaming (HLS + MP4; any URL source — e.g. Bunny Stream)
-- In-app PDF viewer (display a backend-generated report)
 - Lazy / virtualized lists (large feeds, tables)
 - Tablet master-detail (two-pane) layouts
 
@@ -211,7 +211,7 @@ feedback and contributions welcome):
 - Deep links / universal links
 - Embedded WebView · Maps
 
-_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), and a **device-locale getter** (`cx.device_locale`, iOS/Android/web). Next up: an in-app PDF viewer._
+_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), and an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`). Next up: lazy / virtualized lists._
 
 ## Repository layout
 
