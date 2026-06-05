@@ -110,6 +110,7 @@ enum Plugins {
     static func subscribe(plugin: String, op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
         switch plugin {
         case "ticker": await TickerStream.run(input: input, emit: emit)
+        case "websocket": await WebSocketPlugin.subscribe(op: op, input: input, emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break
         }
@@ -144,6 +145,7 @@ enum Plugins {
         case "speech": return await SpeechPlugin.handle(op: op, input: input)
         case "bluetooth": return await BluetoothPlugin.handle(op: op, input: input)
         case "oauth": return await OAuthPlugin.handle(op: op, input: input)
+        case "websocket": return await WebSocketPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")

@@ -6,7 +6,7 @@
 use mobiler_core::{
     BoxAlign, ButtonStyle, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, MobilerApp, MobilerShell, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
+    ImageShape, InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart,
     email_field, emphasis,
     gauge_chart, grid, icon_button, image, multiline_field, phone_field, progress, rating,
@@ -130,6 +130,10 @@ pub enum Msg {
     ToggleLive,
     /// A streamed tick from the `ticker` subscription (the counter value as a string).
     Tick(String),
+    /// Connect/disconnect the "Echo WS" row (the `websocket` plugin over the streaming primitive).
+    ToggleWs,
+    /// A frame streamed from the echo WebSocket (`ok` false = closed).
+    WsFrame(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -204,6 +208,10 @@ pub struct Model {
     live_on: bool,
     live_count: u32,
     live_last: String,
+    /// "Echo WS" row of the Live card — a real WebSocket (the `websocket` plugin) over the same
+    /// streaming primitive: subscribed state + the last frame received from the echo server.
+    ws_on: bool,
+    ws_last: String,
 }
 
 impl Default for Model {
@@ -257,6 +265,8 @@ impl Default for Model {
             live_on: false,
             live_count: 0,
             live_last: String::new(),
+            ws_on: false,
+            ws_last: String::new(),
         }
     }
 }
@@ -581,6 +591,25 @@ impl MobilerApp for FadeHouse {
             Msg::Tick(value) => {
                 model.live_count += 1;
                 model.live_last = value;
+            }
+            Msg::ToggleWs => {
+                model.ws_on = !model.ws_on;
+                if model.ws_on {
+                    model.ws_last = "connecting…".to_string();
+                    // Subscribe to a real echo WebSocket via the `websocket` plugin (streaming):
+                    // the server greets on connect, then echoes — each frame re-enters as WsFrame.
+                    cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.events", Msg::WsFrame);
+                } else {
+                    cx.unsubscribe("ws");
+                }
+            }
+            Msg::WsFrame(resp) => {
+                if resp.ok {
+                    model.ws_last = resp.output;
+                } else {
+                    model.ws_on = false;
+                    model.ws_last = "disconnected".to_string();
+                }
             }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
@@ -919,7 +948,8 @@ fn bt_section(model: &Model) -> Widget {
 /// built-in `ticker` stream (`cx.subscribe`/`unsubscribe`), and a status line that
 /// updates every second as ticks stream in. Proves the streaming primitive: a native
 /// source pushing N events over time into `update`.
-fn live_card(on: bool, count: u32, last: &str) -> Widget {
+fn live_card(model: &Model) -> Widget {
+    let (on, count, last) = (model.live_on, model.live_count, model.live_last.as_str());
     let status = if on {
         caption(format!("● live — {count} tick(s) received (last: {last})"))
     } else if count > 0 {
@@ -927,12 +957,23 @@ fn live_card(on: bool, count: u32, last: &str) -> Widget {
     } else {
         caption("Tap Start to stream live updates pushed from a native source.")
     };
+    // Second row: a real WebSocket over the same primitive (the `websocket` plugin).
+    let ws_status = if model.ws_on {
+        caption(format!("● connected — last frame: {}", model.ws_last))
+    } else if !model.ws_last.is_empty() {
+        caption(format!("WS: {}", model.ws_last))
+    } else {
+        caption("Or stream from a real echo WebSocket (the `websocket` plugin).")
+    };
     card(
         column(vec![
             emphasis("Live"),
             caption("A push stream from the device (cx.subscribe → the built-in `ticker`)."),
             status,
             button(if on { "Stop" } else { "Start" }, ButtonStyle::Filled, Msg::ToggleLive),
+            divider(),
+            ws_status,
+            button(if model.ws_on { "Disconnect" } else { "Echo WS" }, ButtonStyle::Outlined, Msg::ToggleWs),
         ]),
         CardStyle::Outlined,
     )
@@ -1134,7 +1175,7 @@ fn profile_screen(model: &Model) -> Widget {
         ),
         // Live streaming demo (cx.subscribe → built-in `ticker`): a native source
         // pushes N events over time into update(), each re-rendering this card.
-        live_card(model.live_on, model.live_count, &model.live_last),
+        live_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![

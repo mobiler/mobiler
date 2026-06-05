@@ -1,32 +1,35 @@
-# websocket — persistent real-time connection (free, bundled)
+# websocket — persistent real-time connection, streaming (free, bundled)
 
 ```bash
 mobiler plugin add websocket
 ```
 
-A WebSocket bridged into the request/response ABI via four ops. The app pumps `recv` in a loop to
-stream incoming frames.
+A WebSocket that rides Mobiler's **streaming primitive** (`cx.subscribe`/`unsubscribe`): `subscribe`
+opens the socket and pushes one event per incoming frame into `update` — no app-driven receive loop.
 
 ```rust
-cx.plugin("websocket", "connect", "wss://echo.websocket.org", Msg::WsOpen),
-Msg::WsOpen(r) => if r.ok { cx.plugin("websocket", "recv", "", Msg::WsFrame) },  // start the loop
-Msg::WsFrame(r) => {
-    if r.ok { /* r.output = frame */ cx.plugin("websocket", "recv", "", Msg::WsFrame); } // re-issue
-    else { /* r.output == "closed" → stop */ }
+// Open + stream: one Msg::Frame per incoming frame, until close.
+cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.events", Msg::Frame),
+Msg::Frame(r) => {
+    if r.ok { /* r.output = frame text */ }
+    else    { /* r.output == "closed" → the socket dropped */ }
 }
-// cx.plugin("websocket", "send", "hello", …)   cx.plugin("websocket", "close", "", …)
+// Send while subscribed:           cx.plugin("websocket", "send", "hello", …)
+// Stop streaming + close:          cx.unsubscribe("ws")
 ```
 
-- **Ops:** `connect` (input = ws/wss URL, resolves when open), `send` (input = text frame), `recv`
-  (suspends for the next frame; `ok:false, output "closed"` when the socket closes — stop looping),
-  `close`.
-- **Streaming model:** there's no push in the ABI, so receiving is a **self-re-issuing `recv` loop**
-  — each frame's handler kicks off the next `recv`. Frames arriving between calls are queued (Android
-  Channel / URLSession buffering), so none are dropped.
-- **Android:** OkHttp `WebSocket` (already a shell dependency — no extra Gradle dep).
-- **iOS:** `URLSessionWebSocketTask` (system framework — no package). iOS 16 target ✓.
-- **Web:** graceful `ok:false` (a browser `WebSocket`-based handler could be added later).
+- **Streaming op:** `subscribe(key, "websocket", "stream", url, on_frame)` — opens the socket and
+  emits a `PluginResponse` per frame (`ok:false, output "closed"` when it drops). `cx.unsubscribe(key)`
+  closes it. Send with the `send` request/response op against the same socket.
+- **Legacy ops** (back-compat): `connect`/`send`/`recv`/`close` still work (the pre-streaming
+  self-re-issuing `recv` loop), but `subscribe` is the canonical path.
+- **Android:** OkHttp `WebSocket` (already a shell dependency — no extra Gradle dep); the streaming
+  side is a `callbackFlow` over the `WebSocketListener`, torn down on `awaitClose`.
+- **iOS:** `URLSessionWebSocketTask` (system framework — no package); the stream loops `receive()`
+  and is cancelled via `withTaskCancellationHandler` on unsubscribe. iOS 16 target ✓.
+- **Web:** the shell opens a browser `WebSocket` and streams its `onmessage` frames (handled in the
+  web shell's `start_stream`).
 - One connection per app (the plugin instance is a registry singleton). Testable against any echo
-  server (e.g. `wss://echo.websocket.org`) — no special hardware, unlike scanner/biometric.
+  server (e.g. `wss://echo.websocket.events`) — no special hardware.
 
-See `app-core-usage.rs` for a full connect → recv-loop → send → close example.
+See `app-core-usage.rs` for a full subscribe → send → unsubscribe example.
