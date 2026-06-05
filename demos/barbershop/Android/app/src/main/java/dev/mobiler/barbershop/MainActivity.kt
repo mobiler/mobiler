@@ -145,6 +145,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
@@ -282,6 +291,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             color = colorFor(widget.style),
             modifier = Modifier.padding(vertical = 2.dp),
         )
+
+        is Widget.PdfView -> PdfViewWidget(widget.url)
 
         is Widget.Image -> AsyncImage(
             model = widget.source,
@@ -1188,4 +1199,62 @@ private fun boxAlignFor(align: BoxAlign): Alignment = when (align) {
 @Composable
 private fun CardBody(child: Widget, send: (Action) -> Unit) {
     Box(modifier = Modifier.padding(16.dp)) { Render(child, send) }
+}
+
+
+/** In-app PDF viewer (Widget.PdfView). Downloads a remote PDF to the cache (or opens a file URI),
+ *  renders every page to a bitmap with the platform PdfRenderer, and stacks them. The parent
+ *  scroller handles overflow. */
+@Composable
+private fun PdfViewWidget(url: String) {
+    val context = LocalContext.current
+    var pages by remember(url) { mutableStateOf<List<ImageBitmap>>(emptyList()) }
+    var error by remember(url) { mutableStateOf<String?>(null) }
+    LaunchedEffect(url) {
+        try {
+            pages = withContext(Dispatchers.IO) { renderPdfPages(context, url) }
+        } catch (e: Exception) {
+            error = e.message ?: "could not load PDF"
+        }
+    }
+    Column(modifier = Modifier.fillMaxWidth().heightIn(min = 480.dp)) {
+        when {
+            error != null -> Text("PDF: $error")
+            pages.isEmpty() -> CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+            else -> pages.forEach { page ->
+                Image(
+                    bitmap = page,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun renderPdfPages(context: android.content.Context, url: String): List<ImageBitmap> {
+    val file: java.io.File = if (url.startsWith("http")) {
+        val tmp = java.io.File.createTempFile("mobiler_pdf", ".pdf", context.cacheDir)
+        java.net.URL(url).openStream().use { input -> tmp.outputStream().use { output -> input.copyTo(output) } }
+        tmp
+    } else {
+        val uri = android.net.Uri.parse(url)
+        if (uri.scheme == "file") java.io.File(uri.path!!) else java.io.File(url)
+    }
+    val pfd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+    val renderer = android.graphics.pdf.PdfRenderer(pfd)
+    val pages = ArrayList<ImageBitmap>(renderer.pageCount)
+    for (i in 0 until renderer.pageCount) {
+        val page = renderer.openPage(i)
+        val width = 1080
+        val height = (width.toFloat() / page.width * page.height).toInt().coerceAtLeast(1)
+        val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(android.graphics.Color.WHITE)
+        page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        page.close()
+        pages.add(bmp.asImageBitmap())
+    }
+    renderer.close()
+    pfd.close()
+    return pages
 }

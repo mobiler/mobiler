@@ -382,6 +382,10 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             }
             .into_any()
         }
+        Widget::PdfView { url } => {
+            // Browsers render PDFs natively in an iframe (remote URL or local blob/file URL).
+            view! { <iframe class="pdfview" src=url.clone() title="PDF"></iframe> }.into_any()
+        }
         Widget::Rating { value, max, on_rate } => {
             let value = *value;
             let stars: Vec<AnyView> = (1..=*max)

@@ -11,7 +11,8 @@ use mobiler_core::{
     email_field, emphasis,
     gauge_chart, grid, icon_button, image, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
-    row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton, spacer, stack,
+    pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
+    spacer, stack,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_error,
     with_fab, with_refresh, with_sheet, with_theme,
 };
@@ -1072,6 +1073,15 @@ fn profile_screen(model: &Model) -> Widget {
         // Locale-aware formatting showcase — the same amount/date rendered per locale
         // (mobiler_core::format; pure Rust, synchronous, runs in the core).
         format_card(&model.device_locale),
+        // In-app PDF viewer (Widget::PdfView) — display a backend-generated report.
+        card(
+            column(vec![
+                emphasis("Report"),
+                caption("A backend-generated PDF, displayed in-app (Widget::PdfView)."),
+                pdf_view("https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"),
+            ]),
+            CardStyle::Outlined,
+        ),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![
