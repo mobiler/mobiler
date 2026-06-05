@@ -15,14 +15,16 @@
 //! entry point; an app may add its own stylesheet to override any widget class.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
-use crux_core::{App, Core};
+use crux_core::{App, Core, Request};
 use leptos::prelude::*;
 use mobiler_core::{
     Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, Icon,
-    ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, ProjectColor,
+    ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
     Rgb, Spacing, TextStyle, Theme, Tone, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
@@ -125,8 +127,91 @@ where
                     }
                 });
             }
+            // Long-lived subscription: start a native source that resolves the same
+            // request repeatedly (one event per `core.resolve`). See `start_stream`.
+            Effect::PluginStream(request) => start_stream(core, set_view, request),
         }
     }
+}
+
+/// Start a streaming subscription ([`Effect::PluginStream`]): begin a native source
+/// that resolves `request` **repeatedly** (a [`PluginResponse`] per event), each
+/// resolution re-entering the core. The source handle is parked in a per-key
+/// registry so [`unsubscribe`](mobiler_core::Cx::unsubscribe) can stop it.
+///
+/// Web sources: `ticker`/`start` (a `setInterval` emitting an incrementing counter
+/// every `input` ms — the deterministic demonstrator) and `websocket`/`stream`
+/// (a `WebSocket`, a frame per `onmessage`).
+fn start_stream<A: WebApp>(
+    core: &Arc<Core<A>>,
+    set_view: WriteSignal<Widget>,
+    request: Request<PluginStreamCall>,
+) where
+    A::Model: Default + Send + Sync,
+{
+    use wasm_bindgen::{closure::Closure, JsCast};
+
+    let call = request.operation.clone();
+
+    // Each resolution of a `resolves_many_times` request yields the next stream item;
+    // share the request across event closures via Rc<RefCell<_>>.
+    let request = Rc::new(RefCell::new(request));
+    let core = core.clone();
+    let emit = move |resp: PluginResponse| {
+        if let Ok(next) = core.resolve(&mut *request.borrow_mut(), resp) {
+            drive(&core, set_view, next);
+        }
+    };
+
+    let handle = match (call.plugin.as_str(), call.op.as_str()) {
+        // Built-in deterministic demonstrator: emit an incrementing counter every
+        // `input` ms. Dropping the Interval (on unsubscribe) stops it.
+        ("ticker", "start") => {
+            let ms: u32 = call.input.parse().unwrap_or(1000);
+            let count = std::cell::Cell::new(0u32);
+            let interval = gloo_timers::callback::Interval::new(ms, move || {
+                count.set(count.get() + 1);
+                emit(PluginResponse { ok: true, output: count.get().to_string() });
+            });
+            StreamHandle::Ticker { _interval: interval }
+        }
+        ("websocket", "stream") => {
+            let Ok(ws) = web_sys::WebSocket::new(&call.input) else { return };
+            let onmessage = {
+                let emit = emit.clone();
+                Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |e: web_sys::MessageEvent| {
+                    emit(PluginResponse { ok: true, output: e.data().as_string().unwrap_or_default() });
+                })
+            };
+            let onclose = Closure::<dyn FnMut(web_sys::CloseEvent)>::new(move |_e| {
+                emit(PluginResponse { ok: false, output: "closed".into() });
+            });
+            ws.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+            ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+            StreamHandle::Ws(WsStream { ws, _onmessage: onmessage, _onclose: onclose })
+        }
+        _ => return, // unknown / native-only source — ignore on web
+    };
+
+    STREAMS.with(|m| {
+        m.borrow_mut().insert(call.key.clone(), handle);
+    });
+}
+
+/// An open streaming source, parked by subscription key for teardown. Dropping the
+/// entry stops the source (the `Interval` cancels on drop; the `WebSocket` is closed
+/// explicitly in the `unsubscribe` handler and its closures drop here).
+enum StreamHandle {
+    /// A `ticker` interval — held only so dropping it (on unsubscribe) cancels it.
+    Ticker { _interval: gloo_timers::callback::Interval },
+    Ws(WsStream),
+}
+
+/// An open web `WebSocket` subscription — holds its JS closures so they stay alive.
+struct WsStream {
+    ws: web_sys::WebSocket,
+    _onmessage: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)>,
+    _onclose: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::CloseEvent)>,
 }
 
 /// Fulfil a request/response capability. `http` via `fetch`; `device` via the
@@ -321,6 +406,16 @@ fn perform_notify(notify: &PluginNotify) {
         // gesture-gated), so degrade to copying — a sane universal fallback.
         ("share", _) => {
             let _ = win.navigator().clipboard().write_text(&notify.input);
+        }
+        // Tear down a streaming subscription: close the WebSocket parked under this
+        // key (input = the subscription key) and drop its closures. Paired with
+        // cx.unsubscribe; the matching source was opened in `start_stream`.
+        ("stream", "unsubscribe") => {
+            // Removing the entry drops the source (a `ticker` Interval cancels on
+            // drop); for a WebSocket we also close it explicitly.
+            if let Some(StreamHandle::Ws(ws)) = STREAMS.with(|m| m.borrow_mut().remove(&notify.input)) {
+                let _ = ws.ws.close();
+            }
         }
         // Transient toast: a styled div appended to <body>, auto-removed after a beat.
         ("toast", _) => show_toast(&notify.input),
@@ -805,6 +900,11 @@ thread_local! {
     /// threaded). Lets the Scaffold body animate on navigation — the web twin of
     /// the native shells keying their body on `route`.
     static NAV: RefCell<(String, u32, bool)> = const { RefCell::new((String::new(), 0, false)) };
+
+    /// Open streaming subscriptions keyed by subscription key (wasm is single-
+    /// threaded). Each [`Effect::PluginStream`] parks its source here so
+    /// `cx.unsubscribe(key)` can stop it; dropping the entry stops the source.
+    static STREAMS: RefCell<HashMap<String, StreamHandle>> = RefCell::new(HashMap::new());
 }
 
 /// Render an app [`Theme`] as inline CSS custom properties on the scaffold root — the web
