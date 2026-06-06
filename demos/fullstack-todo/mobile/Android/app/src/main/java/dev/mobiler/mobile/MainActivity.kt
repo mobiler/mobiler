@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -785,6 +787,50 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) { widget.children.forEach { Render(it, send) } }
+
+        // A paged feed list: pull-to-refresh on top (PullToRefreshBox) + load-more when the user
+        // scrolls near the end. Bounded height so the inner LazyColumn scrolls inside the body.
+        is Widget.LazyList -> {
+            val onLoadMore = widget.onLoadMore
+            val loading = widget.loading
+            val hasMore = widget.hasMore
+            val list: @Composable () -> Unit = {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    itemsIndexed(widget.children) { idx, child ->
+                        Render(child, send)
+                        // Fire load-more once when the second-to-last item composes (near the end).
+                        if (onLoadMore != null && hasMore && !loading && idx >= widget.children.size - 2) {
+                            LaunchedEffect(widget.children.size, idx) { send(Action.Fired(onLoadMore)) }
+                        }
+                    }
+                    if (loading) {
+                        item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(8.dp)) }
+                    } else if (!hasMore && onLoadMore != null) {
+                        item {
+                            Text(
+                                "End of list",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            val onRefresh = widget.onRefresh
+            if (onRefresh != null) {
+                PullToRefreshBox(
+                    isRefreshing = widget.refreshing,
+                    onRefresh = { send(Action.Fired(onRefresh)) },
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                ) { list() }
+            } else {
+                list()
+            }
+        }
 
         is Widget.Button -> when (widget.style) {
             ButtonStyle.FILLED -> Button(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }

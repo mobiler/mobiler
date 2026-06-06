@@ -618,6 +618,37 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let kids = render_all(children, send);
             view! { <div class="scroller">{kids}</div> }.into_any()
         }
+        // A long/paged feed. Web has no pull gesture or reliable infinite-scroll on a sub-container,
+        // so (like Scaffold pull-to-refresh) the gestures degrade to controls: a top "↻ Refresh"
+        // button (while `on_refresh`), and a bottom "Load more" button (while `has_more && !loading`)
+        // / loading bar / "end" caption. iOS/Android do true pull + scroll-near-end detection.
+        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing } => {
+            let kids = render_all(children, send);
+            let refresh_btn = on_refresh.clone().map(|token| {
+                let send = send.clone();
+                view! { <button class="refresh-btn" on:click=move |_| send(Action::Fired { token: token.clone() })>"↻ Refresh"</button> }
+            });
+            let refresh_bar = refreshing.then(|| view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> });
+            let loading_bar = loading.then(|| view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> });
+            let load_more_btn = (!*loading && *has_more)
+                .then(|| on_load_more.clone())
+                .flatten()
+                .map(|token| {
+                    let send = send.clone();
+                    view! { <button class="btn btn-outlined lazylist-more" on:click=move |_| send(Action::Fired { token: token.clone() })>"Load more"</button> }
+                });
+            let end_cap = (!*has_more && on_load_more.is_some()).then(|| view! { <div class="lazylist-end">"End of list"</div> });
+            view! {
+                <div class="lazylist">
+                    {refresh_btn}
+                    {refresh_bar}
+                    {kids}
+                    {loading_bar}
+                    {load_more_btn}
+                    {end_cap}
+                </div>
+            }.into_any()
+        }
 
         // ---- input / actions ----
         Widget::Button { label, style, on_press } => {

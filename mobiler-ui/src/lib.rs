@@ -448,6 +448,20 @@ pub enum Widget {
     /// A list row that reveals trailing `actions` on horizontal swipe (each tappable). On web the
     /// actions render inline as a trailing button row (no gesture).
     SwipeAction { child: Box<Widget>, actions: Vec<SwipeButton> },
+    /// A scrollable list for long/paged feeds, with shell-detected events at both ends: the bottom
+    /// `on_load_more` fires when the user scrolls near the end (infinite scroll), the top
+    /// `on_refresh` fires on pull-to-refresh. `loading`/`refreshing`/`has_more` are app-owned: set
+    /// `loading` while a page loads (shell shows a spinner, stops firing), `has_more=false` when
+    /// exhausted, and `refreshing` while a pull-refresh runs. The app appends to `children` on each
+    /// load-more. `on_refresh` is set via [`with_refresh`](mobiler_core::with_refresh).
+    LazyList {
+        children: Vec<Widget>,
+        on_load_more: Option<ActionToken>,
+        loading: bool,
+        has_more: bool,
+        on_refresh: Option<ActionToken>,
+        refreshing: bool,
+    },
     Spacer { size: Spacing },
     // Layout
     Row { children: Vec<Widget> },
@@ -560,6 +574,7 @@ mod tests {
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
         round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });
+        round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),
