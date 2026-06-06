@@ -50,7 +50,9 @@ private final class WebSocketConnection {
             emit(PluginResponse(ok: false, output: "invalid url"))
             return
         }
-        let t = URLSession.shared.webSocketTask(with: url)
+        // A dedicated session (not URLSession.shared) for the socket's lifetime.
+        let session = URLSession(configuration: .default)
+        let t = session.webSocketTask(with: url)
         task = t
         t.resume()
         await withTaskCancellationHandler {
@@ -59,16 +61,23 @@ private final class WebSocketConnection {
                     switch try await t.receive() {
                     case .string(let s): emit(PluginResponse(ok: true, output: s))
                     case .data(let d): emit(PluginResponse(ok: true, output: String(decoding: d, as: UTF8.self)))
-                    @unknown default: break
+                    // A control frame (ping/pong/etc.) — keep waiting, don't emit.
+                    @unknown default: continue
                     }
                 } catch {
-                    emit(PluginResponse(ok: false, output: "closed"))
-                    break
+                    // The socket closed or failed: report the real reason and STOP — `return`
+                    // exits this loop unambiguously (no re-loop). Suppress on cancellation so an
+                    // unsubscribe doesn't surface a spurious error.
+                    if !Task.isCancelled {
+                        emit(PluginResponse(ok: false, output: error.localizedDescription))
+                    }
+                    return
                 }
             }
         } onCancel: {
             t.cancel(with: .goingAway, reason: nil)
         }
+        session.invalidateAndCancel()
         if task === t { task = nil }
     }
 

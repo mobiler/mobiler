@@ -608,7 +608,13 @@ impl MobilerApp for FadeHouse {
                     model.ws_last = resp.output;
                 } else {
                     model.ws_on = false;
-                    model.ws_last = "disconnected".to_string();
+                    // Surface the real close reason (the shell sends the error text) so a failure
+                    // is diagnosable on-device, not just a generic "disconnected".
+                    model.ws_last = if resp.output.is_empty() || resp.output == "closed" {
+                        "disconnected".to_string()
+                    } else {
+                        format!("closed: {}", resp.output)
+                    };
                 }
             }
             Msg::OAuthDone(ok, output) => {
