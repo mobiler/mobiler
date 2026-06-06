@@ -78,7 +78,7 @@ ABI change. Bundled free plugins:
 | 🔎 `scanner` | barcode / QR scanning |
 | 🔐 `biometric` | Face ID / fingerprint auth |
 | 🗝️ `securestore` | encrypted key/value (Keychain / Keystore) |
-| 🔌 `websocket` | persistent real-time connection |
+| 🔌 `websocket` | persistent real-time connection (streaming, via `cx.subscribe`) |
 | 🔔 `notifications` | local scheduled notifications (reminders) |
 | 🔋 `battery` | device battery level (sample) |
 | 📶 `connectivity` | network status (online/wifi/cellular/offline) |

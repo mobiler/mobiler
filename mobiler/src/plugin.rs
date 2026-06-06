@@ -67,6 +67,11 @@ struct IosSpec {
     #[serde(default)]
     sources: Vec<String>,
     register: String,
+    /// Optional streaming-dispatch registration (a `Plugins.subscribe` case), inserted at the
+    /// `// mobiler:plugins-stream` marker. Set by streaming-capable plugins (e.g. websocket) in
+    /// addition to `register` (their request/response case).
+    #[serde(default)]
+    register_stream: Option<String>,
     #[serde(default)]
     info_plist: BTreeMap<String, String>,
     #[serde(default)]
@@ -192,6 +197,9 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
         }
         let core_swift = root.join("iOS/Sources/Core.swift");
         report(insert_before(&core_swift, "// mobiler:plugins", &i.register, &i.register)?, "iOS registration");
+        if let Some(rs) = &i.register_stream {
+            report(insert_before(&core_swift, "// mobiler:plugins-stream", rs, rs)?, "iOS streaming registration");
+        }
 
         let project_yml = root.join("iOS/project.yml");
         for (key, val) in &i.info_plist {
@@ -257,14 +265,30 @@ enum Insert {
     MarkerMissing(String),
 }
 
-/// Insert `payload` (one logical line) immediately before the line containing `marker`,
-/// matching the marker's indentation. Idempotent: skip if `needle` is already in the file.
+/// Whether `line` contains `marker` at a token boundary — i.e. `marker` is NOT immediately
+/// followed by `-`, `_`, or an alphanumeric. This stops a marker from matching a longer marker
+/// that has it as a prefix (e.g. `mobiler:plugins` must not match `mobiler:plugins-stream`).
+fn line_has_marker(line: &str, marker: &str) -> bool {
+    let mut from = 0;
+    while let Some(pos) = line[from..].find(marker) {
+        let end = from + pos + marker.len();
+        let next = line[end..].chars().next();
+        if !matches!(next, Some(c) if c == '-' || c == '_' || c.is_alphanumeric()) {
+            return true;
+        }
+        from = end;
+    }
+    false
+}
+
+/// Insert `payload` (one logical line) immediately before the line containing `marker` (matched at
+/// a token boundary), with the marker's indentation. Idempotent: skip if `needle` is already present.
 fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Result<Insert> {
     let content = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     if content.contains(needle) {
         return Ok(Insert::AlreadyPresent);
     }
-    let Some(marker_line) = content.lines().find(|l| l.contains(marker)) else {
+    let Some(marker_line) = content.lines().find(|l| line_has_marker(l, marker)) else {
         return Ok(Insert::MarkerMissing(marker.to_string()));
     };
     let indent: String = marker_line.chars().take_while(|c| c.is_whitespace()).collect();
@@ -354,7 +378,7 @@ mod test {
         .unwrap();
         fs::write(
             root.join("iOS/Sources/Core.swift"),
-            "switch plugin {\n        case \"http\": return x\n        // mobiler:plugins\n        default: return y\n        }\n",
+            "func subscribe() {\n        switch plugin {\n        // mobiler:plugins-stream\n        default: break\n        }\n    }\n    func handle() {\n        switch plugin {\n        case \"http\": return x\n        // mobiler:plugins\n        default: return y\n        }\n    }\n",
         )
         .unwrap();
         fs::write(
@@ -382,6 +406,35 @@ mod test {
         assert!(core_kt.contains("\"battery\" to BatteryPlugin(application),"));
         let core_swift = read(&root, "iOS/Sources/Core.swift");
         assert!(core_swift.contains("case \"battery\": return await BatteryPlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn line_has_marker_respects_token_boundaries() {
+        // A marker must not match a longer marker that has it as a prefix.
+        assert!(line_has_marker("    // mobiler:plugins — inserts here", "// mobiler:plugins"));
+        assert!(!line_has_marker("    // mobiler:plugins-stream — inserts here", "// mobiler:plugins"));
+        assert!(line_has_marker("    // mobiler:plugins-stream — inserts here", "// mobiler:plugins-stream"));
+    }
+
+    #[test]
+    fn add_bundled_websocket_registers_handle_and_stream_cases() {
+        let root = skeleton();
+        add_at(&root, "websocket").unwrap();
+
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        // The request/response case lands at // mobiler:plugins …
+        let handle_at = core_swift.find("case \"websocket\": return await WebSocketPlugin.handle").expect("handle case");
+        // … and the streaming case lands at the // mobiler:plugins-stream marker.
+        let stream_at = core_swift.find("case \"websocket\": await WebSocketPlugin.subscribe").expect("stream case");
+        // Crucially, each lands in its OWN switch — the stream case (in `subscribe`, earlier in the
+        // file) before the handle case (in `handle`). Guards the marker prefix-collision bug:
+        // `// mobiler:plugins` must NOT match the `// mobiler:plugins-stream` line.
+        assert!(stream_at < handle_at, "stream case must be in subscribe(), handle case in handle()");
+        assert!(handle_at > core_swift.find("func handle()").unwrap(), "handle case must be inside handle()");
+        // Android registers once (its streaming is the polymorphic subscribe() override).
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"websocket\" to WebSocketPlugin(application),"));
         let _ = fs::remove_dir_all(&root);
     }
 

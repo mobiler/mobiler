@@ -1,6 +1,6 @@
 // Rust app-side usage of the websocket plugin (drop into shared/src/app.rs).
-// The streaming receive is modeled as a self-re-issuing `recv` loop: each frame's handler
-// kicks off the next recv, until the socket closes (ok:false, output "closed").
+// Rides the streaming primitive: `cx.subscribe` opens the socket and delivers a Msg::Frame per
+// incoming frame (no app-driven recv loop); `cx.unsubscribe` closes it.
 
 use mobiler_core::*;
 use serde::{Deserialize, Serialize};
@@ -8,10 +8,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Msg {
     Connect,
-    WsOpen(PluginResponse),
+    Frame(PluginResponse),
     SendPing,
     Sent(PluginResponse),
-    WsFrame(PluginResponse),
     Disconnect,
     Noop(PluginResponse),
 }
@@ -25,31 +24,28 @@ pub struct Model {
 impl MyApp {
     fn handle(&self, msg: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match msg {
-            Msg::Connect => cx.plugin("websocket", "connect", "wss://echo.websocket.org", Msg::WsOpen),
-            Msg::WsOpen(resp) => {
-                model.connected = resp.ok;
-                if resp.ok {
-                    model.log.push("connected".into());
-                    // Start the receive loop.
-                    cx.plugin("websocket", "recv", "", Msg::WsFrame);
-                } else {
-                    model.log.push(format!("connect failed: {}", resp.output));
-                }
+            // Open the socket and stream frames — one Msg::Frame per incoming frame, until close.
+            Msg::Connect => {
+                model.connected = true;
+                cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.org", Msg::Frame);
             }
-            Msg::SendPing => cx.plugin("websocket", "send", "ping", Msg::Sent),
-            Msg::Sent(_) => model.log.push("sent: ping".into()),
-            Msg::WsFrame(resp) => {
+            Msg::Frame(resp) => {
                 if resp.ok {
                     model.log.push(format!("recv: {}", resp.output));
-                    // Re-issue recv to keep streaming.
-                    cx.plugin("websocket", "recv", "", Msg::WsFrame);
                 } else {
-                    // output == "closed" → stop the loop.
+                    // output == "closed" → the socket dropped.
                     model.connected = false;
                     model.log.push("disconnected".into());
                 }
             }
-            Msg::Disconnect => cx.plugin("websocket", "close", "", Msg::Noop),
+            // Send a frame while subscribed (request/response op against the same socket).
+            Msg::SendPing => cx.plugin("websocket", "send", "ping", Msg::Sent),
+            Msg::Sent(_) => model.log.push("sent: ping".into()),
+            // Stop streaming + close the socket.
+            Msg::Disconnect => {
+                cx.unsubscribe("ws");
+                model.connected = false;
+            }
             Msg::Noop(_) => {}
         }
     }

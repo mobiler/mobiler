@@ -1,21 +1,22 @@
-# Free, bundled Mobiler plugin: WebSocket (persistent real-time connection). Four ops bridge a
-# streaming socket into the request/response ABI; the app pumps `recv` in a loop. Call from Rust:
-#   cx.plugin("websocket", "connect", "wss://echo.websocket.org", |r| Msg::WsOpen(r.ok))
-#   cx.plugin("websocket", "send", "hello", |_| Msg::Noop)
-#   cx.plugin("websocket", "recv", "", |r| Msg::WsFrame(r))   // re-issue recv after each frame;
-#                                                              // r.ok==false, output "closed" → stop
-#   cx.plugin("websocket", "close", "", |_| Msg::Noop)
+# Free, bundled Mobiler plugin: WebSocket (persistent real-time connection). Rides the streaming
+# primitive — `subscribe` opens the socket and streams frames into `update`; call from Rust:
+#   cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.org", |r| Msg::Frame(r))
+#   cx.plugin("websocket", "send", "hello", |_| Msg::Noop)   // send while subscribed
+#   cx.unsubscribe("ws")                                      // closes the socket
+# (Legacy request/response ops connect/recv/close remain for back-compat.)
 #
 # Install:  mobiler plugin add websocket
 # Android = OkHttp WebSocket (already a shell dep); iOS = URLSessionWebSocketTask (system framework).
 name = "websocket"
-summary = "WebSocket — persistent real-time connection (free)"
+summary = "WebSocket — persistent real-time connection, streaming (free)"
 
 [android]
 sources = ["android/WebSocketPlugin.kt"]
 register = '"websocket" to WebSocketPlugin(application)'
+# Streaming is the plugin's `subscribe()` override (polymorphic), so no separate registration line.
 # OkHttp is already a template dependency (HttpPlugin), so no extra gradle_deps needed.
 
 [ios]
 sources = ["ios/WebSocketPlugin.swift"]
 register = 'case "websocket": return await WebSocketPlugin.handle(op: op, input: input)'
+register_stream = 'case "websocket": await WebSocketPlugin.subscribe(op: op, input: input, emit: emit)'

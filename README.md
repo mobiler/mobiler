@@ -160,7 +160,7 @@ free plugins:
 | 🔎 **scanner** | barcode / QR scanning | `mobiler plugin add scanner` |
 | 🔐 **biometric** | Face ID / fingerprint auth | `mobiler plugin add biometric` |
 | 🗝️ **securestore** | encrypted key/value (Keychain / Keystore) | `mobiler plugin add securestore` |
-| 🔌 **websocket** | persistent real-time connection | `mobiler plugin add websocket` |
+| 🔌 **websocket** | persistent real-time connection (streaming, via `cx.subscribe`) | `mobiler plugin add websocket` |
 | 🔔 **notifications** | local scheduled notifications (reminders) | `mobiler plugin add notifications` |
 | 🔋 **battery** | device battery level (sample) | `mobiler plugin add battery` |
 | 📶 **connectivity** | network status (online/wifi/cellular/offline) | `mobiler plugin add connectivity` |

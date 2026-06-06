@@ -31,6 +31,7 @@ const BASE_REL: &str = ".mobiler/base";
 /// A file whose template contains any of these is MERGE-class: never auto-overwritten.
 const ANCHORS: &[&str] = &[
     "mobiler:plugins",
+    "mobiler:plugins-stream",
     "mobiler:permissions",
     "mobiler:manifest-application",
     "mobiler:gradle-deps",

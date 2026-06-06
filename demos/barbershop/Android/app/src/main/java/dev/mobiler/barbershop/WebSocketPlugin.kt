@@ -1,6 +1,6 @@
-package {{PACKAGE}}
+package dev.mobiler.barbershop
 
-import {{PACKAGE_SHARED_TYPES}}.PluginResponse
+import dev.mobiler.barbershop.shared.types.PluginResponse
 
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
