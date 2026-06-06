@@ -9,7 +9,7 @@ opens the socket and pushes one event per incoming frame into `update` — no ap
 
 ```rust
 // Open + stream: one Msg::Frame per incoming frame, until close.
-cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.events", Msg::Frame),
+cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.org", Msg::Frame),
 Msg::Frame(r) => {
     if r.ok { /* r.output = frame text */ }
     else    { /* r.output == "closed" → the socket dropped */ }
@@ -30,6 +30,6 @@ Msg::Frame(r) => {
 - **Web:** the shell opens a browser `WebSocket` and streams its `onmessage` frames (handled in the
   web shell's `start_stream`).
 - One connection per app (the plugin instance is a registry singleton). Testable against any echo
-  server (e.g. `wss://echo.websocket.events`) — no special hardware.
+  server (e.g. `wss://echo.websocket.org`) — no special hardware.
 
 See `app-core-usage.rs` for a full subscribe → send → unsubscribe example.

@@ -1,6 +1,6 @@
 # Free, bundled Mobiler plugin: WebSocket (persistent real-time connection). Rides the streaming
 # primitive — `subscribe` opens the socket and streams frames into `update`; call from Rust:
-#   cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.events", |r| Msg::Frame(r))
+#   cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.org", |r| Msg::Frame(r))
 #   cx.plugin("websocket", "send", "hello", |_| Msg::Noop)   // send while subscribed
 #   cx.unsubscribe("ws")                                      // closes the socket
 # (Legacy request/response ops connect/recv/close remain for back-compat.)

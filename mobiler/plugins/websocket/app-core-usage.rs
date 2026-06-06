@@ -27,7 +27,7 @@ impl MyApp {
             // Open the socket and stream frames — one Msg::Frame per incoming frame, until close.
             Msg::Connect => {
                 model.connected = true;
-                cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.events", Msg::Frame);
+                cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.org", Msg::Frame);
             }
             Msg::Frame(resp) => {
                 if resp.ok {

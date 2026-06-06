@@ -598,7 +598,7 @@ impl MobilerApp for FadeHouse {
                     model.ws_last = "connecting…".to_string();
                     // Subscribe to a real echo WebSocket via the `websocket` plugin (streaming):
                     // the server greets on connect, then echoes — each frame re-enters as WsFrame.
-                    cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.events", Msg::WsFrame);
+                    cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.org", Msg::WsFrame);
                 } else {
                     cx.unsubscribe("ws");
                 }
