@@ -37,6 +37,10 @@ struct Manifest {
     name: String,
     #[serde(default)]
     summary: String,
+    /// Free-form post-install notes printed after a successful add — for the one or two steps a
+    /// plugin can't automate (e.g. push: drop `google-services.json` into `Android/app/`).
+    #[serde(default)]
+    notes: Vec<String>,
     #[serde(default)]
     android: Option<PlatformSpec>,
     #[serde(default)]
@@ -54,6 +58,13 @@ struct PlatformSpec {
     /// Each becomes an `implementation("…")` line in the app's build.gradle.kts.
     #[serde(default)]
     gradle_deps: Vec<String>,
+    /// Gradle plugin coordinates "plugin.id:version" (e.g. "com.google.gms.google-services:4.4.2").
+    /// Each adds `id("plugin.id") version "version" apply false` to the **project** build.gradle.kts
+    /// (`// mobiler:gradle-plugins-classpath`) and `id("plugin.id")` to the **app** build.gradle.kts
+    /// (`// mobiler:gradle-plugins`) — for plugins that must be APPLIED (e.g. google-services), which a
+    /// plain `gradle_deps` `implementation(…)` line can't express.
+    #[serde(default)]
+    gradle_plugins: Vec<String>,
     /// XML snippets inserted inside `<application>` in AndroidManifest.xml — e.g. a
     /// `<receiver android:name=".NotificationReceiver" android:exported="false"/>` a plugin needs
     /// to fire while the app is closed. Each should carry a unique `android:name` (used for the
@@ -182,6 +193,19 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
             let line = format!("implementation(\"{dep}\")");
             report(insert_before(&gradle, "mobiler:gradle-deps", &line, dep)?, "Android Gradle dependency");
         }
+        let gradle_proj = root.join("Android/build.gradle.kts");
+        for gp in &a.gradle_plugins {
+            // "plugin.id:version" → applied in the app block + declared (apply false) at project level.
+            let (id, ver) = gp.split_once(':').unwrap_or((gp.as_str(), ""));
+            let needle = format!("id(\"{id}\")");
+            report(insert_before(&gradle, "mobiler:gradle-plugins", &needle, &needle)?, "Android Gradle plugin (app)");
+            let proj_line = if ver.is_empty() {
+                format!("id(\"{id}\") apply false")
+            } else {
+                format!("id(\"{id}\") version \"{ver}\" apply false")
+            };
+            report(insert_before(&gradle_proj, "mobiler:gradle-plugins-classpath", &proj_line, &needle)?, "Android Gradle plugin (project)");
+        }
         for xml in &a.manifest_application {
             // Idempotency key: the snippet's android:name (unique per receiver/service/provider),
             // falling back to the trimmed snippet if it has none.
@@ -216,6 +240,7 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
         }
     }
 
+    notes.extend(manifest.notes.iter().cloned());
     println!("\n✓ Plugin `{}` installed.", manifest.name);
     for n in notes {
         println!("  • {n}");
@@ -372,8 +397,13 @@ mod test {
         .unwrap();
         fs::write(root.join("Android/settings.gradle.kts"), "rootProject.name = \"Demo\"\n").unwrap();
         fs::write(
+            root.join("Android/build.gradle.kts"),
+            "plugins {\n    alias(libs.plugins.android.application) apply false\n    // mobiler:gradle-plugins-classpath\n}\n",
+        )
+        .unwrap();
+        fs::write(
             root.join("Android/app/build.gradle.kts"),
-            "dependencies {\n    implementation(project(\":shared\"))\n    // mobiler:gradle-deps\n}\n",
+            "plugins {\n    alias(libs.plugins.android.application)\n    // mobiler:gradle-plugins\n}\ndependencies {\n    implementation(project(\":shared\"))\n    // mobiler:gradle-deps\n}\n",
         )
         .unwrap();
         fs::write(
@@ -665,6 +695,40 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_push_registers_service_perm_dep_gradle_plugin_and_entitlement() {
+        let root = skeleton();
+        add_at(&root, "push").unwrap();
+
+        // Both Android sources copied with the package substituted.
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/PushPlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/PushMessagingService.kt").contains("class PushMessagingService"));
+        // Registered in both shells — handle case + the streaming case (cx.subscribe).
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"push\" to PushPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        let handle_at = core_swift.find("case \"push\": return await PushPlugin.handle").expect("handle case");
+        let stream_at = core_swift.find("case \"push\": await PushPlugin.subscribe").expect("stream case");
+        assert!(stream_at < handle_at, "stream case in subscribe(), handle case in handle()");
+        // Permission + FCM service + firebase dep.
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.POST_NOTIFICATIONS"), "POST_NOTIFICATIONS injected");
+        assert!(manifest.contains("android:name=\".PushMessagingService\""), "FCM service declared");
+        let gradle = read(&root, "Android/app/build.gradle.kts");
+        assert!(gradle.contains("com.google.firebase:firebase-messaging"), "firebase dep injected");
+        // The new gradle_plugins field: applied in the app block + declared (apply false) at project level.
+        assert!(gradle.contains("id(\"com.google.gms.google-services\")"), "google-services applied in app gradle");
+        let gradle_proj = read(&root, "Android/build.gradle.kts");
+        assert!(
+            gradle_proj.contains("id(\"com.google.gms.google-services\") version \"4.4.2\" apply false"),
+            "google-services declared (apply false) in project gradle"
+        );
+        // iOS aps-environment entitlement (first plugin to exercise the entitlements path).
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("entitlements:") && yml.contains("aps-environment"), "aps-environment entitlement added");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
@@ -700,6 +764,14 @@ mod test {
         assert!(
             t("Android/app/build.gradle.kts").contains("mobiler:gradle-deps"),
             "build.gradle.kts needs the mobiler:gradle-deps anchor"
+        );
+        assert!(
+            t("Android/app/build.gradle.kts").contains("// mobiler:gradle-plugins"),
+            "app build.gradle.kts needs the // mobiler:gradle-plugins anchor (apply a Gradle plugin)"
+        );
+        assert!(
+            t("Android/build.gradle.kts").contains("// mobiler:gradle-plugins-classpath"),
+            "project build.gradle.kts needs the // mobiler:gradle-plugins-classpath anchor"
         );
     }
 

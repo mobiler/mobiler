@@ -1,0 +1,42 @@
+# Free, bundled Mobiler plugin: remote push (server-sent notifications via APNs/FCM). The companion
+# to the LOCAL `notifications` plugin. Two surfaces, both riding existing primitives:
+#   cx.plugin("push", "register", "", |r| Msg::PushToken(r))         // → {"token":"…","platform":"apns"|"fcm"}
+#   cx.subscribe("push", "push", "events", "", |r| Msg::PushEvent(r)) // each received/tapped payload,
+#                                                                      // or {"type":"token_refresh","token":"…"}
+# Register returns the device token; POST it (with your tenant) to your backend via cx.http. The
+# events stream delivers foreground-received + tapped notifications (and token rotations).
+#
+# iOS = native APNs via system frameworks (no third-party SDK). The shell's AppDelegate forwards the
+# APNs token + notification callbacks to `PushBridge`; this plugin adapts them to the cx ABI.
+# Android = Firebase Cloud Messaging (the only way to get a device token on stock Android).
+#
+# Install:  mobiler plugin add push
+# TWO manual steps `plugin add` can't do (see notes below): drop `google-services.json` into
+# Android/app/, and enable Push Notifications on your App ID + match `aps-environment` to your signing.
+name = "push"
+summary = "Remote push (APNs/FCM) — server-sent notifications (free; needs Firebase config on Android)"
+notes = [
+  "Android: download google-services.json from your Firebase console into Android/app/ — it carries your project's keys and can't be bundled. The Android build FAILS without it.",
+  "iOS: the 'aps-environment' entitlement was added as 'development' (APNs sandbox / TestFlight). Switch it to 'production' for App Store builds — a mismatch is the #1 reason push silently never arrives.",
+]
+
+[android]
+sources = ["android/PushPlugin.kt", "android/PushMessagingService.kt"]
+register = '"push" to PushPlugin(application)'
+# POST_NOTIFICATIONS is the Android 13+ runtime permission for posting notifications.
+permissions = ["android.permission.POST_NOTIFICATIONS"]
+gradle_deps = ["com.google.firebase:firebase-messaging:24.1.0"]
+# FCM needs the google-services Gradle PLUGIN applied (it processes google-services.json) — not just
+# a dependency. `gradle_plugins` applies it in the app block + declares it (apply false) at project level.
+gradle_plugins = ["com.google.gms.google-services:4.4.2"]
+# The FCM service must be statically declared so it runs even when the app process is dead.
+manifest_application = ['<service android:name=".PushMessagingService" android:exported="false"><intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter></service>']
+
+[ios]
+sources = ["ios/PushPlugin.swift"]
+register = 'case "push": return await PushPlugin.handle(op: op, input: input)'
+register_stream = 'case "push": await PushPlugin.subscribe(op: op, input: input, emit: emit)'
+# Remote push requires the aps-environment entitlement. "development" = APNs sandbox (debug +
+# TestFlight); switch to "production" for App Store. Also enable Push Notifications on the App ID.
+[ios.entitlements]
+"aps-environment" = "development"

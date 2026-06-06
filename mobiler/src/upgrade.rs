@@ -35,6 +35,8 @@ const ANCHORS: &[&str] = &[
     "mobiler:permissions",
     "mobiler:manifest-application",
     "mobiler:gradle-deps",
+    "mobiler:gradle-plugins",
+    "mobiler:gradle-plugins-classpath",
     "mobiler:info-plist",
     "mobiler:target-extra",
 ];
@@ -55,12 +57,15 @@ fn classify(rel: &Path, desired: &[u8]) -> Class {
     let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("");
     // OWN — the user's Rust app, the Cargo manifests (deps handled separately), per-app identity
     // files that always differ, and binaries (icons, the gradle wrapper jar).
+    // NOTE: iOS/Sources/App.swift is NOT own — it's generic shell infrastructure (the entry point +
+    // the AppDelegate/PushBridge that remote push needs). The per-app struct name comes from
+    // `{{NAME}}` substitution, so overwriting it on upgrade regenerates it correctly; a hand-edited
+    // App.swift is protected by the 3-way merge (base→yours→new), like any other SHELL file.
     let own = p.starts_with("shared/src/")
         || name == "Cargo.toml"
         || p == "Android/settings.gradle.kts"
         || p == "Android/app/src/main/res/values/strings.xml"
         || p == "iOS/Sources/Info.plist"
-        || p == "iOS/Sources/App.swift"
         || p.starts_with("iOS/Sources/Assets.xcassets/")
         || is_binary(rel);
     if own {
@@ -540,7 +545,6 @@ mod test {
         assert_eq!(classify(Path::new("shared/src/app.rs"), b"fn main(){}"), Class::Own);
         assert_eq!(classify(Path::new("shared/Cargo.toml"), b""), Class::Own);
         assert_eq!(classify(Path::new("Android/settings.gradle.kts"), b""), Class::Own);
-        assert_eq!(classify(Path::new("iOS/Sources/App.swift"), b""), Class::Own);
         assert_eq!(
             classify(Path::new("Android/app/src/main/res/mipmap-hdpi/ic_launcher.webp"), b"\x00"),
             Class::Own
@@ -550,7 +554,15 @@ mod test {
             classify(Path::new("Android/app/src/main/java/dev/x/Core.kt"), b"// mobiler:plugins\n"),
             Class::Merge
         );
-        // SHELL — generic, no anchor, not own
+        // The project build.gradle.kts now carries the gradle-plugins-classpath anchor (push applies
+        // the google-services Gradle plugin there) → MERGE, so an upgrade never wipes it.
+        assert_eq!(
+            classify(Path::new("Android/build.gradle.kts"), b"plugins {\n    // mobiler:gradle-plugins-classpath\n}\n"),
+            Class::Merge
+        );
+        // SHELL — generic, no anchor, not own. App.swift is now SHELL (generic entry point +
+        // AppDelegate/PushBridge); its per-app struct name comes via {{NAME}} substitution.
+        assert_eq!(classify(Path::new("iOS/Sources/App.swift"), b"@main struct {{NAME}}App {}"), Class::Shell);
         assert_eq!(classify(Path::new("iOS/Sources/Render.swift"), b"func render(){}"), Class::Shell);
         assert_eq!(classify(Path::new("rust-toolchain.toml"), b"[toolchain]"), Class::Shell);
     }

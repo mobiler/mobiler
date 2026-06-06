@@ -97,6 +97,7 @@ ABI change. Bundled free plugins:
 | 🗃️ `sqlite` | on-device SQLite (exec / query → JSON) |
 | 🔵 `bluetooth` | BLE scan / connect / read |
 | 🔑 `oauth` | OAuth 2.0 / OIDC login (system auth browser → redirect) |
+| 📲 `push` | remote push notifications (APNs / FCM) |
 
 ```bash
 mobiler plugin list
@@ -164,8 +165,9 @@ in-app purchases, deep links, embedded WebView, and maps. The full list lives on
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
 (`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
 (`PdfView`), a native→core streaming primitive (`cx.subscribe`/`unsubscribe`, with a built-in
-`ticker`), and a paged feed list (`LazyList` — infinite scroll + pull-to-refresh). Next up: remote
-push (APNs/FCM)._
+`ticker`), a paged feed list (`LazyList` — infinite scroll + pull-to-refresh), and remote push
+(`push` plugin — APNs/FCM, device-token registration + an inbound event stream). Next up: in-app
+purchases / subscriptions._
 
 ## Links
 
