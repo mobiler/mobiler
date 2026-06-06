@@ -9,7 +9,7 @@ use mobiler_core::{
     ImageShape, InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart,
     email_field, emphasis,
-    gauge_chart, grid, icon_button, image, multiline_field, phone_field, progress, rating,
+    gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
     pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
     spacer, stack,
@@ -134,6 +134,10 @@ pub enum Msg {
     ToggleWs,
     /// A frame streamed from the echo WebSocket (`ok` false = closed).
     WsFrame(PluginResponse),
+    /// The `LazyList` Feed scrolled near the end — append the next page.
+    FeedLoadMore,
+    /// The Feed was pulled-to-refresh — reset to page 1.
+    FeedRefresh,
 }
 
 #[derive(Clone)]
@@ -212,6 +216,15 @@ pub struct Model {
     /// streaming primitive: subscribed state + the last frame received from the echo server.
     ws_on: bool,
     ws_last: String,
+    /// "Feed" card — a long paged list demoing `LazyList` (pull-to-refresh + load-more). The app
+    /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
+    feed: Vec<String>,
+    feed_refreshing: bool,
+}
+
+/// One page (10 items) of synthetic feed rows starting at item `start` (1-based).
+fn feed_page(start: usize) -> Vec<String> {
+    (start..start + 10).map(|i| format!("Booking #{i}")).collect()
 }
 
 impl Default for Model {
@@ -267,6 +280,8 @@ impl Default for Model {
             live_last: String::new(),
             ws_on: false,
             ws_last: String::new(),
+            feed: feed_page(1),
+            feed_refreshing: false,
         }
     }
 }
@@ -616,6 +631,18 @@ impl MobilerApp for FadeHouse {
                         format!("closed: {}", resp.output)
                     };
                 }
+            }
+            Msg::FeedLoadMore => {
+                // Append the next page until we hit the cap (6 pages = 60 items), then `has_more`
+                // goes false and the shell stops firing.
+                if model.feed.len() < 60 {
+                    model.feed.extend(feed_page(model.feed.len() + 1));
+                }
+            }
+            Msg::FeedRefresh => {
+                model.feed = feed_page(1);
+                model.feed.insert(0, "↻ refreshed".to_string());
+                model.feed_refreshing = false;
             }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
@@ -985,6 +1012,29 @@ fn live_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Feed" card — a `LazyList` of synthetic bookings: pull-to-refresh at the top, load-more
+/// when you scroll near the end (stops at 60). The list owns a bounded scroll region.
+fn feed_card(model: &Model) -> Widget {
+    let items: Vec<Widget> = model
+        .feed
+        .iter()
+        .map(|row| card(text(row.clone()), CardStyle::Filled))
+        .collect();
+    let list = with_refresh(
+        lazy_list(items, false, model.feed.len() < 60, Msg::FeedLoadMore),
+        model.feed_refreshing,
+        Msg::FeedRefresh,
+    );
+    card(
+        column(vec![
+            emphasis("Feed"),
+            caption("A long paged list — pull to refresh, scroll to load more (`LazyList`)."),
+            list,
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 fn format_card(device_locale: &str) -> Widget {
     let amount = 1234.5;
     let row_for = |label: &str, value: String| {
@@ -1182,6 +1232,7 @@ fn profile_screen(model: &Model) -> Widget {
         // Live streaming demo (cx.subscribe → built-in `ticker`): a native source
         // pushes N events over time into update(), each re-rendering this card.
         live_card(model),
+        feed_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![

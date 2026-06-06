@@ -899,8 +899,41 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
             route,
             depth,
         },
+        // Pull-to-refresh on a LazyList's top — same API as on a Scaffold. Leaves the load-more
+        // fields intact.
+        Widget::LazyList { children, on_load_more, loading, has_more, .. } => Widget::LazyList {
+            children,
+            on_load_more,
+            loading,
+            has_more,
+            on_refresh: Some(tok(on_refresh)),
+            refreshing,
+        },
         other => other,
     }
+}
+
+/// A scrollable list for long/paged feeds that fires `on_load_more` when the user scrolls near the
+/// end. The app owns the state: append to `children` on each load-more event, set `loading` true
+/// while the page loads (the shell shows a spinner and won't re-fire), and `has_more=false` when
+/// the feed is exhausted. Add pull-to-refresh at the top with [`with_refresh`]. Give it room — a
+/// `LazyList` nested in a scrollable body needs a bounded height to scroll on its own.
+#[must_use]
+pub fn lazy_list<E: Serialize>(children: Vec<Widget>, loading: bool, has_more: bool, on_load_more: E) -> Widget {
+    Widget::LazyList {
+        children,
+        on_load_more: Some(tok(on_load_more)),
+        loading,
+        has_more,
+        on_refresh: None,
+        refreshing: false,
+    }
+}
+
+/// A scrollable list with no load-more and no refresh — a plain virtualized list of `children`.
+#[must_use]
+pub fn lazy_list_static(children: Vec<Widget>) -> Widget {
+    Widget::LazyList { children, on_load_more: None, loading: false, has_more: false, on_refresh: None, refreshing: false }
 }
 
 #[cfg(test)]
@@ -1221,6 +1254,19 @@ mod tests {
         assert!(matches!(
             swipe_action(text("row"), vec![("Delete", Tone::Danger, Ev::Tap)]),
             Widget::SwipeAction { actions, .. } if actions.len() == 1
+        ));
+        // lazy_list carries the load-more token + app-owned flags; no refresh by default.
+        assert!(matches!(
+            lazy_list(vec![text("a"), text("b")], false, true, Ev::Tap),
+            Widget::LazyList { children, on_load_more: Some(t), loading: false, has_more: true, on_refresh: None, refreshing: false }
+                if children.len() == 2 && t == serde_json::to_string(&Ev::Tap).unwrap()
+        ));
+        assert!(matches!(lazy_list_static(vec![text("a")]), Widget::LazyList { on_load_more: None, on_refresh: None, .. }));
+        // with_refresh adds pull-to-refresh to a LazyList without disturbing the load-more fields.
+        assert!(matches!(
+            with_refresh(lazy_list(vec![text("a")], true, false, Ev::Tap), true, Ev::Open(9)),
+            Widget::LazyList { on_load_more: Some(_), loading: true, has_more: false, on_refresh: Some(r), refreshing: true, .. }
+                if r == serde_json::to_string(&Ev::Open(9)).unwrap()
         ));
         assert!(matches!(spacer(Spacing::Lg), Widget::Spacer { .. }));
         assert!(matches!(image("u", ImageShape::Circle, ImageRatio::Square), Widget::Image { .. }));

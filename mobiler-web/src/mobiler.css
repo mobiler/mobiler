@@ -260,6 +260,22 @@ body {
 .sp-lg { height: 16px; }
 .sp-xl { height: 24px; }
 
+/* ---- lazy list (paged feed: refresh on top, load-more at bottom) ---- */
+.lazylist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.lazylist .lazylist-more { align-self: center; margin: 8px 0; }
+.lazylist .lazylist-end {
+  text-align: center;
+  color: var(--muted, #888);
+  font-size: 0.85rem;
+  padding: 10px 0;
+}
+
 /* ---- input / actions ---- */
 .btn {
   border: none;
