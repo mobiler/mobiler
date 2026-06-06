@@ -739,6 +739,10 @@ private struct LazyListView: View {
                 }
             }
         }
+        // A bounded height makes the inner ScrollView a real scroll region: the LazyVStack
+        // virtualizes (so load-more fires incrementally on scroll, not all at once) and
+        // `.refreshable` has a scroll view to attach to. Nested inside the page scroll.
+        .frame(height: 420)
         .refreshableIf(onRefresh, send)
     }
 }
