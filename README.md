@@ -100,7 +100,8 @@ your app's types.
 
 The `Widget` vocabulary renders identically on Android, iOS, and web:
 
-- **Layout** — rows, columns, grids, cards, scrollers, boxes, spacers, dividers.
+- **Layout** — rows, columns, grids, cards, scrollers, **paged lists** (`LazyList` — infinite
+  scroll + pull-to-refresh), boxes, spacers, dividers.
 - **Inputs** — buttons, text fields, toggles, segmented controls, search fields, rating.
 - **Navigation** — `Scaffold` with a top bar, bottom **tabs**, a **FAB**, and bottom **sheets**
   (it goes adaptive on tablets: a side rail + capped width).
@@ -210,7 +211,7 @@ feedback and contributions welcome):
 - Deep links / universal links
 - Embedded WebView · Maps
 
-_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`), and a **native → core streaming primitive** (`cx.subscribe`/`unsubscribe` — a source pushes N events over time into `update`; iOS/Android/web, with a built-in `ticker`). Next up: remote push (APNs/FCM) and lazy / virtualized lists, both on the streaming primitive._
+_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`), and a **native → core streaming primitive** (`cx.subscribe`/`unsubscribe` — a source pushes N events over time into `update`; iOS/Android/web, with a built-in `ticker`), and a **paged feed list** (`LazyList` — infinite scroll + pull-to-refresh, app-owned loading state). Next up: remote push (APNs/FCM)._
 
 ## Repository layout
 

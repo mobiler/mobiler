@@ -143,6 +143,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
+    case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing):
+        return AnyView(LazyListView(
+            children: children, onLoadMore: onLoadMore, loading: loading,
+            hasMore: hasMore, onRefresh: onRefresh, refreshing: refreshing, send: send
+        ))
+
     // MARK: input / actions
     case .button(let label, let style, let onPress):
         return AnyView(Button(label) { send(.fired(token: onPress)) }.modifier(ButtonStyleMod(style)))
@@ -718,6 +724,48 @@ private struct RegionChartView: View {
                 }
             }
         }.padding(.vertical, 4)
+    }
+}
+
+// A paged feed list: pull-to-refresh at the top (`.refreshable`) + load-more when the last row
+// appears (`.onAppear`, guarded by hasMore && !loading so it fires once per page). App-owned
+// `loading`/`refreshing`/`hasMore` drive the spinners and gate the events.
+private struct LazyListView: View {
+    let children: [SharedTypes.Widget]
+    let onLoadMore: String?
+    let loading: Bool
+    let hasMore: Bool
+    let onRefresh: String?
+    let refreshing: Bool
+    let send: (Action) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 6) {
+                if refreshing {
+                    ProgressView().frame(maxWidth: .infinity).padding(.bottom, 4)
+                }
+                ForEach(Array(children.enumerated()), id: \.offset) { idx, child in
+                    render(child, send)
+                        .onAppear {
+                            if idx == children.count - 1, hasMore, !loading, let token = onLoadMore {
+                                send(.fired(token: token))
+                            }
+                        }
+                }
+                if loading {
+                    ProgressView().frame(maxWidth: .infinity).padding(8)
+                } else if !hasMore && onLoadMore != nil {
+                    Text("End of list").font(.footnote).foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity).padding(8)
+                }
+            }
+        }
+        // A bounded height makes the inner ScrollView a real scroll region: the LazyVStack
+        // virtualizes (so load-more fires incrementally on scroll, not all at once) and
+        // `.refreshable` has a scroll view to attach to. Nested inside the page scroll.
+        .frame(height: 420)
+        .refreshableIf(onRefresh, send)
     }
 }
 
