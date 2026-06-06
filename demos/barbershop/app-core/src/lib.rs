@@ -138,6 +138,14 @@ pub enum Msg {
     FeedLoadMore,
     /// The Feed was pulled-to-refresh — reset to page 1.
     FeedRefresh,
+
+    /// --- Profile "Push" card: remote push (`push` plugin) ---
+    /// Register for a device token + subscribe to inbound push events.
+    EnablePush,
+    /// The device token (or error) returned by `push` register.
+    PushRegistered(PluginResponse),
+    /// An inbound push payload (received/tapped) or a `{"type":"token_refresh",…}` event.
+    PushEvent(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -216,6 +224,11 @@ pub struct Model {
     /// streaming primitive: subscribed state + the last frame received from the echo server.
     ws_on: bool,
     ws_last: String,
+    /// "Push" card — remote push (`push` plugin): the device token (after register) + the last
+    /// inbound payload. Needs `mobiler plugin add push` + your Firebase/APNs config to actually
+    /// deliver; without it, register reports "unavailable" (graceful degrade).
+    push_token: String,
+    push_last: String,
     /// "Feed" card — a long paged list demoing `LazyList` (pull-to-refresh + load-more). The app
     /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
     feed: Vec<String>,
@@ -280,6 +293,8 @@ impl Default for Model {
             live_last: String::new(),
             ws_on: false,
             ws_last: String::new(),
+            push_token: String::new(),
+            push_last: String::new(),
             feed: feed_page(1),
             feed_refreshing: false,
         }
@@ -643,6 +658,26 @@ impl MobilerApp for FadeHouse {
                 model.feed = feed_page(1);
                 model.feed.insert(0, "↻ refreshed".to_string());
                 model.feed_refreshing = false;
+            }
+            Msg::EnablePush => {
+                // Ask the OS for a device token AND subscribe to inbound pushes (a real app
+                // subscribes at startup so a tap that launched the app isn't missed). Both no-op
+                // gracefully until `mobiler plugin add push` + Firebase/APNs config are in place.
+                model.push_token = "registering…".to_string();
+                cx.plugin("push", "register", "", Msg::PushRegistered);
+                cx.subscribe("push", "push", "events", "", Msg::PushEvent);
+            }
+            Msg::PushRegistered(resp) => {
+                model.push_token = if resp.ok {
+                    resp.output // {"token":"…","platform":"apns"|"fcm"} — POST to your backend
+                } else {
+                    format!("unavailable: {} (run `mobiler plugin add push`)", resp.output)
+                };
+            }
+            Msg::PushEvent(resp) => {
+                if resp.ok {
+                    model.push_last = resp.output;
+                }
             }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
@@ -1012,6 +1047,33 @@ fn live_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Push" card — remote push (`push` plugin): Register fetches the device token (APNs/FCM) and
+/// subscribes to inbound notifications; the status line shows the token + the last payload. Real
+/// delivery needs `mobiler plugin add push` + your Firebase/APNs config — without it, register
+/// degrades to "unavailable" (the call returns ok:false from the default plugin dispatch).
+fn push_card(model: &Model) -> Widget {
+    let token_line = if model.push_token.is_empty() {
+        caption("Tap Register to get this device's push token (POST it to your backend).")
+    } else {
+        caption(format!("Token: {}", model.push_token))
+    };
+    let event_line = if model.push_last.is_empty() {
+        caption("Inbound notifications appear here (foreground-received or tapped).")
+    } else {
+        caption(format!("Last push: {}", model.push_last))
+    };
+    card(
+        column(vec![
+            emphasis("Push"),
+            caption("Remote push (cx.plugin \"register\" + cx.subscribe \"events\" — APNs / FCM)."),
+            token_line,
+            event_line,
+            button("Register for push", ButtonStyle::Filled, Msg::EnablePush),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 /// The "Feed" card — a `LazyList` of synthetic bookings: pull-to-refresh at the top, load-more
 /// when you scroll near the end (stops at 60). The list owns a bounded scroll region.
 fn feed_card(model: &Model) -> Widget {
@@ -1232,6 +1294,7 @@ fn profile_screen(model: &Model) -> Widget {
         // Live streaming demo (cx.subscribe → built-in `ticker`): a native source
         // pushes N events over time into update(), each re-rendering this card.
         live_card(model),
+        push_card(model),
         feed_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
