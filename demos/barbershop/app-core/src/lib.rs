@@ -1181,7 +1181,9 @@ fn video_card(model: &Model) -> Widget {
             caption("A controllable native player (Widget::Video — AVPlayer / Media3 ExoPlayer / <video>)."),
             video_player(
                 "intro",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+                // Public H.264 MP4 with range support (plays in AVPlayer / ExoPlayer / <video>).
+                // NB: the old Google `gtv-videos-bucket` sample URLs now return HTTP 403.
+                "https://media.w3.org/2010/05/sintel/trailer.mp4",
                 model.video_playing,
                 model.video_seek_ms,
                 Msg::VideoEnded,
@@ -1210,7 +1212,7 @@ fn web_card() -> Widget {
         column(vec![
             emphasis("Embedded web"),
             caption("A native web view (Widget::WebView) — WKWebView / Android WebView / <iframe>. Here: a Bunny.net Stream player embed (the hosted-player use case)."),
-            web_view("https://iframe.mediadelivery.net/embed/197133/dc48a09e-d9bb-420a-83d7-72dc2304c034"),
+            web_view("https://iframe.mediadelivery.net/embed/197133/dc48a09e-d9bb-420a-83d7-72dc2304c034?autoplay=false"),
         ]),
         CardStyle::Outlined,
     )
