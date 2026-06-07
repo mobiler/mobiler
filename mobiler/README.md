@@ -159,8 +159,7 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 ## Roadmap
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
-demand-driven): video playback/streaming
-(HLS + MP4, any URL source), tablet master-detail,
+demand-driven): tablet master-detail,
 deep links, embedded WebView, and maps. The full list lives on
 [GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
@@ -170,7 +169,8 @@ deep links, embedded WebView, and maps. The full list lives on
 (`push` plugin — APNs/FCM; **experimental**), and in-app purchases (`iap` plugin — StoreKit 2 / Play
 Billing: products, purchase, restore, a transactions stream; **experimental**), and a
 Firebase-everywhere push variant (`push-firebase-only` — FCM on both platforms via the Firebase iOS
-SDK; **experimental**)._
+SDK; **experimental**), and a controllable **video player** (`Video` — AVPlayer / Media3 ExoPlayer /
+`<video>`: HLS + MP4, app-driven play/seek + position/ended events)._
 
 ## Links
 

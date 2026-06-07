@@ -63,6 +63,10 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     // HTTP capability (Core.kt HttpPlugin)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Media3/ExoPlayer for Widget.Video (MP4 + HLS playback)
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
     // mobiler:gradle-deps — `mobiler plugin add` inserts plugin Gradle dependencies above this line
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
