@@ -55,7 +55,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
-        PushBridge.shared.didRegister(token: hex)
+        // Forward both: the hex string (native-APNs push plugin) and the raw Data (the Firebase-only
+        // push plugin hands the raw token to Messaging.apnsToken).
+        PushBridge.shared.didRegister(token: hex, raw: deviceToken)
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -97,6 +99,10 @@ final class PushBridge {
     private var sink: (@Sendable (String) -> Void)?
     private var buffer: [String] = []
 
+    /// The raw APNs device token (set by the AppDelegate). The Firebase-only push plugin reads this to
+    /// hand to `Messaging.messaging().apnsToken`; the native-APNs plugin uses the hex string instead.
+    private(set) var rawAPNsToken: Data?
+
     // --- called by the push plugin ---
 
     /// Await the APNs device token (resolved by the AppDelegate's didRegister callback).
@@ -116,7 +122,8 @@ final class PushBridge {
 
     // --- called by the AppDelegate ---
 
-    func didRegister(token: String) {
+    func didRegister(token: String, raw: Data) {
+        rawAPNsToken = raw
         if tokenWaiters.isEmpty {
             // An out-of-band rotation (no register call in flight) → notify the app via the stream.
             emit("{\"type\":\"token_refresh\",\"token\":\"\(token)\"}")
