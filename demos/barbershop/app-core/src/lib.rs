@@ -1201,15 +1201,16 @@ fn video_card(model: &Model) -> Widget {
 /// it embeds a public page; the same widget hosts a player embed (e.g. a Bunny.net embed URL) on all
 /// platforms. NOT the default video player — that's the Intro video card above (`Widget::Video`).
 fn web_card() -> Widget {
-    // A hosted player embed inside the WebView (here a public YouTube embed; for Bunny.net you'd use
-    // `mobiler_core::bunny::embed_url(library_id, video_id)`, or `embed_url_signed(..)` from your
-    // backend). The hosted player brings its own captions/quality/thumbnails on every platform —
-    // distinct from the controllable native Widget::Video in the Intro video card above.
+    // The WebView loads any URL — here a direct video the browser/WebView plays inline. For a hosted
+    // player with its own captions/quality/thumbnails, point it at an embed URL: Bunny.net via
+    // `mobiler_core::bunny::embed_url(library_id, video_id)` (or `embed_url_signed(..)` from your
+    // backend). (NB: YouTube embeds need an http origin a bare WKWebView lacks → they show "watch on
+    // YouTube"; Bunny embeds and direct media URLs work directly.)
     card(
         column(vec![
             emphasis("Embedded web"),
-            caption("A native web view (Widget::WebView). Hosts any URL — docs, dashboards, or a hosted player embed (Bunny.net / YouTube)."),
-            web_view("https://www.youtube.com/embed/aqz-KE-bpKQ"),
+            caption("A native web view (Widget::WebView) — WKWebView / Android WebView / <iframe>. Loads any URL: a web page, or a hosted player embed (e.g. Bunny.net)."),
+            web_view("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"),
         ]),
         CardStyle::Outlined,
     )

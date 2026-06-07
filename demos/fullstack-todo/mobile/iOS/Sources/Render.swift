@@ -1269,7 +1269,7 @@ struct VideoView: UIViewControllerRepresentable {
         player.isMuted = muted
         vc.player = player
         vc.showsPlaybackControls = controls
-        context.coordinator.attach(player: player, id: id, looping: looping, onEnded: onEnded)
+        context.coordinator.attach(player: player, id: id, looping: looping, onEnded: onEnded, playing: playing)
         if playing { player.play() }
         return vc
     }
@@ -1279,11 +1279,11 @@ struct VideoView: UIViewControllerRepresentable {
         guard let player = vc.player else { return }
         player.isMuted = muted
         context.coordinator.applySeek(seekToMs, on: player)
-        if playing, player.timeControlStatus == .paused {
-            player.play()
-        } else if !playing, player.timeControlStatus != .paused {
-            player.pause()
-        }
+        // Edge-triggered: only act when the app's `playing` actually CHANGES (like Android's
+        // LaunchedEffect(playing)). Reconciling on every ~1s position re-render would fight the
+        // native transport controls — tapping the player's own play button would be force-paused
+        // a second later because the model still reads paused.
+        context.coordinator.applyPlaying(playing, on: player)
     }
 
     static func dismantleUIViewController(_ vc: AVPlayerViewController, coordinator: Coordinator) {
@@ -1299,11 +1299,12 @@ struct VideoView: UIViewControllerRepresentable {
         private var timeObserver: Any?
         private var endObserver: NSObjectProtocol?
         private var lastSeekMs: Int64 = -1
+        private var lastPlaying: Bool?
 
         init(send: @escaping (Action) -> Void) { self.send = send }
 
-        func attach(player: AVPlayer, id: String, looping: Bool, onEnded: String?) {
-            self.id = id; self.looping = looping; self.onEnded = onEnded
+        func attach(player: AVPlayer, id: String, looping: Bool, onEnded: String?, playing: Bool) {
+            self.id = id; self.looping = looping; self.onEnded = onEnded; self.lastPlaying = playing
             let pid = id
             timeObserver = player.addPeriodicTimeObserver(
                 forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main
@@ -1329,6 +1330,14 @@ struct VideoView: UIViewControllerRepresentable {
             guard ms >= 0, ms != lastSeekMs else { return }
             lastSeekMs = ms
             player.seek(to: CMTime(seconds: Double(ms) / 1000.0, preferredTimescale: 600))
+        }
+
+        // Apply play/pause only on a real change (edge-triggered), so the native transport controls
+        // aren't reverted by the periodic position re-render. nil initial = "unset" → first call acts.
+        func applyPlaying(_ playing: Bool, on player: AVPlayer) {
+            guard playing != lastPlaying else { return }
+            lastPlaying = playing
+            if playing { player.play() } else { player.pause() }
         }
 
         func detach(from player: AVPlayer?) {
