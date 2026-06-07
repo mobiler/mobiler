@@ -481,6 +481,19 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // Browsers render PDFs natively in an iframe (remote URL or local blob/file URL).
             view! { <iframe class="pdfview" src=url.clone() title="PDF"></iframe> }.into_any()
         }
+        Widget::WebView { url } => {
+            // General embedded web content (incl. hosted player embeds like Bunny.net). `allow`
+            // permits autoplay / fullscreen / PiP / encrypted-media so hosted players work.
+            view! {
+                <iframe
+                    class="webview"
+                    src=url.clone()
+                    title="Web"
+                    allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+                    allowfullscreen=true
+                ></iframe>
+            }.into_any()
+        }
         Widget::Video { url, playing, controls, looping, muted, on_ended, .. } => {
             // Web v1 = a native-controls `<video>`. App-driven play/pause + seek + position events are
             // iOS/Android only: the web shell rebuilds the whole tree on each `update`, which would

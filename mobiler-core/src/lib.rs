@@ -7,6 +7,7 @@
 
 use std::marker::PhantomData;
 
+pub mod bunny;
 pub mod format;
 pub use format::{Currency, Locale};
 
@@ -529,6 +530,12 @@ pub fn without_controls(widget: Widget) -> Widget {
         other => other,
     }
 }
+/// A native web view showing the page / embedded player at `url` (`WKWebView` / Android `WebView` /
+/// `<iframe>`). General-purpose: docs, dashboards, or a hosted player embed (e.g. a Bunny.net /
+/// YouTube embed URL). NOT the default video player — use [`video_player`] for that. Give it room
+/// (a sized container or a card).
+#[must_use]
+pub fn web_view(url: impl Into<String>) -> Widget { Widget::WebView { url: url.into() } }
 /// A single unnamed series wrapping `values` — the back-compat shape for `bar_chart`/`line_chart`.
 fn one_series(values: Vec<f32>) -> Vec<ChartSeries> {
     vec![ChartSeries { name: String::new(), values, color: None, goal: None }]
@@ -1327,6 +1334,7 @@ mod tests {
     fn input_builders_carry_ids_values_and_event_tokens() {
         assert!(matches!(text_field("id", "ph", "v"), Widget::TextField { kind: FieldKind::Text, error: None, .. }));
         assert!(matches!(pdf_view("https://x/report.pdf"), Widget::PdfView { url } if url == "https://x/report.pdf"));
+        assert!(matches!(web_view("https://iframe.mediadelivery.net/embed/1/abc"), Widget::WebView { url } if url == "https://iframe.mediadelivery.net/embed/1/abc"));
         // video_player defaults + the cosmetic modifiers (match-and-rebind like with_refresh).
         assert!(matches!(video_player("v", "https://x/c.mp4", false, -1, Ev::Tap),
             Widget::Video { id, playing: false, seek_to_ms: -1, controls: true, looping: false, muted: false, on_ended: Some(_), .. } if id == "v"));
