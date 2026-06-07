@@ -4,10 +4,12 @@
 mobiler plugin add iap
 ```
 
-> ⚠️ **Android is experimental — not yet device-tested.** The iOS flow is verifiable on the simulator
-> via a local `.storekit` file (below). Android Play Billing has no local sandbox: the purchase loop
-> needs a Play Console app + a signed build on a test track + license testers, and hasn't been run on a
-> device yet. Both platforms compile + install. (Mobiler itself is experimental.)
+> ⚠️ **Experimental — the purchase flow is not yet device-tested on either platform.** `IapPlugin.swift`
+> compiles + links against StoreKit and the UI renders on the iOS simulator, and the Android Play
+> Billing code compiles, but neither real purchase round-trip has been run end-to-end yet (iOS needs
+> Xcode's StoreKit testing harness or a sandbox account; Android needs a Play Console test track + license
+> testers — there's no local sandbox). Treat the API as stable-ish, the delivery path as unproven, and
+> always validate receipts server-side. (Mobiler itself is experimental.)
 
 In-app purchases via the **native system sheets** — no Widget, no third-party SDK (iOS StoreKit 2 is a
 system framework; Android uses the Play Billing library). Five ops + one stream, all on existing
@@ -59,10 +61,15 @@ cx.plugin("iap", "finish",   "<txnId | [consume:]purchaseToken>", Msg::Done), //
 ## Test the iOS flow on the simulator (no App Store Connect, no real money)
 
 StoreKit 2 supports a local **StoreKit Configuration file** that makes `products` + `purchase` work on
-the simulator. Add a `Products.storekit` (defining your products + prices) to your iOS target and point
-the scheme's **run action** at it (`StoreKitConfigurationFileReference`). Then the purchase sheet runs
-on the sim against the local config — ideal for development + CI-style validation. The demo
-(`demos/barbershop/iOS/Products.storekit`) shows a working example.
+the simulator with no App Store Connect and no real money. Add a `Products.storekit` (defining your
+products + prices) and point the scheme's **run action** at it
+(`scheme.run.storeKitConfiguration` in xcodegen). The demo (`demos/barbershop/iOS/Products.storekit` +
+its `project.yml` scheme block) is a working example.
+
+> Note: the local StoreKit config is activated by **Xcode's Run/debug action**, not by
+> `xcrun simctl launch` alone — so a headless `simctl` launch won't load the config (`products`
+> returns empty). Run the scheme from Xcode (or use a real device + sandbox account) to exercise the
+> actual purchase flow.
 
 ## v1 scope
 

@@ -13,12 +13,13 @@
 #
 # Install:  mobiler plugin add iap
 name = "iap"
-summary = "In-app purchase / subscriptions (StoreKit 2 / Play Billing) — free, bundled (Android EXPERIMENTAL)"
+summary = "In-app purchase / subscriptions (StoreKit 2 / Play Billing) — free, bundled (EXPERIMENTAL)"
 notes = [
+  "EXPERIMENTAL: the purchase flow is not yet device-tested on either platform — it compiles + the UI renders, but no real round-trip has run end-to-end. See the plugin README.",
   "Create your products SERVER-SIDE first — App Store Connect (iOS) + Play Console (Android). The IDs you pass to `products` must match exactly.",
   "Verification: the plugin does the platform's built-in check AND returns the raw signed receipt (iOS JWS / Android purchaseToken+signature) in each transaction. POST it to your backend for authoritative validation before granting anything revenue-bearing.",
-  "iOS: enable the In-App Purchase capability on your App ID. For SIMULATOR testing add a .storekit Configuration file to the scheme's run action (see the plugin README) — purchases then work on the sim with no App Store Connect and no real money.",
-  "Android EXPERIMENTAL: Play Billing needs a Play Console app + products + a signed build on a closed/internal test track + license testers. There is no local sandbox; the purchase loop is not yet device-validated.",
+  "iOS: enable the In-App Purchase capability on your App ID. To test on the simulator, add a .storekit Configuration file to the scheme and RUN FROM XCODE (the StoreKit test harness isn't applied by `simctl launch` alone).",
+  "Android: Play Billing needs a Play Console app + products + a signed build on a closed/internal test track + license testers. There is no local sandbox.",
 ]
 
 [android]
