@@ -5,6 +5,7 @@ import ImageIO
 import PDFKit
 import AVKit
 import AVFoundation
+import WebKit
 
 // The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
 // (what to draw) + `Action` (what to send back). No app-specific types; this exact
@@ -71,6 +72,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             urlString: url, id: id, playing: playing, seekToMs: seekToMs,
             controls: controls, looping: looping, muted: muted, onEnded: onEnded, send: send
         ).id(id).frame(minHeight: 240))
+
+    case .webView(let url):
+        return AnyView(WebKitWebView(urlString: url).frame(minHeight: 240))
 
     case .rating(let value, let max, let onRate):
         return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
@@ -1372,5 +1376,32 @@ struct PDFKitView: UIViewRepresentable {
                 view.document = doc
             }
         }
+    }
+}
+
+// General embedded web content (docs, dashboards, hosted player embeds like Bunny.net). JS +
+// inline-media autoplay are enabled so hosted players work. Reloads only when the URL changes.
+struct WebKitWebView: UIViewRepresentable {
+    let urlString: String
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        let view = WKWebView(frame: .zero, configuration: config)
+        load(into: view)
+        context.coordinator.lastURL = urlString
+        return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {
+        if context.coordinator.lastURL != urlString {
+            context.coordinator.lastURL = urlString
+            load(into: view)
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    final class Coordinator { var lastURL: String? = nil }
+    private func load(into view: WKWebView) {
+        guard let url = URL(string: urlString) else { return }
+        view.load(URLRequest(url: url))
     }
 }

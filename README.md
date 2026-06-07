@@ -107,8 +107,10 @@ The `Widget` vocabulary renders identically on Android, iOS, and web:
   (it goes adaptive on tablets: a side rail + capped width).
 - **Media & feedback** — images, avatars, progress bars, shimmer skeletons, swipe actions,
   an inline month **calendar**, an in-app **PDF viewer** (`PdfView` — display a
-  backend-generated report), and a controllable **video player** (`Video` — AVPlayer / Media3 /
-  `<video>`; HLS + MP4; app-driven play/seek + position/ended events).
+  backend-generated report), a controllable **video player** (`Video` — AVPlayer / Media3 /
+  `<video>`; HLS + MP4; app-driven play/seek + position/ended events), and an embedded
+  **web view** (`WebView` — WKWebView / Android WebView / `<iframe>`; hosts any page or a hosted
+  player embed like Bunny.net, with a `mobiler_core::bunny` URL helper).
 - **Charts** — `Chart` in **eight styles**: bar, line, stacked bar, 100%-stacked bar, pie,
   donut, concentric fitness-style **progress rings**, and a radial **gauge** — multi-series with
   an optional y-axis and legend. Plus a variable-width stacked-region / coverage-gap
@@ -211,7 +213,7 @@ feedback and contributions welcome):
 - Deep links / universal links
 - Embedded WebView · Maps
 
-_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`), and a **native → core streaming primitive** (`cx.subscribe`/`unsubscribe` — a source pushes N events over time into `update`; iOS/Android/web, with a built-in `ticker`), a **paged feed list** (`LazyList` — infinite scroll + pull-to-refresh, app-owned loading state), **remote push** (`mobiler plugin add push` — APNs/FCM, device-token registration + an inbound event stream; **experimental**), **in-app purchases** (`mobiler plugin add iap` — StoreKit 2 / Play Billing: products, purchase, restore, a transactions stream; **experimental**), a **Firebase-everywhere push variant** (`mobiler plugin add push-firebase-only` — FCM on both platforms via the Firebase iOS SDK, one token + one backend; **experimental**, alternative to `push`), and a controllable **video player** (`Video` — AVPlayer / Media3 ExoPlayer / `<video>`: HLS + MP4, app-driven play/seek + position/ended events)._
+_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`), and a **native → core streaming primitive** (`cx.subscribe`/`unsubscribe` — a source pushes N events over time into `update`; iOS/Android/web, with a built-in `ticker`), a **paged feed list** (`LazyList` — infinite scroll + pull-to-refresh, app-owned loading state), **remote push** (`mobiler plugin add push` — APNs/FCM, device-token registration + an inbound event stream; **experimental**), **in-app purchases** (`mobiler plugin add iap` — StoreKit 2 / Play Billing: products, purchase, restore, a transactions stream; **experimental**), a **Firebase-everywhere push variant** (`mobiler plugin add push-firebase-only` — FCM on both platforms via the Firebase iOS SDK, one token + one backend; **experimental**, alternative to `push`), a controllable **video player** (`Video` — AVPlayer / Media3 ExoPlayer / `<video>`: HLS + MP4, app-driven play/seek + position/ended events), and an embedded **web view** (`WebView` — WKWebView / Android WebView / `<iframe>`; hosts any page or a hosted player embed like Bunny.net, with a `mobiler_core::bunny` URL helper)._
 
 ## Repository layout
 
