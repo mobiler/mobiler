@@ -18,3 +18,5 @@ mobiler-ui = { path = "../mobiler-ui", version = "0.17.0" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1"
 facet = { version = "=0.44", features = ["chrono"] }
+sha2 = "0.10"
+hex = "0.4"

@@ -431,6 +431,13 @@ pub enum Widget {
         muted: bool,
         on_ended: Option<ActionToken>,
     },
+    /// Displays the web page / embedded player at `url` in a native web view — `WKWebView` on iOS,
+    /// `android.webkit.WebView` on Android, an `<iframe>` on web. General-purpose: docs, dashboards,
+    /// or a hosted player embed (e.g. a Bunny.net / YouTube embed URL, which brings its own
+    /// captions/quality/thumbnails). JavaScript and inline media autoplay are enabled so hosted
+    /// players work. This is NOT the default way to play video — use [`Widget::Video`] for a
+    /// controllable native player. Fills its width; give it room (place in a sized container).
+    WebView { url: String },
     /// A star rating. `value` is in tenths (e.g. `48` = 4.8 of `max` stars). When `on_rate`
     /// is set (one token per star), the stars are tappable — star *i* fires `on_rate[i]`.
     Rating { value: u32, max: u8, on_rate: Option<Vec<ActionToken>> },
@@ -590,6 +597,7 @@ mod tests {
         round_trips(&Widget::PdfView { url: "https://example.com/report.pdf".to_string() });
         round_trips(&Widget::Video { url: "https://example.com/clip.mp4".to_string(), id: "v1".to_string(), playing: true, seek_to_ms: -1, controls: true, looping: false, muted: true, on_ended: Some("ended".to_string()) });
         round_trips(&Widget::Video { url: "https://example.com/live.m3u8".to_string(), id: "v2".to_string(), playing: false, seek_to_ms: 5000, controls: false, looping: true, muted: false, on_ended: None });
+        round_trips(&Widget::WebView { url: "https://iframe.mediadelivery.net/embed/1/abc".to_string() });
         round_trips(&Widget::TextField { id: "email".to_string(), placeholder: "you@co".to_string(), value: "".to_string(), kind: FieldKind::Email, error: None });
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });

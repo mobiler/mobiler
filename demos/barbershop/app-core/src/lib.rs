@@ -12,7 +12,7 @@ use mobiler_core::{
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
     pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
-    spacer, stack, video_player,
+    spacer, stack, video_player, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_error,
     with_fab, with_refresh, with_sheet, with_theme,
 };
@@ -1197,6 +1197,24 @@ fn video_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Web" card — the general `Widget::WebView` (WKWebView / Android WebView / `<iframe>`). Here
+/// it embeds a public page; the same widget hosts a player embed (e.g. a Bunny.net embed URL) on all
+/// platforms. NOT the default video player — that's the Intro video card above (`Widget::Video`).
+fn web_card() -> Widget {
+    // A hosted player embed inside the WebView (here a public YouTube embed; for Bunny.net you'd use
+    // `mobiler_core::bunny::embed_url(library_id, video_id)`, or `embed_url_signed(..)` from your
+    // backend). The hosted player brings its own captions/quality/thumbnails on every platform —
+    // distinct from the controllable native Widget::Video in the Intro video card above.
+    card(
+        column(vec![
+            emphasis("Embedded web"),
+            caption("A native web view (Widget::WebView). Hosts any URL — docs, dashboards, or a hosted player embed (Bunny.net / YouTube)."),
+            web_view("https://www.youtube.com/embed/aqz-KE-bpKQ"),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 /// The "Feed" card — a `LazyList` of synthetic bookings: pull-to-refresh at the top, load-more
 /// when you scroll near the end (stops at 60). The list owns a bounded scroll region.
 fn feed_card(model: &Model) -> Widget {
@@ -1420,6 +1438,7 @@ fn profile_screen(model: &Model) -> Widget {
         push_card(model),
         store_card(model),
         video_card(model),
+        web_card(),
         feed_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
