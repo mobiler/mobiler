@@ -14,8 +14,9 @@
 # TWO manual steps `plugin add` can't do (see notes below): drop `google-services.json` into
 # Android/app/, and enable Push Notifications on your App ID + match `aps-environment` to your signing.
 name = "push"
-summary = "Remote push (APNs/FCM) — server-sent notifications (free; needs Firebase config on Android)"
+summary = "Remote push (APNs/FCM) — server-sent notifications (free; EXPERIMENTAL — not yet device-tested)"
 notes = [
+  "EXPERIMENTAL: the iOS receive path is simulator-verified, but the real APNs/FCM token round-trip hasn't been validated on a physical device yet. See the plugin README.",
   "Android: download google-services.json from your Firebase console into Android/app/ — it carries your project's keys and can't be bundled. The Android build FAILS without it.",
   "iOS: the 'aps-environment' entitlement was added as 'development' (APNs sandbox / TestFlight). Switch it to 'production' for App Store builds — a mismatch is the #1 reason push silently never arrives.",
 ]
