@@ -71,7 +71,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(VideoView(
             urlString: url, id: id, playing: playing, seekToMs: seekToMs,
             controls: controls, looping: looping, muted: muted, onEnded: onEnded, send: send
-        ).frame(minHeight: 240))
+        ).id(id).frame(minHeight: 240))
 
     case .webView(let url):
         return AnyView(WebKitWebView(urlString: url).frame(minHeight: 240))
@@ -1246,10 +1246,14 @@ extension View {
 }
 
 
-// Native video player (Widget.Video) — an AVPlayer in an AVPlayerViewController. The app drives
-// play/pause (`playing`) + seek (`seekToMs`, applied when it CHANGES); a periodic observer reports the
-// position ~1/sec via `.input(id, .int(ms))`; `onEnded` fires (or it loops). The Coordinator owns the
-// player + observers, so the ~1/sec re-render reuses the same player rather than restarting playback.
+// Native video player (Widget.Video). The iOS shell rebuilds the ENTIRE view tree on every model
+// change (e.g. the ~1s position update), so SwiftUI recreates this representable — therefore the
+// AVPlayer + its observers must live OUTSIDE the SwiftUI view lifecycle, in a per-`id` session store,
+// or playback would reset to a fresh player every tick (black "no video", stops after ~1s). A
+// recreated AVPlayerViewController just rebinds to the same already-playing player. A stable `.id`
+// on the view (in the render switch) also helps SwiftUI preserve identity. The app drives play/pause
+// (`playing`, on change) + seek (`seekToMs`, on change); a periodic observer reports position ~1/sec
+// via `.input(id, .int(ms))`; `onEnded` fires (or it loops).
 struct VideoView: UIViewControllerRepresentable {
     let urlString: String
     let id: String
@@ -1261,91 +1265,91 @@ struct VideoView: UIViewControllerRepresentable {
     let onEnded: String?
     let send: (Action) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(send: send) }
-
     func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let session = VideoSessionStore.shared.session(id: id, url: urlString, send: send)
+        session.configure(looping: looping, onEnded: onEnded, muted: muted)
         let vc = AVPlayerViewController()
-        let player = AVPlayer(url: URL(string: urlString) ?? URL(fileURLWithPath: "/dev/null"))
-        player.isMuted = muted
-        vc.player = player
+        vc.player = session.player
         vc.showsPlaybackControls = controls
-        context.coordinator.attach(player: player, id: id, looping: looping, onEnded: onEnded, playing: playing)
-        if playing { player.play() }
+        session.apply(playing: playing, seekToMs: seekToMs)
         return vc
     }
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
+        let session = VideoSessionStore.shared.session(id: id, url: urlString, send: send)
+        session.configure(looping: looping, onEnded: onEnded, muted: muted)
+        if vc.player !== session.player { vc.player = session.player }
         vc.showsPlaybackControls = controls
-        guard let player = vc.player else { return }
+        session.apply(playing: playing, seekToMs: seekToMs)
+    }
+}
+
+// A persistent per-video session — the AVPlayer + its observers, kept alive across the shell's
+// whole-tree re-renders (which recreate the representable). Keyed by the widget's stable `id`.
+@MainActor
+final class VideoSession {
+    let player: AVPlayer
+    let url: String
+    private let id: String
+    private var send: (Action) -> Void
+    private var looping = false
+    private var onEnded: String?
+    private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
+    private var lastSeekMs: Int64 = -1
+    private var lastPlaying: Bool?
+
+    init(id: String, url: String, send: @escaping (Action) -> Void) {
+        self.id = id; self.url = url; self.send = send
+        self.player = AVPlayer(url: URL(string: url) ?? URL(fileURLWithPath: "/dev/null"))
+        let pid = id
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main
+        ) { [weak self] time in
+            guard let self else { return }
+            let secs = time.seconds
+            self.send(.input(id: pid, value: .int(Int64(secs.isFinite ? secs * 1000 : 0))))
+        }
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            if self.looping { self.player.seek(to: .zero); self.player.play() }
+            else if let token = self.onEnded { self.send(.fired(token: token)) }
+        }
+    }
+
+    // Refresh per-render inputs (latest send closure + cosmetic flags) without touching playback.
+    func configure(looping: Bool, onEnded: String?, muted: Bool) {
+        self.looping = looping
+        self.onEnded = onEnded
         player.isMuted = muted
-        context.coordinator.applySeek(seekToMs, on: player)
-        // Edge-triggered: only act when the app's `playing` actually CHANGES (like Android's
-        // LaunchedEffect(playing)). Reconciling on every ~1s position re-render would fight the
-        // native transport controls — tapping the player's own play button would be force-paused
-        // a second later because the model still reads paused.
-        context.coordinator.applyPlaying(playing, on: player)
     }
+    func refresh(send: @escaping (Action) -> Void) { self.send = send }
 
-    static func dismantleUIViewController(_ vc: AVPlayerViewController, coordinator: Coordinator) {
-        coordinator.detach(from: vc.player)
-    }
-
-    @MainActor
-    final class Coordinator {
-        let send: (Action) -> Void
-        private var id = ""
-        private var onEnded: String?
-        private var looping = false
-        private var timeObserver: Any?
-        private var endObserver: NSObjectProtocol?
-        private var lastSeekMs: Int64 = -1
-        private var lastPlaying: Bool?
-
-        init(send: @escaping (Action) -> Void) { self.send = send }
-
-        func attach(player: AVPlayer, id: String, looping: Bool, onEnded: String?, playing: Bool) {
-            self.id = id; self.looping = looping; self.onEnded = onEnded; self.lastPlaying = playing
-            let pid = id
-            timeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main
-            ) { [weak self] time in
-                guard let self else { return }
-                let secs = time.seconds
-                let ms = Int64(secs.isFinite ? secs * 1000 : 0)
-                self.send(.input(id: pid, value: .int(ms)))
-            }
-            endObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
-            ) { [weak self] _ in
-                guard let self else { return }
-                if self.looping {
-                    player.seek(to: .zero); player.play()
-                } else if let token = self.onEnded {
-                    self.send(.fired(token: token))
-                }
-            }
+    // Edge-triggered: seek / play / pause only when the value actually CHANGES, so the periodic
+    // re-render neither re-seeks every tick nor fights the native transport controls.
+    func apply(playing: Bool, seekToMs: Int64) {
+        if seekToMs >= 0, seekToMs != lastSeekMs {
+            lastSeekMs = seekToMs
+            player.seek(to: CMTime(seconds: Double(seekToMs) / 1000.0, preferredTimescale: 600))
         }
-
-        func applySeek(_ ms: Int64, on player: AVPlayer) {
-            guard ms >= 0, ms != lastSeekMs else { return }
-            lastSeekMs = ms
-            player.seek(to: CMTime(seconds: Double(ms) / 1000.0, preferredTimescale: 600))
-        }
-
-        // Apply play/pause only on a real change (edge-triggered), so the native transport controls
-        // aren't reverted by the periodic position re-render. nil initial = "unset" → first call acts.
-        func applyPlaying(_ playing: Bool, on player: AVPlayer) {
-            guard playing != lastPlaying else { return }
+        if playing != lastPlaying {
             lastPlaying = playing
             if playing { player.play() } else { player.pause() }
         }
+    }
+}
 
-        func detach(from player: AVPlayer?) {
-            if let timeObserver { player?.removeTimeObserver(timeObserver) }
-            timeObserver = nil
-            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-            endObserver = nil
-        }
+@MainActor
+final class VideoSessionStore {
+    static let shared = VideoSessionStore()
+    private var sessions: [String: VideoSession] = [:]
+    func session(id: String, url: String, send: @escaping (Action) -> Void) -> VideoSession {
+        if let s = sessions[id], s.url == url { s.refresh(send: send); return s }
+        let s = VideoSession(id: id, url: url, send: send)
+        sessions[id] = s
+        return s
     }
 }
 
