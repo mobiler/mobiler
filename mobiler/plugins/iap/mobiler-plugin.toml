@@ -1,0 +1,37 @@
+# Free, bundled Mobiler plugin: in-app purchase (StoreKit 2 / Play Billing 7). No Widget — uses the
+# native system purchase sheets. Rides existing primitives (no lib ABI change):
+#   cx.plugin("iap","products", <json id array>, Msg::Products)   // → product metadata JSON
+#   cx.plugin("iap","purchase", <product id>, Msg::Started)        // launches the sheet; result on the stream
+#   cx.subscribe("iap","iap","transactions","", Msg::Txn)          // ONE event per transaction
+#   cx.plugin("iap","restore","", Msg::Started)                    // restores; results on the stream
+#   cx.plugin("iap","finish", <txnId | [consume:]purchaseToken>, Msg::Done) // ack/consume AFTER granting
+#
+# The transactions STREAM is the single source of truth: purchase/restore return a thin ack, the real
+# transaction (incl. Ask-to-Buy approval, subscription renewal, out-of-app purchase) always arrives on
+# the stream. SUBSCRIBE AT STARTUP so buffered/out-of-app transactions aren't missed. Call `finish`
+# ONLY after granting the content (iOS replays unfinished txns; Android auto-refunds unacked in 3 days).
+#
+# Install:  mobiler plugin add iap
+name = "iap"
+summary = "In-app purchase / subscriptions (StoreKit 2 / Play Billing) — free, bundled (EXPERIMENTAL)"
+notes = [
+  "EXPERIMENTAL: the purchase flow is not yet device-tested on either platform — it compiles + the UI renders, but no real round-trip has run end-to-end. See the plugin README.",
+  "Create your products SERVER-SIDE first — App Store Connect (iOS) + Play Console (Android). The IDs you pass to `products` must match exactly.",
+  "Verification: the plugin does the platform's built-in check AND returns the raw signed receipt (iOS JWS / Android purchaseToken+signature) in each transaction. POST it to your backend for authoritative validation before granting anything revenue-bearing.",
+  "iOS: enable the In-App Purchase capability on your App ID. To test on the simulator, add a .storekit Configuration file to the scheme and RUN FROM XCODE (the StoreKit test harness isn't applied by `simctl launch` alone).",
+  "Android: Play Billing needs a Play Console app + products + a signed build on a closed/internal test track + license testers. There is no local sandbox.",
+]
+
+[android]
+sources = ["android/IapPlugin.kt"]
+register = '"iap" to IapPlugin(application)'
+# Play Billing 7. The billing AAR declares <uses-permission com.android.vending.BILLING> itself via
+# manifest merge, so no `permissions` entry is needed.
+gradle_deps = ["com.android.billingclient:billing:7.1.1"]
+
+[ios]
+sources = ["ios/IapPlugin.swift"]
+register = 'case "iap": return await IapPlugin.handle(op: op, input: input)'
+register_stream = 'case "iap": await IapPlugin.subscribe(op: op, input: input, emit: emit)'
+# StoreKit 2 is a system framework — no package, no entitlements file, no Info.plist key. The In-App
+# Purchase capability is enabled on the App ID in the dev portal (the one manual step).

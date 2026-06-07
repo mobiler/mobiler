@@ -146,6 +146,18 @@ pub enum Msg {
     PushRegistered(PluginResponse),
     /// An inbound push payload (received/tapped) or a `{"type":"token_refresh",…}` event.
     PushEvent(PluginResponse),
+
+    /// --- Profile "Store" card: in-app purchase (`iap` plugin) ---
+    /// Buy a product (launches the native purchase sheet).
+    BuyProduct(String),
+    /// Restore prior purchases.
+    RestorePurchases,
+    /// Product metadata JSON from `iap` products.
+    StoreProducts(PluginResponse),
+    /// Thin ack from a purchase/restore launch.
+    StoreStarted(PluginResponse),
+    /// A transaction from the `iap` transactions stream (purchase / restore / renewal).
+    StoreTxn(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -229,6 +241,10 @@ pub struct Model {
     /// deliver; without it, register reports "unavailable" (graceful degrade).
     push_token: String,
     push_last: String,
+    /// "Store" card — in-app purchase (`iap` plugin): the loaded products JSON + the last transaction.
+    /// Needs `mobiler plugin add iap` + store products (or an iOS `.storekit` file) to actually transact.
+    store_products: String,
+    store_last: String,
     /// "Feed" card — a long paged list demoing `LazyList` (pull-to-refresh + load-more). The app
     /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
     feed: Vec<String>,
@@ -295,6 +311,8 @@ impl Default for Model {
             ws_last: String::new(),
             push_token: String::new(),
             push_last: String::new(),
+            store_products: String::new(),
+            store_last: String::new(),
             feed: feed_page(1),
             feed_refreshing: false,
         }
@@ -679,6 +697,21 @@ impl MobilerApp for FadeHouse {
                     model.push_last = resp.output;
                 }
             }
+            Msg::BuyProduct(id) => cx.plugin("iap", "purchase", &id, Msg::StoreStarted),
+            Msg::RestorePurchases => cx.plugin("iap", "restore", "", Msg::StoreStarted),
+            Msg::StoreProducts(resp) => {
+                if resp.ok {
+                    model.store_products = resp.output; // JSON array: [{id,title,price,type},…]
+                }
+            }
+            Msg::StoreStarted(_) => {} // thin ack — the real transaction arrives on StoreTxn
+            Msg::StoreTxn(resp) => {
+                if resp.ok {
+                    // A real app POSTs resp.output's signed `payload` to its backend, then grants +
+                    // finishes. Here we just surface the transaction.
+                    model.store_last = resp.output;
+                }
+            }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
                     match query_param(&output, "code") {
@@ -704,6 +737,11 @@ impl MobilerApp for FadeHouse {
         // Detect the device's preferred locale (built-in `device` capability) so the
         // formatting card can show it — works on iOS, Android, and web.
         cx.device_locale(|r| Msg::GotDeviceLocale(r.output));
+        // In-app purchase (`iap` plugin): subscribe to the transactions stream at startup (the single
+        // source of truth) + load product metadata for the Store card. No-ops gracefully until
+        // `mobiler plugin add iap`. iOS sim-tests against demos/barbershop/iOS/Products.storekit.
+        cx.subscribe("iap", "iap", "transactions", "", Msg::StoreTxn);
+        cx.plugin("iap", "products", r#"["com.fadehouse.tip","com.fadehouse.pro","com.fadehouse.premium"]"#, Msg::StoreProducts);
     }
 
     fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
@@ -1074,6 +1112,34 @@ fn push_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Store" card — in-app purchase (`iap` plugin): Buy buttons launch the native purchase sheet,
+/// and the transactions stream surfaces the result. iOS is testable on the simulator via
+/// `demos/barbershop/iOS/Products.storekit`; Android needs a Play Console test track. Degrades
+/// gracefully (purchase returns ok:false from the default plugin dispatch) until `mobiler plugin add iap`.
+fn store_card(model: &Model) -> Widget {
+    let status = if model.store_last.is_empty() {
+        caption("Tap a product to buy. iOS: tested on-sim via a local .storekit file (no real money).")
+    } else {
+        caption(format!("Last transaction: {}", model.store_last))
+    };
+    card(
+        column(vec![
+            emphasis("Store"),
+            caption("In-app purchase (cx.plugin \"purchase\" + the transactions stream — StoreKit 2 / Play Billing)."),
+            status,
+            row(vec![
+                button("Tip $1", ButtonStyle::Outlined, Msg::BuyProduct("com.fadehouse.tip".to_string())),
+                button("Pro", ButtonStyle::Filled, Msg::BuyProduct("com.fadehouse.pro".to_string())),
+            ]),
+            row(vec![
+                button("Premium (sub)", ButtonStyle::Outlined, Msg::BuyProduct("com.fadehouse.premium".to_string())),
+                button("Restore", ButtonStyle::Text, Msg::RestorePurchases),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 /// The "Feed" card — a `LazyList` of synthetic bookings: pull-to-refresh at the top, load-more
 /// when you scroll near the end (stops at 60). The list owns a bounded scroll region.
 fn feed_card(model: &Model) -> Widget {
@@ -1295,6 +1361,7 @@ fn profile_screen(model: &Model) -> Widget {
         // pushes N events over time into update(), each re-rendering this card.
         live_card(model),
         push_card(model),
+        store_card(model),
         feed_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(

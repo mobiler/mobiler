@@ -98,6 +98,7 @@ ABI change. Bundled free plugins:
 | 🔵 `bluetooth` | BLE scan / connect / read |
 | 🔑 `oauth` | OAuth 2.0 / OIDC login (system auth browser → redirect) |
 | 📲 `push` | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** |
+| 💳 `iap` | in-app purchase / subscriptions (StoreKit 2 / Play Billing) — **experimental, not yet device-tested** |
 
 ```bash
 mobiler plugin list
@@ -158,16 +159,16 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
 demand-driven): video playback/streaming
-(HLS + MP4, any URL source), lazy/virtualized lists, tablet master-detail,
-remote push (APNs/FCM),
-in-app purchases, deep links, embedded WebView, and maps. The full list lives on
+(HLS + MP4, any URL source), tablet master-detail,
+deep links, embedded WebView, and maps. The full list lives on
 [GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
 (`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
 (`PdfView`), a native→core streaming primitive (`cx.subscribe`/`unsubscribe`, with a built-in
-`ticker`), a paged feed list (`LazyList` — infinite scroll + pull-to-refresh), and remote push
-(`push` plugin — APNs/FCM, device-token registration + an inbound event stream; **experimental, not
-yet device-tested**). Next up: in-app purchases / subscriptions._
+`ticker`), a paged feed list (`LazyList` — infinite scroll + pull-to-refresh), remote push
+(`push` plugin — APNs/FCM; **experimental**), and in-app purchases (`iap` plugin — StoreKit 2 / Play
+Billing: products, purchase, restore, a transactions stream; **experimental**). Next up: a
+Firebase-on-iOS push variant (`push-fcm`)._
 
 ## Links
 

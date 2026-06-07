@@ -1,0 +1,76 @@
+{
+  "identifier" : "FADEHOUSE01",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "1000000001",
+      "localizations" : [
+        {
+          "description" : "Leave the shop a tip",
+          "displayName" : "Tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.fadehouse.tip",
+      "referenceName" : "Tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "1000000002",
+      "localizations" : [
+        {
+          "description" : "Unlock Pro features",
+          "displayName" : "Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.fadehouse.pro",
+      "referenceName" : "Pro",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : []
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "20000001",
+      "localizations" : [],
+      "name" : "Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "1000000003",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Premium membership, billed monthly",
+              "displayName" : "Premium",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.fadehouse.premium",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Premium",
+          "subscriptionGroupID" : "20000001",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

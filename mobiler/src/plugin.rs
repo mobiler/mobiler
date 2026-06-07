@@ -729,6 +729,31 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_iap_registers_both_switches_and_adds_billing_dep() {
+        let root = skeleton();
+        add_at(&root, "iap").unwrap();
+
+        // Source copied with the package substituted.
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/IapPlugin.kt").contains("package dev.mobiler.demo"));
+        // Registered in both shells; the streaming case lands in subscribe(), the handle case in handle().
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"iap\" to IapPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        let handle_at = core_swift.find("case \"iap\": return await IapPlugin.handle").expect("handle case");
+        let stream_at = core_swift.find("case \"iap\": await IapPlugin.subscribe").expect("stream case");
+        assert!(stream_at < handle_at, "stream case in subscribe(), handle case in handle()");
+        // Play Billing Gradle dependency injected; NO gradle plugin / entitlements / permissions.
+        let gradle = read(&root, "Android/app/build.gradle.kts");
+        assert!(gradle.contains("com.android.billingclient:billing"), "billing dep injected");
+        assert!(!gradle.contains("google-services"), "no gradle plugin for iap");
+        let yml = read(&root, "iOS/project.yml");
+        assert!(!yml.contains("entitlements:"), "iap adds no iOS entitlements");
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(!manifest.contains("uses-permission"), "iap declares no permissions (billing AAR merges its own)");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();

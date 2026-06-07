@@ -74,4 +74,10 @@ targets:
         # The archive is built unsigned (build-ios.sh signs at export for App Store); the
         # simulator + device compile-check builds need no signing either.
         CODE_SIGNING_ALLOWED: "NO"
+    # Point the run scheme at the local StoreKit config so the `iap` plugin's purchases work on the
+    # simulator with no App Store Connect and no real money (StoreKit 2 testing). Affects RUN only,
+    # not build/archive — the CI build-only iOS lane is unaffected.
+    scheme:
+      run:
+        storeKitConfiguration: Products.storekit
     # mobiler:target-extra (plugin add inserts a target-level entitlements block above this line)
