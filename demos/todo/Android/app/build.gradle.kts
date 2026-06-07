@@ -45,6 +45,10 @@ android {
 
 dependencies {
     implementation(project(":shared"))
+    // Media3/ExoPlayer for Widget.Video (MP4 + HLS playback)
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

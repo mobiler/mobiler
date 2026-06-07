@@ -481,6 +481,27 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // Browsers render PDFs natively in an iframe (remote URL or local blob/file URL).
             view! { <iframe class="pdfview" src=url.clone() title="PDF"></iframe> }.into_any()
         }
+        Widget::Video { url, playing, controls, looping, muted, on_ended, .. } => {
+            // Web v1 = a native-controls `<video>`. App-driven play/pause + seek + position events are
+            // iOS/Android only: the web shell rebuilds the whole tree on each `update`, which would
+            // reset the element ~every tick — so we don't pump position here. `muted && playing` →
+            // autoplay (the only reliable browser autoplay, e.g. a looping background clip). MP4 plays
+            // everywhere; HLS (.m3u8) plays only on Safari in v1 (hls.js for other browsers is v2).
+            let (send, ended) = (send.clone(), on_ended.clone());
+            let autoplay = *playing && *muted;
+            view! {
+                <video
+                    class="video"
+                    src=url.clone()
+                    controls=*controls
+                    autoplay=autoplay
+                    prop:loop=*looping
+                    muted=*muted
+                    playsinline=true
+                    on:ended=move |_| { if let Some(t) = ended.clone() { send(Action::Fired { token: t }); } }
+                ></video>
+            }.into_any()
+        }
         Widget::Rating { value, max, on_rate } => {
             let value = *value;
             let stars: Vec<AnyView> = (1..=*max)

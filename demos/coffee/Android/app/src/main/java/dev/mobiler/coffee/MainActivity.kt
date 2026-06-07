@@ -32,6 +32,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -295,6 +301,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         )
 
         is Widget.PdfView -> PdfViewWidget(widget.url)
+        is Widget.Video -> VideoWidget(widget.url, widget.id, widget.playing, widget.seekToMs, widget.controls, widget.looping, widget.muted, widget.onEnded, send)
 
         is Widget.Image -> AsyncImage(
             model = widget.source,
@@ -1247,6 +1254,49 @@ private fun CardBody(child: Widget, send: (Action) -> Unit) {
     Box(modifier = Modifier.padding(16.dp)) { Render(child, send) }
 }
 
+
+// Native video player (Widget.Video) — Media3 ExoPlayer in a PlayerView. The app drives play/pause
+// (`playing`) + seek (`seekToMs`, applied when it changes); a 1s loop reports the position via
+// Action.Input(id, Int(ms)); onEnded fires (loop is handled by repeatMode). The player is keyed by
+// `url` (remember) and released on dispose — never leaked across the ~1/sec re-render.
+@OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Long, controls: Boolean, looping: Boolean, muted: Boolean, onEnded: String?, send: (Action) -> Unit) {
+    val context = LocalContext.current
+    val player = remember(url) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(url))
+            repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            volume = if (muted) 0f else 1f
+            prepare()
+        }
+    }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED && onEnded != null) send(Action.Fired(onEnded))
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener); player.release() }
+    }
+    LaunchedEffect(player, id) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            send(Action.Input(id, InputValue.Int(player.currentPosition)))
+        }
+    }
+    LaunchedEffect(playing) { player.playWhenReady = playing }
+    var lastSeek by remember { mutableStateOf(-1L) }
+    LaunchedEffect(seekToMs) {
+        if (seekToMs >= 0 && seekToMs != lastSeek) { lastSeek = seekToMs; player.seekTo(seekToMs) }
+    }
+    AndroidView(
+        factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = controls } },
+        update = { it.useController = controls },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
+    )
+}
 
 /** In-app PDF viewer (Widget.PdfView). Downloads a remote PDF to the cache (or opens a file URI),
  *  renders every page to a bitmap with the platform PdfRenderer, and stacks them. The parent

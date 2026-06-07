@@ -12,7 +12,7 @@ use mobiler_core::{
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
     pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
-    spacer, stack,
+    spacer, stack, video_player,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_error,
     with_fab, with_refresh, with_sheet, with_theme,
 };
@@ -158,6 +158,13 @@ pub enum Msg {
     StoreStarted(PluginResponse),
     /// A transaction from the `iap` transactions stream (purchase / restore / renewal).
     StoreTxn(PluginResponse),
+
+    /// --- Profile "Intro video" card: the controllable `Widget::Video` player ---
+    VideoPlay,
+    VideoPause,
+    VideoRestart,
+    /// The clip finished (`on_ended`).
+    VideoEnded,
 }
 
 #[derive(Clone)]
@@ -245,6 +252,12 @@ pub struct Model {
     /// Needs `mobiler plugin add iap` + store products (or an iOS `.storekit` file) to actually transact.
     store_products: String,
     store_last: String,
+    /// "Intro video" card — the controllable `Widget::Video`: app-driven play/pause + restart, and the
+    /// current position (ms) the shell reports ~1/sec via `input`.
+    video_playing: bool,
+    video_seek_ms: i64,
+    video_pos_ms: i64,
+    video_ended: bool,
     /// "Feed" card — a long paged list demoing `LazyList` (pull-to-refresh + load-more). The app
     /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
     feed: Vec<String>,
@@ -313,6 +326,10 @@ impl Default for Model {
             push_last: String::new(),
             store_products: String::new(),
             store_last: String::new(),
+            video_playing: false,
+            video_seek_ms: -1,
+            video_pos_ms: 0,
+            video_ended: false,
             feed: feed_page(1),
             feed_refreshing: false,
         }
@@ -712,6 +729,12 @@ impl MobilerApp for FadeHouse {
                     model.store_last = resp.output;
                 }
             }
+            // Drive the controllable Widget::Video (play/pause via the app-owned `playing` field;
+            // seek by setting `video_seek_ms`; position arrives in `fn input`).
+            Msg::VideoPlay => { model.video_playing = true; model.video_ended = false; }
+            Msg::VideoPause => model.video_playing = false,
+            Msg::VideoRestart => { model.video_seek_ms = 0; model.video_playing = true; model.video_ended = false; }
+            Msg::VideoEnded => { model.video_playing = false; model.video_ended = true; }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
                     match query_param(&output, "code") {
@@ -745,8 +768,8 @@ impl MobilerApp for FadeHouse {
     }
 
     fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
-        if let InputValue::Text(t) = value {
-            match id {
+        match value {
+            InputValue::Text(t) => match id {
                 "search" => model.search = t,
                 "note" => model.note = t,
                 "email" => model.email = t,
@@ -754,7 +777,10 @@ impl MobilerApp for FadeHouse {
                 "password" => model.password = t,
                 "bio" => model.bio = t,
                 _ => {}
-            }
+            },
+            // The Video widget reports its current position (ms) ~1/sec via the input mechanism.
+            InputValue::Int(ms) if id == "intro" => model.video_pos_ms = ms,
+            _ => {}
         }
     }
 
@@ -1140,6 +1166,37 @@ fn store_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Intro video" card — the controllable `Widget::Video`: app-driven Play/Pause/Restart, the
+/// shell-reported position (~1/sec via `input`), and the `on_ended` event. A public MP4 so it plays
+/// on all three shells (an HLS `.m3u8` would play on iOS/Android + Safari only in v1).
+fn video_card(model: &Model) -> Widget {
+    let status = if model.video_ended {
+        caption("Finished ✓".to_string())
+    } else {
+        caption(format!("Position: {}s", model.video_pos_ms / 1000))
+    };
+    card(
+        column(vec![
+            emphasis("Intro video"),
+            caption("A controllable native player (Widget::Video — AVPlayer / Media3 ExoPlayer / <video>)."),
+            video_player(
+                "intro",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+                model.video_playing,
+                model.video_seek_ms,
+                Msg::VideoEnded,
+            ),
+            status,
+            row(vec![
+                button("Play", ButtonStyle::Filled, Msg::VideoPlay),
+                button("Pause", ButtonStyle::Outlined, Msg::VideoPause),
+                button("Restart", ButtonStyle::Text, Msg::VideoRestart),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 /// The "Feed" card — a `LazyList` of synthetic bookings: pull-to-refresh at the top, load-more
 /// when you scroll near the end (stops at 60). The list owns a bounded scroll region.
 fn feed_card(model: &Model) -> Widget {
@@ -1362,6 +1419,7 @@ fn profile_screen(model: &Model) -> Widget {
         live_card(model),
         push_card(model),
         store_card(model),
+        video_card(model),
         feed_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(

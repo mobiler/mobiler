@@ -3,6 +3,8 @@ import SharedTypes
 import UIKit
 import ImageIO
 import PDFKit
+import AVKit
+import AVFoundation
 
 // The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
 // (what to draw) + `Action` (what to send back). No app-specific types; this exact
@@ -63,6 +65,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 
     case .pdfView(let url):
         return AnyView(PDFKitView(urlString: url).frame(minHeight: 480))
+
+    case .video(let url, let id, let playing, let seekToMs, let controls, let looping, let muted, let onEnded):
+        return AnyView(VideoView(
+            urlString: url, id: id, playing: playing, seekToMs: seekToMs,
+            controls: controls, looping: looping, muted: muted, onEnded: onEnded, send: send
+        ).frame(minHeight: 240))
 
     case .rating(let value, let max, let onRate):
         return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
@@ -1233,6 +1241,100 @@ extension View {
     }
 }
 
+
+// Native video player (Widget.Video) — an AVPlayer in an AVPlayerViewController. The app drives
+// play/pause (`playing`) + seek (`seekToMs`, applied when it CHANGES); a periodic observer reports the
+// position ~1/sec via `.input(id, .int(ms))`; `onEnded` fires (or it loops). The Coordinator owns the
+// player + observers, so the ~1/sec re-render reuses the same player rather than restarting playback.
+struct VideoView: UIViewControllerRepresentable {
+    let urlString: String
+    let id: String
+    let playing: Bool
+    let seekToMs: Int64
+    let controls: Bool
+    let looping: Bool
+    let muted: Bool
+    let onEnded: String?
+    let send: (Action) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(send: send) }
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        let player = AVPlayer(url: URL(string: urlString) ?? URL(fileURLWithPath: "/dev/null"))
+        player.isMuted = muted
+        vc.player = player
+        vc.showsPlaybackControls = controls
+        context.coordinator.attach(player: player, id: id, looping: looping, onEnded: onEnded)
+        if playing { player.play() }
+        return vc
+    }
+
+    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
+        vc.showsPlaybackControls = controls
+        guard let player = vc.player else { return }
+        player.isMuted = muted
+        context.coordinator.applySeek(seekToMs, on: player)
+        if playing, player.timeControlStatus == .paused {
+            player.play()
+        } else if !playing, player.timeControlStatus != .paused {
+            player.pause()
+        }
+    }
+
+    static func dismantleUIViewController(_ vc: AVPlayerViewController, coordinator: Coordinator) {
+        coordinator.detach(from: vc.player)
+    }
+
+    @MainActor
+    final class Coordinator {
+        let send: (Action) -> Void
+        private var id = ""
+        private var onEnded: String?
+        private var looping = false
+        private var timeObserver: Any?
+        private var endObserver: NSObjectProtocol?
+        private var lastSeekMs: Int64 = -1
+
+        init(send: @escaping (Action) -> Void) { self.send = send }
+
+        func attach(player: AVPlayer, id: String, looping: Bool, onEnded: String?) {
+            self.id = id; self.looping = looping; self.onEnded = onEnded
+            let pid = id
+            timeObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main
+            ) { [weak self] time in
+                guard let self else { return }
+                let secs = time.seconds
+                let ms = Int64(secs.isFinite ? secs * 1000 : 0)
+                self.send(.input(id: pid, value: .int(ms)))
+            }
+            endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                if self.looping {
+                    player.seek(to: .zero); player.play()
+                } else if let token = self.onEnded {
+                    self.send(.fired(token: token))
+                }
+            }
+        }
+
+        func applySeek(_ ms: Int64, on player: AVPlayer) {
+            guard ms >= 0, ms != lastSeekMs else { return }
+            lastSeekMs = ms
+            player.seek(to: CMTime(seconds: Double(ms) / 1000.0, preferredTimescale: 600))
+        }
+
+        func detach(from player: AVPlayer?) {
+            if let timeObserver { player?.removeTimeObserver(timeObserver) }
+            timeObserver = nil
+            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+            endObserver = nil
+        }
+    }
+}
 
 // In-app PDF viewer (Widget.PdfView) — PDFKit renders the document at `urlString`
 // (a remote https URL is downloaded; a file:// URL loads directly). `autoScales` fits the page.
