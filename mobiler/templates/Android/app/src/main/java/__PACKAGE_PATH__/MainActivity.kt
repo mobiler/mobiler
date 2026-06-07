@@ -302,6 +302,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 
         is Widget.PdfView -> PdfViewWidget(widget.url)
         is Widget.Video -> VideoWidget(widget.url, widget.id, widget.playing, widget.seekToMs, widget.controls, widget.looping, widget.muted, widget.onEnded, send)
+        is Widget.WebView -> WebViewWidget(widget.url)
 
         is Widget.Image -> AsyncImage(
             model = widget.source,
@@ -1267,6 +1268,28 @@ private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Lon
     AndroidView(
         factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = controls } },
         update = { it.useController = controls },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
+    )
+}
+
+// General embedded web content (Widget.WebView) — an android.webkit.WebView in an AndroidView. JS +
+// inline-media autoplay are enabled so hosted players (e.g. Bunny.net embeds) work. Keyed by `url`
+// (remember) and destroyed on dispose — never leaked.
+@Composable
+private fun WebViewWidget(url: String) {
+    val context = LocalContext.current
+    val webView = remember(url) {
+        android.webkit.WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            webViewClient = android.webkit.WebViewClient()
+            loadUrl(url)
+        }
+    }
+    DisposableEffect(webView) { onDispose { webView.destroy() } }
+    AndroidView(
+        factory = { webView },
         modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
     )
 }
