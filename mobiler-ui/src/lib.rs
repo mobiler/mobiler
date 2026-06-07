@@ -413,6 +413,24 @@ pub enum Widget {
     /// on Android, an `<iframe>` on web — so the app only supplies the URL (e.g. a
     /// backend-generated report). Fills its width; give it room (place in a sized container).
     PdfView { url: String },
+    /// An in-app native video player for the stream/file at `url` (MP4 everywhere; HLS `.m3u8` on
+    /// iOS/Android natively + Safari on web; or a local file URI). Native player per shell — AVPlayer
+    /// (iOS), Media3/ExoPlayer (Android), a `<video>` element (web). **Controllable:** `playing` drives
+    /// play/pause (app-owned, like a `Toggle`); set `seek_to_ms` to jump (the shell seeks when the value
+    /// CHANGES; `-1` = no seek). The shell reports the current position ~once/second via
+    /// `Action::Input { id, value: Int(position_ms) }` (handle it in [`MobilerApp::input`]), and fires
+    /// `on_ended` when the clip finishes. `controls` shows the native transport bar; `looping` restarts
+    /// on end; `muted` starts muted (needed for reliable autoplay). Fills its width; give it room.
+    Video {
+        url: String,
+        id: String,
+        playing: bool,
+        seek_to_ms: i64,
+        controls: bool,
+        looping: bool,
+        muted: bool,
+        on_ended: Option<ActionToken>,
+    },
     /// A star rating. `value` is in tenths (e.g. `48` = 4.8 of `max` stars). When `on_rate`
     /// is set (one token per star), the stars are tappable — star *i* fires `on_rate[i]`.
     Rating { value: u32, max: u8, on_rate: Option<Vec<ActionToken>> },
@@ -570,6 +588,8 @@ mod tests {
             legend: vec![ChartLegendItem { label: "Gap".to_string(), color: Rgb::new(0x5A, 0x7D, 0x9A) }],
         });
         round_trips(&Widget::PdfView { url: "https://example.com/report.pdf".to_string() });
+        round_trips(&Widget::Video { url: "https://example.com/clip.mp4".to_string(), id: "v1".to_string(), playing: true, seek_to_ms: -1, controls: true, looping: false, muted: true, on_ended: Some("ended".to_string()) });
+        round_trips(&Widget::Video { url: "https://example.com/live.m3u8".to_string(), id: "v2".to_string(), playing: false, seek_to_ms: 5000, controls: false, looping: true, muted: false, on_ended: None });
         round_trips(&Widget::TextField { id: "email".to_string(), placeholder: "you@co".to_string(), value: "".to_string(), kind: FieldKind::Email, error: None });
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });

@@ -483,6 +483,52 @@ pub fn skeleton() -> Widget { Widget::Skeleton }
 /// a backend-generated report. Give it room (place in a sized container or a scroller).
 #[must_use]
 pub fn pdf_view(url: impl Into<String>) -> Widget { Widget::PdfView { url: url.into() } }
+/// A controllable native video player for `url` (remote MP4/HLS or a local file URI), rendered with the
+/// native player per platform (AVPlayer / Media3 ExoPlayer / `<video>`). `id` routes the ~once-per-second
+/// position into `input(id, InputValue::Int(position_ms))`; build it fresh each render with the current
+/// `playing` (play/pause) + `seek_to_ms` (the shell jumps when this CHANGES; `-1` = no seek). `on_ended`
+/// fires when the clip finishes. Defaults: controls shown, not looping/muted — tune with
+/// [`with_loop`]/[`with_muted`]/[`without_controls`]. Give it room (a sized container or a card).
+#[must_use]
+pub fn video_player<E: Serialize>(id: impl Into<String>, url: impl Into<String>, playing: bool, seek_to_ms: i64, on_ended: E) -> Widget {
+    Widget::Video {
+        url: url.into(),
+        id: id.into(),
+        playing,
+        seek_to_ms,
+        controls: true,
+        looping: false,
+        muted: false,
+        on_ended: Some(tok(on_ended)),
+    }
+}
+/// Loop a [`video_player`] (restart on end). No-op on non-Video widgets.
+#[must_use]
+pub fn with_loop(widget: Widget) -> Widget {
+    match widget {
+        Widget::Video { url, id, playing, seek_to_ms, controls, muted, on_ended, .. } =>
+            Widget::Video { url, id, playing, seek_to_ms, controls, looping: true, muted, on_ended },
+        other => other,
+    }
+}
+/// Start a [`video_player`] muted (needed for reliable autoplay). No-op on non-Video widgets.
+#[must_use]
+pub fn with_muted(widget: Widget) -> Widget {
+    match widget {
+        Widget::Video { url, id, playing, seek_to_ms, controls, looping, on_ended, .. } =>
+            Widget::Video { url, id, playing, seek_to_ms, controls, looping, muted: true, on_ended },
+        other => other,
+    }
+}
+/// Hide the native transport controls on a [`video_player`] (the app drives it). No-op otherwise.
+#[must_use]
+pub fn without_controls(widget: Widget) -> Widget {
+    match widget {
+        Widget::Video { url, id, playing, seek_to_ms, looping, muted, on_ended, .. } =>
+            Widget::Video { url, id, playing, seek_to_ms, controls: false, looping, muted, on_ended },
+        other => other,
+    }
+}
 /// A single unnamed series wrapping `values` — the back-compat shape for `bar_chart`/`line_chart`.
 fn one_series(values: Vec<f32>) -> Vec<ChartSeries> {
     vec![ChartSeries { name: String::new(), values, color: None, goal: None }]
@@ -1281,6 +1327,11 @@ mod tests {
     fn input_builders_carry_ids_values_and_event_tokens() {
         assert!(matches!(text_field("id", "ph", "v"), Widget::TextField { kind: FieldKind::Text, error: None, .. }));
         assert!(matches!(pdf_view("https://x/report.pdf"), Widget::PdfView { url } if url == "https://x/report.pdf"));
+        // video_player defaults + the cosmetic modifiers (match-and-rebind like with_refresh).
+        assert!(matches!(video_player("v", "https://x/c.mp4", false, -1, Ev::Tap),
+            Widget::Video { id, playing: false, seek_to_ms: -1, controls: true, looping: false, muted: false, on_ended: Some(_), .. } if id == "v"));
+        assert!(matches!(without_controls(with_muted(with_loop(video_player("v", "u", true, 0, Ev::Tap)))),
+            Widget::Video { playing: true, controls: false, looping: true, muted: true, .. }));
         assert!(matches!(secure_field("pw", "Password", ""), Widget::TextField { kind: FieldKind::Secure, .. }));
         assert!(matches!(email_field("e", "", ""), Widget::TextField { kind: FieldKind::Email, .. }));
         assert!(matches!(multiline_field("note", "", ""), Widget::TextField { kind: FieldKind::Multiline, .. }));
