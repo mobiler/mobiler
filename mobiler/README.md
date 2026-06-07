@@ -98,6 +98,7 @@ ABI change. Bundled free plugins:
 | 🔵 `bluetooth` | BLE scan / connect / read |
 | 🔑 `oauth` | OAuth 2.0 / OIDC login (system auth browser → redirect) |
 | 📲 `push` | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** |
+| 🔥 `push-firebase-only` | push via Firebase on both platforms (one FCM token; alternative to `push`) — **experimental** |
 | 💳 `iap` | in-app purchase / subscriptions (StoreKit 2 / Play Billing) — **experimental, not yet device-tested** |
 
 ```bash
@@ -167,8 +168,9 @@ deep links, embedded WebView, and maps. The full list lives on
 (`PdfView`), a native→core streaming primitive (`cx.subscribe`/`unsubscribe`, with a built-in
 `ticker`), a paged feed list (`LazyList` — infinite scroll + pull-to-refresh), remote push
 (`push` plugin — APNs/FCM; **experimental**), and in-app purchases (`iap` plugin — StoreKit 2 / Play
-Billing: products, purchase, restore, a transactions stream; **experimental**). Next up: a
-Firebase-on-iOS push variant (`push-fcm`)._
+Billing: products, purchase, restore, a transactions stream; **experimental**), and a
+Firebase-everywhere push variant (`push-firebase-only` — FCM on both platforms via the Firebase iOS
+SDK; **experimental**)._
 
 ## Links
 

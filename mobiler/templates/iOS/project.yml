@@ -16,6 +16,7 @@ packages:
   # `codegen --language swift` into generated/SharedTypes.
   SharedTypes:
     path: generated/SharedTypes
+  # mobiler:spm-packages — `mobiler plugin add` inserts remote SwiftPM packages above this line
 
 targets:
   {{NAME}}:
@@ -26,6 +27,7 @@ targets:
       - generated/shared.swift         # uniffi Swift wrapper (generated)
     dependencies:
       - package: SharedTypes
+      # mobiler:spm-dependencies — `mobiler plugin add` inserts SwiftPM product deps above this line
     info:
       path: Sources/Info.plist
       # xcodegen regenerates this plist from these properties on every build, so

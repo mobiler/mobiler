@@ -39,6 +39,8 @@ const ANCHORS: &[&str] = &[
     "mobiler:gradle-plugins-classpath",
     "mobiler:info-plist",
     "mobiler:target-extra",
+    "mobiler:spm-packages",
+    "mobiler:spm-dependencies",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

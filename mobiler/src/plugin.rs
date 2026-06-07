@@ -87,6 +87,12 @@ struct IosSpec {
     info_plist: BTreeMap<String, String>,
     #[serde(default)]
     entitlements: BTreeMap<String, toml::Value>,
+    /// Remote SwiftPM packages, each "name|url|version|product" (pipe-delimited — URLs contain `:`/`/`).
+    /// Adds a remote package entry to the iOS project.yml `packages:` block (`# mobiler:spm-packages`)
+    /// AND a target `- package: <name> / product: <product>` dependency (`# mobiler:spm-dependencies`)
+    /// — the iOS twin of `android.gradle_plugins`, for plugins that pull an SPM dependency (e.g. Firebase).
+    #[serde(default)]
+    spm_packages: Vec<String>,
 }
 
 // ---------------- source resolution ----------------
@@ -238,6 +244,9 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
                     .to_string(),
             );
         }
+        for entry in &i.spm_packages {
+            install_spm_package(&project_yml, entry)?;
+        }
     }
 
     notes.extend(manifest.notes.iter().cloned());
@@ -355,6 +364,51 @@ fn install_entitlements(
     Ok(())
 }
 
+/// Add a remote SwiftPM package (`name|url|version|product`) to the iOS project.yml: a package entry
+/// in the top-level `packages:` block (at `# mobiler:spm-packages`) + a target product dependency in
+/// `dependencies:` (at `# mobiler:spm-dependencies`). Idempotent — skips the package if its `url` is
+/// already present, and the dependency if `product: <product>` is. The iOS twin of `gradle_plugins`.
+fn install_spm_package(project_yml: &Path, entry: &str) -> Result<()> {
+    let parts: Vec<&str> = entry.split('|').collect();
+    let [name, url, version, product] = parts[..] else {
+        bail!("spm_packages entry must be 'name|url|version|product', got `{entry}`");
+    };
+    let mut content =
+        fs::read_to_string(project_yml).with_context(|| format!("reading {}", project_yml.display()))?;
+
+    // 1) Remote package entry in the `packages:` block.
+    if !content.contains(url) {
+        match content.lines().find(|l| line_has_marker(l, "# mobiler:spm-packages")).map(str::to_string) {
+            Some(marker) => {
+                let indent: String = marker.chars().take_while(|c| c.is_whitespace()).collect();
+                let block = format!("{indent}{name}:\n{indent}  url: {url}\n{indent}  from: {version}\n");
+                let anchor = format!("{marker}\n");
+                content = content.replacen(&anchor, &format!("{block}{anchor}"), 1);
+                println!("  + iOS SwiftPM package {name}");
+            }
+            None => println!("  ! iOS SwiftPM package: anchor `# mobiler:spm-packages` not found — add it manually"),
+        }
+    }
+
+    // 2) Target product dependency in the `dependencies:` block.
+    let dep_needle = format!("product: {product}");
+    if !content.contains(&dep_needle) {
+        match content.lines().find(|l| line_has_marker(l, "# mobiler:spm-dependencies")).map(str::to_string) {
+            Some(marker) => {
+                let indent: String = marker.chars().take_while(|c| c.is_whitespace()).collect();
+                let block = format!("{indent}- package: {name}\n{indent}  product: {product}\n");
+                let anchor = format!("{marker}\n");
+                content = content.replacen(&anchor, &format!("{block}{anchor}"), 1);
+                println!("  + iOS SwiftPM dependency {product}");
+            }
+            None => println!("  ! iOS SwiftPM dependency: anchor `# mobiler:spm-dependencies` not found — add it manually"),
+        }
+    }
+
+    fs::write(project_yml, content).with_context(|| format!("writing {}", project_yml.display()))?;
+    Ok(())
+}
+
 /// Render a TOML scalar/array as an inline YAML value (strings, bools, ints, arrays of strings).
 fn yaml_scalar(v: &toml::Value) -> String {
     match v {
@@ -413,7 +467,7 @@ mod test {
         .unwrap();
         fs::write(
             root.join("iOS/project.yml"),
-            "targets:\n  Demo:\n    info:\n      properties:\n        PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.demo\n        # mobiler:info-plist\n    settings:\n      base:\n        FOO: bar\n    # mobiler:target-extra\n",
+            "packages:\n  SharedTypes:\n    path: generated/SharedTypes\n  # mobiler:spm-packages\ntargets:\n  Demo:\n    dependencies:\n      - package: SharedTypes\n      # mobiler:spm-dependencies\n    info:\n      properties:\n        PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.demo\n        # mobiler:info-plist\n    settings:\n      base:\n        FOO: bar\n    # mobiler:target-extra\n",
         )
         .unwrap();
         root
@@ -754,6 +808,36 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_push_firebase_only_injects_spm_package_and_registers_under_push() {
+        let root = skeleton();
+        add_at(&root, "push-firebase-only").unwrap();
+
+        // iOS Firebase plugin + Android copies present.
+        assert!(read(&root, "iOS/Sources/FirebasePushPlugin.swift").contains("FirebasePushPlugin"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/PushPlugin.kt").contains("package dev.mobiler.demo"));
+        // Registered under the cx name "push" in both shells (handle + stream cases).
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"push\" to PushPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        let handle_at = core_swift.find("case \"push\": return await FirebasePushPlugin.handle").expect("handle case");
+        let stream_at = core_swift.find("case \"push\": await FirebasePushPlugin.subscribe").expect("stream case");
+        assert!(stream_at < handle_at, "stream case in subscribe(), handle case in handle()");
+        // The NEW spm_packages capability: Firebase remote package + the FirebaseMessaging product dep.
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("url: https://github.com/firebase/firebase-ios-sdk"), "Firebase SPM package injected");
+        assert!(yml.contains("from: 11."), "Firebase version pinned");
+        assert!(yml.contains("product: FirebaseMessaging"), "FirebaseMessaging product dependency injected");
+        // Android FCM bits (same as push) + the iOS aps-environment entitlement.
+        let gradle = read(&root, "Android/app/build.gradle.kts");
+        assert!(gradle.contains("com.google.firebase:firebase-messaging"), "firebase dep");
+        assert!(gradle.contains("id(\"com.google.gms.google-services\")"), "google-services gradle plugin");
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android:name=\".PushMessagingService\""), "FCM service");
+        assert!(yml.contains("aps-environment"), "aps-environment entitlement");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
@@ -786,6 +870,8 @@ mod test {
         let yml = t("iOS/project.yml");
         assert!(yml.contains("# mobiler:info-plist"), "project.yml needs the info-plist anchor");
         assert!(yml.contains("# mobiler:target-extra"), "project.yml needs the target-extra anchor");
+        assert!(yml.contains("# mobiler:spm-packages"), "project.yml needs the spm-packages anchor (packages: block)");
+        assert!(yml.contains("# mobiler:spm-dependencies"), "project.yml needs the spm-dependencies anchor (target deps)");
         assert!(
             t("Android/app/build.gradle.kts").contains("mobiler:gradle-deps"),
             "build.gradle.kts needs the mobiler:gradle-deps anchor"

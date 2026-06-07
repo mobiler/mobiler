@@ -1,0 +1,41 @@
+# Free, bundled Mobiler plugin: remote push, Firebase-ONLY (FCM on BOTH iOS + Android). An opt-in
+# ALTERNATIVE to the native-APNs `push` plugin — iOS uses the Firebase iOS SDK instead of raw APNs, so
+# `register` returns an FCM token on both platforms and your backend speaks ONE FCM API. The cx API is
+# identical to `push` (registers under the same name "push"), so app code is unchanged:
+#   cx.plugin("push", "register", "", |r| Msg::PushToken(r))          // → {"token":"…","platform":"fcm"}
+#   cx.subscribe("push", "push", "events", "", |r| Msg::PushEvent(r)) // received/tapped payloads + refresh
+#
+# Install `push` OR `push-firebase-only` — NOT both (they both register `case "push"`, which collides at
+# build). On iOS FCM still delivers via APNs → the shell's AppDelegate/PushBridge feed the events stream
+# (reused unchanged); only the token source differs (FCM registration token, with the APNs token handed
+# to Firebase under the hood).
+#
+# Install:  mobiler plugin add push-firebase-only
+name = "push-firebase-only"
+summary = "Remote push, Firebase-only (FCM on iOS + Android via the Firebase iOS SDK) — free, bundled (EXPERIMENTAL)"
+notes = [
+  "EXPERIMENTAL: like `push`, the real FCM token round-trip isn't device-tested. Needs a Firebase project + a physical device.",
+  "MUTUALLY EXCLUSIVE with the `push` plugin — install ONE or the other (both inject `case \"push\"`, which collides loudly at build).",
+  "iOS: drop GoogleService-Info.plist into iOS/Sources/ (Firebase reads it at FirebaseApp.configure()). It carries your keys; can't be bundled.",
+  "Android: drop google-services.json into Android/app/ — the build FAILS without it.",
+  "iOS: enable the Push Notifications capability on your App ID AND upload your APNs auth key (.p8) to the Firebase console (Project Settings → Cloud Messaging) so FCM can relay to iOS.",
+  "iOS: the 'aps-environment' entitlement was added as 'development' (sandbox/TestFlight). Switch it to 'production' for App Store builds.",
+]
+
+[android]
+# Identical to the `push` plugin's Android side — FCM is FCM regardless of the iOS transport.
+sources = ["android/PushPlugin.kt", "android/PushMessagingService.kt"]
+register = '"push" to PushPlugin(application)'
+permissions = ["android.permission.POST_NOTIFICATIONS"]
+gradle_deps = ["com.google.firebase:firebase-messaging:24.1.0"]
+gradle_plugins = ["com.google.gms.google-services:4.4.2"]
+manifest_application = ['<service android:name=".PushMessagingService" android:exported="false"><intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter></service>']
+
+[ios]
+sources = ["ios/FirebasePushPlugin.swift"]
+register = 'case "push": return await FirebasePushPlugin.handle(op: op, input: input)'
+register_stream = 'case "push": await FirebasePushPlugin.subscribe(op: op, input: input, emit: emit)'
+# The Firebase iOS SDK via Swift Package Manager (FirebaseMessaging pulls FirebaseCore transitively).
+spm_packages = ["Firebase|https://github.com/firebase/firebase-ios-sdk|11.6.0|FirebaseMessaging"]
+[ios.entitlements]
+"aps-environment" = "development"
