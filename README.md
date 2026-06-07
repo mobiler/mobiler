@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental)
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 💳 iap (StoreKit/Play Billing)
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -181,6 +181,7 @@ free plugins:
 | 🔵 **bluetooth** | BLE scan / connect / read | `mobiler plugin add bluetooth` |
 | 🔑 **oauth** | OAuth 2.0 / OIDC login (system auth browser → redirect) | `mobiler plugin add oauth` |
 | 📲 **push** | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** | `mobiler plugin add push` |
+| 💳 **iap** | in-app purchase / subscriptions (StoreKit 2 / Play Billing) — **Android experimental** | `mobiler plugin add iap` |
 
 ```bash
 mobiler plugin list            # see the bundled (free) plugins
@@ -206,11 +207,10 @@ feedback and contributions welcome):
 - File read/write & downloads
 
 **Platform & monetization**
-- In-app purchases / subscriptions
 - Deep links / universal links
 - Embedded WebView · Maps
 
-_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`), and a **native → core streaming primitive** (`cx.subscribe`/`unsubscribe` — a source pushes N events over time into `update`; iOS/Android/web, with a built-in `ticker`), a **paged feed list** (`LazyList` — infinite scroll + pull-to-refresh, app-owned loading state), and **remote push** (`mobiler plugin add push` — APNs/FCM, device-token registration + an inbound event stream; **experimental — not yet device-tested**). Next up: in-app purchases / subscriptions._
+_Recently shipped: rich form fields, the `oauth` plugin (OAuth 2.0 / OIDC login), **locale-aware number / currency / date formatting** (`mobiler_core::format` — Swiss/CHF, de/fr/it, en, Serbian/RSD), a **device-locale getter** (`cx.device_locale`, iOS/Android/web), an **in-app PDF viewer** (`PdfView` — iOS PDFKit / Android PdfRenderer / web `<iframe>`), and a **native → core streaming primitive** (`cx.subscribe`/`unsubscribe` — a source pushes N events over time into `update`; iOS/Android/web, with a built-in `ticker`), a **paged feed list** (`LazyList` — infinite scroll + pull-to-refresh, app-owned loading state), **remote push** (`mobiler plugin add push` — APNs/FCM, device-token registration + an inbound event stream; **experimental**), and **in-app purchases** (`mobiler plugin add iap` — StoreKit 2 / Play Billing: products, purchase, restore, a transactions stream; **Android experimental**). Next up: a Firebase-on-iOS push variant (`push-fcm`)._
 
 ## Repository layout
 
