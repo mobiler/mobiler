@@ -1287,6 +1287,7 @@ private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Lon
     var lastSeek by remember { mutableStateOf(-1L) }
     LaunchedEffect(seekToMs) {
         if (seekToMs >= 0 && seekToMs != lastSeek) { lastSeek = seekToMs; player.seekTo(seekToMs) }
+        else if (seekToMs < 0) { lastSeek = -1L }
     }
     var startApplied by remember { mutableStateOf(false) }
     LaunchedEffect(player) {
@@ -1295,6 +1296,7 @@ private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Lon
     var lastSeekIndex by remember { mutableStateOf(-1L) }
     LaunchedEffect(seekIndex) {
         if (seekIndex >= 0 && seekIndex != lastSeekIndex) { lastSeekIndex = seekIndex; player.seekTo(seekIndex.toInt(), 0L) }
+        else if (seekIndex < 0) { lastSeekIndex = -1L }
     }
     // Poster: fetch the image off the main thread, show it as PlayerView artwork while idle.
     val posterDrawable = remember(poster) { mutableStateOf<android.graphics.drawable.Drawable?>(null) }

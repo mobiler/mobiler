@@ -45,6 +45,12 @@ targets:
         # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
         # the "Missing export compliance" question.
         ITSAppUsesNonExemptEncryption: false
+        # Picture-in-Picture: an app that uses Widget::Video with allow_pip must declare the audio
+        # background mode so playback (hence PiP) continues when the app is backgrounded. The Mobiler
+        # template ships WITHOUT this (App Store review hygiene) — adding this one line is the
+        # documented per-app opt-in. The barbershop demo opts in to exercise PiP.
+        UIBackgroundModes:
+          - audio
         # Camera usage string — required by the `video` plugin (record a video) and the
         # camera capability. iOS requires it to access the camera.
         NSCameraUsageDescription: "Record video and take photos."
@@ -63,7 +69,7 @@ targets:
         # ships as 1.1 build 1 — a fresh version string, so it's accepted regardless of any
         # prior 1.0 builds. Bump CURRENT_PROJECT_VERSION for each subsequent 1.1 upload.
         MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "13"
+        CURRENT_PROJECT_VERSION: "14"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]

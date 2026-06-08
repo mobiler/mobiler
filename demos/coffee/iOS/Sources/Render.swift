@@ -1437,12 +1437,18 @@ final class VideoSession {
             appliedStartAt = true
             player.seek(to: CMTime(seconds: Double(startAtMs) / 1000.0, preferredTimescale: 600))
         }
-        if seekIndex >= 0, seekIndex != lastSeekIndex { lastSeekIndex = seekIndex; jump(to: Int(seekIndex)) }
-        if seekToMs >= 0, seekToMs != lastSeekMs {
-            lastSeekMs = seekToMs
-            endedFlag = false
-            player.seek(to: CMTime(seconds: Double(seekToMs) / 1000.0, preferredTimescale: 600))
-        }
+        // A seek/jump fires only when the value CHANGES; the app clears it back to -1 once consumed,
+        // and we mirror that here so a repeat seek to the SAME value (e.g. Restart → 0 again) re-fires.
+        if seekIndex >= 0 {
+            if seekIndex != lastSeekIndex { lastSeekIndex = seekIndex; jump(to: Int(seekIndex)) }
+        } else { lastSeekIndex = -1 }
+        if seekToMs >= 0 {
+            if seekToMs != lastSeekMs {
+                lastSeekMs = seekToMs
+                endedFlag = false
+                player.seek(to: CMTime(seconds: Double(seekToMs) / 1000.0, preferredTimescale: 600))
+            }
+        } else { lastSeekMs = -1 }
         if playing != lastPlaying {
             lastPlaying = playing
             if playing { endedFlag = false; player.rate = desiredRate } else { player.pause() }
@@ -1450,6 +1456,7 @@ final class VideoSession {
             // honor a rate change while already playing
             if abs(player.rate - desiredRate) > 0.001 { player.rate = desiredRate }
         }
+        updateCaption()  // reflect a CC toggle immediately, even while paused
     }
 
     private func jump(to index: Int) {
@@ -1469,8 +1476,19 @@ final class VideoSession {
 
     // Fetch + parse the selected sidecar WebVTT once (works for https and data: URLs).
     private func loadCaptionsIfNeeded() {
-        guard captionsOn, !captionsRequested, let urlStr = captionUrl, let url = URL(string: urlStr) else { return }
+        guard captionsOn, !captionsRequested, let urlStr = captionUrl else { return }
         captionsRequested = true
+        // data: URLs aren't reliably loaded by URLSession — decode them inline. Remote tracks fetch.
+        if urlStr.hasPrefix("data:"), let comma = urlStr.firstIndex(of: ",") {
+            let meta = urlStr[..<comma]
+            let payload = String(urlStr[urlStr.index(after: comma)...])
+            let text: String? = meta.contains(";base64")
+                ? Data(base64Encoded: payload).flatMap { String(data: $0, encoding: .utf8) }
+                : (payload.removingPercentEncoding ?? payload)
+            if let text { cues = VideoSession.parseVtt(text) }
+            return
+        }
+        guard let url = URL(string: urlStr) else { return }
         Task { @MainActor in
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let text = String(data: data, encoding: .utf8) else { return }
