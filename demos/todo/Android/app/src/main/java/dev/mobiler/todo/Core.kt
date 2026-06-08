@@ -93,7 +93,7 @@ object SystemBus {
 /** Built-in `system` stream: deep-link URLs + app lifecycle (foreground/background), fed by
  *  MainActivity via SystemBus. Mirrors the push plugin's PushBus/callbackFlow shape. */
 class SystemPlugin : MobilerPlugin {
-    override suspend fun handle(op: String, input: String): PluginResponse =
+    override fun handle(op: String, input: String): PluginResponse =
         PluginResponse(false, "system is a streaming capability — use cx.subscribe")
     override fun subscribe(op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> =
         kotlinx.coroutines.flow.callbackFlow {
