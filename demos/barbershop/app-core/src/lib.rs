@@ -4,7 +4,7 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
-    BoxAlign, ButtonStyle, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
+    BoxAlign, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart,
@@ -12,9 +12,9 @@ use mobiler_core::{
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
     pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
-    spacer, stack, video_player, web_view,
-    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_error,
-    with_fab, with_refresh, with_sheet, with_theme,
+    spacer, stack, video_player, video_playlist, web_view,
+    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_captions, with_error,
+    with_fab, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
 };
 use mobiler_core::format::{self, Currency, Locale};
 use serde::{Deserialize, Serialize};
@@ -165,6 +165,15 @@ pub enum Msg {
     VideoRestart,
     /// The clip finished (`on_ended`).
     VideoEnded,
+    /// v2 controls: cycle speed (1×→1.5×→2×), mute, captions, Picture-in-Picture.
+    VideoCycleRate,
+    VideoToggleMute,
+    VideoToggleCaptions,
+    VideoTogglePip,
+    /// --- Profile "Playlist" card: an auto-advancing `video_playlist` ---
+    PlaylistPlay,
+    PlaylistJump(i64),
+    PlaylistEnded,
 }
 
 #[derive(Clone)]
@@ -258,6 +267,15 @@ pub struct Model {
     video_seek_ms: i64,
     video_pos_ms: i64,
     video_ended: bool,
+    video_rate: f32,
+    video_muted: bool,
+    video_captions: bool,
+    video_pip: bool,
+    video_duration_ms: i64,
+    video_state: i64,
+    playlist_playing: bool,
+    playlist_seek_index: i64,
+    playlist_index: i64,
     /// "Feed" card — a long paged list demoing `LazyList` (pull-to-refresh + load-more). The app
     /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
     feed: Vec<String>,
@@ -330,6 +348,15 @@ impl Default for Model {
             video_seek_ms: -1,
             video_pos_ms: 0,
             video_ended: false,
+            video_rate: 1.0,
+            video_muted: false,
+            video_captions: false,
+            video_pip: false,
+            video_duration_ms: 0,
+            video_state: 0,
+            playlist_playing: false,
+            playlist_seek_index: -1,
+            playlist_index: 0,
             feed: feed_page(1),
             feed_refreshing: false,
         }
@@ -735,6 +762,15 @@ impl MobilerApp for FadeHouse {
             Msg::VideoPause => model.video_playing = false,
             Msg::VideoRestart => { model.video_seek_ms = 0; model.video_playing = true; model.video_ended = false; }
             Msg::VideoEnded => { model.video_playing = false; model.video_ended = true; }
+            Msg::VideoCycleRate => {
+                model.video_rate = if model.video_rate < 1.25 { 1.5 } else if model.video_rate < 1.75 { 2.0 } else { 1.0 };
+            }
+            Msg::VideoToggleMute => model.video_muted = !model.video_muted,
+            Msg::VideoToggleCaptions => model.video_captions = !model.video_captions,
+            Msg::VideoTogglePip => model.video_pip = !model.video_pip,
+            Msg::PlaylistPlay => model.playlist_playing = true,
+            Msg::PlaylistJump(i) => { model.playlist_seek_index = i; model.playlist_playing = true; }
+            Msg::PlaylistEnded => model.playlist_playing = false,
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
                     match query_param(&output, "code") {
@@ -778,8 +814,12 @@ impl MobilerApp for FadeHouse {
                 "bio" => model.bio = t,
                 _ => {}
             },
-            // The Video widget reports its current position (ms) ~1/sec via the input mechanism.
+            // The Video widget reports its current position (ms) ~1/sec via the input mechanism, plus
+            // transport state on suffixed ids ("{id}.duration" / ".state" / ".buffered" / ".index").
             InputValue::Int(ms) if id == "intro" => model.video_pos_ms = ms,
+            InputValue::Int(d) if id == "intro.duration" => model.video_duration_ms = d,
+            InputValue::Int(s) if id == "intro.state" => model.video_state = s,
+            InputValue::Int(i) if id == "playlist.index" => model.playlist_index = i,
             _ => {}
         }
     }
@@ -1170,29 +1210,98 @@ fn store_card(model: &Model) -> Widget {
 /// shell-reported position (~1/sec via `input`), and the `on_ended` event. A public MP4 so it plays
 /// on all three shells (an HLS `.m3u8` would play on iOS/Android + Safari only in v1).
 fn video_card(model: &Model) -> Widget {
-    let status = if model.video_ended {
-        caption("Finished ✓".to_string())
-    } else {
-        caption(format!("Position: {}s", model.video_pos_ms / 1000))
+    let state_label = match model.video_state {
+        1 => "buffering",
+        3 => "playing",
+        4 => "ended",
+        2 => "paused",
+        _ => "idle",
     };
+    let status = caption(format!(
+        "{} • {}s / {}s",
+        state_label,
+        model.video_pos_ms / 1000,
+        model.video_duration_ms.max(0) / 1000
+    ));
+    // Build the player, then layer on the v2 cosmetics (poster, resume offset, rate, mute, captions,
+    // PiP) — each modifier is a no-op-safe match-and-rebind on Widget::Video.
+    let mut player = video_player(
+        "intro",
+        // Public H.264 MP4 with range support (plays in AVPlayer / ExoPlayer / <video>).
+        // NB: the old Google `gtv-videos-bucket` sample URLs now return HTTP 403.
+        "https://media.w3.org/2010/05/sintel/trailer.mp4",
+        model.video_playing,
+        model.video_seek_ms,
+        Msg::VideoEnded,
+    );
+    player = with_poster(player, "https://picsum.photos/seed/fadehouse/640/360");
+    player = with_start_at(player, 8000); // resume 0:08 in on first load
+    player = with_rate(player, model.video_rate);
+    if model.video_muted {
+        player = with_muted(player);
+    }
+    if model.video_pip {
+        player = with_pip(player);
+    }
+    if model.video_captions {
+        // A self-contained WebVTT via a data: URL (same-origin → renders on web with no CORS).
+        player = with_captions(
+            player,
+            vec![Caption {
+                url: "data:text/vtt,WEBVTT%0A%0A00:00:00.000 --> 00:00:30.000%0AFade House — intro".to_string(),
+                label: "English".to_string(),
+                language: "en".to_string(),
+                default_on: true,
+            }],
+        );
+    }
     card(
         column(vec![
             emphasis("Intro video"),
             caption("A controllable native player (Widget::Video — AVPlayer / Media3 ExoPlayer / <video>)."),
-            video_player(
-                "intro",
-                // Public H.264 MP4 with range support (plays in AVPlayer / ExoPlayer / <video>).
-                // NB: the old Google `gtv-videos-bucket` sample URLs now return HTTP 403.
-                "https://media.w3.org/2010/05/sintel/trailer.mp4",
-                model.video_playing,
-                model.video_seek_ms,
-                Msg::VideoEnded,
-            ),
+            player,
             status,
             row(vec![
                 button("Play", ButtonStyle::Filled, Msg::VideoPlay),
                 button("Pause", ButtonStyle::Outlined, Msg::VideoPause),
                 button("Restart", ButtonStyle::Text, Msg::VideoRestart),
+            ]),
+            row(vec![
+                button(&format!("{:.1}×", model.video_rate), ButtonStyle::Text, Msg::VideoCycleRate),
+                button(if model.video_muted { "Unmute" } else { "Mute" }, ButtonStyle::Text, Msg::VideoToggleMute),
+                button(if model.video_captions { "CC ✓" } else { "CC" }, ButtonStyle::Text, Msg::VideoToggleCaptions),
+                button(if model.video_pip { "PiP ✓" } else { "PiP" }, ButtonStyle::Text, Msg::VideoTogglePip),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
+/// The "Playlist" card — a `video_playlist` over two clips that auto-advances gaplessly. The shell
+/// reports the current track via `input("playlist.index", …)`; the buttons force-jump via `seek_index`.
+fn playlist_card(model: &Model) -> Widget {
+    let player = with_seek_index(
+        video_playlist(
+            "playlist",
+            vec![
+                "https://media.w3.org/2010/05/video/movie_300.mp4".to_string(),
+                "https://media.w3.org/2010/05/sintel/trailer.mp4".to_string(),
+            ],
+            0,
+            model.playlist_playing,
+            Msg::PlaylistEnded,
+        ),
+        model.playlist_seek_index,
+    );
+    card(
+        column(vec![
+            emphasis("Playlist"),
+            caption(format!("Two clips, auto-advancing • now playing clip {}", model.playlist_index + 1)),
+            player,
+            row(vec![
+                button("Play", ButtonStyle::Filled, Msg::PlaylistPlay),
+                button("Clip 1", ButtonStyle::Outlined, Msg::PlaylistJump(0)),
+                button("Clip 2", ButtonStyle::Outlined, Msg::PlaylistJump(1)),
             ]),
         ]),
         CardStyle::Outlined,
@@ -1441,6 +1550,7 @@ fn profile_screen(model: &Model) -> Widget {
         push_card(model),
         store_card(model),
         video_card(model),
+        playlist_card(model),
         web_card(),
         feed_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.

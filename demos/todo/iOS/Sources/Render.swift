@@ -67,10 +67,13 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .pdfView(let url):
         return AnyView(PDFKitView(urlString: url).frame(minHeight: 480))
 
-    case .video(let url, let id, let playing, let seekToMs, let controls, let looping, let muted, let onEnded):
+    case .video(let url, let id, let playing, let seekToMs, let controls, let looping, let muted, let onEnded,
+                let poster, let startAtMs, let captions, let rate, let volume, let urls, let startIndex, let seekIndex, let allowPip):
         return AnyView(VideoView(
             urlString: url, id: id, playing: playing, seekToMs: seekToMs,
-            controls: controls, looping: looping, muted: muted, onEnded: onEnded, send: send
+            controls: controls, looping: looping, muted: muted, onEnded: onEnded,
+            poster: poster, startAtMs: startAtMs, captions: captions, rate: rate, volume: volume,
+            urls: urls, startIndex: startIndex, seekIndex: seekIndex, allowPip: allowPip, send: send
         ).id(id).frame(minHeight: 240))
 
     case .webView(let url):
@@ -1263,33 +1266,51 @@ struct VideoView: UIViewControllerRepresentable {
     let looping: Bool
     let muted: Bool
     let onEnded: String?
+    let poster: String?
+    let startAtMs: Int64
+    let captions: [Caption]
+    let rate: Float
+    let volume: Float
+    let urls: [String]
+    let startIndex: Int64
+    let seekIndex: Int64
+    let allowPip: Bool
     let send: (Action) -> Void
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let session = VideoSessionStore.shared.session(id: id, url: urlString, send: send)
-        session.configure(looping: looping, onEnded: onEnded, muted: muted)
+        let session = VideoSessionStore.shared.session(id: id, url: urlString, urls: urls, startIndex: startIndex, send: send)
+        session.configure(looping: looping, onEnded: onEnded, muted: muted, volume: volume, rate: rate, captions: captions)
         let vc = AVPlayerViewController()
         vc.player = session.player
         vc.showsPlaybackControls = controls
-        session.apply(playing: playing, seekToMs: seekToMs)
+        vc.allowsPictureInPicturePlayback = allowPip
+        if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
+        session.attachPoster(to: vc, poster: poster)
+        session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
         return vc
     }
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
-        let session = VideoSessionStore.shared.session(id: id, url: urlString, send: send)
-        session.configure(looping: looping, onEnded: onEnded, muted: muted)
+        let session = VideoSessionStore.shared.session(id: id, url: urlString, urls: urls, startIndex: startIndex, send: send)
+        session.configure(looping: looping, onEnded: onEnded, muted: muted, volume: volume, rate: rate, captions: captions)
         if vc.player !== session.player { vc.player = session.player }
         vc.showsPlaybackControls = controls
-        session.apply(playing: playing, seekToMs: seekToMs)
+        vc.allowsPictureInPicturePlayback = allowPip
+        if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
+        session.attachPoster(to: vc, poster: poster)
+        session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
     }
 }
 
-// A persistent per-video session — the AVPlayer + its observers, kept alive across the shell's
-// whole-tree re-renders (which recreate the representable). Keyed by the widget's stable `id`.
+// A persistent per-video session — the AVPlayer (or AVQueuePlayer for a playlist) + its observers,
+// kept alive across the shell's whole-tree re-renders (which recreate the representable). Keyed by
+// the widget's stable `id`. Reports position + duration/state/buffered (+ playlist index) via the
+// `.input("{id}[.suffix]", …)` path so the app can build a custom transport UI.
 @MainActor
 final class VideoSession {
     let player: AVPlayer
     let url: String
+    let urls: [String]
     private let id: String
     private var send: (Action) -> Void
     private var looping = false
@@ -1298,10 +1319,36 @@ final class VideoSession {
     private var endObserver: NSObjectProtocol?
     private var lastSeekMs: Int64 = -1
     private var lastPlaying: Bool?
+    private var desiredRate: Float = 1.0
+    private var lastSeekIndex: Int64 = -1
+    private var appliedStartAt = false
+    private var captionsOn = false
+    private var captionsApplied = false
+    private var captionLangs: [String] = []
+    private var endedFlag = false
+    private var posterView: UIImageView?
+    private var posterImage: UIImage?
+    private var lastDuration: Int64 = -2
+    private var lastState: Int64 = -1
+    private var lastBuffered: Int64 = -1
+    private var lastIndex: Int64 = -2
+    private var itemToIndex: [ObjectIdentifier: Int] = [:]
 
-    init(id: String, url: String, send: @escaping (Action) -> Void) {
-        self.id = id; self.url = url; self.send = send
-        self.player = AVPlayer(url: URL(string: url) ?? URL(fileURLWithPath: "/dev/null"))
+    init(id: String, url: String, urls: [String], startIndex: Int64, send: @escaping (Action) -> Void) {
+        self.id = id; self.url = url; self.urls = urls; self.send = send
+        if urls.isEmpty {
+            self.player = AVPlayer(url: URL(string: url) ?? URL(fileURLWithPath: "/dev/null"))
+        } else {
+            let start = max(0, min(Int(startIndex), urls.count - 1))
+            var items: [AVPlayerItem] = []
+            for i in start..<urls.count {
+                guard let u = URL(string: urls[i]) else { continue }
+                let item = AVPlayerItem(url: u)
+                itemToIndex[ObjectIdentifier(item)] = i
+                items.append(item)
+            }
+            self.player = AVQueuePlayer(items: items)
+        }
         let pid = id
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main
@@ -1309,35 +1356,190 @@ final class VideoSession {
             guard let self else { return }
             let secs = time.seconds
             self.send(.input(id: pid, value: .int(Int64(secs.isFinite ? secs * 1000 : 0))))
+            self.reportTransport()
         }
+        // Observe ALL item ends (queue advances internally) and react to ours only.
         endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            if self.looping { self.player.seek(to: .zero); self.player.play() }
-            else if let token = self.onEnded { self.send(.fired(token: token)) }
+            forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let item = note.object as? AVPlayerItem else { return }
+            guard self.owns(item) else { return }
+            if self.urls.isEmpty {
+                self.endedFlag = true
+                if self.looping { self.endedFlag = false; self.player.seek(to: .zero); self.player.play() }
+                else if let token = self.onEnded { self.send(.fired(token: token)) }
+            } else if self.isLastItem(item) {
+                self.endedFlag = true
+                if self.looping { self.endedFlag = false; self.restartQueue() }
+                else if let token = self.onEnded { self.send(.fired(token: token)) }
+            }
+            self.reportTransport()
         }
+    }
+
+    private func owns(_ item: AVPlayerItem) -> Bool {
+        if urls.isEmpty { return item === player.currentItem }
+        return itemToIndex[ObjectIdentifier(item)] != nil
+    }
+    private func isLastItem(_ item: AVPlayerItem) -> Bool {
+        guard let idx = itemToIndex[ObjectIdentifier(item)] else { return false }
+        return idx == urls.count - 1
+    }
+    private func restartQueue() {
+        guard let queue = player as? AVQueuePlayer else { return }
+        queue.removeAllItems()
+        itemToIndex.removeAll()
+        for i in 0..<urls.count {
+            guard let u = URL(string: urls[i]) else { continue }
+            let item = AVPlayerItem(url: u)
+            itemToIndex[ObjectIdentifier(item)] = i
+            if queue.canInsert(item, after: nil) { queue.insert(item, after: nil) }
+        }
+        queue.play()
     }
 
     // Refresh per-render inputs (latest send closure + cosmetic flags) without touching playback.
-    func configure(looping: Bool, onEnded: String?, muted: Bool) {
+    func configure(looping: Bool, onEnded: String?, muted: Bool, volume: Float, rate: Float, captions: [Caption]) {
         self.looping = looping
         self.onEnded = onEnded
         player.isMuted = muted
+        player.volume = volume
+        self.desiredRate = rate > 0 ? rate : 1.0
+        let wantCaptions = !captions.isEmpty
+        let langs = captions.map { $0.language }
+        if wantCaptions != captionsOn || langs != captionLangs { captionsApplied = false }
+        captionsOn = wantCaptions
+        captionLangs = langs
+        applyCaptionsIfNeeded()
     }
     func refresh(send: @escaping (Action) -> Void) { self.send = send }
 
-    // Edge-triggered: seek / play / pause only when the value actually CHANGES, so the periodic
-    // re-render neither re-seeks every tick nor fights the native transport controls.
-    func apply(playing: Bool, seekToMs: Int64) {
+    // Edge-triggered: seek / play / pause / track-jump only when a value actually CHANGES, so the
+    // periodic re-render neither re-applies every tick nor fights the native transport controls.
+    func apply(playing: Bool, seekToMs: Int64, startAtMs: Int64, seekIndex: Int64, allowPip: Bool) {
+        if allowPip {
+            // PiP needs an active playback audio session; this enables foreground PiP without any
+            // Info.plist key (background continuation is the documented opt-in `UIBackgroundModes`).
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
+        if !appliedStartAt, startAtMs >= 0 {
+            appliedStartAt = true
+            player.seek(to: CMTime(seconds: Double(startAtMs) / 1000.0, preferredTimescale: 600))
+        }
+        if seekIndex >= 0, seekIndex != lastSeekIndex { lastSeekIndex = seekIndex; jump(to: Int(seekIndex)) }
         if seekToMs >= 0, seekToMs != lastSeekMs {
             lastSeekMs = seekToMs
+            endedFlag = false
             player.seek(to: CMTime(seconds: Double(seekToMs) / 1000.0, preferredTimescale: 600))
         }
         if playing != lastPlaying {
             lastPlaying = playing
-            if playing { player.play() } else { player.pause() }
+            if playing { endedFlag = false; player.rate = desiredRate } else { player.pause() }
+        } else if playing {
+            // honor a rate change while already playing
+            if abs(player.rate - desiredRate) > 0.001 { player.rate = desiredRate }
         }
+    }
+
+    private func jump(to index: Int) {
+        guard let queue = player as? AVQueuePlayer, !urls.isEmpty else { return }
+        let target = max(0, min(index, urls.count - 1))
+        queue.removeAllItems()
+        itemToIndex.removeAll()
+        for i in target..<urls.count {
+            guard let u = URL(string: urls[i]) else { continue }
+            let item = AVPlayerItem(url: u)
+            itemToIndex[ObjectIdentifier(item)] = i
+            if queue.canInsert(item, after: nil) { queue.insert(item, after: nil) }
+        }
+        endedFlag = false
+        if lastPlaying == true { queue.play() }
+    }
+
+    private func applyCaptionsIfNeeded() {
+        guard captionsOn, !captionsApplied, let item = player.currentItem else { return }
+        captionsApplied = true
+        let langs = captionLangs
+        let asset = item.asset
+        Task { @MainActor in
+            guard let group = try? await asset.loadMediaSelectionGroup(for: .legible) else { return }
+            let opt = group.options.first { o in
+                guard let tag = o.extendedLanguageTag else { return false }
+                return langs.contains { tag == $0 || tag.hasPrefix($0) }
+            } ?? group.options.first
+            if let opt { item.select(opt, in: group) }
+        }
+    }
+
+    // Show `poster` as an overlay until playback starts. The VC is recreated on every whole-tree
+    // re-render (see #127), so re-attach to the CURRENT overlay if ours isn't in it; the fetched
+    // image is cached on the session so a recreated VC shows it instantly.
+    func attachPoster(to vc: AVPlayerViewController, poster: String?) {
+        guard let poster, let url = URL(string: poster), let overlay = vc.contentOverlayView else { return }
+        if let existing = posterView, existing.superview === overlay {
+            if player.timeControlStatus == .playing { existing.isHidden = true }
+            return
+        }
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFit
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        iv.image = posterImage
+        iv.isHidden = (player.timeControlStatus == .playing)
+        overlay.addSubview(iv)
+        NSLayoutConstraint.activate([
+            iv.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+            iv.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+            iv.topAnchor.constraint(equalTo: overlay.topAnchor),
+            iv.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+        ])
+        posterView = iv
+        if posterImage == nil {
+            Task { @MainActor in
+                if let (data, _) = try? await URLSession.shared.data(from: url), let img = UIImage(data: data) {
+                    self.posterImage = img
+                    self.posterView?.image = img
+                }
+            }
+        }
+    }
+
+    private func currentIndex() -> Int64 {
+        guard !urls.isEmpty, let item = player.currentItem else { return -1 }
+        return Int64(itemToIndex[ObjectIdentifier(item)] ?? 0)
+    }
+    private func durationMs() -> Int64 {
+        guard let item = player.currentItem else { return -1 }
+        let d = CMTimeGetSeconds(item.duration)
+        return (d.isFinite && d > 0) ? Int64(d * 1000) : -1
+    }
+    private func bufferedMs() -> Int64 {
+        guard let item = player.currentItem, let r = item.loadedTimeRanges.last?.timeRangeValue else { return 0 }
+        let end = CMTimeGetSeconds(r.start) + CMTimeGetSeconds(r.duration)
+        return end.isFinite ? Int64(end * 1000) : 0
+    }
+    private func currentState() -> Int64 {
+        guard let item = player.currentItem else { return 0 }
+        if item.status == .failed { return 0 }
+        switch player.timeControlStatus {
+        case .playing: return 3
+        case .waitingToPlayAtSpecifiedRate: return 1
+        case .paused: return endedFlag ? 4 : 2
+        @unknown default: return 2
+        }
+    }
+    // Report duration/state/buffered (+ playlist index) via suffixed input ids when they change.
+    private func reportTransport() {
+        applyCaptionsIfNeeded()
+        if posterView != nil, player.timeControlStatus == .playing { posterView?.isHidden = true }
+        let d = durationMs()
+        if d != lastDuration { lastDuration = d; send(.input(id: id + ".duration", value: .int(d))) }
+        let s = currentState()
+        if s != lastState { lastState = s; send(.input(id: id + ".state", value: .int(s))) }
+        let b = bufferedMs()
+        if b != lastBuffered { lastBuffered = b; send(.input(id: id + ".buffered", value: .int(b))) }
+        let i = currentIndex()
+        if i != lastIndex { lastIndex = i; send(.input(id: id + ".index", value: .int(i))) }
     }
 }
 
@@ -1345,9 +1547,9 @@ final class VideoSession {
 final class VideoSessionStore {
     static let shared = VideoSessionStore()
     private var sessions: [String: VideoSession] = [:]
-    func session(id: String, url: String, send: @escaping (Action) -> Void) -> VideoSession {
-        if let s = sessions[id], s.url == url { s.refresh(send: send); return s }
-        let s = VideoSession(id: id, url: url, send: send)
+    func session(id: String, url: String, urls: [String], startIndex: Int64, send: @escaping (Action) -> Void) -> VideoSession {
+        if let s = sessions[id], s.url == url, s.urls == urls { s.refresh(send: send); return s }
+        let s = VideoSession(id: id, url: url, urls: urls, startIndex: startIndex, send: send)
         sessions[id] = s
         return s
     }
