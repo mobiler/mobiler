@@ -160,7 +160,7 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
 demand-driven): tablet master-detail,
-deep links, embedded WebView, and maps. The full list lives on
+deep links, and maps. The full list lives on
 [GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
 (`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
@@ -169,8 +169,11 @@ deep links, embedded WebView, and maps. The full list lives on
 (`push` plugin — APNs/FCM; **experimental**), and in-app purchases (`iap` plugin — StoreKit 2 / Play
 Billing: products, purchase, restore, a transactions stream; **experimental**), and a
 Firebase-everywhere push variant (`push-firebase-only` — FCM on both platforms via the Firebase iOS
-SDK; **experimental**), and a controllable **video player** (`Video` — AVPlayer / Media3 ExoPlayer /
-`<video>`: HLS + MP4, app-driven play/seek + position/ended events)._
+SDK; **experimental**), a controllable **video player** (`Video` — AVPlayer / Media3 ExoPlayer /
+`<video>`: HLS + MP4, app-driven play/seek + position/ended events), an embedded **web view**
+(`WebView`, + a `mobiler_core::bunny` URL helper), and **Video v2** (poster, start-offset, captions,
+playback rate/volume, full transport state, playlist/queue, Picture-in-Picture, and hls.js for web
+HLS on Chrome/Firefox)._
 
 ## Links
 
