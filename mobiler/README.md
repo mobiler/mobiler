@@ -160,9 +160,10 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 ## Roadmap
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
-demand-driven): tablet master-detail
-and maps. The full list lives on
-[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields, the
+demand-driven): maps, background tasks, analytics, accessibility. The full list lives on
+[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: a **two-pane master-detail**
+(`Split` — side-by-side on tablets/landscape, push-nav on phones), an **app `files` plugin**
+(read/write/list + download + export to Files/Downloads), rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
 (`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
 (`PdfView`), a native→core streaming primitive (`cx.subscribe`/`unsubscribe`, with a built-in
