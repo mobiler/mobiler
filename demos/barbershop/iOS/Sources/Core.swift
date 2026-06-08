@@ -102,6 +102,21 @@ enum TickerStream {
     }
 }
 
+/// Streaming dispatch for the built-in `system` source: bridges deep-link + lifecycle events from
+/// SystemBridge (App.swift) into the cx.subscribe stream. Attaches on subscribe — flushing any
+/// buffered launch deep-link — parks until the Task is cancelled (cx.unsubscribe), then detaches.
+enum SystemStream {
+    static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
+        await MainActor.run { SystemBridge.shared.attach(sink) }
+        await withTaskCancellationHandler {
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        } onCancel: {
+            Task { @MainActor in SystemBridge.shared.detach() }
+        }
+    }
+}
+
 /// Dispatches the opaque `{plugin, op, input}` envelope by name. Adding a plugin
 /// never touches the wire ABI — only this registry.
 enum Plugins {
@@ -110,6 +125,7 @@ enum Plugins {
     static func subscribe(plugin: String, op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
         switch plugin {
         case "ticker": await TickerStream.run(input: input, emit: emit)
+        case "system": await SystemStream.run(emit: emit)
         case "websocket": await WebSocketPlugin.subscribe(op: op, input: input, emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break

@@ -34,6 +34,12 @@ targets:
       # letterboxed (black bars top/bottom) instead of full screen.
       properties:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.todo
+        # Deep links: register the app's custom URL scheme (default = the bundle id) so
+        # `dev.mobiler.todo://…` opens the app — delivered to the core via the built-in `system` stream.
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.mobiler.todo
+            CFBundleURLSchemes:
+              - dev.mobiler.todo
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

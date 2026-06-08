@@ -45,6 +45,14 @@ targets:
         # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
         # the "Missing export compliance" question.
         ITSAppUsesNonExemptEncryption: false
+        # Deep links: register the app's custom URL scheme (default = the bundle id) so
+        # `dev.mobiler.barbershop://…` opens the app — delivered to the core via the built-in `system` stream.
+        # (Universal/App Links over https additionally need an associated-domains entitlement + a
+        # server-side apple-app-site-association file — not auto-wired.)
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.mobiler.barbershop
+            CFBundleURLSchemes:
+              - dev.mobiler.barbershop
         # Picture-in-Picture: an app that uses Widget::Video with allow_pip must declare the audio
         # background mode so playback (hence PiP) continues when the app is backgrounded. The Mobiler
         # template ships WITHOUT this (App Store review hygiene) — adding this one line is the
@@ -69,7 +77,7 @@ targets:
         # ships as 1.1 build 1 — a fresh version string, so it's accepted regardless of any
         # prior 1.0 builds. Bump CURRENT_PROJECT_VERSION for each subsequent 1.1 upload.
         MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "15"
+        CURRENT_PROJECT_VERSION: "16"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]

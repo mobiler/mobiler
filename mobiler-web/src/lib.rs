@@ -232,12 +232,51 @@ fn start_stream<A: WebApp>(
             ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
             StreamHandle::Ws(WsStream { ws, _onmessage: onmessage, _onclose: onclose })
         }
+        // Built-in `system` source: deep-link URLs + app lifecycle. On the web a "deep link" is the
+        // current URL (delivered on subscribe + on `popstate`) and "lifecycle" maps to page
+        // visibility (`visibilitychange`). Listeners are dropped (removed) on unsubscribe.
+        ("system", "events") => {
+            let win = web_sys::window().expect("window");
+            let doc = win.document().expect("document");
+            // Initial: the current URL as a deeplink + current visibility as lifecycle.
+            if let Ok(href) = win.location().href() {
+                emit(PluginResponse { ok: true, output: system_deeplink(&href) });
+            }
+            emit(PluginResponse { ok: true, output: system_lifecycle(&doc) });
+            let onpop = {
+                let (emit, win) = (emit.clone(), win.clone());
+                Closure::<dyn FnMut(web_sys::Event)>::new(move |_e: web_sys::Event| {
+                    if let Ok(href) = win.location().href() {
+                        emit(PluginResponse { ok: true, output: system_deeplink(&href) });
+                    }
+                })
+            };
+            let onvis = {
+                let (emit, doc) = (emit.clone(), doc.clone());
+                Closure::<dyn FnMut(web_sys::Event)>::new(move |_e: web_sys::Event| {
+                    emit(PluginResponse { ok: true, output: system_lifecycle(&doc) });
+                })
+            };
+            let _ = win.add_event_listener_with_callback("popstate", onpop.as_ref().unchecked_ref());
+            let _ = doc.add_event_listener_with_callback("visibilitychange", onvis.as_ref().unchecked_ref());
+            StreamHandle::System(SystemStream { win, doc, _onpop: onpop, _onvis: onvis })
+        }
         _ => return, // unknown / native-only source — ignore on web
     };
 
     STREAMS.with(|m| {
         m.borrow_mut().insert(call.key.clone(), handle);
     });
+}
+
+/// A `system` deeplink event payload (the push-style tagged JSON the app demuxes by `type`).
+fn system_deeplink(url: &str) -> String {
+    format!("{{\"type\":\"deeplink\",\"url\":{}}}", serde_json::to_string(url).unwrap_or_else(|_| "\"\"".into()))
+}
+/// A `system` lifecycle event payload — page visibility maps to active/background.
+fn system_lifecycle(doc: &web_sys::Document) -> String {
+    let state = if doc.visibility_state() == web_sys::VisibilityState::Visible { "active" } else { "background" };
+    format!("{{\"type\":\"lifecycle\",\"state\":\"{state}\"}}")
 }
 
 /// An open streaming source, parked by subscription key for teardown. Dropping the
@@ -247,6 +286,25 @@ enum StreamHandle {
     /// A `ticker` interval — held only so dropping it (on unsubscribe) cancels it.
     Ticker { _interval: gloo_timers::callback::Interval },
     Ws(WsStream),
+    /// The built-in `system` source — holds its JS listeners alive; `Drop` removes them on
+    /// unsubscribe (the handle is dropped when removed from `STREAMS`). Never pattern-matched.
+    #[allow(dead_code)]
+    System(SystemStream),
+}
+
+/// The `system` subscription's event listeners — removed from the DOM when dropped (unsubscribe).
+struct SystemStream {
+    win: web_sys::Window,
+    doc: web_sys::Document,
+    _onpop: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
+    _onvis: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
+}
+impl Drop for SystemStream {
+    fn drop(&mut self) {
+        use wasm_bindgen::JsCast;
+        let _ = self.win.remove_event_listener_with_callback("popstate", self._onpop.as_ref().unchecked_ref());
+        let _ = self.doc.remove_event_listener_with_callback("visibilitychange", self._onvis.as_ref().unchecked_ref());
+    }
 }
 
 /// An open web `WebSocket` subscription — holds its JS closures so they stay alive.

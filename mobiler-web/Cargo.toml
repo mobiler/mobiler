@@ -1,6 +1,6 @@
 [package]
 name = "mobiler-web"
-version = "0.26.0"
+version = "0.27.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Mobiler's web shell — renders any Mobiler app's Widget tree to the DOM (Leptos/WASM)."
@@ -32,4 +32,5 @@ web-sys = { version = "0.3", features = [
     "Window", "Storage", "Navigator", "Clipboard", "EventTarget",
     "HtmlInputElement", "FileList", "File", "Blob", "Url",
     "WebSocket", "MessageEvent", "CloseEvent", "BinaryType",
+    "Location", "VisibilityState", "Event",
 ] }

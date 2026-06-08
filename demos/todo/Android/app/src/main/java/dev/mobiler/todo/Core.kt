@@ -12,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.channels.awaitClose
 import dev.mobiler.todo.shared.CoreFfi
 import dev.mobiler.todo.shared.types.Action
 import dev.mobiler.todo.shared.types.Effect
@@ -62,6 +63,46 @@ class TickerPlugin : MobilerPlugin {
     }
 }
 
+/** In-process bus from MainActivity (deep-link intents + fg/bg lifecycle) to the built-in `system`
+ *  cx.subscribe stream. Deep links arriving before the core subscribes buffer and flush on attach
+ *  (launch-from-dead); lifecycle emits live, with the current state sent on attach. */
+object SystemBus {
+    private var sink: ((String) -> Unit)? = null
+    private val buffer = mutableListOf<String>()
+    private var lastState = "active"
+
+    @Synchronized fun attach(s: (String) -> Unit) {
+        sink = s
+        buffer.forEach { s(it) }
+        buffer.clear()
+        s("""{"type":"lifecycle","state":"$lastState"}""")
+    }
+    @Synchronized fun detach(s: (String) -> Unit) { if (sink === s) sink = null }
+
+    @Synchronized fun emitDeepLink(url: String) {
+        val payload = """{"type":"deeplink","url":${org.json.JSONObject.quote(url)}}"""
+        val s = sink
+        if (s != null) s(payload) else buffer.add(payload)
+    }
+    @Synchronized fun emitLifecycle(state: String) {
+        lastState = state
+        sink?.invoke("""{"type":"lifecycle","state":"$state"}""")  // live only — not buffered
+    }
+}
+
+/** Built-in `system` stream: deep-link URLs + app lifecycle (foreground/background), fed by
+ *  MainActivity via SystemBus. Mirrors the push plugin's PushBus/callbackFlow shape. */
+class SystemPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse =
+        PluginResponse(false, "system is a streaming capability — use cx.subscribe")
+    override fun subscribe(op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> =
+        kotlinx.coroutines.flow.callbackFlow {
+            val sink: (String) -> Unit = { trySend(PluginResponse(true, it)) }
+            SystemBus.attach(sink)
+            awaitClose { SystemBus.detach(sink) }
+        }
+}
+
 /** Official, bundled plugin: request/response device info. */
 class DevicePlugin : MobilerPlugin {
     override fun handle(op: String, input: String): PluginResponse = when (op) {
@@ -96,6 +137,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "toast" to ToastPlugin(application),
         "device" to DevicePlugin(),
         "ticker" to TickerPlugin(),
+        "system" to SystemPlugin(),
         "storage" to StoragePlugin(application),
     )
 
