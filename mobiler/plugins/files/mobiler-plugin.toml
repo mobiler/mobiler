@@ -1,0 +1,26 @@
+# Free, bundled Mobiler plugin: app-sandbox file I/O + download + export. Call from Rust:
+#   cx.plugin("files","write",   r#"{"path":"notes.txt","content":"hi"}"#,        |r| Msg::Wrote(r.output)) // → file:// URI
+#   cx.plugin("files","read",    r#"{"path":"notes.txt"}"#,                       |r| Msg::Read(r.output))
+#   cx.plugin("files","append",  r#"{"path":"log.txt","content":"line\n"}"#,      |r| Msg::Appended(r.ok))
+#   cx.plugin("files","delete",  r#"{"path":"notes.txt"}"#,                       |r| Msg::Deleted(r.ok))
+#   cx.plugin("files","list",    r#"{"dir":""}"#,                                 |r| Msg::Listed(r.output)) // JSON [{name,size,dir}]
+#   cx.plugin("files","download",r#"{"url":"https://…/x.pdf","path":"x.pdf"}"#,   |r| Msg::Got(r.output))    // native binary → file:// URI
+#   cx.plugin("files","export",  r#"{"path":"x.pdf","name":"Report.pdf"}"#,       |r| Msg::Exported(r.ok))   // system save picker
+#
+# Paths are app-sandbox-relative (iOS Documents / Android filesDir); `read`/`export` also accept an
+# absolute file:// URI (e.g. a `filepicker` result). Binary: pass "base64":true on read/write
+# (`download` is binary-safe natively). NO permission needed — `export` uses the system save picker.
+# Install: mobiler plugin add files
+name = "files"
+summary = "App file storage — read/write/list, download a URL, export to Files/Downloads (free)"
+
+[android]
+# A transparent helper Activity runs the SAF "create document" save picker for `export`, so the
+# plugin is self-contained (no edit to the app's MainActivity, which `plugin add` can't do).
+sources = ["android/FilesPlugin.kt", "android/FileExportActivity.kt"]
+register = '"files" to FilesPlugin(application)'
+manifest_application = ['<activity android:name=".FileExportActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />']
+
+[ios]
+sources = ["ios/FilesPlugin.swift"]
+register = 'case "files": return await FilesPlugin.handle(op: op, input: input)'

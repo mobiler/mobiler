@@ -92,6 +92,7 @@ ABI change. Bundled free plugins:
 | 🗣️ `tts` | text-to-speech (speak a string aloud) |
 | ⭐ `review` | in-app App Store / Play review prompt |
 | 📤 `sharefile` | share a file / image via the share sheet |
+| 📁 `files` | read/write/list app files, download a URL, export to Files/Downloads |
 | 🎬 `video` | record a video → local URI |
 | 🎤 `speech` | speech-to-text (dictation) |
 | 🗃️ `sqlite` | on-device SQLite (exec / query → JSON) |
