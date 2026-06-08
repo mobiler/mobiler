@@ -534,6 +534,13 @@ pub enum Widget {
     Grid { children: Vec<Widget> },
     /// Horizontally scrolling row of children (a carousel / chip rail).
     Scroller { children: Vec<Widget> },
+    /// Two-pane master-detail. On a **wide** screen (tablet / landscape — the shell's regular size
+    /// class) `primary` and `detail` render side-by-side; on a **compact** screen (phone) it shows
+    /// ONE pane: `primary` until `show_detail` is set (the app sets it when a row is selected), then
+    /// `detail` with a back chevron that fires `on_back` (the app clears its selection). On wide,
+    /// `show_detail`/`on_back` are ignored — both panes stay visible, so `detail` should show a
+    /// placeholder until something is selected.
+    Split { primary: Box<Widget>, detail: Box<Widget>, show_detail: bool, on_back: Option<ActionToken> },
     // Input
     Button { label: String, style: ButtonStyle, on_press: ActionToken },
     IconButton { icon: Icon, on_press: ActionToken },
@@ -635,6 +642,8 @@ mod tests {
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
         round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });
+        round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: true, on_back: Some("back".to_string()) });
+        round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: false, on_back: None });
         round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {

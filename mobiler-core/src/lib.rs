@@ -759,6 +759,14 @@ pub fn stack(align: BoxAlign, scrim: bool, children: Vec<Widget>) -> Widget {
 }
 #[must_use]
 pub fn grid(children: Vec<Widget>) -> Widget { Widget::Grid { children } }
+/// A two-pane master-detail layout ([`Widget::Split`]). Side-by-side on a wide screen (tablet /
+/// landscape); one pane on a phone — `primary` until `show_detail` (the app sets it on selection),
+/// then `detail` with a back chevron firing `on_back`. On wide, `detail` should show a placeholder
+/// until a row is selected.
+#[must_use]
+pub fn split<E: Serialize>(primary: Widget, detail: Widget, show_detail: bool, on_back: E) -> Widget {
+    Widget::Split { primary: Box::new(primary), detail: Box::new(detail), show_detail, on_back: Some(tok(on_back)) }
+}
 /// Horizontally scrolling row of children (a carousel / chip rail).
 #[must_use]
 pub fn scroller(children: Vec<Widget>) -> Widget { Widget::Scroller { children } }
@@ -1404,6 +1412,9 @@ mod tests {
         assert!(matches!(card(text("x"), CardStyle::Filled), Widget::Card { on_press: None, .. }));
         // a scrim z-stack keeps its align + scrim flag
         assert!(matches!(stack(BoxAlign::Center, true, vec![]), Widget::Box { scrim: true, .. }));
+        // split: children boxed, show_detail + on_back carried.
+        assert!(matches!(split(text("list"), text("detail"), true, Ev::Tap),
+            Widget::Split { show_detail: true, on_back: Some(_), .. }));
     }
 
     #[test]

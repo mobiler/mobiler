@@ -12,7 +12,7 @@ use mobiler_core::{
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
     pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
-    spacer, stack, video_player, video_playlist, web_view,
+    spacer, split, stack, video_player, video_playlist, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_captions, with_error,
     with_fab, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
 };
@@ -41,6 +41,9 @@ pub enum Msg {
     SelectTab(Tab),
     SelectCategory(String),
     SelectAudience(Audience),
+    /// Services tab master-detail (Widget::Split): select a service → show its detail pane.
+    SelectService(u32),
+    DeselectService,
     OpenService(u32),
     CloseSheet,
     Rate(u8),
@@ -212,6 +215,7 @@ pub struct Model {
     barbers: Vec<Barber>,
     /// Index of the service whose booking sheet is open (`None` = closed).
     open_service: Option<usize>,
+    selected_service: Option<u32>,
     /// Stars the user tapped in the booking sheet, in tenths (0 = unrated).
     user_rating: u32,
     /// Date chosen during the FAB "book a cut" flow (`cx.pick_date` → `cx.pick_time`).
@@ -323,6 +327,7 @@ impl Default for Model {
                 Barber { name: "Theo", specialty: "Hot shaves", rating: "4.7", image: "https://loremflickr.com/200/200/barbershop?lock=14" },
             ],
             open_service: None,
+            selected_service: None,
             user_rating: 0,
             pending_date: None,
             pending_time: None,
@@ -408,6 +413,8 @@ impl MobilerApp for FadeHouse {
             Msg::SelectTab(t) => model.tab = t,
             Msg::SelectCategory(c) => model.category = c,
             Msg::SelectAudience(a) => model.audience = a,
+            Msg::SelectService(i) => model.selected_service = Some(i),
+            Msg::DeselectService => model.selected_service = None,
             Msg::OpenService(i) => {
                 model.open_service = Some(i as usize);
                 model.user_rating = 0;
@@ -1050,13 +1057,37 @@ fn home(model: &Model) -> Widget {
 }
 
 fn services_screen(model: &Model) -> Widget {
-    column(vec![
+    // Master-detail (Widget::Split): the services list (primary) + the selected service's detail
+    // (detail). On a tablet/landscape they sit side-by-side; on a phone, tapping a service shows the
+    // detail full-screen with a back chevron. The detail's "Book" opens the existing booking sheet.
+    let primary = column(vec![
         search_field("search", "Search services…", model.search.as_str()),
         audience_segmented(model),
         category_carousel(model),
         spacer(Spacing::Sm),
         services_grid(model),
-    ])
+    ]);
+    let detail = match model.selected_service.and_then(|i| model.services.get(i as usize).map(|s| (i, s))) {
+        Some((i, s)) => service_detail(i, s),
+        None => card(caption("Select a service to see details."), CardStyle::Outlined),
+    };
+    split(primary, detail, model.selected_service.is_some(), Msg::DeselectService)
+}
+
+/// The detail pane of the Services master-detail — the selected service, with a Book button that
+/// opens the booking sheet (the existing `OpenService` flow).
+fn service_detail(index: u32, s: &Service) -> Widget {
+    card(
+        column(vec![
+            image(s.image, ImageShape::Rounded, ImageRatio::Wide),
+            title(s.name),
+            row(vec![text(s.price), rating(tenths(s.rating), 5)]),
+            badge(s.category, Tone::Info),
+            caption("A fresh, sharp cut from the Fade House team."),
+            button("Book this", ButtonStyle::Filled, Msg::OpenService(index)),
+        ]),
+        CardStyle::Outlined,
+    )
 }
 
 fn services_grid(model: &Model) -> Widget {
@@ -1087,7 +1118,7 @@ fn service_card(index: u32, s: &Service) -> Widget {
             badge(s.category, Tone::Info),
         ]),
         CardStyle::Filled,
-        Msg::OpenService(index),
+        Msg::SelectService(index),
     )
 }
 
