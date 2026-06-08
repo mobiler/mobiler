@@ -1285,6 +1285,7 @@ struct VideoView: UIViewControllerRepresentable {
         vc.showsPlaybackControls = controls
         vc.allowsPictureInPicturePlayback = allowPip
         if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
+        vc.delegate = session.pipDelegate
         session.attachPoster(to: vc, poster: poster)
         session.attachCaption(to: vc)
         session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
@@ -1298,6 +1299,7 @@ struct VideoView: UIViewControllerRepresentable {
         vc.showsPlaybackControls = controls
         vc.allowsPictureInPicturePlayback = allowPip
         if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
+        vc.delegate = session.pipDelegate
         session.attachPoster(to: vc, poster: poster)
         session.attachCaption(to: vc)
         session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
@@ -1337,6 +1339,7 @@ final class VideoSession {
     private var lastBuffered: Int64 = -1
     private var lastIndex: Int64 = -2
     private var itemToIndex: [ObjectIdentifier: Int] = [:]
+    let pipDelegate = VideoPipDelegate()
 
     init(id: String, url: String, urls: [String], startIndex: Int64, send: @escaping (Action) -> Void) {
         self.id = id; self.url = url; self.urls = urls; self.send = send
@@ -1616,6 +1619,16 @@ final class VideoSession {
         if b != lastBuffered { lastBuffered = b; send(.input(id: id + ".buffered", value: .int(b))) }
         let i = currentIndex()
         if i != lastIndex { lastIndex = i; send(.input(id: id + ".index", value: .int(i))) }
+    }
+}
+
+// Auto-restores the embedded player's inline UI when PiP stops (e.g. when the user reopens the
+// app), instead of leaving the floating window until the video is tapped. The VC is still in the
+// view hierarchy, so acknowledging the restore (completionHandler(true)) is all that's needed.
+final class VideoPipDelegate: NSObject, AVPlayerViewControllerDelegate {
+    func playerViewController(_ playerViewController: AVPlayerViewController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(true)
     }
 }
 
