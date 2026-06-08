@@ -63,7 +63,49 @@ where
 {
     console_error_panic_hook::set_once();
     inject_default_style();
+    inject_hls_support();
     leptos::mount::mount_to_body(shell::<A>);
+}
+
+/// hls.js bootstrap for HLS (`.m3u8`) playback in browsers without native HLS
+/// (Chrome/Firefox — Safari/iOS play HLS natively). A `<video>` whose source is an
+/// `.m3u8` is rendered with `data-hls-src` and no `src`; this self-contained script
+/// watches the DOM (a `MutationObserver`, so it also catches elements re-rendered on
+/// each `update`) and, for each such `<video>`, either sets `src` directly (native
+/// HLS, e.g. Safari) or lazily loads hls.js from a CDN and attaches it. If the CDN
+/// fails it falls back to a plain `src`. Inert until an `.m3u8` `Video` appears, so
+/// MP4/Bunny content (and non-video apps) pay nothing. Bunny content keeps using its
+/// own player via `WebView`; this is for raw non-Bunny `.m3u8` on Chrome/Firefox.
+fn inject_hls_support() {
+    const BOOTSTRAP: &str = r#"(function(){
+  function ensureHls(cb){
+    if(window.Hls){return cb();}
+    if(window.__mobilerHlsLoading){(window.__mobilerHlsCbs=window.__mobilerHlsCbs||[]).push(cb);return;}
+    window.__mobilerHlsLoading=true;window.__mobilerHlsCbs=[cb];
+    var s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/hls.js@1';
+    var flush=function(){var cbs=window.__mobilerHlsCbs||[];window.__mobilerHlsCbs=[];cbs.forEach(function(f){f();});};
+    s.onload=flush;s.onerror=flush;
+    document.head.appendChild(s);
+  }
+  function attach(v){
+    if(v.__mobilerHlsDone){return;}v.__mobilerHlsDone=true;
+    var url=v.getAttribute('data-hls-src');if(!url){return;}
+    if(v.canPlayType('application/vnd.apple.mpegurl')){v.src=url;return;}
+    ensureHls(function(){
+      if(window.Hls&&window.Hls.isSupported()){var h=new window.Hls();h.loadSource(url);h.attachMedia(v);v.__mobilerHls=h;}
+      else{v.src=url;}
+    });
+  }
+  function scan(root){if(root&&root.querySelectorAll){root.querySelectorAll('video[data-hls-src]').forEach(attach);}}
+  new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType===1){if(n.matches&&n.matches('video[data-hls-src]')){attach(n);}scan(n);}});});}).observe(document.documentElement,{childList:true,subtree:true});
+  scan(document);
+})();"#;
+    let document = leptos::prelude::document();
+    let Some(head) = document.head() else { return };
+    let Ok(script) = document.create_element("script") else { return };
+    script.set_text_content(Some(BOOTSTRAP));
+    let _ = head.append_child(&script);
 }
 
 /// Inject the shell's default stylesheet at the **front** of `<head>` so it's the
@@ -494,25 +536,65 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 ></iframe>
             }.into_any()
         }
-        Widget::Video { url, playing, controls, looping, muted, on_ended, .. } => {
-            // Web v1 = a native-controls `<video>`. App-driven play/pause + seek + position events are
-            // iOS/Android only: the web shell rebuilds the whole tree on each `update`, which would
-            // reset the element ~every tick — so we don't pump position here. `muted && playing` →
-            // autoplay (the only reliable browser autoplay, e.g. a looping background clip). MP4 plays
-            // everywhere; HLS (.m3u8) plays only on Safari in v1 (hls.js for other browsers is v2).
+        Widget::Video { url, playing, controls, looping, muted, on_ended, poster, start_at_ms, captions, rate, volume, urls, start_index, .. } => {
+            // Web = a native-controls `<video>`. App-driven play/pause + seek + position/state events
+            // are iOS/Android only: the web shell rebuilds the whole tree on each `update`, which would
+            // reset the element ~every tick — so we don't pump those here (poster/captions/rate/volume
+            // ARE declarative attributes, so they're safe). `muted && playing` → autoplay. MP4 plays
+            // everywhere; HLS (.m3u8) plays natively on Safari and, on Chrome/Firefox, via the hls.js
+            // bootstrap (`inject_hls_support`). A non-empty `urls` is a playlist (best-effort: starts at
+            // `start_index`, advances on `ended` within this element's lifetime — no index pump back).
+            use wasm_bindgen::JsCast;
             let (send, ended) = (send.clone(), on_ended.clone());
             let autoplay = *playing && *muted;
+            let playlist = urls.clone();
+            let start_index = (*start_index).max(0) as usize;
+            let effective = if playlist.is_empty() { url.clone() }
+                else { playlist.get(start_index).cloned().unwrap_or_else(|| url.clone()) };
+            let is_hls = effective.to_ascii_lowercase().ends_with(".m3u8");
+            let src = (!is_hls).then(|| effective.clone());
+            let hls_src = is_hls.then(|| effective.clone());
+            let poster_attr = poster.clone();
+            let start_at = *start_at_ms;
+            let rate = *rate as f64;
+            let volume = (*volume as f64).clamp(0.0, 1.0);
+            let tracks: Vec<_> = captions.iter().map(|c| view! {
+                <track kind="subtitles" src=c.url.clone() srclang=c.language.clone() label=c.label.clone() default=c.default_on />
+            }).collect();
+            let next_idx = std::rc::Rc::new(std::cell::Cell::new(start_index));
             view! {
                 <video
                     class="video"
-                    src=url.clone()
+                    src=src
+                    data-hls-src=hls_src
+                    poster=poster_attr
                     controls=*controls
                     autoplay=autoplay
                     prop:loop=*looping
+                    prop:playbackRate=rate
+                    prop:volume=volume
                     muted=*muted
                     playsinline=true
-                    on:ended=move |_| { if let Some(t) = ended.clone() { send(Action::Fired { token: t }); } }
-                ></video>
+                    on:loadedmetadata=move |ev| {
+                        if start_at >= 0 {
+                            if let Some(v) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlVideoElement>().ok()) {
+                                v.set_current_time(start_at as f64 / 1000.0);
+                            }
+                        }
+                    }
+                    on:ended=move |ev| {
+                        let nxt = next_idx.get() + 1;
+                        if !playlist.is_empty() && nxt < playlist.len() {
+                            next_idx.set(nxt);
+                            if let Some(v) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlVideoElement>().ok()) {
+                                v.set_src(&playlist[nxt]);
+                                let _ = v.play();
+                            }
+                        } else if let Some(t) = ended.clone() {
+                            send(Action::Fired { token: t });
+                        }
+                    }
+                >{tracks}</video>
             }.into_any()
         }
         Widget::Rating { value, max, on_rate } => {

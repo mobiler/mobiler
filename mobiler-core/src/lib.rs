@@ -21,7 +21,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    Action, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FieldKind, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, Widget,
@@ -488,8 +488,10 @@ pub fn pdf_view(url: impl Into<String>) -> Widget { Widget::PdfView { url: url.i
 /// native player per platform (AVPlayer / Media3 ExoPlayer / `<video>`). `id` routes the ~once-per-second
 /// position into `input(id, InputValue::Int(position_ms))`; build it fresh each render with the current
 /// `playing` (play/pause) + `seek_to_ms` (the shell jumps when this CHANGES; `-1` = no seek). `on_ended`
-/// fires when the clip finishes. Defaults: controls shown, not looping/muted — tune with
-/// [`with_loop`]/[`with_muted`]/[`without_controls`]. Give it room (a sized container or a card).
+/// fires when the clip finishes. Defaults: controls shown, not looping/muted, no poster, no resume
+/// offset, no captions, rate 1.0, full volume, single clip (no playlist), PiP off — tune with
+/// [`with_loop`]/[`with_muted`]/[`without_controls`]/[`with_poster`]/[`with_start_at`]/[`with_captions`]/
+/// [`with_rate`]/[`with_volume`]/[`with_pip`] (or [`video_playlist`] for a queue). Give it room.
 #[must_use]
 pub fn video_player<E: Serialize>(id: impl Into<String>, url: impl Into<String>, playing: bool, seek_to_ms: i64, on_ended: E) -> Widget {
     Widget::Video {
@@ -501,35 +503,109 @@ pub fn video_player<E: Serialize>(id: impl Into<String>, url: impl Into<String>,
         looping: false,
         muted: false,
         on_ended: Some(tok(on_ended)),
+        poster: None,
+        start_at_ms: -1,
+        captions: Vec::new(),
+        rate: 1.0,
+        volume: 1.0,
+        urls: Vec::new(),
+        start_index: 0,
+        seek_index: -1,
+        allow_pip: false,
     }
+}
+/// A controllable native video player over a **playlist** of `urls` (auto-advances gaplessly; the
+/// shell reports the current track via `input("{id}.index", InputValue::Int(i))`). `start_index` is
+/// the first clip; build it fresh each render with the current `playing`. Force-jump to a track by
+/// pairing this with [`with_seek_index`]. `on_ended` fires when the LAST clip finishes. Same cosmetic
+/// modifiers as [`video_player`]. Empty `urls` renders nothing useful — use [`video_player`] for one clip.
+#[must_use]
+pub fn video_playlist<E: Serialize>(id: impl Into<String>, urls: Vec<String>, start_index: i64, playing: bool, on_ended: E) -> Widget {
+    Widget::Video {
+        url: urls.first().cloned().unwrap_or_default(),
+        id: id.into(),
+        playing,
+        seek_to_ms: -1,
+        controls: true,
+        looping: false,
+        muted: false,
+        on_ended: Some(tok(on_ended)),
+        poster: None,
+        start_at_ms: -1,
+        captions: Vec::new(),
+        rate: 1.0,
+        volume: 1.0,
+        urls,
+        start_index,
+        seek_index: -1,
+        allow_pip: false,
+    }
+}
+/// Apply a mutation to a [`Widget::Video`]'s fields, passing other widgets through unchanged. Keeps
+/// the `with_*` video modifiers from each having to spell out all of `Video`'s fields.
+fn map_video(widget: Widget, f: impl FnOnce(&mut VideoFields)) -> Widget {
+    match widget {
+        Widget::Video { url, id, playing, seek_to_ms, controls, looping, muted, on_ended,
+            poster, start_at_ms, captions, rate, volume, urls, start_index, seek_index, allow_pip } => {
+            let mut v = VideoFields { url, id, playing, seek_to_ms, controls, looping, muted, on_ended,
+                poster, start_at_ms, captions, rate, volume, urls, start_index, seek_index, allow_pip };
+            f(&mut v);
+            Widget::Video { url: v.url, id: v.id, playing: v.playing, seek_to_ms: v.seek_to_ms,
+                controls: v.controls, looping: v.looping, muted: v.muted, on_ended: v.on_ended,
+                poster: v.poster, start_at_ms: v.start_at_ms, captions: v.captions, rate: v.rate,
+                volume: v.volume, urls: v.urls, start_index: v.start_index, seek_index: v.seek_index,
+                allow_pip: v.allow_pip }
+        }
+        other => other,
+    }
+}
+struct VideoFields {
+    url: String, id: String, playing: bool, seek_to_ms: i64, controls: bool, looping: bool,
+    muted: bool, on_ended: Option<String>, poster: Option<String>, start_at_ms: i64,
+    captions: Vec<Caption>, rate: f32, volume: f32, urls: Vec<String>, start_index: i64,
+    seek_index: i64, allow_pip: bool,
 }
 /// Loop a [`video_player`] (restart on end). No-op on non-Video widgets.
 #[must_use]
-pub fn with_loop(widget: Widget) -> Widget {
-    match widget {
-        Widget::Video { url, id, playing, seek_to_ms, controls, muted, on_ended, .. } =>
-            Widget::Video { url, id, playing, seek_to_ms, controls, looping: true, muted, on_ended },
-        other => other,
-    }
-}
+pub fn with_loop(widget: Widget) -> Widget { map_video(widget, |v| v.looping = true) }
 /// Start a [`video_player`] muted (needed for reliable autoplay). No-op on non-Video widgets.
 #[must_use]
-pub fn with_muted(widget: Widget) -> Widget {
-    match widget {
-        Widget::Video { url, id, playing, seek_to_ms, controls, looping, on_ended, .. } =>
-            Widget::Video { url, id, playing, seek_to_ms, controls, looping, muted: true, on_ended },
-        other => other,
-    }
-}
+pub fn with_muted(widget: Widget) -> Widget { map_video(widget, |v| v.muted = true) }
 /// Hide the native transport controls on a [`video_player`] (the app drives it). No-op otherwise.
 #[must_use]
-pub fn without_controls(widget: Widget) -> Widget {
-    match widget {
-        Widget::Video { url, id, playing, seek_to_ms, looping, muted, on_ended, .. } =>
-            Widget::Video { url, id, playing, seek_to_ms, controls: false, looping, muted, on_ended },
-        other => other,
-    }
+pub fn without_controls(widget: Widget) -> Widget { map_video(widget, |v| v.controls = false) }
+/// Show `poster` (an image URL) before the first play / while idle. No-op on non-Video widgets.
+#[must_use]
+pub fn with_poster(widget: Widget, poster: impl Into<String>) -> Widget {
+    let poster = poster.into();
+    map_video(widget, move |v| v.poster = Some(poster))
 }
+/// Resume a [`video_player`] at `start_at_ms` (applied once on load). No-op on non-Video widgets.
+#[must_use]
+pub fn with_start_at(widget: Widget, start_at_ms: i64) -> Widget {
+    map_video(widget, move |v| v.start_at_ms = start_at_ms)
+}
+/// Attach subtitle/caption tracks to a [`video_player`] (see [`Caption`]). No-op on non-Video widgets.
+#[must_use]
+pub fn with_captions(widget: Widget, captions: Vec<Caption>) -> Widget {
+    map_video(widget, move |v| v.captions = captions)
+}
+/// Set playback speed (`1.0` = normal) on a [`video_player`]. No-op on non-Video widgets.
+#[must_use]
+pub fn with_rate(widget: Widget, rate: f32) -> Widget { map_video(widget, move |v| v.rate = rate) }
+/// Set the volume (`0.0`–`1.0`) on a [`video_player`]. No-op on non-Video widgets.
+#[must_use]
+pub fn with_volume(widget: Widget, volume: f32) -> Widget {
+    map_video(widget, move |v| v.volume = volume.clamp(0.0, 1.0))
+}
+/// Force a playlist [`video_playlist`] to jump to track `index` when this CHANGES. No-op otherwise.
+#[must_use]
+pub fn with_seek_index(widget: Widget, index: i64) -> Widget {
+    map_video(widget, move |v| v.seek_index = index)
+}
+/// Enable Picture-in-Picture on a [`video_player`] (the shell adds a PiP affordance). No-op otherwise.
+#[must_use]
+pub fn with_pip(widget: Widget) -> Widget { map_video(widget, |v| v.allow_pip = true) }
 /// A native web view showing the page / embedded player at `url` (`WKWebView` / Android `WebView` /
 /// `<iframe>`). General-purpose: docs, dashboards, or a hosted player embed (e.g. a Bunny.net /
 /// YouTube embed URL). NOT the default video player — use [`video_player`] for that. Give it room
@@ -1340,6 +1416,22 @@ mod tests {
             Widget::Video { id, playing: false, seek_to_ms: -1, controls: true, looping: false, muted: false, on_ended: Some(_), .. } if id == "v"));
         assert!(matches!(without_controls(with_muted(with_loop(video_player("v", "u", true, 0, Ev::Tap)))),
             Widget::Video { playing: true, controls: false, looping: true, muted: true, .. }));
+        // v2 defaults + modifiers.
+        assert!(matches!(video_player("v", "u", false, -1, Ev::Tap),
+            Widget::Video { poster: None, start_at_ms: -1, rate, volume, allow_pip: false, .. }
+                if (rate - 1.0).abs() < f32::EPSILON && (volume - 1.0).abs() < f32::EPSILON));
+        let tuned = with_pip(with_volume(with_rate(with_start_at(with_poster(
+            with_captions(video_player("v", "u", true, -1, Ev::Tap),
+                vec![Caption { url: "e.vtt".into(), label: "EN".into(), language: "en".into(), default_on: true }]),
+            "p.jpg"), 9000), 1.5), 0.5));
+        assert!(matches!(tuned,
+            Widget::Video { poster: Some(p), start_at_ms: 9000, rate, volume, allow_pip: true, captions, .. }
+                if p == "p.jpg" && (rate - 1.5).abs() < f32::EPSILON && (volume - 0.5).abs() < f32::EPSILON && captions.len() == 1));
+        // playlist builder: url defaults to the first clip; urls/start_index carried; seek_index jumps.
+        assert!(matches!(with_seek_index(video_playlist("pl", vec!["a.mp4".into(), "b.mp4".into()], 1, true, Ev::Tap), 0),
+            Widget::Video { url, urls, start_index: 1, seek_index: 0, .. } if url == "a.mp4" && urls.len() == 2));
+        // modifiers are no-ops on non-Video widgets.
+        assert!(matches!(with_pip(divider()), Widget::Divider));
         assert!(matches!(secure_field("pw", "Password", ""), Widget::TextField { kind: FieldKind::Secure, .. }));
         assert!(matches!(email_field("e", "", ""), Widget::TextField { kind: FieldKind::Email, .. }));
         assert!(matches!(multiline_field("note", "", ""), Widget::TextField { kind: FieldKind::Multiline, .. }));

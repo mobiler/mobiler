@@ -165,6 +165,7 @@ import dev.mobiler.todo.ui.theme.TodoTheme
 import dev.mobiler.todo.shared.types.Action
 import dev.mobiler.todo.shared.types.BoxAlign
 import dev.mobiler.todo.shared.types.ButtonStyle
+import dev.mobiler.todo.shared.types.Caption
 import dev.mobiler.todo.shared.types.CardStyle
 import dev.mobiler.todo.shared.types.ChartStyle
 import dev.mobiler.todo.shared.types.Corner
@@ -250,7 +251,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         )
 
         is Widget.PdfView -> PdfViewWidget(widget.url)
-        is Widget.Video -> VideoWidget(widget.url, widget.id, widget.playing, widget.seekToMs, widget.controls, widget.looping, widget.muted, widget.onEnded, send)
+        is Widget.Video -> VideoWidget(widget.url, widget.id, widget.playing, widget.seekToMs, widget.controls, widget.looping, widget.muted, widget.onEnded, widget.poster, widget.startAtMs, widget.captions, widget.rate, widget.volume, widget.urls, widget.startIndex, widget.seekIndex, widget.allowPip, send)
         is Widget.WebView -> WebViewWidget(widget.url)
 
         is Widget.Image -> AsyncImage(
@@ -1208,15 +1209,34 @@ private fun CardBody(child: Widget, send: (Action) -> Unit) {
 // (`playing`) + seek (`seekToMs`, applied when it changes); a 1s loop reports the position via
 // Action.Input(id, Int(ms)); onEnded fires (loop is handled by repeatMode). The player is keyed by
 // `url` (remember) and released on dispose — never leaked across the ~1/sec re-render.
+// Build a MediaItem with optional sidecar WebVTT caption tracks (Media3 renders them natively).
+@OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun buildVideoItem(url: String, captions: List<Caption>): MediaItem {
+    val b = MediaItem.Builder().setUri(url)
+    if (captions.isNotEmpty()) {
+        b.setSubtitleConfigurations(captions.map { c ->
+            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(c.url))
+                .setMimeType(androidx.media3.common.MimeTypes.TEXT_VTT)
+                .setLanguage(c.language)
+                .setLabel(c.label)
+                .setSelectionFlags(if (c.defaultOn) androidx.media3.common.C.SELECTION_FLAG_DEFAULT else 0)
+                .build()
+        })
+    }
+    return b.build()
+}
+
 @OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Long, controls: Boolean, looping: Boolean, muted: Boolean, onEnded: String?, send: (Action) -> Unit) {
+private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Long, controls: Boolean, looping: Boolean, muted: Boolean, onEnded: String?, poster: String?, startAtMs: Long, captions: List<Caption>, rate: Float, volume: Float, urls: List<String>, startIndex: Long, seekIndex: Long, allowPip: Boolean, send: (Action) -> Unit) {
     val context = LocalContext.current
-    val player = remember(url) {
+    val player = remember(url, urls) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(url))
-            repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-            volume = if (muted) 0f else 1f
+            if (urls.isEmpty()) {
+                setMediaItem(buildVideoItem(url, captions))
+            } else {
+                setMediaItems(urls.map { buildVideoItem(it, emptyList()) }, startIndex.toInt().coerceIn(0, maxOf(0, urls.size - 1)), 0L)
+            }
             prepare()
         }
     }
@@ -1229,20 +1249,75 @@ private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Lon
         player.addListener(listener)
         onDispose { player.removeListener(listener); player.release() }
     }
+    LaunchedEffect(looping) { player.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
+    LaunchedEffect(muted, volume) { player.volume = if (muted) 0f else volume.coerceIn(0f, 1f) }
+    LaunchedEffect(rate) { player.setPlaybackSpeed(if (rate > 0f) rate else 1f) }
+    // PiP: on Android 12+ auto-enter when the app is backgrounded (no button needed). Gated by allowPip;
+    // needs android:supportsPictureInPicture on the activity (template manifest).
+    val activity = context as? android.app.Activity
+    LaunchedEffect(allowPip) {
+        if (allowPip && activity != null && android.os.Build.VERSION.SDK_INT >= 31) {
+            activity.setPictureInPictureParams(android.app.PictureInPictureParams.Builder().setAutoEnterEnabled(true).build())
+        }
+    }
+    // Position + transport state (duration / state / buffered / playlist index) via suffixed input ids.
+    var lastDur by remember { mutableStateOf(Long.MIN_VALUE) }
+    var lastState by remember { mutableStateOf(-1L) }
+    var lastIndex by remember { mutableStateOf(-2L) }
     LaunchedEffect(player, id) {
         while (true) {
             kotlinx.coroutines.delay(1000)
             send(Action.Input(id, InputValue.Int(player.currentPosition)))
+            val dur = if (player.duration == androidx.media3.common.C.TIME_UNSET) -1L else player.duration
+            if (dur != lastDur) { lastDur = dur; send(Action.Input("$id.duration", InputValue.Int(dur))) }
+            send(Action.Input("$id.buffered", InputValue.Int(player.bufferedPosition)))
+            val state = when {
+                player.playbackState == Player.STATE_ENDED -> 4L
+                player.playbackState == Player.STATE_BUFFERING -> 1L
+                player.isPlaying -> 3L
+                player.playbackState == Player.STATE_READY -> 2L
+                else -> 0L
+            }
+            if (state != lastState) { lastState = state; send(Action.Input("$id.state", InputValue.Int(state))) }
+            val idx = player.currentMediaItemIndex.toLong()
+            if (idx != lastIndex) { lastIndex = idx; send(Action.Input("$id.index", InputValue.Int(idx))) }
         }
     }
     LaunchedEffect(playing) { player.playWhenReady = playing }
     var lastSeek by remember { mutableStateOf(-1L) }
     LaunchedEffect(seekToMs) {
         if (seekToMs >= 0 && seekToMs != lastSeek) { lastSeek = seekToMs; player.seekTo(seekToMs) }
+        else if (seekToMs < 0) { lastSeek = -1L }
+    }
+    var startApplied by remember { mutableStateOf(false) }
+    LaunchedEffect(player) {
+        if (startAtMs >= 0 && !startApplied) { startApplied = true; player.seekTo(startAtMs) }
+    }
+    var lastSeekIndex by remember { mutableStateOf(-1L) }
+    LaunchedEffect(seekIndex) {
+        if (seekIndex >= 0 && seekIndex != lastSeekIndex) { lastSeekIndex = seekIndex; player.seekTo(seekIndex.toInt(), 0L) }
+        else if (seekIndex < 0) { lastSeekIndex = -1L }
+    }
+    // Poster: fetch the image off the main thread, show it as PlayerView artwork while idle.
+    val posterDrawable = remember(poster) { mutableStateOf<android.graphics.drawable.Drawable?>(null) }
+    LaunchedEffect(poster) {
+        if (poster != null) {
+            posterDrawable.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    java.net.URL(poster).openStream().use {
+                        android.graphics.drawable.BitmapDrawable(context.resources, android.graphics.BitmapFactory.decodeStream(it))
+                    }
+                } catch (e: Exception) { null }
+            }
+        }
     }
     AndroidView(
         factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = controls } },
-        update = { it.useController = controls },
+        update = { view ->
+            view.useController = controls
+            view.defaultArtwork = posterDrawable.value
+            view.artworkDisplayMode = if (posterDrawable.value != null) PlayerView.ARTWORK_DISPLAY_MODE_FILL else PlayerView.ARTWORK_DISPLAY_MODE_OFF
+        },
         modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
     )
 }

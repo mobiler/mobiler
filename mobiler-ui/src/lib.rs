@@ -396,6 +396,20 @@ pub struct SwipeButton {
     pub on_tap: ActionToken,
 }
 
+/// One subtitle/caption track for a [`Widget::Video`]. `url` points at a WebVTT (`.vtt`) file,
+/// `language` is a BCP-47 tag (e.g. `"en"`), `label` is the human-readable menu entry, and
+/// `default_on` selects it by default. Sidecar tracks work on web (`<track>`) and Android
+/// (Media3 subtitle configuration); on iOS only captions already embedded in an HLS manifest are
+/// selectable (AVPlayer can't attach a sidecar VTT to an MP4 — a documented v1 gap).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct Caption {
+    pub url: String,
+    pub label: String,
+    pub language: String,
+    pub default_on: bool,
+}
+
 // ------------------------------- widgets -------------------------------
 
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
@@ -421,6 +435,16 @@ pub enum Widget {
     /// `Action::Input { id, value: Int(position_ms) }` (handle it in [`MobilerApp::input`]), and fires
     /// `on_ended` when the clip finishes. `controls` shows the native transport bar; `looping` restarts
     /// on end; `muted` starts muted (needed for reliable autoplay). Fills its width; give it room.
+    ///
+    /// v2 fields: `poster` shows a thumbnail image before the first play; `start_at_ms` resumes at an
+    /// offset (applied once on load, `-1` = start). `captions` adds subtitle tracks (see [`Caption`]).
+    /// `rate` sets playback speed (`1.0` = normal) and `volume` the level (`0.0`–`1.0`). For a playlist,
+    /// set `urls` (non-empty takes precedence over `url`) with `start_index`; the shell auto-advances
+    /// and reports the current track ~as it changes via `Action::Input { id: "{id}.index", … }`, and
+    /// `seek_index` jumps to a track when it CHANGES (`-1` = none). The shell also reports
+    /// `"{id}.duration"`, `"{id}.state"` (0 idle / 1 buffering / 2 ready-paused / 3 playing / 4 ended)
+    /// and `"{id}.buffered"` via the same `Input` path (handle them in [`MobilerApp::input`]). Set
+    /// `allow_pip` to enable Picture-in-Picture (the shell adds a PiP affordance).
     Video {
         url: String,
         id: String,
@@ -430,6 +454,15 @@ pub enum Widget {
         looping: bool,
         muted: bool,
         on_ended: Option<ActionToken>,
+        poster: Option<String>,
+        start_at_ms: i64,
+        captions: Vec<Caption>,
+        rate: f32,
+        volume: f32,
+        urls: Vec<String>,
+        start_index: i64,
+        seek_index: i64,
+        allow_pip: bool,
     },
     /// Displays the web page / embedded player at `url` in a native web view — `WKWebView` on iOS,
     /// `android.webkit.WebView` on Android, an `<iframe>` on web. General-purpose: docs, dashboards,
@@ -595,8 +628,8 @@ mod tests {
             legend: vec![ChartLegendItem { label: "Gap".to_string(), color: Rgb::new(0x5A, 0x7D, 0x9A) }],
         });
         round_trips(&Widget::PdfView { url: "https://example.com/report.pdf".to_string() });
-        round_trips(&Widget::Video { url: "https://example.com/clip.mp4".to_string(), id: "v1".to_string(), playing: true, seek_to_ms: -1, controls: true, looping: false, muted: true, on_ended: Some("ended".to_string()) });
-        round_trips(&Widget::Video { url: "https://example.com/live.m3u8".to_string(), id: "v2".to_string(), playing: false, seek_to_ms: 5000, controls: false, looping: true, muted: false, on_ended: None });
+        round_trips(&Widget::Video { url: "https://example.com/clip.mp4".to_string(), id: "v1".to_string(), playing: true, seek_to_ms: -1, controls: true, looping: false, muted: true, on_ended: Some("ended".to_string()), poster: Some("https://example.com/poster.jpg".to_string()), start_at_ms: 12000, captions: vec![Caption { url: "https://example.com/en.vtt".to_string(), label: "English".to_string(), language: "en".to_string(), default_on: true }], rate: 1.5, volume: 0.8, urls: vec![], start_index: 0, seek_index: -1, allow_pip: true });
+        round_trips(&Widget::Video { url: "https://example.com/live.m3u8".to_string(), id: "v2".to_string(), playing: false, seek_to_ms: 5000, controls: false, looping: true, muted: false, on_ended: None, poster: None, start_at_ms: -1, captions: vec![], rate: 1.0, volume: 1.0, urls: vec!["https://example.com/a.mp4".to_string(), "https://example.com/b.mp4".to_string()], start_index: 1, seek_index: 0, allow_pip: false });
         round_trips(&Widget::WebView { url: "https://iframe.mediadelivery.net/embed/1/abc".to_string() });
         round_trips(&Widget::TextField { id: "email".to_string(), placeholder: "you@co".to_string(), value: "".to_string(), kind: FieldKind::Email, error: None });
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
