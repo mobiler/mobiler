@@ -11,10 +11,17 @@ struct CoffeeApp: App {
     // UIApplicationDelegate) into the SwiftUI app — see AppDelegate + PushBridge below.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var core = Core()
+    // Tracks foreground/background for the `system` lifecycle events (see SystemBridge).
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView(core: core)
+                // Inbound system events → SystemBridge → the `system` stream. `.onOpenURL` delivers
+                // deep links (custom scheme / universal link) at launch and while running; scenePhase
+                // reports foreground/background.
+                .onOpenURL { SystemBridge.shared.didOpen(url: $0) }
+                .onChange(of: scenePhase) { newPhase in SystemBridge.shared.didChangeScene(newPhase) }
         }
     }
 }
@@ -157,5 +164,59 @@ final class PushBridge {
             return json
         }
         return "{}"
+    }
+}
+
+// Always-present, plugin-agnostic forwarder for inbound *system* events — deep-link URLs (`.onOpenURL`)
+// and app lifecycle (scenePhase) — into the built-in `system` stream (cx.subscribe). Deep links arriving
+// before the core subscribes BUFFER and flush on attach (launch-from-dead), exactly like PushBridge;
+// lifecycle changes emit live, and the current state is sent on attach. Dormant until something
+// subscribes to "system".
+@MainActor
+final class SystemBridge {
+    static let shared = SystemBridge()
+
+    private var sink: (@Sendable (String) -> Void)?
+    private var buffer: [String] = []
+    private var lastPhase: ScenePhase = .active
+
+    func attach(_ sink: @escaping @Sendable (String) -> Void) {
+        self.sink = sink
+        for payload in buffer { sink(payload) }
+        buffer.removeAll()
+        // Tell the freshly-subscribed app the current lifecycle state.
+        emitLifecycle(lastPhase == .background ? "background" : "active")
+    }
+    func detach() { sink = nil }
+
+    func didOpen(url: URL) {
+        emit("{\"type\":\"deeplink\",\"url\":\(Self.jsonString(url.absoluteString))}")
+    }
+
+    func didChangeScene(_ phase: ScenePhase) {
+        lastPhase = phase
+        switch phase {
+        case .active: emitLifecycle("active")
+        case .background: emitLifecycle("background")
+        default: break  // .inactive is a transient app-switcher state — ignore
+        }
+    }
+
+    private func emitLifecycle(_ state: String) {
+        // Lifecycle is live-only (not buffered) — a fresh subscriber gets the current state on attach.
+        sink?("{\"type\":\"lifecycle\",\"state\":\"\(state)\"}")
+    }
+
+    private func emit(_ payload: String) {
+        if let sink { sink(payload) } else { buffer.append(payload) }
+    }
+
+    // JSON-encode a string (quotes + escapes) without a library: encode `[s]`, strip the brackets.
+    private static func jsonString(_ s: String) -> String {
+        if let data = try? JSONSerialization.data(withJSONObject: [s]),
+           let arr = String(data: data, encoding: .utf8), arr.count >= 2 {
+            return String(arr.dropFirst().dropLast())
+        }
+        return "\"\""
     }
 }

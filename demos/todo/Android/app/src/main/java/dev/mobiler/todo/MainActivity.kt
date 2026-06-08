@@ -186,7 +186,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // A deep link that launched the app — buffered by SystemBus until the core subscribes.
+        intent?.data?.let { SystemBus.emitDeepLink(it.toString()) }
         setContent { App() }
+    }
+
+    // Inbound system events → SystemBus → the built-in `system` stream.
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.data?.let { SystemBus.emitDeepLink(it.toString()) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        SystemBus.emitLifecycle("active")
+    }
+
+    override fun onStop() {
+        SystemBus.emitLifecycle("background")
+        super.onStop()
     }
 }
 

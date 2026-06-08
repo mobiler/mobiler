@@ -159,8 +159,8 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 ## Roadmap
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
-demand-driven): tablet master-detail,
-deep links, and maps. The full list lives on
+demand-driven): tablet master-detail
+and maps. The full list lives on
 [GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
 (`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
@@ -173,7 +173,9 @@ SDK; **experimental**), a controllable **video player** (`Video` — AVPlayer / 
 `<video>`: HLS + MP4, app-driven play/seek + position/ended events), an embedded **web view**
 (`WebView`, + a `mobiler_core::bunny` URL helper), and **Video v2** (poster, start-offset, captions,
 playback rate/volume, full transport state, playlist/queue, Picture-in-Picture, and hls.js for web
-HLS on Chrome/Firefox)._
+HLS on Chrome/Firefox), and **deep links + app lifecycle** (the built-in `system` stream —
+inbound deep-link URLs [custom scheme, default = the app's bundle id] + foreground/background events,
+on iOS/Android/web)._
 
 ## Links
 

@@ -34,6 +34,12 @@ targets:
       # runs the app letterboxed (black bars top/bottom) instead of full screen.
       properties:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.mobile
+        # Deep links: register the app's custom URL scheme (default = the bundle id) so
+        # `dev.mobiler.mobile://…` opens the app — delivered to the core via the built-in `system` stream.
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.mobiler.mobile
+            CFBundleURLSchemes:
+              - dev.mobiler.mobile
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

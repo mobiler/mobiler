@@ -175,6 +175,8 @@ pub enum Msg {
     PlaylistPause,
     PlaylistJump(i64),
     PlaylistEnded,
+    /// --- Profile "Deep links & lifecycle" card: the built-in `system` stream ---
+    SystemEvent(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -277,6 +279,9 @@ pub struct Model {
     playlist_playing: bool,
     playlist_seek_index: i64,
     playlist_index: i64,
+    last_deeplink: String,
+    app_state: String,
+    fg_count: u32,
     /// "Feed" card — a long paged list demoing `LazyList` (pull-to-refresh + load-more). The app
     /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
     feed: Vec<String>,
@@ -358,6 +363,9 @@ impl Default for Model {
             playlist_playing: false,
             playlist_seek_index: -1,
             playlist_index: 0,
+            last_deeplink: String::new(),
+            app_state: "active".to_string(),
+            fg_count: 0,
             feed: feed_page(1),
             feed_refreshing: false,
         }
@@ -774,6 +782,29 @@ impl MobilerApp for FadeHouse {
             // Select a track without auto-playing — Play/Pause control playback.
             Msg::PlaylistJump(i) => model.playlist_seek_index = i,
             Msg::PlaylistEnded => model.playlist_playing = false,
+            Msg::SystemEvent(resp) => {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&resp.output) {
+                    match v.get("type").and_then(|t| t.as_str()) {
+                        Some("deeplink") => {
+                            if let Some(url) = v.get("url").and_then(|u| u.as_str()) {
+                                model.last_deeplink = url.to_string();
+                                // Minimal routing: a "promo" deep link jumps to the Profile tab (where
+                                // this card lives). Gated on the path so a plain web page-load (whose
+                                // URL is also delivered here) doesn't force-navigate. Real apps route
+                                // by the URL's full path/query.
+                                if url.contains("promo") { model.tab = Tab::Profile; }
+                            }
+                        }
+                        Some("lifecycle") => {
+                            if let Some(state) = v.get("state").and_then(|s| s.as_str()) {
+                                model.app_state = state.to_string();
+                                if state == "active" { model.fg_count += 1; }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
                     match query_param(&output, "code") {
@@ -803,6 +834,9 @@ impl MobilerApp for FadeHouse {
         // source of truth) + load product metadata for the Store card. No-ops gracefully until
         // `mobiler plugin add iap`. iOS sim-tests against demos/barbershop/iOS/Products.storekit.
         cx.subscribe("iap", "iap", "transactions", "", Msg::StoreTxn);
+        // Built-in `system` stream: deep-link URLs + app lifecycle (foreground/background). A
+        // launch deep-link is buffered and arrives as the first event on subscribe.
+        cx.subscribe("system", "system", "events", "", Msg::SystemEvent);
         cx.plugin("iap", "products", r#"["com.fadehouse.tip","com.fadehouse.pro","com.fadehouse.premium"]"#, Msg::StoreProducts);
     }
 
@@ -1218,6 +1252,27 @@ fn store_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Deep links & lifecycle" card — the built-in `system` stream (`cx.subscribe`). Shows the last
+/// deep link that opened the app (a launch link is buffered + delivered on subscribe) and the live
+/// foreground/background state. Test: `xcrun simctl openurl booted dev.mobiler.barbershop://promo?id=42`
+/// (iOS) or `adb shell am start -a android.intent.action.VIEW -d "dev.mobiler.barbershop://promo?id=42"`.
+fn system_card(model: &Model) -> Widget {
+    let link = if model.last_deeplink.is_empty() {
+        caption("No deep link yet — open dev.mobiler.barbershop://promo?id=42".to_string())
+    } else {
+        caption(format!("Last deep link: {}", model.last_deeplink))
+    };
+    card(
+        column(vec![
+            emphasis("Deep links & lifecycle"),
+            caption("The built-in `system` stream (cx.subscribe) — inbound deep-link URLs + app foreground/background, native → core."),
+            link,
+            caption(format!("App state: {} • foregrounded {}×", model.app_state, model.fg_count)),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 /// The "Intro video" card — the controllable `Widget::Video`: app-driven Play/Pause/Restart, the
 /// shell-reported position (~1/sec via `input`), and the `on_ended` event. A public MP4 so it plays
 /// on all three shells (an HLS `.m3u8` would play on iOS/Android + Safari only in v1).
@@ -1562,6 +1617,7 @@ fn profile_screen(model: &Model) -> Widget {
         live_card(model),
         push_card(model),
         store_card(model),
+        system_card(model),
         video_card(model),
         playlist_card(model),
         web_card(),
