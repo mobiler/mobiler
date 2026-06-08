@@ -172,6 +172,7 @@ pub enum Msg {
     VideoTogglePip,
     /// --- Profile "Playlist" card: an auto-advancing `video_playlist` ---
     PlaylistPlay,
+    PlaylistPause,
     PlaylistJump(i64),
     PlaylistEnded,
 }
@@ -769,7 +770,9 @@ impl MobilerApp for FadeHouse {
             Msg::VideoToggleCaptions => model.video_captions = !model.video_captions,
             Msg::VideoTogglePip => model.video_pip = !model.video_pip,
             Msg::PlaylistPlay => model.playlist_playing = true,
-            Msg::PlaylistJump(i) => { model.playlist_seek_index = i; model.playlist_playing = true; }
+            Msg::PlaylistPause => model.playlist_playing = false,
+            // Select a track without auto-playing — Play/Pause control playback.
+            Msg::PlaylistJump(i) => model.playlist_seek_index = i,
             Msg::PlaylistEnded => model.playlist_playing = false,
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
@@ -816,10 +819,19 @@ impl MobilerApp for FadeHouse {
             },
             // The Video widget reports its current position (ms) ~1/sec via the input mechanism, plus
             // transport state on suffixed ids ("{id}.duration" / ".state" / ".buffered" / ".index").
-            InputValue::Int(ms) if id == "intro" => model.video_pos_ms = ms,
+            // `seek_to_ms`/`seek_index` are edge-triggered (the shell acts only when the value
+            // CHANGES), so clear them back to -1 once consumed — otherwise a second Restart / re-tap
+            // of the same track sends an unchanged value and is ignored.
+            InputValue::Int(ms) if id == "intro" => {
+                model.video_pos_ms = ms;
+                if model.video_seek_ms >= 0 { model.video_seek_ms = -1; }
+            }
             InputValue::Int(d) if id == "intro.duration" => model.video_duration_ms = d,
             InputValue::Int(s) if id == "intro.state" => model.video_state = s,
-            InputValue::Int(i) if id == "playlist.index" => model.playlist_index = i,
+            InputValue::Int(i) if id == "playlist.index" => {
+                model.playlist_index = i;
+                if model.playlist_seek_index >= 0 { model.playlist_seek_index = -1; }
+            }
             _ => {}
         }
     }
@@ -1258,7 +1270,7 @@ fn video_card(model: &Model) -> Widget {
     card(
         column(vec![
             emphasis("Intro video"),
-            caption("A controllable native player (Widget::Video — AVPlayer / Media3 ExoPlayer / <video>)."),
+            caption("A controllable native player (Widget::Video — AVPlayer / Media3 ExoPlayer / <video>). CC shows a caption overlay; with PiP on, play then background the app to pop out a floating window."),
             player,
             status,
             row(vec![
@@ -1300,8 +1312,9 @@ fn playlist_card(model: &Model) -> Widget {
             player,
             row(vec![
                 button("Play", ButtonStyle::Filled, Msg::PlaylistPlay),
-                button("Clip 1", ButtonStyle::Outlined, Msg::PlaylistJump(0)),
-                button("Clip 2", ButtonStyle::Outlined, Msg::PlaylistJump(1)),
+                button("Pause", ButtonStyle::Outlined, Msg::PlaylistPause),
+                button("Clip 1", ButtonStyle::Text, Msg::PlaylistJump(0)),
+                button("Clip 2", ButtonStyle::Text, Msg::PlaylistJump(1)),
             ]),
         ]),
         CardStyle::Outlined,

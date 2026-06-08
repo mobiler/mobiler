@@ -1286,6 +1286,7 @@ struct VideoView: UIViewControllerRepresentable {
         vc.allowsPictureInPicturePlayback = allowPip
         if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
         session.attachPoster(to: vc, poster: poster)
+        session.attachCaption(to: vc)
         session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
         return vc
     }
@@ -1298,6 +1299,7 @@ struct VideoView: UIViewControllerRepresentable {
         vc.allowsPictureInPicturePlayback = allowPip
         if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
         session.attachPoster(to: vc, poster: poster)
+        session.attachCaption(to: vc)
         session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
     }
 }
@@ -1323,8 +1325,10 @@ final class VideoSession {
     private var lastSeekIndex: Int64 = -1
     private var appliedStartAt = false
     private var captionsOn = false
-    private var captionsApplied = false
-    private var captionLangs: [String] = []
+    private var captionUrl: String?
+    private var captionsRequested = false
+    private var cues: [(start: Double, end: Double, text: String)] = []
+    private var captionLabel: UILabel?
     private var endedFlag = false
     private var posterView: UIImageView?
     private var posterImage: UIImage?
@@ -1405,12 +1409,18 @@ final class VideoSession {
         player.isMuted = muted
         player.volume = volume
         self.desiredRate = rate > 0 ? rate : 1.0
-        let wantCaptions = !captions.isEmpty
-        let langs = captions.map { $0.language }
-        if wantCaptions != captionsOn || langs != captionLangs { captionsApplied = false }
-        captionsOn = wantCaptions
-        captionLangs = langs
-        applyCaptionsIfNeeded()
+        // Captions: AVPlayer can't render a sidecar WebVTT alongside an MP4, so the shell parses the
+        // selected track itself and draws cues in an overlay label (HLS streams with EMBEDDED captions
+        // are still selectable via the player's own CC menu). Pick the default track, else the first.
+        captionsOn = !captions.isEmpty
+        let chosen = captions.first(where: { $0.defaultOn }) ?? captions.first
+        if let chosen, chosen.url != captionUrl {
+            captionUrl = chosen.url
+            captionsRequested = false
+            cues = []
+        }
+        loadCaptionsIfNeeded()
+        if !captionsOn { captionLabel?.isHidden = true }
     }
     func refresh(send: @escaping (Action) -> Void) { self.send = send }
 
@@ -1457,19 +1467,67 @@ final class VideoSession {
         if lastPlaying == true { queue.play() }
     }
 
-    private func applyCaptionsIfNeeded() {
-        guard captionsOn, !captionsApplied, let item = player.currentItem else { return }
-        captionsApplied = true
-        let langs = captionLangs
-        let asset = item.asset
+    // Fetch + parse the selected sidecar WebVTT once (works for https and data: URLs).
+    private func loadCaptionsIfNeeded() {
+        guard captionsOn, !captionsRequested, let urlStr = captionUrl, let url = URL(string: urlStr) else { return }
+        captionsRequested = true
         Task { @MainActor in
-            guard let group = try? await asset.loadMediaSelectionGroup(for: .legible) else { return }
-            let opt = group.options.first { o in
-                guard let tag = o.extendedLanguageTag else { return false }
-                return langs.contains { tag == $0 || tag.hasPrefix($0) }
-            } ?? group.options.first
-            if let opt { item.select(opt, in: group) }
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let text = String(data: data, encoding: .utf8) else { return }
+            self.cues = VideoSession.parseVtt(text)
         }
+    }
+
+    // Minimal WebVTT parser: blocks separated by blank lines, each with a `start --> end` line.
+    static func parseVtt(_ raw: String) -> [(start: Double, end: Double, text: String)] {
+        var out: [(start: Double, end: Double, text: String)] = []
+        let text = raw.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        for block in text.components(separatedBy: "\n\n") {
+            let lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            guard let arrowIdx = lines.firstIndex(where: { $0.contains("-->") }) else { continue }
+            let parts = lines[arrowIdx].components(separatedBy: "-->")
+            guard parts.count == 2, let s = parseVttTime(parts[0]), let e = parseVttTime(parts[1]) else { continue }
+            let cue = lines[(arrowIdx + 1)...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cue.isEmpty { out.append((s, e, cue)) }
+        }
+        return out
+    }
+    static func parseVttTime(_ s: String) -> Double? {
+        let token = s.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? ""
+        let comps = token.split(separator: ":").map(String.init)
+        guard !comps.isEmpty else { return nil }
+        var secs = 0.0
+        for c in comps { secs = secs * 60 + (Double(c.replacingOccurrences(of: ",", with: ".")) ?? 0) }
+        return secs
+    }
+
+    // Attach a caption overlay label, re-attaching to the current VC's overlay if recreated (see #127).
+    func attachCaption(to vc: AVPlayerViewController) {
+        guard let overlay = vc.contentOverlayView else { return }
+        if let existing = captionLabel, existing.superview === overlay { return }
+        let lbl = UILabel()
+        lbl.numberOfLines = 0
+        lbl.textAlignment = .center
+        lbl.textColor = .white
+        lbl.font = .systemFont(ofSize: 15, weight: .semibold)
+        lbl.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        lbl.isHidden = true
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(lbl)
+        NSLayoutConstraint.activate([
+            lbl.leadingAnchor.constraint(greaterThanOrEqualTo: overlay.leadingAnchor, constant: 8),
+            lbl.trailingAnchor.constraint(lessThanOrEqualTo: overlay.trailingAnchor, constant: -8),
+            lbl.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            lbl.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -16),
+        ])
+        captionLabel = lbl
+    }
+    private func updateCaption() {
+        guard captionsOn, !cues.isEmpty else { captionLabel?.isHidden = true; return }
+        let now = CMTimeGetSeconds(player.currentTime())
+        let active = cues.first(where: { now >= $0.start && now <= $0.end })
+        captionLabel?.text = active?.text
+        captionLabel?.isHidden = (active == nil)
     }
 
     // Show `poster` as an overlay until playback starts. The VC is recreated on every whole-tree
@@ -1530,7 +1588,7 @@ final class VideoSession {
     }
     // Report duration/state/buffered (+ playlist index) via suffixed input ids when they change.
     private func reportTransport() {
-        applyCaptionsIfNeeded()
+        updateCaption()
         if posterView != nil, player.timeControlStatus == .playing { posterView?.isHidden = true }
         let d = durationMs()
         if d != lastDuration { lastDuration = d; send(.input(id: id + ".duration", value: .int(d))) }
