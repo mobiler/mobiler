@@ -37,10 +37,13 @@ targets:
       properties:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.barbershop
         UILaunchScreen: {}
+        # Allow landscape so the Widget::Split master-detail can show its side-by-side (regular size
+        # class) layout on an iPad or a Plus/Max iPhone in landscape. UIRequiresFullScreen keeps the
+        # app full-screen (opts out of iPad multitasking) so it gets the regular class, not Slide Over.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four
-        # orientations) by declaring the app full-screen.
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: true
         # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
         # the "Missing export compliance" question.
@@ -77,7 +80,7 @@ targets:
         # ships as 1.1 build 1 — a fresh version string, so it's accepted regardless of any
         # prior 1.0 builds. Bump CURRENT_PROJECT_VERSION for each subsequent 1.1 upload.
         MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "17"
+        CURRENT_PROJECT_VERSION: "19"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]

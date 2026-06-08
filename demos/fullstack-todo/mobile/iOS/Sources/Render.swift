@@ -158,6 +158,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
+    case .split(let primary, let detail, let showDetail, let onBack):
+        return AnyView(SplitView(primary: primary, detail: detail, showDetail: showDetail, onBack: onBack, send: send))
+
     case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing):
         return AnyView(LazyListView(
             children: children, onLoadMore: onLoadMore, loading: loading,
@@ -857,6 +860,39 @@ private struct RatingView: View {
 }
 
 // MARK: - Scaffold (top bar + scrollable body + bottom tabs + theme-as-data)
+
+// Two-pane master-detail (Widget.Split). Regular width (tablet / landscape) → primary + detail
+// side-by-side; compact (phone) → one pane: `primary`, or `detail` with a back chevron when
+// `showDetail`. Reads the same `horizontalSizeClass` as ScaffoldView's nav-rail switch.
+private struct SplitView: View {
+    let primary: SharedTypes.Widget
+    let detail: SharedTypes.Widget
+    let showDetail: Bool
+    let onBack: String?
+    let send: (Action) -> Void
+    @Environment(\.horizontalSizeClass) private var hSize
+
+    var body: some View {
+        if hSize == .regular {
+            HStack(alignment: .top, spacing: 20) {
+                render(primary, send).frame(width: 320, alignment: .top)
+                Divider()
+                render(detail, send).frame(maxWidth: .infinity, alignment: .top)
+            }
+        } else if showDetail {
+            VStack(alignment: .leading, spacing: 8) {
+                if let onBack {
+                    Button(action: { send(.fired(token: onBack)) }) {
+                        Label("Back", systemImage: "chevron.left").font(.body.weight(.semibold))
+                    }.buttonStyle(.plain)
+                }
+                render(detail, send)
+            }
+        } else {
+            render(primary, send)
+        }
+    }
+}
 
 private struct ScaffoldView: View {
     let title: String

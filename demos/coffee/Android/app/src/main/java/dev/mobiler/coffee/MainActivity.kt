@@ -867,6 +867,30 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) { widget.children.forEach { Render(it, send) } }
 
+        // Two-pane master-detail (Widget.Split). Wide (≥600.dp — the Scaffold-rail threshold) →
+        // primary + detail side-by-side; narrow → one pane: primary, or detail + a back row when
+        // showDetail. Mirrors the Scaffold's BoxWithConstraints size switch.
+        is Widget.Split -> BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            if (maxWidth >= 600.dp) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Box(modifier = Modifier.width(320.dp)) { Render(widget.primary, send) }
+                    Box(modifier = Modifier.weight(1f)) { Render(widget.detail, send) }
+                }
+            } else if (widget.showDetail) {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val back = widget.onBack
+                    if (back != null) {
+                        TextButton(onClick = { send(Action.Fired(back)) }) {
+                            Text("‹ Back", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Render(widget.detail, send)
+                }
+            } else {
+                Render(widget.primary, send)
+            }
+        }
+
         // A paged feed list: pull-to-refresh on top (PullToRefreshBox) + load-more when the user
         // scrolls near the end. Bounded height so the inner LazyColumn scrolls inside the body.
         is Widget.LazyList -> {

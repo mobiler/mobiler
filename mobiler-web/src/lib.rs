@@ -792,6 +792,23 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let kids = render_all(children, send);
             view! { <div class="scroller">{kids}</div> }.into_any()
         }
+        // Two-pane master-detail. CSS does the adapting: wide (`@media min-width:768px`) shows both
+        // panes side-by-side (back hidden); narrow shows one — primary by default, or detail (+ a
+        // back chevron) when `data-detail` is set. `show_detail`/`on_back` only matter when narrow.
+        Widget::Split { primary, detail, show_detail, on_back } => {
+            let p = render(primary, send);
+            let d = render(detail, send);
+            let back_btn = on_back.clone().map(|t| {
+                let send = send.clone();
+                view! { <button class="split-back" on:click=move |_| send(Action::Fired { token: t.clone() })>"‹ Back"</button> }
+            });
+            view! {
+                <div class="split" data-detail=show_detail.then_some("1")>
+                    <div class="split-primary">{p}</div>
+                    <div class="split-detail">{back_btn}{d}</div>
+                </div>
+            }.into_any()
+        }
         // A long/paged feed. Web has no pull gesture or reliable infinite-scroll on a sub-container,
         // so (like Scaffold pull-to-refresh) the gestures degrade to controls: a top "↻ Refresh"
         // button (while `on_refresh`), and a bottom "Load more" button (while `has_more && !loading`)
