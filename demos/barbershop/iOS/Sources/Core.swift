@@ -162,6 +162,7 @@ enum Plugins {
         case "bluetooth": return await BluetoothPlugin.handle(op: op, input: input)
         case "oauth": return await OAuthPlugin.handle(op: op, input: input)
         case "websocket": return await WebSocketPlugin.handle(op: op, input: input)
+        case "files": return await FilesPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")

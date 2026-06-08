@@ -372,6 +372,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "bluetooth" to BluetoothPlugin(application),
         "oauth" to OAuthPlugin(application),
         "websocket" to WebSocketPlugin(application),
+        "files" to FilesPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

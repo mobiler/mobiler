@@ -559,6 +559,29 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_files_copies_sources_registers_and_declares_export_activity() {
+        let root = skeleton();
+        add_at(&root, "files").unwrap();
+
+        // Both Android sources copied with the package substituted.
+        let plugin = read(&root, "Android/app/src/main/java/dev/mobiler/demo/FilesPlugin.kt");
+        assert!(plugin.contains("package dev.mobiler.demo"));
+        assert!(plugin.contains("class FilesPlugin"));
+        let activity = read(&root, "Android/app/src/main/java/dev/mobiler/demo/FileExportActivity.kt");
+        assert!(activity.contains("class FileExportActivity"));
+        // Registered in both shells + the export helper Activity declared in the manifest.
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"files\" to FilesPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"files\": return await FilesPlugin.handle"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android:name=\".FileExportActivity\""), "export helper activity declared");
+        let swift = read(&root, "iOS/Sources/FilesPlugin.swift");
+        assert!(swift.contains("enum FilesPlugin"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_bundled_geolocation_adds_permissions_and_plist_key() {
         let root = skeleton();
         add_at(&root, "geolocation").unwrap();

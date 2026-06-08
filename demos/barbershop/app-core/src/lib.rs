@@ -177,6 +177,13 @@ pub enum Msg {
     PlaylistEnded,
     /// --- Profile "Deep links & lifecycle" card: the built-in `system` stream ---
     SystemEvent(PluginResponse),
+    /// --- Profile "Files" card: the `files` plugin (read/write/list/download/export) ---
+    FilesWrite,
+    FilesRead,
+    FilesList,
+    FilesDownload,
+    FilesExport,
+    FilesResult(PluginResponse),
 }
 
 #[derive(Clone)]
@@ -282,6 +289,7 @@ pub struct Model {
     last_deeplink: String,
     app_state: String,
     fg_count: u32,
+    files_status: String,
     /// "Feed" card — a long paged list demoing `LazyList` (pull-to-refresh + load-more). The app
     /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
     feed: Vec<String>,
@@ -366,6 +374,7 @@ impl Default for Model {
             last_deeplink: String::new(),
             app_state: "active".to_string(),
             fg_count: 0,
+            files_status: String::new(),
             feed: feed_page(1),
             feed_refreshing: false,
         }
@@ -804,6 +813,21 @@ impl MobilerApp for FadeHouse {
                         _ => {}
                     }
                 }
+            }
+            // `files` plugin round-trip: write a note → read it back → list → download a sample →
+            // export to the system save picker. One result handler updates the status line.
+            Msg::FilesWrite => cx.plugin("files", "write", r#"{"path":"demo/note.txt","content":"Hello from Fade House"}"#, Msg::FilesResult),
+            Msg::FilesRead => cx.plugin("files", "read", r#"{"path":"demo/note.txt"}"#, Msg::FilesResult),
+            Msg::FilesList => cx.plugin("files", "list", r#"{"dir":"demo"}"#, Msg::FilesResult),
+            Msg::FilesDownload => cx.plugin("files", "download", r#"{"url":"https://www.w3.org/robots.txt","path":"demo/robots.txt"}"#, Msg::FilesResult),
+            Msg::FilesExport => cx.plugin("files", "export", r#"{"path":"demo/note.txt","name":"FadeHouse.txt"}"#, Msg::FilesResult),
+            Msg::FilesResult(r) => {
+                model.files_status = if r.ok {
+                    let out = if r.output.len() > 80 { format!("{}…", &r.output[..80]) } else { r.output };
+                    format!("ok — {out}")
+                } else {
+                    format!("error — {}", r.output)
+                };
             }
             Msg::OAuthDone(ok, output) => {
                 model.oauth_status = if ok {
@@ -1273,6 +1297,28 @@ fn system_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Files" card — the `files` plugin (`cx.plugin`). Write a note to the app sandbox, read it
+/// back, list the dir, download a sample to disk, and export to the system Files/Downloads picker.
+fn files_card(model: &Model) -> Widget {
+    card(
+        column(vec![
+            emphasis("Files"),
+            caption("App-sandbox file I/O + download + export (the `files` plugin — read / write / list / download / export)."),
+            row(vec![
+                button("Write", ButtonStyle::Filled, Msg::FilesWrite),
+                button("Read", ButtonStyle::Outlined, Msg::FilesRead),
+                button("List", ButtonStyle::Text, Msg::FilesList),
+            ]),
+            row(vec![
+                button("Download", ButtonStyle::Outlined, Msg::FilesDownload),
+                button("Export", ButtonStyle::Text, Msg::FilesExport),
+            ]),
+            caption(if model.files_status.is_empty() { "Tap Write, then Read.".to_string() } else { model.files_status.clone() }),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 /// The "Intro video" card — the controllable `Widget::Video`: app-driven Play/Pause/Restart, the
 /// shell-reported position (~1/sec via `input`), and the `on_ended` event. A public MP4 so it plays
 /// on all three shells (an HLS `.m3u8` would play on iOS/Android + Safari only in v1).
@@ -1618,6 +1664,7 @@ fn profile_screen(model: &Model) -> Widget {
         push_card(model),
         store_card(model),
         system_card(model),
+        files_card(model),
         video_card(model),
         playlist_card(model),
         web_card(),

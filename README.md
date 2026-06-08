@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing)
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing)
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -180,6 +180,7 @@ free plugins:
 | 🗣️ **tts** | text-to-speech (speak a string aloud) | `mobiler plugin add tts` |
 | ⭐ **review** | in-app App Store / Play review prompt | `mobiler plugin add review` |
 | 📤 **sharefile** | share a file / image via the share sheet | `mobiler plugin add sharefile` |
+| 📁 **files** | app-sandbox read/write/list, download a URL to disk, export to Files/Downloads | `mobiler plugin add files` |
 | 🎬 **video** | record a video → local URI | `mobiler plugin add video` |
 | 🎤 **speech** | speech-to-text (dictation) | `mobiler plugin add speech` |
 | 🗃️ **sqlite** | on-device SQLite (exec / query → JSON) | `mobiler plugin add sqlite` |
