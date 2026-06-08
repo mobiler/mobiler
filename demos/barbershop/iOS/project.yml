@@ -63,7 +63,7 @@ targets:
         # ships as 1.1 build 1 — a fresh version string, so it's accepted regardless of any
         # prior 1.0 builds. Bump CURRENT_PROJECT_VERSION for each subsequent 1.1 upload.
         MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "11"
+        CURRENT_PROJECT_VERSION: "12"
         # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
         LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
         OTHER_LDFLAGS: ["-lshared"]
