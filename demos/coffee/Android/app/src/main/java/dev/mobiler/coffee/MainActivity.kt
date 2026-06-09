@@ -20,6 +20,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -811,30 +812,36 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         ) { widget.children.forEach { Render(it, send) } }
 
         is Widget.Card -> {
-            val mod = Modifier.fillMaxWidth()
             val op = widget.onPress
+            val lp = widget.onLongPress
+            // Tap and/or long-press via one `combinedClickable` so a card can carry both. The M3
+            // `Card(onClick=)` overload has no long-click, so we use the plain Card variants and
+            // attach the gesture as a modifier.
+            val clickMod = if (op != null || lp != null)
+                Modifier.combinedClickable(
+                    onClick = { if (op != null) send(Action.Fired(op)) },
+                    onLongClick = if (lp != null) ({ send(Action.Fired(lp)) }) else null,
+                )
+            else Modifier
+            val mod = Modifier.fillMaxWidth().then(clickMod)
             when (widget.style) {
-                CardStyle.OUTLINED ->
-                    if (op != null) OutlinedCard(onClick = { send(Action.Fired(op)) }, modifier = mod) { CardBody(widget.child, send) }
-                    else OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
+                CardStyle.OUTLINED -> OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
                 CardStyle.FILLED -> {
                     val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, colors = colors) { CardBody(widget.child, send) }
-                    else Card(modifier = mod, colors = colors) { CardBody(widget.child, send) }
+                    Card(modifier = mod, colors = colors) { CardBody(widget.child, send) }
                 }
                 CardStyle.ELEVATED -> {
                     val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                    if (op != null) Card(onClick = { send(Action.Fired(op)) }, modifier = mod, elevation = elev) { CardBody(widget.child, send) }
-                    else Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                    Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
                 }
                 CardStyle.BRAND -> {
                     // Brand gradient (seed → accent, via the M3 primary → secondary scheme).
                     val cs = MaterialTheme.colorScheme
                     val grad = Brush.linearGradient(listOf(cs.primary, cs.secondary))
-                    val brandMod = mod
+                    val brandMod = Modifier.fillMaxWidth()
                         .clip(MaterialTheme.shapes.medium)
                         .background(grad)
-                        .then(if (op != null) Modifier.clickable { send(Action.Fired(op)) } else Modifier)
+                        .then(clickMod)
                     Box(modifier = brandMod) {
                         CompositionLocalProvider(LocalContentColor provides Color.White) { CardBody(widget.child, send) }
                     }

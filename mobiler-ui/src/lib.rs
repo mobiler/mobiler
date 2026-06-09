@@ -557,8 +557,15 @@ pub enum Widget {
     // Layout
     Row { children: Vec<Widget> },
     Column { children: Vec<Widget> },
-    /// Card; tappable when `on_press` is set.
-    Card { child: Box<Widget>, style: CardStyle, on_press: Option<ActionToken> },
+    /// Card; tappable when `on_press` is set. Fires `on_long_press` (when set) on a
+    /// press-and-hold (web: a ~500 ms pointer-hold; iOS: `onLongPressGesture`;
+    /// Android: `combinedClickable`'s `onLongClick`).
+    Card {
+        child: Box<Widget>,
+        style: CardStyle,
+        on_press: Option<ActionToken>,
+        on_long_press: Option<ActionToken>,
+    },
     /// Z-stack: children layered back-to-front, positioned by `align`. With
     /// `scrim`, the first child is a background image, darkened for legibility,
     /// and the rest render on top in light content.
