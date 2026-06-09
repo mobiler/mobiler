@@ -17,8 +17,9 @@ new `mobiler_core::i18n` translation primitive we add along the way.
 1. **[Scaffold & first screen](01-scaffold-and-first-screen.md)** — `mobiler new`, the mobile-only
    project layout, the `MobilerApp` (Model / Msg / `update` / `input` / `view`), the four-tab
    `scaffold`, a floating action button, a bottom sheet, and an in-memory expense ledger.
-2. **Persist with SQLite** — design the schema, create it on launch, insert/query, and the
-   "the Model isn't persisted — re-read it on launch" pattern. *(coming next)*
+2. **[Persist with SQLite](02-persist-with-sqlite.md)** — the schema, creating it on launch,
+   insert/query with bound params, a new `cx.now()` capability, day-grouping, period filters, and the
+   "the Model isn't persisted — re-read it on launch" pattern.
 3. **Accounts & transfers** — the Assets tab: accounts, balances, net worth, transfers.
 4. **Categories & the entry sheet** — editable income/expense categories with subcategories, the date
    picker, the category picker.

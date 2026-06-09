@@ -316,12 +316,20 @@ enum DialogPlugin {
     }
 }
 
-/// Native date / time picker — request/response. `op` is "date" (→ ISO "YYYY-MM-DD")
-/// or "time" (→ 24-hour "HH:MM"); `ok=false` on cancel. Presents a UIDatePicker in an
-/// action sheet and resolves via a continuation once the user taps Done.
+/// Native date / time capability — request/response. `op`:
+///   "now"  → the current local date-time as "yyyy-MM-dd HH:mm:ss" (no UI, resolves immediately),
+///   "date" → a picker returning ISO "YYYY-MM-DD", "time" → a picker returning 24-hour "HH:MM".
+/// Pickers resolve `ok=false` on cancel. The pickers present a UIDatePicker in an action sheet.
 @MainActor
 enum DateTimePlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
+        // "now" needs no UI — stamp the current local date-time and return at once.
+        if op == "now" {
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return PluginResponse(ok: true, output: fmt.string(from: Date()))
+        }
         let mode: UIDatePicker.Mode
         switch op {
         case "date": mode = .date

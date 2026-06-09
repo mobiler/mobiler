@@ -213,11 +213,17 @@ class DialogPlugin : MobilerPlugin {
     }
 }
 
-/** Official, bundled plugin: native date / time pickers (request/response). op is
- *  "date" (→ ISO "YYYY-MM-DD") or "time" (→ 24-hour "HH:MM"); ok=false on cancel.
- *  Suspends until the user picks or dismisses. */
+/** Official, bundled plugin: native date / time capability (request/response). op is
+ *  "now" (→ current local "yyyy-MM-dd HH:mm:ss", no UI), "date" (→ ISO "YYYY-MM-DD")
+ *  or "time" (→ 24-hour "HH:MM"); pickers return ok=false on cancel and suspend until
+ *  the user picks or dismisses. */
 class DateTimePlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
+        // "now" needs no Activity/UI — stamp the current local date-time and return at once.
+        if (op == "now") {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            return PluginResponse(true, fmt.format(java.util.Date()))
+        }
         val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
         val now = Calendar.getInstance()
         return withContext(Dispatchers.Main) {
