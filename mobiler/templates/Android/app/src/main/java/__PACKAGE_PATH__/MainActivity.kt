@@ -123,6 +123,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -168,6 +173,7 @@ import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import {{PACKAGE}}.ui.theme.{{NAME}}Theme
+import {{PACKAGE_SHARED_TYPES}}.A11yRole
 import {{PACKAGE_SHARED_TYPES}}.Action
 import {{PACKAGE_SHARED_TYPES}}.BoxAlign
 import {{PACKAGE_SHARED_TYPES}}.ButtonStyle
@@ -932,6 +938,23 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 ) { list() }
             } else {
                 list()
+            }
+        }
+
+        is Widget.A11y -> {
+            val desc = widget.hint?.let { "${widget.label}. $it" } ?: widget.label
+            Box(
+                modifier = Modifier.semantics(mergeDescendants = true) {
+                    contentDescription = desc
+                    when (widget.role) {
+                        A11yRole.BUTTON -> role = Role.Button
+                        A11yRole.IMAGE -> role = Role.Image
+                        A11yRole.HEADER -> heading()
+                        A11yRole.LINK, A11yRole.ADJUSTABLE, null -> {}
+                    }
+                },
+            ) {
+                Render(widget.child, send)
             }
         }
 
