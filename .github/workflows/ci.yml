@@ -34,6 +34,9 @@ jobs:
           # Barbershop showcase: app-core only (web is separate).
           - name: demo-barbershop
             dir: demos/barbershop
+          # Saldo — the multilingual expense/money manager (mobile-only; tutorial showcase).
+          - name: demo-saldo
+            dir: demos/saldo
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
@@ -140,6 +143,7 @@ jobs:
           - demos/todo
           - demos/fullstack-todo/mobile
           - demos/barbershop
+          - demos/saldo
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -239,7 +243,7 @@ jobs:
         # coffee carries installed plugins; todo + fullstack exercise the other demo
         # shells so Kotlin drift (new Widget variants in the exhaustive `when`) can't
         # slip through uncaught — their Android shells aren't otherwise CI-compiled.
-        demo: [demos/coffee, demos/todo, demos/fullstack-todo/mobile, demos/barbershop]
+        demo: [demos/coffee, demos/todo, demos/fullstack-todo/mobile, demos/barbershop, demos/saldo]
     steps:
       - uses: actions/checkout@v5
 

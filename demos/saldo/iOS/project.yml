@@ -1,0 +1,77 @@
+# XcodeGen spec → Mobiler.xcodeproj (project-as-code, so the build is scriptable
+# and reproducible — no hand-edited .pbxproj). `build-ios.sh` runs `xcodegen
+# generate` then `xcodebuild`.
+#
+# VERIFY-ON-MAC: the fiddly part is linking the Rust static lib + its uniffi FFI
+# (the modulemap / header / search paths). The settings below are the standard
+# Crux-iOS shape; expect to adjust paths on the first MacinCloud build.
+name: Saldo
+options:
+  bundleIdPrefix: rs.mobiler.saldo
+  deploymentTarget:
+    iOS: "16.0"
+
+packages:
+  # The facet-generated ABI types (Widget/Action/Effect/...), emitted by
+  # `codegen --language swift` into generated/SharedTypes.
+  SharedTypes:
+    path: generated/SharedTypes
+  # mobiler:spm-packages — `mobiler plugin add` inserts remote SwiftPM packages above this line
+
+targets:
+  Saldo:
+    type: application
+    platform: iOS
+    sources:
+      - Sources                       # App.swift, Core.swift, Render.swift
+      - generated/shared.swift         # uniffi Swift wrapper (generated)
+    dependencies:
+      - package: SharedTypes
+      # mobiler:spm-dependencies — `mobiler plugin add` inserts SwiftPM product deps above this line
+    info:
+      path: Sources/Info.plist
+      # xcodegen regenerates this plist from these properties on every build, so
+      # launch-screen / orientation keys MUST live here — not just in the committed
+      # Info.plist (which gets overwritten). Without UILaunchScreen iOS runs the app
+      # letterboxed (black bars top/bottom) instead of full screen.
+      properties:
+        PRODUCT_BUNDLE_IDENTIFIER: rs.mobiler.saldo
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four
+        # orientations) by declaring the app full-screen.
+        UIRequiresFullScreen: true
+        # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
+        # the "Missing export compliance" question.
+        ITSAppUsesNonExemptEncryption: false
+        # Deep links: register the app's custom URL scheme (default = the bundle id) so
+        # `rs.mobiler.saldo://…` opens the app — delivered to the core via the built-in `system` stream.
+        # (Universal/App Links over https additionally need an associated-domains entitlement + a
+        # server-side apple-app-site-association file — not auto-wired.)
+        CFBundleURLTypes:
+          - CFBundleURLName: rs.mobiler.saldo
+            CFBundleURLSchemes:
+              - rs.mobiler.saldo
+        # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
+        # requires this usage string to access the camera; the App Store flags apps that
+        # ship it without using the camera, so it's left off by default.
+        # NSCameraUsageDescription: "Take photos to use in the app."
+        # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: rs.mobiler.saldo
+        SWIFT_VERSION: "5.9"
+        # Link the Rust staticlib (built by build-ios.sh into generated/lib/).
+        LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/generated/lib"]
+        OTHER_LDFLAGS: ["-lshared"]
+        # uniffi FFI modulemap so `shared.swift` finds the C symbols.
+        SWIFT_INCLUDE_PATHS: ["$(PROJECT_DIR)/generated"]
+        # App icon: actool builds the required sizes from the single 1024 source in
+        # Sources/Assets.xcassets/AppIcon.appiconset and injects CFBundleIconName. Replace
+        # the placeholder icon (a neutral diamond) with your own.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The archive is built unsigned (build-ios.sh signs at export for App Store); the
+        # simulator + device compile-check builds need no signing either.
+        CODE_SIGNING_ALLOWED: "NO"
+    # mobiler:target-extra (plugin add inserts a target-level entitlements block above this line)
