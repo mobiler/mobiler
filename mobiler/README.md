@@ -17,10 +17,12 @@ its `view` returns a `Widget` tree that thin, **app-agnostic** shells render int
 native widgets. Each shell is generic — built once from a fixed wire ABI and reused for
 every app — so you write the app once, in Rust, and it runs natively everywhere.
 
-The `Widget` set spans layout, inputs, navigation (tabs/FAB/sheets, tablet-adaptive), media,
-feedback, an inline calendar, and **data-viz charts** — eight `Chart` styles (bar, line, stacked,
-100%-stacked, pie, donut, fitness-style progress rings, radial gauge) plus a variable-width
-coverage-gap `RegionChart`.
+The `Widget` set spans layout (incl. paged lazy lists), inputs, navigation (tabs/FAB/sheets,
+tablet-adaptive **master-detail**), media — images, a controllable **video player**, an embedded
+**web view**, an in-app **PDF viewer**, and an interactive **map** (MapKit / MapLibre, no API key) —
+feedback, an inline calendar, **data-viz charts** (eight `Chart` styles: bar, line, stacked,
+100%-stacked, pie, donut, fitness-style progress rings, radial gauge — plus a variable-width
+coverage-gap `RegionChart`), and an **accessibility** wrapper (screen-reader label/hint/role on any widget).
 
 ## Install
 
@@ -163,9 +165,13 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 ## Roadmap
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
-demand-driven): maps, background tasks, analytics, accessibility. The full list lives on
-[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: a **two-pane master-detail**
-(`Split` — side-by-side on tablets/landscape, push-nav on phones), an **app `files` plugin**
+demand-driven): FusedLocation, BLE write/notify, richer gestures/animations. The full list lives on
+[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: an interactive **map**
+(`Map` — iOS MapKit / Android MapLibre / web MapLibre-GL, no API key; markers + tap events), an
+**accessibility** wrapper (`a11y` — screen-reader label/hint/role on any widget), **analytics + crash
+reporting** (`analytics` plugin — Firebase Analytics + Crashlytics; **experimental**), **background
+geofencing + periodic wake** (`geofence` / `background-fetch` plugins; **experimental**), a **two-pane
+master-detail** (`Split` — side-by-side on tablets/landscape, push-nav on phones), an **app `files` plugin**
 (read/write/list + download + export to Files/Downloads), rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
 (`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
