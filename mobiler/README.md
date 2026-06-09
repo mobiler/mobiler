@@ -166,8 +166,13 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 ## Roadmap
 
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
-demand-driven): FusedLocation, BLE write/notify, richer gestures/animations. The full list lives on
-[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: an interactive **map**
+demand-driven): animations / view transitions, and on-device hardening of the experimental plugins.
+The full list lives on
+[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: **card long-press**
+(`with_long_press(card, E)` — press-and-hold for a secondary action, alongside a card's tap),
+**FusedLocation** (`geolocation-fused` plugin — higher-accuracy location via Play Services) and
+**BLE write/notify** (the `bluetooth` plugin gained a write op + a characteristic-change notify
+stream), an interactive **map**
 (`Map` — iOS MapKit / Android MapLibre / web MapLibre-GL, no API key; markers + tap events), an
 **accessibility** wrapper (`a11y` — screen-reader label/hint/role on any widget), **analytics + crash
 reporting** (`analytics` plugin — Firebase Analytics + Crashlytics; **experimental**), **background
