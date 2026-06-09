@@ -156,6 +156,11 @@ body {
 .align-bottom-center> .box-content { justify-content: flex-end;   align-items: center; }
 .align-bottom-end   > .box-content { justify-content: flex-end;   align-items: flex-end; }
 
+/* ---- map (Widget::Map, MapLibre-GL) ---- */
+.mobiler-map-wrap { position: relative; width: 100%; }
+.mobiler-map { width: 100%; height: 240px; border-radius: var(--corner, 12px); overflow: hidden; }
+.mobiler-map-sink { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+
 /* ---- content ----
    Reading text is sized in `rem` so it honors the browser's default-font-size setting (the web
    equivalent of iOS Dynamic Type / Android fontScale). Controls + chart text stay px on purpose. */

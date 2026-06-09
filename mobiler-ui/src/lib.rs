@@ -416,6 +416,17 @@ pub struct Caption {
     pub default_on: bool,
 }
 
+/// A pin on a [`Widget::Map`]. `id` is echoed back when the marker is tapped
+/// (`Action::Input { id: "{map_id}.marker", value: Text(marker.id) }`).
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub struct MapMarker {
+    pub id: String,
+    pub lat: f64,
+    pub lng: f64,
+    pub title: Option<String>,
+}
+
 // ------------------------------- widgets -------------------------------
 
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
@@ -477,6 +488,22 @@ pub enum Widget {
     /// players work. This is NOT the default way to play video — use [`Widget::Video`] for a
     /// controllable native player. Fills its width; give it room (place in a sized container).
     WebView { url: String },
+    /// An interactive map (a "live native view" like [`Widget::Video`]): iOS MapKit, Android MapLibre
+    /// Native, web MapLibre-GL — no API key. The app drives the camera (`center_lat`/`center_lng`/`zoom`)
+    /// and `markers`; the user pans/zooms when `interactive`. Taps report back via `Action::Input`:
+    /// a map tap → `{ id: "{id}.tap", value: Text("lat,lng") }`, a marker tap → `{ id: "{id}.marker",
+    /// value: Text(marker.id) }` (handle in [`MobilerApp::input`] by id-suffix). `style_url` selects the
+    /// MapLibre vector style on Android/web (None → a free default); iOS MapKit uses Apple Maps and
+    /// ignores it. Fills its width; give it a height (place in a sized container).
+    Map {
+        id: String,
+        center_lat: f64,
+        center_lng: f64,
+        zoom: f64,
+        markers: Vec<MapMarker>,
+        style_url: Option<String>,
+        interactive: bool,
+    },
     /// A star rating. `value` is in tenths (e.g. `48` = 4.8 of `max` stars). When `on_rate`
     /// is set (one token per star), the stars are tappable — star *i* fires `on_rate[i]`.
     Rating { value: u32, max: u8, on_rate: Option<Vec<ActionToken>> },
@@ -649,6 +676,8 @@ mod tests {
         round_trips(&Widget::Video { url: "https://example.com/clip.mp4".to_string(), id: "v1".to_string(), playing: true, seek_to_ms: -1, controls: true, looping: false, muted: true, on_ended: Some("ended".to_string()), poster: Some("https://example.com/poster.jpg".to_string()), start_at_ms: 12000, captions: vec![Caption { url: "https://example.com/en.vtt".to_string(), label: "English".to_string(), language: "en".to_string(), default_on: true }], rate: 1.5, volume: 0.8, urls: vec![], start_index: 0, seek_index: -1, allow_pip: true });
         round_trips(&Widget::Video { url: "https://example.com/live.m3u8".to_string(), id: "v2".to_string(), playing: false, seek_to_ms: 5000, controls: false, looping: true, muted: false, on_ended: None, poster: None, start_at_ms: -1, captions: vec![], rate: 1.0, volume: 1.0, urls: vec!["https://example.com/a.mp4".to_string(), "https://example.com/b.mp4".to_string()], start_index: 1, seek_index: 0, allow_pip: false });
         round_trips(&Widget::WebView { url: "https://iframe.mediadelivery.net/embed/1/abc".to_string() });
+        round_trips(&Widget::Map { id: "m1".to_string(), center_lat: 47.3769, center_lng: 8.5417, zoom: 14.0, markers: vec![MapMarker { id: "shop".to_string(), lat: 47.3769, lng: 8.5417, title: Some("Fade House".to_string()) }], style_url: Some("https://tiles.openfreemap.org/styles/liberty".to_string()), interactive: true });
+        round_trips(&Widget::Map { id: "m2".to_string(), center_lat: 0.0, center_lng: 0.0, zoom: 2.0, markers: vec![], style_url: None, interactive: false });
         round_trips(&Widget::TextField { id: "email".to_string(), placeholder: "you@co".to_string(), value: "".to_string(), kind: FieldKind::Email, error: None });
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });

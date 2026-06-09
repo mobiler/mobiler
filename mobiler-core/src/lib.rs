@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use mobiler_ui::{
     A11yRole, Action, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FieldKind, FontFamily, Icon,
-    ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
+    ImageRatio, ImageShape, InputValue, MapMarker, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, Widget,
 };
 
@@ -612,6 +612,52 @@ pub fn with_pip(widget: Widget) -> Widget { map_video(widget, |v| v.allow_pip = 
 /// (a sized container or a card).
 #[must_use]
 pub fn web_view(url: impl Into<String>) -> Widget { Widget::WebView { url: url.into() } }
+
+/// An interactive map centered at (`center_lat`, `center_lng`) with the given `zoom` (≈ MapLibre/Google
+/// zoom levels: ~2 world, ~14 city, ~17 street). iOS MapKit / Android MapLibre / web MapLibre-GL — no
+/// API key. Add pins with [`with_markers`], a vector style with [`with_map_style`]. Taps arrive in
+/// [`MobilerApp::input`] as `Input { id: "{id}.tap", Text("lat,lng") }` / `{ "{id}.marker", Text(id) }`.
+/// Give it a height (a sized container or card).
+#[must_use]
+pub fn map(id: impl Into<String>, center_lat: f64, center_lng: f64, zoom: f64) -> Widget {
+    Widget::Map {
+        id: id.into(),
+        center_lat,
+        center_lng,
+        zoom,
+        markers: Vec::new(),
+        style_url: None,
+        interactive: true,
+    }
+}
+/// Add/replace the pins on a [`map`] (no-op on any other widget).
+#[must_use]
+pub fn with_markers(widget: Widget, markers: Vec<MapMarker>) -> Widget {
+    match widget {
+        Widget::Map { id, center_lat, center_lng, zoom, style_url, interactive, .. } =>
+            Widget::Map { id, center_lat, center_lng, zoom, markers, style_url, interactive },
+        other => other,
+    }
+}
+/// Set the MapLibre vector-style URL (Android + web; iOS MapKit ignores it). None → a free default.
+#[must_use]
+pub fn with_map_style(widget: Widget, url: impl Into<String>) -> Widget {
+    match widget {
+        Widget::Map { id, center_lat, center_lng, zoom, markers, interactive, .. } =>
+            Widget::Map { id, center_lat, center_lng, zoom, markers, style_url: Some(url.into()), interactive },
+        other => other,
+    }
+}
+/// A map pin at (`lat`, `lng`); `id` is echoed on tap. Add a title with [`marker_titled`].
+#[must_use]
+pub fn marker(id: impl Into<String>, lat: f64, lng: f64) -> MapMarker {
+    MapMarker { id: id.into(), lat, lng, title: None }
+}
+/// A titled map pin (the title shows in the marker's callout/popup).
+#[must_use]
+pub fn marker_titled(id: impl Into<String>, lat: f64, lng: f64, title: impl Into<String>) -> MapMarker {
+    MapMarker { id: id.into(), lat, lng, title: Some(title.into()) }
+}
 /// A single unnamed series wrapping `values` — the back-compat shape for `bar_chart`/`line_chart`.
 fn one_series(values: Vec<f32>) -> Vec<ChartSeries> {
     vec![ChartSeries { name: String::new(), values, color: None, goal: None }]

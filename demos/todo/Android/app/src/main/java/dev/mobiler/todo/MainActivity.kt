@@ -181,6 +181,7 @@ import dev.mobiler.todo.shared.types.Icon as WidgetIcon
 import dev.mobiler.todo.shared.types.ImageRatio
 import dev.mobiler.todo.shared.types.ImageShape
 import dev.mobiler.todo.shared.types.InputValue
+import dev.mobiler.todo.shared.types.MapMarker
 import dev.mobiler.todo.shared.types.ProjectColor
 import dev.mobiler.todo.shared.types.Spacing
 import dev.mobiler.todo.shared.types.TextStyle as ModelTextStyle
@@ -278,6 +279,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.PdfView -> PdfViewWidget(widget.url)
         is Widget.Video -> VideoWidget(widget.url, widget.id, widget.playing, widget.seekToMs, widget.controls, widget.looping, widget.muted, widget.onEnded, widget.poster, widget.startAtMs, widget.captions, widget.rate, widget.volume, widget.urls, widget.startIndex, widget.seekIndex, widget.allowPip, send)
         is Widget.WebView -> WebViewWidget(widget.url)
+        is Widget.Map -> MapWidget(widget.id, widget.centerLat, widget.centerLng, widget.zoom, widget.markers, widget.styleUrl, widget.interactive, send)
 
         is Widget.Image -> AsyncImage(
             model = widget.source,
@@ -1465,4 +1467,69 @@ private fun renderPdfPages(context: android.content.Context, url: String): List<
     renderer.close()
     pfd.close()
     return pages
+}
+
+// `Widget::Map` on Android — MapLibre Native (no API key) via Compose AndroidView interop. Markers are a
+// GeoJSON CircleLayer (core API). Map tap → "{id}.tap" (coords); marker tap → "{id}.marker" (id).
+@Composable
+private fun MapWidget(
+    id: String,
+    centerLat: Double,
+    centerLng: Double,
+    zoom: Double,
+    markers: List<MapMarker>,
+    styleUrl: String?,
+    interactive: Boolean,
+    send: (Action) -> Unit,
+) {
+    val context = LocalContext.current
+    val mapView = remember {
+        org.maplibre.android.MapLibre.getInstance(context)
+        org.maplibre.android.maps.MapView(context)
+    }
+    DisposableEffect(Unit) {
+        mapView.onCreate(null); mapView.onStart(); mapView.onResume()
+        onDispose { mapView.onPause(); mapView.onStop(); mapView.onDestroy() }
+    }
+    fun featureCollection() = org.maplibre.geojson.FeatureCollection.fromFeatures(
+        markers.map { mk ->
+            org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(mk.lng, mk.lat))
+                .also { it.addStringProperty("mid", mk.id) }
+        },
+    )
+    AndroidView(
+        modifier = Modifier.fillMaxWidth().height(240.dp),
+        factory = {
+            mapView.apply {
+                getMapAsync { map ->
+                    map.uiSettings.setAllGesturesEnabled(interactive)
+                    map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                        .target(org.maplibre.android.geometry.LatLng(centerLat, centerLng)).zoom(zoom).build()
+                    val style = styleUrl ?: "https://tiles.openfreemap.org/styles/liberty"
+                    map.setStyle(org.maplibre.android.maps.Style.Builder().fromUri(style)) { s ->
+                        s.addSource(org.maplibre.android.style.sources.GeoJsonSource("mobiler-markers", featureCollection()))
+                        s.addLayer(
+                            org.maplibre.android.style.layers.CircleLayer("mobiler-markers-layer", "mobiler-markers").withProperties(
+                                org.maplibre.android.style.layers.PropertyFactory.circleRadius(7f),
+                                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#E5484D")),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                            ),
+                        )
+                    }
+                    map.addOnMapClickListener { latLng ->
+                        val pt = map.projection.toScreenLocation(latLng)
+                        val hits = map.queryRenderedFeatures(pt, "mobiler-markers-layer")
+                        val mid = hits.firstOrNull()?.getStringProperty("mid")
+                        if (mid != null) {
+                            send(Action.Input("$id.marker", InputValue.Text(mid)))
+                        } else {
+                            send(Action.Input("$id.tap", InputValue.Text("${latLng.latitude},${latLng.longitude}")))
+                        }
+                        true
+                    }
+                }
+            }
+        },
+    )
 }
