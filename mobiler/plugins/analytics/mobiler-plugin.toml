@@ -1,0 +1,49 @@
+# Free, bundled Mobiler plugin: product analytics + automatic crash reporting via Firebase
+# (Firebase Analytics + Crashlytics, on both iOS and Android). Fire-and-forget request/response — no
+# ABI change. Crash capture is AUTOMATIC once Firebase is configured (no API call needed). Call from Rust:
+#   cx.plugin("analytics", "logEvent",
+#       r#"{"name":"booking_confirmed","params":{"service":"fade","value":35}}"#, |_| Msg::Noop)
+#   cx.plugin("analytics", "setUserId", "user-123", |_| Msg::Noop)
+#   cx.plugin("analytics", "setUserProperty", r#"{"name":"plan","value":"pro"}"#, |_| Msg::Noop)
+#   cx.plugin("analytics", "setEnabled", "false", |_| Msg::Noop)   // consent/opt-out (analytics + crash)
+#   cx.plugin("analytics", "log", "checkout step 2", |_| Msg::Noop)         // Crashlytics breadcrumb
+#   cx.plugin("analytics", "recordError", r#"{"message":"timeout","domain":"net"}"#, |_| Msg::Noop)
+#   cx.plugin("analytics", "testCrash", "", |_| Msg::Noop)         // force a crash to verify wiring (dev)
+#
+# Install:  mobiler plugin add analytics
+name = "analytics"
+summary = "Analytics + crash reporting (Firebase Analytics + Crashlytics) — free, bundled (EXPERIMENTAL)"
+notes = [
+  "EXPERIMENTAL: the Firebase round-trip isn't device-tested in CI (no Firebase project / config files committed). Verify on a real device with your own Firebase project.",
+  "iOS: drop GoogleService-Info.plist into iOS/Sources/ — Firebase reads it at FirebaseApp.configure(). It carries your project keys and can't be bundled. WITHOUT it the plugin stays inert (ops return ok:false; the app does NOT crash).",
+  "Android: drop google-services.json into Android/app/ — the google-services Gradle plugin reads it at build time and the BUILD FAILS without it.",
+  "iOS crash symbolication: Crashlytics CAPTURES crashes without extra setup, but for symbolicated (readable) reports add a Run Script build phase that runs the Firebase 'upload-symbols'/'run' script over your dSYMs (see the Crashlytics docs). Not automated by this plugin.",
+  "If you also install push-firebase-only, both share one FirebaseApp.configure() (guarded) + one google-services config — no conflict.",
+]
+
+[android]
+sources = ["android/AnalyticsPlugin.kt"]
+register = '"analytics" to AnalyticsPlugin(application)'
+# Firebase Analytics + Crashlytics SDKs. FirebaseApp auto-initializes on Android (no launch hook).
+gradle_deps = [
+  "com.google.firebase:firebase-analytics:22.1.2",
+  "com.google.firebase:firebase-crashlytics:19.2.1",
+]
+# google-services processes google-services.json (shared with push); the crashlytics plugin uploads the
+# ProGuard/R8 mapping for symbolicated crashes. Both must be APPLIED (not just dependencies).
+gradle_plugins = [
+  "com.google.gms.google-services:4.4.2",
+  "com.google.firebase.crashlytics:3.0.2",
+]
+
+[ios]
+sources = ["ios/AnalyticsPlugin.swift"]
+register = 'case "analytics": return await AnalyticsPlugin.handle(op: op, input: input)'
+# Configure Firebase at launch (guarded) so Crashlytics installs its handlers early enough to catch
+# crashes during startup, and analytics auto-collection works from the first screen.
+app_launch = ["AnalyticsPlugin.bootstrap()"]
+# The Firebase iOS SDK via SwiftPM — same package as push-firebase-only (dedup'd by URL), two products.
+spm_packages = [
+  "Firebase|https://github.com/firebase/firebase-ios-sdk|11.6.0|FirebaseAnalytics",
+  "Firebase|https://github.com/firebase/firebase-ios-sdk|11.6.0|FirebaseCrashlytics",
+]

@@ -77,7 +77,8 @@ final class FCMDelegate: NSObject, MessagingDelegate {
     func configureOnce() {
         guard !configured else { return }
         configured = true
-        FirebaseApp.configure()              // reads GoogleService-Info.plist from the bundle
+        // The `analytics` plugin may have already configured Firebase at launch — configure only if not.
+        if FirebaseApp.app() == nil { FirebaseApp.configure() }  // reads GoogleService-Info.plist
         Messaging.messaging().delegate = self
     }
 

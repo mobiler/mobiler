@@ -159,6 +159,14 @@ pub enum Msg {
     /// An inbound push payload (received/tapped) or a `{"type":"token_refresh",…}` event.
     PushEvent(PluginResponse),
 
+    /// --- Profile "Analytics" card: product analytics + crash reporting (`analytics` plugin) ---
+    /// Log a sample analytics event (+ set a user property).
+    SendTestEvent,
+    /// Force a crash to verify Crashlytics wiring (dev only).
+    TestCrash,
+    /// Ack from an analytics op (surfaces availability — degrades gracefully without the plugin/config).
+    AnalyticsAck(PluginResponse),
+
     /// --- Profile "Store" card: in-app purchase (`iap` plugin) ---
     /// Buy a product (launches the native purchase sheet).
     BuyProduct(String),
@@ -286,6 +294,9 @@ pub struct Model {
     /// deliver; without it, register reports "unavailable" (graceful degrade).
     push_token: String,
     push_last: String,
+    /// "Analytics" card (`analytics` plugin): last status line. Needs `mobiler plugin add analytics` +
+    /// a Firebase config to actually report; without it the ops degrade to "unavailable".
+    analytics_status: String,
     /// "Store" card — in-app purchase (`iap` plugin): the loaded products JSON + the last transaction.
     /// Needs `mobiler plugin add iap` + store products (or an iOS `.storekit` file) to actually transact.
     store_products: String,
@@ -378,6 +389,7 @@ impl Default for Model {
             ws_last: String::new(),
             push_token: String::new(),
             push_last: String::new(),
+            analytics_status: String::new(),
             store_products: String::new(),
             store_last: String::new(),
             video_playing: false,
@@ -820,6 +832,26 @@ impl MobilerApp for FadeHouse {
                 if resp.ok {
                     model.push_last = resp.output;
                 }
+            }
+            // Analytics: identify the user + log a sample event. No-ops gracefully until
+            // `mobiler plugin add analytics` + a Firebase config are in place.
+            Msg::SendTestEvent => {
+                model.analytics_status = "sending…".to_string();
+                cx.plugin("analytics", "setUserProperty", r#"{"name":"audience","value":"men"}"#, Msg::AnalyticsAck);
+                cx.plugin(
+                    "analytics",
+                    "logEvent",
+                    r#"{"name":"demo_event","params":{"screen":"profile","value":1}}"#,
+                    Msg::AnalyticsAck,
+                );
+            }
+            Msg::TestCrash => cx.plugin("analytics", "testCrash", "", Msg::AnalyticsAck),
+            Msg::AnalyticsAck(resp) => {
+                model.analytics_status = if resp.ok {
+                    "Event sent ✓".to_string()
+                } else {
+                    format!("unavailable: {} (run `mobiler plugin add analytics`)", resp.output)
+                };
             }
             Msg::BuyProduct(id) => cx.plugin("iap", "purchase", &id, Msg::StoreStarted),
             Msg::RestorePurchases => cx.plugin("iap", "restore", "", Msg::StoreStarted),
@@ -1359,6 +1391,28 @@ fn push_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Analytics" card — product analytics + crash reporting (`analytics` plugin): logs a sample
+/// event / sets a user property, and a Test crash button (verifies Crashlytics). Degrades to
+/// "unavailable" without `mobiler plugin add analytics` + a Firebase config (the call returns ok:false).
+fn analytics_card(model: &Model) -> Widget {
+    let status = if model.analytics_status.is_empty() {
+        caption("Log events + auto-capture crashes (Firebase Analytics + Crashlytics).")
+    } else {
+        caption(model.analytics_status.clone())
+    };
+    card(
+        column(vec![
+            emphasis("Analytics"),
+            status,
+            row(vec![
+                button("Send test event", ButtonStyle::Filled, Msg::SendTestEvent),
+                button("Test crash", ButtonStyle::Text, Msg::TestCrash),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 /// The "Store" card — in-app purchase (`iap` plugin): Buy buttons launch the native purchase sheet,
 /// and the transactions stream surfaces the result. iOS is testable on the simulator via
 /// `demos/barbershop/iOS/Products.storekit`; Android needs a Play Console test track. Degrades
@@ -1773,6 +1827,7 @@ fn profile_screen(model: &Model) -> Widget {
         // pushes N events over time into update(), each re-rendering this card.
         live_card(model),
         push_card(model),
+        analytics_card(model),
         store_card(model),
         system_card(model),
         files_card(model),
