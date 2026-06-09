@@ -156,12 +156,14 @@ body {
 .align-bottom-center> .box-content { justify-content: flex-end;   align-items: center; }
 .align-bottom-end   > .box-content { justify-content: flex-end;   align-items: flex-end; }
 
-/* ---- content ---- */
-.t-title    { font-size: 28px; font-weight: 750; margin: 2px 0; letter-spacing: -0.01em; }
-.t-subtitle { font-size: 18px; font-weight: 650; margin: 0; }
-.t-emphasis { font-size: 15px; font-weight: 650; margin: 0; }
-.t-caption  { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.4; }
-.t-body     { font-size: 15px; margin: 0; }
+/* ---- content ----
+   Reading text is sized in `rem` so it honors the browser's default-font-size setting (the web
+   equivalent of iOS Dynamic Type / Android fontScale). Controls + chart text stay px on purpose. */
+.t-title    { font-size: 1.75rem; font-weight: 750; margin: 2px 0; letter-spacing: -0.01em; }
+.t-subtitle { font-size: 1.125rem; font-weight: 650; margin: 0; }
+.t-emphasis { font-size: 0.9375rem; font-weight: 650; margin: 0; }
+.t-caption  { font-size: 0.8125rem; color: var(--muted); margin: 0; line-height: 1.4; }
+.t-body     { font-size: 0.9375rem; margin: 0; }
 
 .img { display: block; width: 100%; object-fit: cover; }
 .ratio-wide   { aspect-ratio: 16 / 10; }

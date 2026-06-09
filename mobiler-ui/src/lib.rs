@@ -58,6 +58,12 @@ pub enum ButtonStyle { Filled, Outlined, Text }
 #[repr(C)]
 pub enum CardStyle { Elevated, Outlined, Filled, Brand }
 
+/// Accessibility role for [`Widget::A11y`] — the control type announced to a screen reader. Maps
+/// best-effort per platform: iOS accessibility traits, Android semantics role / `heading()`, web ARIA role.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum A11yRole { Button, Link, Image, Header, Adjustable }
+
 /// What a [`Widget::TextField`] accepts — selects the on-screen keyboard,
 /// secure (masked) entry, and single- vs multi-line layout in one axis.
 ///
@@ -541,6 +547,11 @@ pub enum Widget {
     /// `show_detail`/`on_back` are ignored — both panes stay visible, so `detail` should show a
     /// placeholder until something is selected.
     Split { primary: Box<Widget>, detail: Box<Widget>, show_detail: bool, on_back: Option<ActionToken> },
+    /// Accessibility wrapper: presents `child`'s subtree as ONE screen-reader element named by `label`
+    /// (so an unlabeled IconButton/Image gets a name, or a Card's children group into one announced
+    /// element). `hint` describes what activation does; `role` is the control type. Shell-applied:
+    /// iOS accessibilityLabel/Hint/Traits, Android contentDescription/role/heading, web aria-label/role.
+    A11y { child: Box<Widget>, label: String, hint: Option<String>, role: Option<A11yRole> },
     // Input
     Button { label: String, style: ButtonStyle, on_press: ActionToken },
     IconButton { icon: Icon, on_press: ActionToken },
