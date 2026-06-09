@@ -36,7 +36,8 @@ fn main() {
 - **Complete widget coverage.** Every [`mobiler-ui`](https://crates.io/crates/mobiler-ui)
   `Widget` variant renders (the `match` is exhaustive, like the native shells), so a
   core that runs on Android/iOS renders identically on the web — including the **charts**
-  (bar/line/stacked/pie/donut/rings/gauge + region/coverage), drawn with SVG + CSS here.
+  (bar/line/stacked/pie/donut/rings/gauge + region/coverage), drawn with SVG + CSS here, the
+  **video player** / **web view** / **PDF viewer**, and an interactive **map** (MapLibre-GL).
 
 Build and serve with [Trunk](https://trunkrs.dev): `trunk serve`. See the
 [`fullstack-todo`](https://github.com/mobiler/mobiler/tree/main/demos/fullstack-todo)

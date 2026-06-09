@@ -44,6 +44,11 @@ pub type App = MobilerShell<Counter>;
 - **Charts** — typed builders for data viz: `bar_chart`/`line_chart`, multi-series
   `chart`/`stacked_bar_chart`/`pct_stacked_bar_chart`, `pie_chart`/`donut_chart`, fitness-style
   `rings_chart`, a `gauge_chart`, and `region_chart` (variable-width coverage-gap bands).
+- **Live native views** — builders for native-engine widgets the shell hosts: `video_player`
+  (AVPlayer / ExoPlayer / `<video>`), `web_view`, `pdf_view`, and `map` (MapKit / MapLibre —
+  markers + tap events, no API key).
+- **Accessibility** — `a11y(child, label)` (+ `with_a11y_hint` / `with_a11y_role`) names any
+  widget for VoiceOver / TalkBack.
 
 Most users go through the [`mobiler`](https://crates.io/crates/mobiler) CLI, which
 scaffolds a project wired to this crate and a generic native shell.
