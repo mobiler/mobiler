@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
@@ -19,7 +20,10 @@ import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -30,6 +34,9 @@ import java.util.UUID
  *   - "scan"    : scan ~4s → JSON [{id,name,rssi}] of nearby BLE devices.
  *   - "connect" : input = device id (MAC) → connect GATT + discover services → "connected".
  *   - "read"    : input = {"device":id,"service":uuid,"characteristic":uuid} → value (UTF-8 or hex).
+ *   - "write"   : input = {device,service,characteristic,value,"hex"?,"without_response"?} → ok.
+ *   - notify    : cx.subscribe(key,"bluetooth","notify",{device,service,characteristic},on) → each
+ *                 characteristic-change value (UTF-8 or hex) until cx.unsubscribe.
  *  Best-effort runtime perms (like the geolocation/notifications plugins): returns
  *  "permission requested — try again" until granted, then works on the next call. CANNOT be tested
  *  on an emulator (no BLE radio) — needs a real device near a peripheral. */
@@ -63,6 +70,7 @@ class BluetoothPlugin(private val application: Application) : MobilerPlugin {
             "scan" -> scan(adapter)
             "connect" -> connect(adapter, input.trim())
             "read" -> read(input)
+            "write" -> write(input)
             else -> PluginResponse(false, "unknown op '$op'")
         }
     }
@@ -132,12 +140,84 @@ class BluetoothPlugin(private val application: Application) : MobilerPlugin {
         }
     }
 
+    private suspend fun write(input: String): PluginResponse {
+        val obj = try { JSONObject(input) } catch (e: Exception) { return PluginResponse(false, "bad input") }
+        val (conn, chr) = characteristic(obj) ?: return PluginResponse(false, "not connected / characteristic not found")
+        val gatt = conn.gatt ?: return PluginResponse(false, "not connected")
+        val bytes = bytesFrom(obj)
+        val type = if (obj.optBoolean("without_response")) {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        }
+        return withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { cont ->
+                var resumed = false
+                fun done(r: PluginResponse) { if (!resumed) { resumed = true; cont.resumeWith(Result.success(r)) } }
+                conn.pendingWrite = { done(it) }
+                val started = if (Build.VERSION.SDK_INT >= 33) {
+                    gatt.writeCharacteristic(chr, bytes, type) == android.bluetooth.BluetoothStatusCodes.SUCCESS
+                } else {
+                    @Suppress("DEPRECATION")
+                    run { chr.value = bytes; chr.writeType = type; gatt.writeCharacteristic(chr) }
+                }
+                if (!started) { conn.pendingWrite = null; done(PluginResponse(false, "write failed to start")) }
+            }
+        }
+    }
+
+    /** Streaming notify (cx.subscribe): enable notifications on the characteristic + emit each change
+     *  until the collecting Job is cancelled (cx.unsubscribe → awaitClose disables + detaches). */
+    override fun subscribe(op: String, input: String): Flow<PluginResponse> = callbackFlow {
+        val adapter = adapter()
+        if (adapter == null || !adapter.isEnabled) { trySend(PluginResponse(false, "bluetooth off")); close(); return@callbackFlow }
+        val obj = try { JSONObject(input) } catch (e: Exception) { trySend(PluginResponse(false, "bad input")); close(); return@callbackFlow }
+        val pair = characteristic(obj)
+        if (pair == null) { trySend(PluginResponse(false, "not connected / characteristic not found")); close(); return@callbackFlow }
+        val (conn, chr) = pair
+        val gatt = conn.gatt!!
+        conn.notifySink = { value -> trySend(PluginResponse(true, decodeValue(value))) }
+        gatt.setCharacteristicNotification(chr, true)
+        chr.getDescriptor(CCCD_UUID)?.let { cccd ->
+            if (Build.VERSION.SDK_INT >= 33) {
+                gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            } else {
+                @Suppress("DEPRECATION")
+                run { cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE; gatt.writeDescriptor(cccd) }
+            }
+        }
+        awaitClose {
+            conn.notifySink = null
+            runCatching { gatt.setCharacteristicNotification(chr, false) }
+        }
+    }
+
+    private fun bytesFrom(obj: JSONObject): ByteArray {
+        val v = obj.optString("value")
+        return if (obj.optBoolean("hex")) {
+            v.chunked(2).mapNotNull { it.toIntOrNull(16)?.toByte() }.toByteArray()
+        } else {
+            v.toByteArray(Charsets.UTF_8)
+        }
+    }
+
+    /** Resolve {device,service,characteristic} on a connected GATT, or null if anything's missing. */
+    private fun characteristic(obj: JSONObject): Pair<Conn, BluetoothGattCharacteristic>? {
+        val conn = conns[obj.optString("device")] ?: return null
+        val gatt = conn.gatt ?: return null
+        val svc = gatt.getService(uuid(obj.optString("service")) ?: return null) ?: return null
+        val chr = svc.getCharacteristic(uuid(obj.optString("characteristic")) ?: return null) ?: return null
+        return conn to chr
+    }
+
     private fun uuid(s: String): UUID? = try { UUID.fromString(s) } catch (e: Exception) { null }
 
     /** Holds one device's GATT + the in-flight connect/read continuations (a GATT has one callback). */
     private class Conn(private val onConnect: (PluginResponse) -> Unit) {
         var gatt: BluetoothGatt? = null
         var pendingRead: ((PluginResponse) -> Unit)? = null
+        var pendingWrite: ((PluginResponse) -> Unit)? = null
+        var notifySink: ((ByteArray) -> Unit)? = null
         private var connectResolved = false
 
         val callback = object : BluetoothGattCallback() {
@@ -175,13 +255,36 @@ class BluetoothPlugin(private val application: Application) : MobilerPlugin {
                 pendingRead = null
                 cb(decode(status, value))
             }
+
+            override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
+                val cb = pendingWrite ?: return
+                pendingWrite = null
+                cb(if (status == BluetoothGatt.GATT_SUCCESS) PluginResponse(true, "") else PluginResponse(false, "write failed"))
+            }
+
+            @Deprecated("Pre-API-33 signature; both are overridden so either platform routes here.")
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
+                c.value?.let { notifySink?.invoke(it) }
+            }
+
+            override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) {
+                notifySink?.invoke(value)
+            }
         }
 
         private fun decode(status: Int, value: ByteArray?): PluginResponse {
             if (status != BluetoothGatt.GATT_SUCCESS || value == null) return PluginResponse(false, "read failed")
-            val text = value.toString(Charsets.UTF_8)
-            val printable = text.isNotEmpty() && text.all { it.code in 9..126 || it.code > 160 }
-            return PluginResponse(true, if (printable) text else value.joinToString("") { "%02x".format(it) })
+            return PluginResponse(true, decodeValue(value))
         }
     }
 }
+
+/** UTF-8 if the bytes are printable text, else a lowercase hex string. */
+private fun decodeValue(value: ByteArray): String {
+    val text = value.toString(Charsets.UTF_8)
+    val printable = text.isNotEmpty() && text.all { it.code in 9..126 || it.code > 160 }
+    return if (printable) text else value.joinToString("") { "%02x".format(it) }
+}
+
+private val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")

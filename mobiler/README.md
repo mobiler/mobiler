@@ -85,7 +85,8 @@ ABI change. Bundled free plugins:
 | 🔋 `battery` | device battery level (sample) |
 | 📶 `connectivity` | network status (online/wifi/cellular/offline) |
 | 📄 `filepicker` | system document picker → file URI |
-| 📍 `geolocation` | device location → `lat,lng` |
+| 📍 `geolocation` | device location → `lat,lng` (framework LocationManager, no deps) |
+| 🛰️ `geolocation-fused` | device location via Play Services FusedLocationProvider (higher accuracy; alt to `geolocation`) |
 | 📇 `contacts` | system contact picker → `name|phone` |
 | 📅 `calendar` | add an event (system editor) |
 | 🎙️ `audio` | record (mic) + play |
@@ -98,7 +99,7 @@ ABI change. Bundled free plugins:
 | 🎬 `video` | record a video → local URI |
 | 🎤 `speech` | speech-to-text (dictation) |
 | 🗃️ `sqlite` | on-device SQLite (exec / query → JSON) |
-| 🔵 `bluetooth` | BLE scan / connect / read |
+| 🔵 `bluetooth` | BLE scan / connect / read / write / notify (notify is a `cx.subscribe` stream) |
 | 🔑 `oauth` | OAuth 2.0 / OIDC login (system auth browser → redirect) |
 | 📲 `push` | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** |
 | 🔥 `push-firebase-only` | push via Firebase on both platforms (one FCM token; alternative to `push`) — **experimental** |
