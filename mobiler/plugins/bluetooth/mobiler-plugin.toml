@@ -1,5 +1,10 @@
+# Bluetooth Low Energy. ops (request/response): scan / connect / read / write a characteristic; plus a
+# `notify` STREAM over the streaming primitive:
+#   cx.plugin("bluetooth","write", r#"{"device":id,"service":uuid,"characteristic":uuid,"value":"01","hex":true}"#, |_| Msg::Noop)
+#   cx.subscribe(key,"bluetooth","notify", r#"{"device":id,"service":uuid,"characteristic":uuid}"#, Msg::BtNotify)
+# Connect first; write/notify reuse the live GATT/peripheral. Needs a real device (no emulator/sim BLE radio).
 name = "bluetooth"
-summary = "Bluetooth LE — scan / connect / read a characteristic (free; needs a real device)"
+summary = "Bluetooth LE — scan / connect / read / write / notify a characteristic (free; needs a real device)"
 
 [android]
 # Best-effort runtime perms (BLUETOOTH_SCAN/CONNECT on API 31+, falls back to ACCESS_FINE_LOCATION
@@ -16,6 +21,7 @@ permissions = [
 [ios]
 sources = ["ios/BluetoothPlugin.swift"]
 register = 'case "bluetooth": return await BluetoothPlugin.handle(op: op, input: input)'
+register_stream = 'case "bluetooth": await BluetoothPlugin.subscribe(op: op, input: input, emit: emit)'
 
 [ios.info_plist]
 NSBluetoothAlwaysUsageDescription = "Discover and connect to nearby Bluetooth devices."

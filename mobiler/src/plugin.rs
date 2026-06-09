@@ -913,8 +913,28 @@ mod test {
         assert!(manifest.contains("android.permission.BLUETOOTH_SCAN"));
         assert!(manifest.contains("android.permission.BLUETOOTH_CONNECT"));
         assert!(read(&root, "iOS/Sources/BluetoothPlugin.swift").contains("CBCentralManager"));
-        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"bluetooth\": return await BluetoothPlugin.handle"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"bluetooth\": return await BluetoothPlugin.handle"));
+        // write op + the notify stream (register_stream) are present.
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/BluetoothPlugin.kt").contains("\"write\" -> write(input)"));
+        assert!(core_swift.contains("case \"bluetooth\": await BluetoothPlugin.subscribe"), "bluetooth notify stream case");
         assert!(read(&root, "iOS/project.yml").contains("NSBluetoothAlwaysUsageDescription"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn add_bundled_geolocation_fused_registers_under_geolocation_with_play_services() {
+        let root = skeleton();
+        add_at(&root, "geolocation-fused").unwrap();
+        // Registers under the SAME cx name "geolocation" (mutually-exclusive alt to the default plugin).
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/GeolocationPlugin.kt").contains("FusedLocationProviderClient"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"geolocation\" to GeolocationPlugin(application),"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"geolocation\": return await GeolocationPlugin.handle"));
+        let gradle = read(&root, "Android/app/build.gradle.kts");
+        assert!(gradle.contains("com.google.android.gms:play-services-location"), "play-services dep injected");
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.ACCESS_FINE_LOCATION"));
+        assert!(read(&root, "iOS/project.yml").contains("NSLocationWhenInUseUsageDescription"));
         let _ = fs::remove_dir_all(&root);
     }
 

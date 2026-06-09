@@ -1,0 +1,31 @@
+# Free, bundled Mobiler plugin: device location via Google Play Services **FusedLocationProvider** —
+# higher accuracy + lower power than the framework LocationManager the default `geolocation` plugin uses.
+# An opt-in ALTERNATIVE: it registers under the SAME cx name "geolocation", so app code is identical:
+#   cx.plugin("geolocation", "get", "", |r| Msg::GotLocation(r.output))   // → "lat,lng", ok=false on denial
+#
+# Install `geolocation` OR `geolocation-fused` — NOT both (they both register `"geolocation"`, which
+# collides at build). Use this one when you want fused accuracy and don't mind the Play Services dep;
+# use the default `geolocation` for a dependency-free build. iOS is identical to `geolocation`
+# (CoreLocation has no "fused" concept); only the Android source differs.
+#
+# Install:  mobiler plugin add geolocation-fused
+name = "geolocation-fused"
+summary = "Device location via Play Services FusedLocationProvider (higher accuracy; free) — alt to `geolocation`"
+notes = [
+  "MUTUALLY EXCLUSIVE with the `geolocation` plugin — install ONE (both register `\"geolocation\"`).",
+  "Android: needs Google Play Services on the device (FusedLocationProvider). On a device without it, falls back to no location — use the default `geolocation` (framework LocationManager) for max compatibility.",
+]
+
+[android]
+sources = ["android/GeolocationPlugin.kt"]
+register = '"geolocation" to GeolocationPlugin(application)'
+# Adding the plugin IS the opt-in, so these are injected (uncommented) at mobiler:permissions.
+permissions = ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"]
+gradle_deps = ["com.google.android.gms:play-services-location:21.3.0"]
+
+[ios]
+sources = ["ios/GeolocationPlugin.swift"]
+register = 'case "geolocation": return await GeolocationPlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSLocationWhenInUseUsageDescription = "Show your location in the app."

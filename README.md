@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing) · 🗺️ geofence (background geofencing, experimental) · ⏰ background-fetch (periodic wake, experimental) · 📊 analytics (Firebase Analytics + Crashlytics, experimental)
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 🛰️ geolocation-fused (Play Services) · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing) · 🗺️ geofence (background geofencing, experimental) · ⏰ background-fetch (periodic wake, experimental) · 📊 analytics (Firebase Analytics + Crashlytics, experimental)
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -176,7 +176,8 @@ free plugins:
 | 🔋 **battery** | device battery level (sample) | `mobiler plugin add battery` |
 | 📶 **connectivity** | network status (online/wifi/cellular/offline) | `mobiler plugin add connectivity` |
 | 📄 **filepicker** | system document picker → file URI | `mobiler plugin add filepicker` |
-| 📍 **geolocation** | device location → `lat,lng` | `mobiler plugin add geolocation` |
+| 📍 **geolocation** | device location → `lat,lng` (framework LocationManager, no deps) | `mobiler plugin add geolocation` |
+| 🛰️ **geolocation-fused** | device location via Play Services FusedLocationProvider (higher accuracy; alt to `geolocation`) | `mobiler plugin add geolocation-fused` |
 | 📇 **contacts** | system contact picker → `name|phone` | `mobiler plugin add contacts` |
 | 📅 **calendar** | add an event (system editor) | `mobiler plugin add calendar` |
 | 🎙️ **audio** | record (mic) + play | `mobiler plugin add audio` |
@@ -189,7 +190,7 @@ free plugins:
 | 🎬 **video** | record a video → local URI | `mobiler plugin add video` |
 | 🎤 **speech** | speech-to-text (dictation) | `mobiler plugin add speech` |
 | 🗃️ **sqlite** | on-device SQLite (exec / query → JSON) | `mobiler plugin add sqlite` |
-| 🔵 **bluetooth** | BLE scan / connect / read | `mobiler plugin add bluetooth` |
+| 🔵 **bluetooth** | BLE scan / connect / read / write / notify (notify is a `cx.subscribe` stream) | `mobiler plugin add bluetooth` |
 | 🔑 **oauth** | OAuth 2.0 / OIDC login (system auth browser → redirect) | `mobiler plugin add oauth` |
 | 📲 **push** | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** | `mobiler plugin add push` |
 | 🔥 **push-firebase-only** | push via Firebase on **both** platforms (one FCM token; alternative to `push`) — **experimental** | `mobiler plugin add push-firebase-only` |
