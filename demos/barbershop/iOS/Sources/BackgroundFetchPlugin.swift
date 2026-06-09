@@ -16,8 +16,8 @@ private let TASK_ID = "mobiler.refresh"
 enum BackgroundFetchPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
         switch op {
-        case "schedule": return BackgroundFetchBridge.shared.schedule(input)
-        case "cancel": return BackgroundFetchBridge.shared.cancel()
+        case "schedule": return await BackgroundFetchBridge.shared.schedule(input)
+        case "cancel": return await BackgroundFetchBridge.shared.cancel()
         default: return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
     }
