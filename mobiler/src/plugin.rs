@@ -83,8 +83,18 @@ struct IosSpec {
     /// addition to `register` (their request/response case).
     #[serde(default)]
     register_stream: Option<String>,
+    /// Lines inserted at the `// mobiler:app-launch` anchor in App.swift's
+    /// `didFinishLaunchingWithOptions` — for plugins that MUST run code at app launch (e.g.
+    /// `BGTaskScheduler.register(...)`, CLLocationManager region-monitor re-instantiation), which a
+    /// lazy request/response plugin can't do. The iOS twin of Android's statically-declared manifest
+    /// receiver/worker (which already run at launch with no hook).
     #[serde(default)]
-    info_plist: BTreeMap<String, String>,
+    app_launch: Vec<String>,
+    /// Info.plist keys → values. Values are TOML scalars OR arrays, rendered as inline YAML via
+    /// `yaml_scalar` — so a plugin can set array keys (`UIBackgroundModes = ["location"]`,
+    /// `BGTaskSchedulerPermittedIdentifiers = [...]`), not just strings.
+    #[serde(default)]
+    info_plist: BTreeMap<String, toml::Value>,
     #[serde(default)]
     entitlements: BTreeMap<String, toml::Value>,
     /// Remote SwiftPM packages, each "name|url|version|product" (pipe-delimited — URLs contain `:`/`/`).
@@ -230,11 +240,29 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
         if let Some(rs) = &i.register_stream {
             report(insert_before(&core_swift, "// mobiler:plugins-stream", rs, rs)?, "iOS streaming registration");
         }
+        // Launch-time hooks (BGTaskScheduler.register, CLLocationManager re-arm) injected into
+        // App.swift's didFinishLaunchingWithOptions — the only place that runs before the OS
+        // delivers a queued background event.
+        let app_swift = root.join("iOS/Sources/App.swift");
+        for line in &i.app_launch {
+            report(insert_before(&app_swift, "// mobiler:app-launch", line, line)?, "iOS app-launch hook");
+        }
 
         let project_yml = root.join("iOS/project.yml");
         for (key, val) in &i.info_plist {
-            let line = format!("{key}: \"{val}\"");
-            report(insert_before(&project_yml, "# mobiler:info-plist", &line, key)?, "iOS Info.plist key");
+            match val {
+                // Array keys (UIBackgroundModes, BGTaskSchedulerPermittedIdentifiers) MERGE — two
+                // plugins setting the same key (e.g. geofence's [location] + background-fetch's
+                // [fetch]) must union, not skip (insert_before's key-name idempotency would drop one).
+                toml::Value::Array(arr) => {
+                    let items: Vec<String> = arr.iter().map(yaml_scalar).collect();
+                    report(merge_plist_array(&project_yml, key, &items)?, "iOS Info.plist key");
+                }
+                _ => {
+                    let line = format!("{key}: {}", yaml_scalar(val));
+                    report(insert_before(&project_yml, "# mobiler:info-plist", &line, key)?, "iOS Info.plist key");
+                }
+            }
         }
         if !i.entitlements.is_empty() {
             install_entitlements(&project_yml, &i.entitlements, &mut notes)?;
@@ -330,6 +358,76 @@ fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Resu
     let updated = content.replacen(&anchor, &format!("{indent}{payload}\n{anchor}"), 1);
     fs::write(path, updated).with_context(|| format!("writing {}", path.display()))?;
     Ok(Insert::Inserted)
+}
+
+/// Insert or MERGE an array-valued Info.plist key. If the key already exists — whether inline
+/// (`key: [..]`) or YAML block form (`key:` then `- item` lines, e.g. a hand-authored UIBackgroundModes
+/// PiP opt-in) — union the new items into it; otherwise insert a fresh inline line at the
+/// `# mobiler:info-plist` anchor. `items` are already YAML-rendered (quoted). Idempotent — re-adding the
+/// same items reports AlreadyPresent. Two plugins (geofence `[location]` + background-fetch `[fetch]`)
+/// or a plugin layered on a hand-authored block must union, not silently drop one (which would leave a
+/// background capability undeclared).
+fn merge_plist_array(project_yml: &Path, key: &str, items: &[String]) -> Result<Insert> {
+    let content =
+        fs::read_to_string(project_yml).with_context(|| format!("reading {}", project_yml.display()))?;
+
+    // Inline form: `<indent>key: [a, b]`.
+    let inline_prefix = format!("{key}: [");
+    if let Some(existing) = content.lines().find(|l| l.trim_start().starts_with(&inline_prefix)) {
+        let indent: String = existing.chars().take_while(|c| c.is_whitespace()).collect();
+        let inner = existing.trim().trim_start_matches(&inline_prefix).trim_end().trim_end_matches(']');
+        let mut merged: Vec<String> =
+            inner.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        let mut added = false;
+        for it in items {
+            if !merged.iter().any(|m| m == it) {
+                merged.push(it.clone());
+                added = true;
+            }
+        }
+        if !added {
+            return Ok(Insert::AlreadyPresent);
+        }
+        let new_line = format!("{indent}{key}: [{}]", merged.join(", "));
+        let updated = content.replacen(existing, &new_line, 1);
+        fs::write(project_yml, updated).with_context(|| format!("writing {}", project_yml.display()))?;
+        return Ok(Insert::Inserted);
+    }
+
+    // Block form: `<indent>key:` followed by `<indent>  - item` lines.
+    let lines: Vec<&str> = content.lines().collect();
+    if let Some(key_idx) = lines.iter().position(|l| l.trim() == format!("{key}:")) {
+        let key_indent: String = lines[key_idx].chars().take_while(|c| c.is_whitespace()).collect();
+        let item_indent = format!("{key_indent}  ");
+        let mut existing_bare: Vec<String> = Vec::new();
+        let mut last_item: Option<&str> = None;
+        for &l in lines.iter().skip(key_idx + 1) {
+            if l.starts_with(&item_indent) && l.trim_start().starts_with("- ") {
+                existing_bare.push(l.trim_start().trim_start_matches("- ").trim().trim_matches('"').to_string());
+                last_item = Some(l);
+            } else {
+                break; // end of this key's block
+            }
+        }
+        if let Some(anchor_line) = last_item {
+            let additions: Vec<String> = items
+                .iter()
+                .filter(|it| !existing_bare.iter().any(|e| e == it.trim_matches('"')))
+                .map(|it| format!("{item_indent}- {it}"))
+                .collect();
+            if additions.is_empty() {
+                return Ok(Insert::AlreadyPresent);
+            }
+            let anchor = format!("{anchor_line}\n");
+            let replacement = format!("{anchor}{}\n", additions.join("\n"));
+            let updated = content.replacen(&anchor, &replacement, 1);
+            fs::write(project_yml, updated).with_context(|| format!("writing {}", project_yml.display()))?;
+            return Ok(Insert::Inserted);
+        }
+    }
+
+    let line = format!("{key}: [{}]", items.join(", "));
+    insert_before(project_yml, "# mobiler:info-plist", &line, key)
 }
 
 /// Add an xcodegen target-level `entitlements:` block at the `# mobiler:target-extra` anchor.
@@ -466,6 +564,11 @@ mod test {
         )
         .unwrap();
         fs::write(
+            root.join("iOS/Sources/App.swift"),
+            "func application() -> Bool {\n        UNUserNotificationCenter.current().delegate = self\n        // mobiler:app-launch\n        return true\n    }\n",
+        )
+        .unwrap();
+        fs::write(
             root.join("iOS/project.yml"),
             "packages:\n  SharedTypes:\n    path: generated/SharedTypes\n  # mobiler:spm-packages\ntargets:\n  Demo:\n    dependencies:\n      - package: SharedTypes\n      # mobiler:spm-dependencies\n    info:\n      properties:\n        PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.demo\n        # mobiler:info-plist\n    settings:\n      base:\n        FOO: bar\n    # mobiler:target-extra\n",
         )
@@ -597,6 +700,67 @@ mod test {
         assert!(manifest.contains("android.permission.ACCESS_COARSE_LOCATION"), "coarse perm injected");
         let yml = read(&root, "iOS/project.yml");
         assert!(yml.contains("NSLocationWhenInUseUsageDescription"), "iOS usage-description injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn add_bundled_geofence_registers_stream_app_launch_perms_dep_and_array_plist() {
+        let root = skeleton();
+        add_at(&root, "geofence").unwrap();
+
+        // Both Android sources copied with the package substituted.
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/GeofencePlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/GeofenceBroadcastReceiver.kt").contains("class GeofenceBroadcastReceiver"));
+        // Registered in both shells — handle case + the streaming case.
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"geofence\" to GeofencePlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        let handle_at = core_swift.find("case \"geofence\": return await GeofencePlugin.handle").expect("handle case");
+        let stream_at = core_swift.find("case \"geofence\": await GeofencePlugin.subscribe").expect("stream case");
+        assert!(stream_at < handle_at, "stream case in subscribe(), handle case in handle()");
+        // The NEW app-launch hook — bootstrap() injected into App.swift's didFinishLaunching.
+        let app_swift = read(&root, "iOS/Sources/App.swift");
+        assert!(app_swift.contains("GeofencePlugin.bootstrap()"), "app-launch hook injected into App.swift");
+        // Permissions (incl. background location) + Play Services dep + the static receiver.
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.ACCESS_BACKGROUND_LOCATION"), "background-location perm injected");
+        assert!(manifest.contains("android:name=\".GeofenceBroadcastReceiver\""), "geofence receiver declared");
+        let gradle = read(&root, "Android/app/build.gradle.kts");
+        assert!(gradle.contains("com.google.android.gms:play-services-location"), "play-services-location dep injected");
+        // The NEW array-valued Info.plist key — UIBackgroundModes renders as an inline YAML array.
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("UIBackgroundModes: [\"location\"]"), "UIBackgroundModes array injected, got:\n{yml}");
+        assert!(yml.contains("NSLocationAlwaysAndWhenInUseUsageDescription"), "Always usage-description injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn add_bundled_background_fetch_registers_stream_app_launch_workdep_and_array_plists() {
+        let root = skeleton();
+        add_at(&root, "background-fetch").unwrap();
+
+        // Both Android sources copied with the package substituted.
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/BackgroundFetchPlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/BackgroundFetchWorker.kt").contains("class BackgroundFetchWorker"));
+        // Registered in both shells — handle case + the streaming case.
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"background-fetch\" to BackgroundFetchPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        let handle_at = core_swift.find("case \"background-fetch\": return await BackgroundFetchPlugin.handle").expect("handle case");
+        let stream_at = core_swift.find("case \"background-fetch\": await BackgroundFetchPlugin.subscribe").expect("stream case");
+        assert!(stream_at < handle_at, "stream case in subscribe(), handle case in handle()");
+        // app-launch hook + WorkManager dep + POST_NOTIFICATIONS, but NO location perms.
+        let app_swift = read(&root, "iOS/Sources/App.swift");
+        assert!(app_swift.contains("BackgroundFetchPlugin.bootstrap()"), "app-launch hook injected");
+        let gradle = read(&root, "Android/app/build.gradle.kts");
+        assert!(gradle.contains("androidx.work:work-runtime-ktx"), "WorkManager dep injected");
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android.permission.POST_NOTIFICATIONS"), "POST_NOTIFICATIONS injected");
+        assert!(!manifest.contains("ACCESS_FINE_LOCATION"), "no location perms for background-fetch");
+        // Two array-valued Info.plist keys.
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("UIBackgroundModes: [\"fetch\", \"processing\"]"), "UIBackgroundModes array, got:\n{yml}");
+        assert!(yml.contains("BGTaskSchedulerPermittedIdentifiers: [\"mobiler.refresh\"]"), "BGTask identifiers array injected");
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -861,6 +1025,47 @@ mod test {
     }
 
     #[test]
+    fn array_plist_keys_merge_across_plugins() {
+        let root = skeleton();
+        add_at(&root, "geofence").unwrap();          // UIBackgroundModes = ["location"]
+        add_at(&root, "background-fetch").unwrap();   // UIBackgroundModes = ["fetch","processing"] → must UNION
+        let yml = read(&root, "iOS/project.yml");
+        let line = yml.lines().find(|l| l.trim_start().starts_with("UIBackgroundModes:")).expect("UIBackgroundModes line");
+        assert!(line.contains("\"location\""), "geofence's location mode kept: {line}");
+        assert!(line.contains("\"fetch\""), "background-fetch's fetch mode merged in: {line}");
+        assert!(line.contains("\"processing\""), "background-fetch's processing mode merged in: {line}");
+        assert_eq!(yml.matches("UIBackgroundModes:").count(), 1, "still a single UIBackgroundModes line");
+        // background-fetch's own identifier key is also present.
+        assert!(yml.contains("BGTaskSchedulerPermittedIdentifiers: [\"mobiler.refresh\"]"));
+        // Re-adding is idempotent — no duplicate modes.
+        add_at(&root, "geofence").unwrap();
+        let yml2 = read(&root, "iOS/project.yml");
+        assert_eq!(yml2.matches("\"location\"").count(), 1, "no duplicate location mode on re-add");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn merge_plist_array_handles_inline_and_block_forms() {
+        let dir = std::env::temp_dir().join(format!("mob_plist_{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::SeqCst)));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let yml = dir.join("project.yml");
+        // Hand-authored YAML block form (the PiP UIBackgroundModes opt-in pattern).
+        fs::write(&yml, "      properties:\n        UIBackgroundModes:\n          - audio\n        # mobiler:info-plist\n").unwrap();
+        // A plugin must UNION its mode into the existing block, not skip it.
+        assert!(matches!(merge_plist_array(&yml, "UIBackgroundModes", &["\"location\"".into()]).unwrap(), Insert::Inserted));
+        let c = fs::read_to_string(&yml).unwrap();
+        assert!(c.contains("- audio") && c.contains("- \"location\""), "block union kept both:\n{c}");
+        assert_eq!(c.matches("UIBackgroundModes:").count(), 1, "still one key");
+        // Idempotent.
+        assert!(matches!(merge_plist_array(&yml, "UIBackgroundModes", &["\"location\"".into()]).unwrap(), Insert::AlreadyPresent));
+        // A brand-new array key inserts inline at the anchor.
+        assert!(matches!(merge_plist_array(&yml, "BGTaskSchedulerPermittedIdentifiers", &["\"mobiler.refresh\"".into()]).unwrap(), Insert::Inserted));
+        assert!(fs::read_to_string(&yml).unwrap().contains("BGTaskSchedulerPermittedIdentifiers: [\"mobiler.refresh\"]"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn add_is_idempotent() {
         let root = skeleton();
         add_at(&root, "battery").unwrap();
@@ -886,6 +1091,10 @@ mod test {
         assert!(
             t("iOS/Sources/Core.swift").contains("// mobiler:plugins"),
             "Core.swift needs the // mobiler:plugins anchor"
+        );
+        assert!(
+            t("iOS/Sources/App.swift").contains("// mobiler:app-launch"),
+            "App.swift needs the // mobiler:app-launch anchor (launch-time plugin hooks)"
         );
         let manifest = t("Android/app/src/main/AndroidManifest.xml");
         assert!(manifest.contains("mobiler:permissions"), "AndroidManifest.xml needs the mobiler:permissions anchor");

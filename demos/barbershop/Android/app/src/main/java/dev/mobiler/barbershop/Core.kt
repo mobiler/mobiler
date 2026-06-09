@@ -373,6 +373,8 @@ class Core(application: Application) : AndroidViewModel(application) {
         "oauth" to OAuthPlugin(application),
         "websocket" to WebSocketPlugin(application),
         "files" to FilesPlugin(application),
+        "geofence" to GeofencePlugin(application),
+        "background-fetch" to BackgroundFetchPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

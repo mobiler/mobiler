@@ -32,6 +32,7 @@ const BASE_REL: &str = ".mobiler/base";
 const ANCHORS: &[&str] = &[
     "mobiler:plugins",
     "mobiler:plugins-stream",
+    "mobiler:app-launch",
     "mobiler:permissions",
     "mobiler:manifest-application",
     "mobiler:gradle-deps",
@@ -60,9 +61,9 @@ fn classify(rel: &Path, desired: &[u8]) -> Class {
     // OWN — the user's Rust app, the Cargo manifests (deps handled separately), per-app identity
     // files that always differ, and binaries (icons, the gradle wrapper jar).
     // NOTE: iOS/Sources/App.swift is NOT own — it's generic shell infrastructure (the entry point +
-    // the AppDelegate/PushBridge that remote push needs). The per-app struct name comes from
-    // `{{NAME}}` substitution, so overwriting it on upgrade regenerates it correctly; a hand-edited
-    // App.swift is protected by the 3-way merge (base→yours→new), like any other SHELL file.
+    // the AppDelegate/PushBridge that remote push needs). Since it carries the `mobiler:app-launch`
+    // anchor (launch-time plugin hooks), it is MERGE-class: a user's injected bootstrap() lines are
+    // preserved across upgrades (offered as `.mobiler-new` / 3-way-merged), like any other anchored file.
     let own = p.starts_with("shared/src/")
         || name == "Cargo.toml"
         || p == "Android/settings.gradle.kts"
@@ -562,9 +563,13 @@ mod test {
             classify(Path::new("Android/build.gradle.kts"), b"plugins {\n    // mobiler:gradle-plugins-classpath\n}\n"),
             Class::Merge
         );
-        // SHELL — generic, no anchor, not own. App.swift is now SHELL (generic entry point +
-        // AppDelegate/PushBridge); its per-app struct name comes via {{NAME}} substitution.
-        assert_eq!(classify(Path::new("iOS/Sources/App.swift"), b"@main struct {{NAME}}App {}"), Class::Shell);
+        // App.swift carries the `mobiler:app-launch` anchor (launch-time plugin hooks) → MERGE, so an
+        // upgrade preserves a user's injected bootstrap() lines.
+        assert_eq!(
+            classify(Path::new("iOS/Sources/App.swift"), b"@main struct {{NAME}}App {}\n// mobiler:app-launch\n"),
+            Class::Merge
+        );
+        // SHELL — generic, no anchor, not own.
         assert_eq!(classify(Path::new("iOS/Sources/Render.swift"), b"func render(){}"), Class::Shell);
         assert_eq!(classify(Path::new("rust-toolchain.toml"), b"[toolchain]"), Class::Shell);
     }

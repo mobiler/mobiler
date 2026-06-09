@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing)
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing) · 🗺️ geofence (background geofencing, experimental) · ⏰ background-fetch (periodic wake, experimental)
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -189,6 +189,8 @@ free plugins:
 | 📲 **push** | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** | `mobiler plugin add push` |
 | 🔥 **push-firebase-only** | push via Firebase on **both** platforms (one FCM token; alternative to `push`) — **experimental** | `mobiler plugin add push-firebase-only` |
 | 💳 **iap** | in-app purchase / subscriptions (StoreKit 2 / Play Billing) — **experimental, not yet device-tested** | `mobiler plugin add iap` |
+| 🗺️ **geofence** | background geofence enter/exit + significant-location-change (local notification + buffered event) — **experimental** | `mobiler plugin add geofence` |
+| ⏰ **background-fetch** | periodic background wake (BGTaskScheduler / WorkManager) — **experimental** | `mobiler plugin add background-fetch` |
 
 ```bash
 mobiler plugin list            # see the bundled (free) plugins

@@ -1,0 +1,40 @@
+# Free, bundled Mobiler plugin: periodic background fetch — the OS wakes the app on its own schedule
+# to run a brief native task, which posts a local notification AND buffers an event delivered to the
+# core on next foreground (the launch-from-dead pattern, like `push`/`system`). The Rust core never
+# runs in the background — the OS controls timing (best-effort; iOS/Android may defer or skip wakes).
+#
+# Two surfaces:
+#   cx.plugin("background-fetch", "schedule",
+#       r#"{"id":"refresh","min_interval_seconds":3600,"notify_title":"Updated","notify_body":"New data ready"}"#,
+#       |_| Msg::Noop)
+#   cx.plugin("background-fetch", "cancel", r#"{"id":"refresh"}"#, |_| Msg::Noop)
+#   cx.subscribe(key, "background-fetch", "events", "", |r| Msg::Fetch(r))  // → {"type":"fetch","id":"refresh"}
+#
+# Install:  mobiler plugin add background-fetch
+name = "background-fetch"
+summary = "Periodic background wake (BGTaskScheduler / WorkManager) (free; EXPERIMENTAL — not yet device-tested)"
+notes = [
+  "EXPERIMENTAL: the OS decides WHEN (and whether) a background wake fires — it can't be exercised reliably in CI/simulator. Verify on a physical device (iOS: pause in Xcode's debugger and trigger `_simulateLaunchForTaskWithIdentifier:`; Android: `adb shell cmd jobscheduler run`).",
+  "Timing is best-effort and OS-throttled: iOS BGAppRefreshTask is opportunistic; Android WorkManager enforces a 15-minute minimum interval. Treat `min_interval_seconds` as a floor, not a guarantee.",
+  "iOS: the task identifier is `mobiler.refresh` (registered at launch + listed in BGTaskSchedulerPermittedIdentifiers). The `id` you pass is an opaque label echoed back in the event.",
+]
+
+[android]
+sources = ["android/BackgroundFetchPlugin.kt", "android/BackgroundFetchWorker.kt"]
+register = '"background-fetch" to BackgroundFetchPlugin(application)'
+# POST_NOTIFICATIONS is the Android 13+ runtime permission for the wake notification.
+permissions = ["android.permission.POST_NOTIFICATIONS"]
+# WorkManager schedules + runs the periodic worker (auto-initialized via androidx.startup).
+gradle_deps = ["androidx.work:work-runtime-ktx:2.9.1"]
+
+[ios]
+sources = ["ios/BackgroundFetchPlugin.swift"]
+register = 'case "background-fetch": return await BackgroundFetchPlugin.handle(op: op, input: input)'
+register_stream = 'case "background-fetch": await BackgroundFetchPlugin.subscribe(op: op, input: input, emit: emit)'
+# BGTaskScheduler.register MUST run at launch (before didFinishLaunching returns) or it throws.
+app_launch = ["BackgroundFetchPlugin.bootstrap()"]
+
+[ios.info_plist]
+# Opt into background fetch + register the task identifier the plugin schedules.
+UIBackgroundModes = ["fetch", "processing"]
+BGTaskSchedulerPermittedIdentifiers = ["mobiler.refresh"]
