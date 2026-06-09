@@ -67,6 +67,15 @@ pub enum Msg {
     /// Find the nearest shop using the device location (`geolocation` plugin).
     FindNearest,
     GotLocation(String),
+    /// --- Home "Places & background" card: geofence + background-fetch plugins ---
+    /// Register a geofence around the shop + subscribe to enter/exit events (`geofence` plugin).
+    EnableGeofence,
+    /// Schedule a periodic background refresh (`background-fetch` plugin).
+    EnableBackgroundFetch,
+    /// A geofence enter/exit / coarse-location event, or a periodic background wake (both streams).
+    BackgroundEvent(PluginResponse),
+    /// Thin ack from a geofence/background-fetch op launch (surfaces permission/availability hints).
+    BackgroundAck(PluginResponse),
     /// Check network connectivity (`connectivity` plugin).
     CheckSignal,
     GotSignal(String),
@@ -226,6 +235,12 @@ pub struct Model {
     client: String,
     /// Nearest-shop location ("lat,lng") from geolocation.
     location: String,
+    /// "Places & background" card — whether geofence monitoring is on + the last background event
+    /// (a geofence enter/exit or a periodic background-fetch wake). Both ride the streaming primitive
+    /// and are buffered launch-from-dead; without `mobiler plugin add geofence`/`background-fetch`
+    /// they degrade gracefully (the ops report unavailable).
+    background_on: bool,
+    background_last: String,
     /// Network status from the connectivity plugin.
     signal: String,
     /// Last result line for the Profile "Device & capabilities" panel (sensors/audio).
@@ -333,6 +348,8 @@ impl Default for Model {
             pending_time: None,
             client: String::new(),
             location: String::new(),
+            background_on: false,
+            background_last: String::new(),
             signal: String::new(),
             device: String::new(),
             last_audio: None,
@@ -496,6 +513,44 @@ impl MobilerApp for FadeHouse {
                 } else {
                     model.location = loc;
                     cx.toast("Found shops near you ✓");
+                }
+            }
+            // Register a geofence around the shop + subscribe to enter/exit events. The shell posts a
+            // local notification on a crossing AND buffers the event (launch-from-dead); we subscribe
+            // here so a crossing that woke a dead process still reaches the core. No-ops gracefully
+            // until `mobiler plugin add geofence`.
+            Msg::EnableGeofence => {
+                model.background_on = true;
+                cx.plugin("geofence", "requestPermission", "", Msg::BackgroundAck);
+                cx.plugin(
+                    "geofence",
+                    "add",
+                    r#"{"id":"shop","lat":47.3769,"lng":8.5417,"radius":150,"notify_title":"Near Fade House","notify_body":"You're near the shop — drop in for a fresh cut"}"#,
+                    Msg::BackgroundAck,
+                );
+                cx.subscribe("geofence", "geofence", "events", "", Msg::BackgroundEvent);
+            }
+            // Schedule a periodic background wake + subscribe to it. OS-throttled (best-effort).
+            Msg::EnableBackgroundFetch => {
+                cx.plugin(
+                    "background-fetch",
+                    "schedule",
+                    r#"{"id":"availability","min_interval_seconds":3600,"notify_title":"Fade House","notify_body":"New slots may be available"}"#,
+                    Msg::BackgroundAck,
+                );
+                cx.subscribe("background-fetch", "background-fetch", "events", "", Msg::BackgroundEvent);
+            }
+            Msg::BackgroundAck(resp) => {
+                // Surface a hint when an op can't proceed (e.g. "permission requested — try again",
+                // "enable Allow all the time", or "plugin not available" on web / before plugin add).
+                if !resp.ok && !resp.output.is_empty() {
+                    cx.toast(resp.output);
+                }
+            }
+            Msg::BackgroundEvent(resp) => {
+                // {"type":"geofence","id":..,"event":"enter"|"exit"} / {"type":"location",..} / {"type":"fetch",..}
+                if resp.ok {
+                    model.background_last = resp.output;
                 }
             }
             Msg::CheckSignal => cx.plugin("connectivity", "status", "", |r| Msg::GotSignal(r.output)),
@@ -1047,6 +1102,7 @@ fn home(model: &Model) -> Widget {
             button("Check signal", ButtonStyle::Text, Msg::CheckSignal),
         ]),
         nearby,
+        background_card(model),
         audience_segmented(model),
         category_carousel(model),
         subtitle("Our barbers"),
@@ -1054,6 +1110,30 @@ fn home(model: &Model) -> Widget {
         subtitle("Popular services"),
         services_grid(model),
     ])
+}
+
+// "Places & background" card (Home tab) — background location + periodic wake, both riding the
+// streaming primitive (geofence + background-fetch plugins). The core never runs in the background;
+// the native shell monitors, posts a local notification, and buffers the event for the next foreground.
+fn background_card(model: &Model) -> Widget {
+    let status = if !model.background_last.is_empty() {
+        emphasis(format!("Last event: {}", model.background_last))
+    } else if model.background_on {
+        caption("Monitoring — you'll get a notification near the shop.")
+    } else {
+        caption("Get notified near the shop, or refresh availability in the background.")
+    };
+    card(
+        column(vec![
+            subtitle("Places & background"),
+            status,
+            row(vec![
+                button("Notify me near the shop", ButtonStyle::Outlined, Msg::EnableGeofence),
+                button("Background refresh", ButtonStyle::Text, Msg::EnableBackgroundFetch),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    )
 }
 
 fn services_screen(model: &Model) -> Widget {

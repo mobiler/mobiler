@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Launch-time plugin hooks (`mobiler plugin add` inserts bootstrap() calls here) — for plugins
+        // that must run at launch, e.g. BGTaskScheduler.register / CLLocationManager region re-arm.
+        // Must complete before this method returns (BGTaskScheduler throws otherwise).
+        // mobiler:app-launch
         return true
     }
 

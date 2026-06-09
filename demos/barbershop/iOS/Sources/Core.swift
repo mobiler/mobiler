@@ -127,6 +127,8 @@ enum Plugins {
         case "ticker": await TickerStream.run(input: input, emit: emit)
         case "system": await SystemStream.run(emit: emit)
         case "websocket": await WebSocketPlugin.subscribe(op: op, input: input, emit: emit)
+        case "geofence": await GeofencePlugin.subscribe(op: op, input: input, emit: emit)
+        case "background-fetch": await BackgroundFetchPlugin.subscribe(op: op, input: input, emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break
         }
@@ -163,6 +165,8 @@ enum Plugins {
         case "oauth": return await OAuthPlugin.handle(op: op, input: input)
         case "websocket": return await WebSocketPlugin.handle(op: op, input: input)
         case "files": return await FilesPlugin.handle(op: op, input: input)
+        case "geofence": return await GeofencePlugin.handle(op: op, input: input)
+        case "background-fetch": return await BackgroundFetchPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")

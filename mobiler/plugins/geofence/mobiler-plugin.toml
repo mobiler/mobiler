@@ -1,0 +1,59 @@
+# Free, bundled Mobiler plugin: background location monitoring — geofence enter/exit + significant
+# location change. The native OS keeps watching even when the app is closed; on a trigger it posts a
+# local notification AND buffers an event delivered to the core on next foreground (the launch-from-dead
+# pattern, like `push`/`system`). The Rust core itself never runs in the background — this is native-
+# scheduled work + buffered delivery.
+#
+# Two surfaces:
+#   cx.plugin("geofence", "requestPermission", "", |r| Msg::GeoPerm(r.ok))         // "Always" location auth
+#   cx.plugin("geofence", "add",
+#       r#"{"id":"shop","lat":47.37,"lng":8.54,"radius":150,"notify_title":"Nearby","notify_body":"You're at the shop"}"#,
+#       |_| Msg::Noop)
+#   cx.plugin("geofence", "remove", r#"{"id":"shop"}"#, |_| Msg::Noop)
+#   cx.plugin("geofence", "list", "", |r| Msg::GeoList(r.output))                  // → ["shop", ...]
+#   cx.plugin("geofence", "startSignificantChanges", "", |_| Msg::Noop)            // coarse bg location
+#   cx.plugin("geofence", "stopSignificantChanges", "", |_| Msg::Noop)
+#   cx.subscribe(key, "geofence", "events", "", |r| Msg::GeoEvent(r))
+#       // → {"type":"geofence","id":"shop","event":"enter"|"exit"} / {"type":"location","lat":..,"lng":..}
+#
+# Install:  mobiler plugin add geofence
+name = "geofence"
+summary = "Background geofencing + significant-location-change (free; EXPERIMENTAL — not yet device-tested)"
+notes = [
+  "EXPERIMENTAL: the background-trigger paths can't be exercised in CI or the simulator without real device movement; verify on a physical device (simulate a route / drop a pin near a registered region).",
+  "iOS: geofencing requires ALWAYS location authorization. iOS shows a two-step prompt (When-In-Use, then a deferred upgrade to Always) — the user must choose \"Always\" for triggers to fire while the app is closed.",
+  "iOS: this plugin adds UIBackgroundModes=[location] to project.yml so background delivery is reliable. Enable the Background Modes (Location updates) capability if you also build via Xcode directly.",
+  "Android: geofencing needs Google Play Services on the device. ACCESS_BACKGROUND_LOCATION (\"Allow all the time\") is a SEPARATE settings-screen grant on Android 11+ — requestPermission fires the foreground prompt; the user must then enable background access in system settings.",
+]
+
+[android]
+sources = ["android/GeofencePlugin.kt", "android/GeofenceBroadcastReceiver.kt"]
+register = '"geofence" to GeofencePlugin(application)'
+# Foreground + background location, plus POST_NOTIFICATIONS for the trigger notification. Adding the
+# plugin IS the opt-in, so these are injected (uncommented) at mobiler:permissions.
+permissions = [
+  "android.permission.ACCESS_FINE_LOCATION",
+  "android.permission.ACCESS_COARSE_LOCATION",
+  "android.permission.ACCESS_BACKGROUND_LOCATION",
+  "android.permission.POST_NOTIFICATIONS",
+]
+# Geofencing + fused location need Play Services location.
+gradle_deps = ["com.google.android.gms:play-services-location:21.3.0"]
+# The geofence transition (and the fused significant-change PendingIntent) are delivered to this
+# statically-declared receiver so it runs even when the app process is dead.
+manifest_application = ['<receiver android:name=".GeofenceBroadcastReceiver" android:exported="false"/>']
+
+[ios]
+sources = ["ios/GeofencePlugin.swift"]
+register = 'case "geofence": return await GeofencePlugin.handle(op: op, input: input)'
+register_stream = 'case "geofence": await GeofencePlugin.subscribe(op: op, input: input, emit: emit)'
+# Re-create the CLLocationManager + delegate at launch so a background relaunch (region cross /
+# significant change) delivers the queued event to a live delegate. A lazy request/response plugin
+# would set this up too late.
+app_launch = ["GeofencePlugin.bootstrap()"]
+
+[ios.info_plist]
+NSLocationWhenInUseUsageDescription = "Used to notify you about places near you."
+NSLocationAlwaysAndWhenInUseUsageDescription = "Used to notify you about places near you, even when the app is in the background."
+# Background location delivery (region monitoring / significant changes while suspended).
+UIBackgroundModes = ["location"]

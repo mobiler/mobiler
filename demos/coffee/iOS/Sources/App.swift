@@ -3,12 +3,12 @@ import SharedTypes
 import UIKit
 import UserNotifications
 
-/// App entry — the generic Mobiler shell. `Core` drives the Rust core; `render`
+/// App entry â the generic Mobiler shell. `Core` drives the Rust core; `render`
 /// turns its `Widget` tree into SwiftUI. The whole UI is decided in Rust.
 @main
 struct CoffeeApp: App {
     // Bridges UIKit app-lifecycle + APNs/notification callbacks (which only arrive on a
-    // UIApplicationDelegate) into the SwiftUI app — see AppDelegate + PushBridge below.
+    // UIApplicationDelegate) into the SwiftUI app â see AppDelegate + PushBridge below.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var core = Core()
     // Tracks foreground/background for the `system` lifecycle events (see SystemBridge).
@@ -17,7 +17,7 @@ struct CoffeeApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(core: core)
-                // Inbound system events → SystemBridge → the `system` stream. `.onOpenURL` delivers
+                // Inbound system events â SystemBridge â the `system` stream. `.onOpenURL` delivers
                 // deep links (custom scheme / universal link) at launch and while running; scenePhase
                 // reports foreground/background.
                 .onOpenURL { SystemBridge.shared.didOpen(url: $0) }
@@ -48,7 +48,7 @@ private struct RootView: View {
     }
 }
 
-// UIKit app-delegate adaptor — the ONLY place APNs token + remote-notification callbacks arrive in a
+// UIKit app-delegate adaptor â the ONLY place APNs token + remote-notification callbacks arrive in a
 // SwiftUI app. It forwards them to `PushBridge` (below). Inert unless the `push` plugin's `register`
 // op runs: a push-less app never calls registerForRemoteNotifications, so it costs nothing.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Launch-time plugin hooks (`mobiler plugin add` inserts bootstrap() calls here) — for plugins
+        // that must run at launch, e.g. BGTaskScheduler.register / CLLocationManager region re-arm.
+        // Must complete before this method returns (BGTaskScheduler throws otherwise).
+        // mobiler:app-launch
         return true
     }
 
@@ -71,7 +75,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         PushBridge.shared.didFail(error: error)
     }
 
-    // Foreground receipt — show the banner AND forward the payload to the events stream.
+    // Foreground receipt â show the banner AND forward the payload to the events stream.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -81,7 +85,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         completionHandler([.banner, .sound])
     }
 
-    // Tap — forward the payload. Also fires when a tap LAUNCHES the app; PushBridge buffers it until
+    // Tap â forward the payload. Also fires when a tap LAUNCHES the app; PushBridge buffers it until
     // the core subscribes.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -95,7 +99,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
 // Always-present, plugin-agnostic forwarder between the AppDelegate and the optional `push` plugin.
 // The plugin attaches a token-waiter (register op) + an event sink (events stream); until a sink is
-// attached, inbound payloads buffer and flush on attach — so a notification that launched a dead
+// attached, inbound payloads buffer and flush on attach â so a notification that launched a dead
 // process still reaches the app. App.swift references nothing from the plugin, so this compiles and
 // stays dormant in push-less apps.
 @MainActor
@@ -132,7 +136,7 @@ final class PushBridge {
     func didRegister(token: String, raw: Data) {
         rawAPNsToken = raw
         if tokenWaiters.isEmpty {
-            // An out-of-band rotation (no register call in flight) → notify the app via the stream.
+            // An out-of-band rotation (no register call in flight) â notify the app via the stream.
             emit("{\"type\":\"token_refresh\",\"token\":\"\(token)\"}")
         } else {
             let waiters = tokenWaiters
@@ -167,8 +171,8 @@ final class PushBridge {
     }
 }
 
-// Always-present, plugin-agnostic forwarder for inbound *system* events — deep-link URLs (`.onOpenURL`)
-// and app lifecycle (scenePhase) — into the built-in `system` stream (cx.subscribe). Deep links arriving
+// Always-present, plugin-agnostic forwarder for inbound *system* events â deep-link URLs (`.onOpenURL`)
+// and app lifecycle (scenePhase) â into the built-in `system` stream (cx.subscribe). Deep links arriving
 // before the core subscribes BUFFER and flush on attach (launch-from-dead), exactly like PushBridge;
 // lifecycle changes emit live, and the current state is sent on attach. Dormant until something
 // subscribes to "system".
@@ -198,12 +202,12 @@ final class SystemBridge {
         switch phase {
         case .active: emitLifecycle("active")
         case .background: emitLifecycle("background")
-        default: break  // .inactive is a transient app-switcher state — ignore
+        default: break  // .inactive is a transient app-switcher state â ignore
         }
     }
 
     private func emitLifecycle(_ state: String) {
-        // Lifecycle is live-only (not buffered) — a fresh subscriber gets the current state on attach.
+        // Lifecycle is live-only (not buffered) â a fresh subscriber gets the current state on attach.
         sink?("{\"type\":\"lifecycle\",\"state\":\"\(state)\"}")
     }
 

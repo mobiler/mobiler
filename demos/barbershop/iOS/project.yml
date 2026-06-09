@@ -62,6 +62,9 @@ targets:
         # documented per-app opt-in. The barbershop demo opts in to exercise PiP.
         UIBackgroundModes:
           - audio
+          - "location"
+          - "fetch"
+          - "processing"
         # Camera usage string — required by the `video` plugin (record a video) and the
         # camera capability. iOS requires it to access the camera.
         NSCameraUsageDescription: "Record video and take photos."
@@ -71,6 +74,8 @@ targets:
         NSMicrophoneUsageDescription: "Record audio."
         NSSpeechRecognitionUsageDescription: "Transcribe your speech to text."
         NSBluetoothAlwaysUsageDescription: "Discover and connect to nearby Bluetooth devices."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Used to notify you about places near you, even when the app is in the background."
+        BGTaskSchedulerPermittedIdentifiers: ["mobiler.refresh"]
         # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:
