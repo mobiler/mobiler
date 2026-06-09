@@ -64,6 +64,7 @@ where
     console_error_panic_hook::set_once();
     inject_default_style();
     inject_hls_support();
+    inject_maplibre_support();
     leptos::mount::mount_to_body(shell::<A>);
 }
 
@@ -99,6 +100,68 @@ fn inject_hls_support() {
   }
   function scan(root){if(root&&root.querySelectorAll){root.querySelectorAll('video[data-hls-src]').forEach(attach);}}
   new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType===1){if(n.matches&&n.matches('video[data-hls-src]')){attach(n);}scan(n);}});});}).observe(document.documentElement,{childList:true,subtree:true});
+  scan(document);
+})();"#;
+    let document = leptos::prelude::document();
+    let Some(head) = document.head() else { return };
+    let Ok(script) = document.create_element("script") else { return };
+    script.set_text_content(Some(BOOTSTRAP));
+    let _ = head.append_child(&script);
+}
+
+/// MapLibre-GL bootstrap for [`Widget::Map`]. A self-contained script (mirrors `inject_hls_support`):
+/// lazily loads maplibre-gl (JS + CSS) from a CDN the first time a `.mobiler-map` div appears, then for
+/// each one inits a `maplibregl.Map` from its `data-*` attributes (center/zoom/style/markers/interactive)
+/// and wires taps. The Rust render arm re-creates the map div on every `update`, so a `MutationObserver`
+/// also REMOVES the map (`.remove()`) when its node is dropped — no leaked WebGL contexts. Map/marker
+/// taps are reported to the core by writing `"tap|lat,lng"` / `"marker|id"` into the hidden sibling
+/// `.mobiler-map-sink` input and firing its `input` event, which the render arm's `on:input` forwards as
+/// `Action::Input`. Inert (and the CDN is never fetched) until a `Map` widget appears.
+fn inject_maplibre_support() {
+    const BOOTSTRAP: &str = r#"(function(){
+  function ensureML(cb){
+    if(window.maplibregl){return cb();}
+    if(window.__mobilerMlLoading){(window.__mobilerMlCbs=window.__mobilerMlCbs||[]).push(cb);return;}
+    window.__mobilerMlLoading=true;window.__mobilerMlCbs=[cb];
+    var l=document.createElement('link');l.rel='stylesheet';l.href='https://cdn.jsdelivr.net/npm/maplibre-gl@4/dist/maplibre-gl.css';document.head.appendChild(l);
+    var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/maplibre-gl@4/dist/maplibre-gl.js';
+    var flush=function(){var cbs=window.__mobilerMlCbs||[];window.__mobilerMlCbs=[];cbs.forEach(function(f){f();});};
+    s.onload=flush;s.onerror=flush;document.head.appendChild(s);
+  }
+  function emit(el,payload){
+    var sink=el.parentElement&&el.parentElement.querySelector('.mobiler-map-sink');
+    if(sink){sink.value=payload;sink.dispatchEvent(new Event('input',{bubbles:true}));}
+  }
+  function init(el){
+    if(el.__mobilerMap){return;}el.__mobilerMap=true;
+    ensureML(function(){
+      try{
+        var c=(el.getAttribute('data-center')||'0,0').split(',');
+        var center=[parseFloat(c[1])||0,parseFloat(c[0])||0];
+        var zoom=parseFloat(el.getAttribute('data-zoom'))||2;
+        var style=el.getAttribute('data-style')||'https://tiles.openfreemap.org/styles/liberty';
+        var interactive=el.getAttribute('data-interactive')!=='false';
+        var map=new maplibregl.Map({container:el,style:style,center:center,zoom:zoom,interactive:interactive});
+        el.__mobilerMapInstance=map;
+        map.on('click',function(e){emit(el,'tap|'+e.lngLat.lat.toFixed(6)+','+e.lngLat.lng.toFixed(6));});
+        var markers=[];try{markers=JSON.parse(el.getAttribute('data-markers')||'[]');}catch(_){}
+        markers.forEach(function(mk){
+          var m=new maplibregl.Marker().setLngLat([mk.lng,mk.lat]);
+          if(mk.title){m.setPopup(new maplibregl.Popup({offset:24}).setText(mk.title));}
+          m.addTo(map);
+          m.getElement().addEventListener('click',function(ev){ev.stopPropagation();emit(el,'marker|'+mk.id);});
+        });
+      }catch(_){}
+    });
+  }
+  function scan(root){if(root&&root.querySelectorAll){root.querySelectorAll('.mobiler-map[data-map]').forEach(init);}}
+  new MutationObserver(function(muts){muts.forEach(function(m){
+    m.addedNodes.forEach(function(n){if(n.nodeType===1){if(n.matches&&n.matches('.mobiler-map[data-map]')){init(n);}scan(n);}});
+    m.removedNodes.forEach(function(n){if(n.nodeType===1){
+      if(n.__mobilerMapInstance){try{n.__mobilerMapInstance.remove();}catch(_){}}
+      if(n.querySelectorAll){n.querySelectorAll('.mobiler-map').forEach(function(x){if(x.__mobilerMapInstance){try{x.__mobilerMapInstance.remove();}catch(_){}}});}
+    }});
+  });}).observe(document.documentElement,{childList:true,subtree:true});
   scan(document);
 })();"#;
     let document = leptos::prelude::document();
@@ -592,6 +655,44 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                     allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                     allowfullscreen=true
                 ></iframe>
+            }.into_any()
+        }
+        // Interactive map (MapLibre-GL, no key). The div carries the config as data-* attrs;
+        // `inject_maplibre_support` inits the map + reports taps by firing `input` on the hidden sink,
+        // which this `on:input` forwards as Action::Input { "{id}.tap" | "{id}.marker", Text(...) }.
+        Widget::Map { id, center_lat, center_lng, zoom, markers, style_url, interactive } => {
+            let send = send.clone();
+            let id = id.clone();
+            let center = format!("{center_lat},{center_lng}");
+            let markers_json = serde_json::to_string(markers).unwrap_or_else(|_| "[]".to_string());
+            let style = style_url.clone().unwrap_or_default();
+            view! {
+                <div class="mobiler-map-wrap">
+                    <div
+                        class="mobiler-map"
+                        data-map="1"
+                        data-center=center
+                        data-zoom=zoom.to_string()
+                        data-style=style
+                        data-markers=markers_json
+                        data-interactive=interactive.to_string()
+                    ></div>
+                    <input
+                        class="mobiler-map-sink"
+                        type="text"
+                        tabindex="-1"
+                        aria-hidden="true"
+                        on:input=move |ev| {
+                            let raw = event_target_value(&ev);
+                            if let Some((suffix, value)) = raw.split_once('|') {
+                                send(Action::Input {
+                                    id: format!("{id}.{suffix}"),
+                                    value: InputValue::Text(value.to_string()),
+                                });
+                            }
+                        }
+                    />
+                </div>
             }.into_any()
         }
         Widget::Video { url, playing, controls, looping, muted, on_ended, poster, start_at_ms, captions, rate, volume, urls, start_index, .. } => {

@@ -5,6 +5,7 @@
 
 use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role,
+    map, marker_titled, with_markers,
     BoxAlign, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
@@ -250,6 +251,8 @@ pub struct Model {
     /// they degrade gracefully (the ops report unavailable).
     background_on: bool,
     background_last: String,
+    /// "Find us" Map card — the last map/marker tap (Widget::Map → input "shop-map.tap"/".marker").
+    map_last: String,
     /// Network status from the connectivity plugin.
     signal: String,
     /// Last result line for the Profile "Device & capabilities" panel (sensors/audio).
@@ -362,6 +365,7 @@ impl Default for Model {
             location: String::new(),
             background_on: false,
             background_last: String::new(),
+            map_last: String::new(),
             signal: String::new(),
             device: String::new(),
             last_audio: None,
@@ -968,6 +972,10 @@ impl MobilerApp for FadeHouse {
                 "phone" => model.phone = t,
                 "password" => model.password = t,
                 "bio" => model.bio = t,
+                // The Map widget reports a map tap as "lat,lng" on "{id}.tap" and a marker tap as the
+                // marker id on "{id}.marker".
+                "shop-map.tap" => model.map_last = format!("Tapped {t}"),
+                "shop-map.marker" => model.map_last = format!("Marker: {t}"),
                 _ => {}
             },
             // The Video widget reports its current position (ms) ~1/sec via the input mechanism, plus
@@ -1140,6 +1148,7 @@ fn home(model: &Model) -> Widget {
         ]),
         nearby,
         background_card(model),
+        find_us_card(model),
         audience_segmented(model),
         category_carousel(model),
         subtitle("Our barbers"),
@@ -1168,6 +1177,27 @@ fn background_card(model: &Model) -> Widget {
                 button("Notify me near the shop", ButtonStyle::Outlined, Msg::EnableGeofence),
                 button("Background refresh", ButtonStyle::Text, Msg::EnableBackgroundFetch),
             ]),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
+// "Find us" — an interactive Widget::Map centered on the shop with a marker (iOS MapKit / Android
+// MapLibre / web MapLibre-GL, no key). Tapping the marker or the map updates a status line via `input`.
+fn find_us_card(model: &Model) -> Widget {
+    let status = if model.map_last.is_empty() {
+        caption("Tap the pin (or the map) to see coordinates.")
+    } else {
+        emphasis(model.map_last.clone())
+    };
+    card(
+        column(vec![
+            subtitle("Find us"),
+            with_markers(
+                map("shop-map", 47.3769, 8.5417, 14.0),
+                vec![marker_titled("shop", 47.3769, 8.5417, "Fade House")],
+            ),
+            status,
         ]),
         CardStyle::Outlined,
     )
