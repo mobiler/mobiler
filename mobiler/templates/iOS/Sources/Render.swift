@@ -6,6 +6,7 @@ import PDFKit
 import AVKit
 import AVFoundation
 import WebKit
+import MapKit
 
 // The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
 // (what to draw) + `Action` (what to send back). No app-specific types; this exact
@@ -78,6 +79,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 
     case .webView(let url):
         return AnyView(WebKitWebView(urlString: url).frame(minHeight: 240))
+
+    case .map(let id, let centerLat, let centerLng, let zoom, let markers, _, let interactive):
+        return AnyView(MapWidgetView(
+            id: id, centerLat: centerLat, centerLng: centerLng, zoom: zoom,
+            markers: markers, interactive: interactive, send: send
+        ).frame(minHeight: 240))
 
     case .rating(let value, let max, let onRate):
         return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
@@ -348,6 +355,78 @@ private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Act
     ForEach(Array(children.enumerated()), id: \.offset) { _, child in
         render(child, send)
     }
+}
+
+/// `Widget::Map` on iOS — MapKit (`MKMapView`) via UIViewRepresentable. The app drives the camera
+/// (center/zoom → region span) + markers; a tap reports coordinates and selecting a marker reports its
+/// id, both via `Action::Input` ("{id}.tap" / "{id}.marker"). `style_url` is MapLibre-only → ignored
+/// here (MapKit uses Apple Maps).
+private struct MapWidgetView: UIViewRepresentable {
+    let id: String
+    let centerLat: Double
+    let centerLng: Double
+    let zoom: Double
+    let markers: [SharedTypes.MapMarker]
+    let interactive: Bool
+    let send: (Action) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> MKMapView {
+        let mv = MKMapView()
+        mv.delegate = context.coordinator
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tap.delegate = context.coordinator
+        mv.addGestureRecognizer(tap)
+        return mv
+    }
+
+    func updateUIView(_ mv: MKMapView, context: Context) {
+        context.coordinator.parent = self
+        mv.isScrollEnabled = interactive
+        mv.isZoomEnabled = interactive
+        // zoom level → span in degrees (≈ 360 / 2^zoom), clamped to a sane range.
+        let span = min(180.0, max(0.001, 360.0 / pow(2.0, zoom)))
+        let region = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
+            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
+        )
+        mv.setRegion(region, animated: false)
+        mv.removeAnnotations(mv.annotations)
+        for mk in markers {
+            let a = MarkerAnnotation(markerId: mk.id)
+            a.coordinate = CLLocationCoordinate2D(latitude: mk.lat, longitude: mk.lng)
+            a.title = mk.title
+            mv.addAnnotation(a)
+        }
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
+        var parent: MapWidgetView
+        init(_ p: MapWidgetView) { parent = p }
+
+        @objc func handleTap(_ g: UITapGestureRecognizer) {
+            guard let mv = g.view as? MKMapView else { return }
+            let coord = mv.convert(g.location(in: mv), toCoordinateFrom: mv)
+            parent.send(.input(id: "\(parent.id).tap", value: .text("\(coord.latitude),\(coord.longitude)")))
+        }
+
+        // Don't treat a tap on a marker pin as a map tap (the marker fires `didSelect` separately).
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            !(touch.view is MKAnnotationView || touch.view?.superview is MKAnnotationView)
+        }
+
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            if let a = view.annotation as? MarkerAnnotation {
+                parent.send(.input(id: "\(parent.id).marker", value: .text(a.markerId)))
+            }
+        }
+    }
+}
+
+private final class MarkerAnnotation: MKPointAnnotation {
+    let markerId: String
+    init(markerId: String) { self.markerId = markerId; super.init() }
 }
 
 /// A responsive grid: 2 columns on a phone (compact width), 4 on an iPad (regular) —
