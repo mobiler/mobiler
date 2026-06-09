@@ -287,6 +287,16 @@ impl<E> Cx<E> {
     pub fn pick_time(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("datetime", "time", "", then);
     }
+
+    /// Read the current local date-time (built-in `datetime` capability). The core is a
+    /// pure state machine and can't read the clock itself, so stamping an event with "now"
+    /// — a ledger entry, a log line — goes through the shell. `response.output` is the local
+    /// date-time as `YYYY-MM-DD HH:MM:SS` (sortable lexicographically; the date is the first
+    /// 10 chars). No UI — resolves immediately. Pair with [`pick_date`](Self::pick_date) when
+    /// the user should choose a different date instead.
+    pub fn now(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("datetime", "now", "", then);
+    }
 }
 
 // ============================ the app trait ============================
@@ -1404,6 +1414,15 @@ mod tests {
         assert_eq!(cx.requests.len(), 1);
         let (call, _) = &cx.requests[0];
         assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("device", "locale", ""));
+    }
+
+    #[test]
+    fn cx_now_requests_the_datetime_now_op() {
+        let mut cx = Cx::<Ev>::default();
+        cx.now(|_| Ev::Tap);
+        assert_eq!(cx.requests.len(), 1);
+        let (call, _) = &cx.requests[0];
+        assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("datetime", "now", ""));
     }
 
     #[test]
