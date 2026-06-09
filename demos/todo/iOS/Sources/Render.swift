@@ -123,12 +123,16 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .column(let children):
         return AnyView(VStack(alignment: .leading, spacing: 6) { childViews(children, send) })
 
-    case .card(let child, let style, let onPress):
+    case .card(let child, let style, let onPress, let onLongPress):
         let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)))
+        var view = body
         if let token = onPress {
-            return AnyView(Button(action: { send(.fired(token: token)) }) { body }.buttonStyle(.plain))
+            view = AnyView(Button(action: { send(.fired(token: token)) }) { body }.buttonStyle(.plain))
         }
-        return body
+        if let longToken = onLongPress {
+            view = AnyView(view.onLongPressGesture { send(.fired(token: longToken)) })
+        }
+        return view
 
     case .box(let children, let align, let scrim):
         // A scrim box (hero banner) must be sized by its background — the first

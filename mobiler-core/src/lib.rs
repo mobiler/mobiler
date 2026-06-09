@@ -790,12 +790,26 @@ pub fn row(children: Vec<Widget>) -> Widget { Widget::Row { children } }
 pub fn column(children: Vec<Widget>) -> Widget { Widget::Column { children } }
 #[must_use]
 pub fn card(child: Widget, style: CardStyle) -> Widget {
-    Widget::Card { child: Box::new(child), style, on_press: None }
+    Widget::Card { child: Box::new(child), style, on_press: None, on_long_press: None }
 }
 /// A tappable card carrying a typed press event.
 #[must_use]
 pub fn card_button<E: Serialize>(child: Widget, style: CardStyle, on_press: E) -> Widget {
-    Widget::Card { child: Box::new(child), style, on_press: Some(tok(on_press)) }
+    Widget::Card { child: Box::new(child), style, on_press: Some(tok(on_press)), on_long_press: None }
+}
+/// Attach a long-press (press-and-hold) event to a `Card`. No-op on any other widget.
+/// Combines with `card` / `card_button` — a card can carry both a tap and a long-press.
+#[must_use]
+pub fn with_long_press<E: Serialize>(widget: Widget, on_long_press: E) -> Widget {
+    match widget {
+        Widget::Card { child, style, on_press, .. } => Widget::Card {
+            child,
+            style,
+            on_press,
+            on_long_press: Some(tok(on_long_press)),
+        },
+        other => other,
+    }
 }
 /// Z-stack/overlay (the `Box` widget). With `scrim`, the first child is a
 /// darkened background and the rest render on top.
@@ -1267,9 +1281,22 @@ mod tests {
         }
         // a plain card is not tappable
         match card(text("c"), CardStyle::Elevated) {
-            Widget::Card { on_press, .. } => assert!(on_press.is_none()),
+            Widget::Card { on_press, on_long_press, .. } => {
+                assert!(on_press.is_none());
+                assert!(on_long_press.is_none());
+            }
             other => panic!("expected Card, got {other:?}"),
         }
+        // with_long_press attaches a long-press, keeping any existing tap
+        match with_long_press(card_button(text("c"), CardStyle::Filled, Ev::Tap), Ev::Open(7)) {
+            Widget::Card { on_press, on_long_press, .. } => {
+                assert_eq!(on_press, Some(serde_json::to_string(&Ev::Tap).unwrap()));
+                assert_eq!(on_long_press, Some(serde_json::to_string(&Ev::Open(7)).unwrap()));
+            }
+            other => panic!("expected Card, got {other:?}"),
+        }
+        // with_long_press on a non-Card is a no-op
+        assert!(matches!(with_long_press(text("x"), Ev::Tap), Widget::Text { .. }));
     }
 
     // ---- Cx capabilities ----

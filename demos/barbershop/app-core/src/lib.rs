@@ -16,7 +16,7 @@ use mobiler_core::{
     pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
     spacer, split, stack, video_player, video_playlist, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_captions, with_error,
-    with_fab, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
+    with_fab, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
 };
 use mobiler_core::format::{self, Currency, Locale};
 use serde::{Deserialize, Serialize};
@@ -1257,15 +1257,20 @@ fn services_grid(model: &Model) -> Widget {
 }
 
 fn service_card(index: u32, s: &Service) -> Widget {
-    card_button(
-        column(vec![
-            image(s.image, ImageShape::Rounded, ImageRatio::Square),
-            emphasis(s.name),
-            row(vec![text(s.price), rating(tenths(s.rating), 5)]),
-            badge(s.category, Tone::Info),
-        ]),
-        CardStyle::Filled,
-        Msg::SelectService(index),
+    // Tap selects the service (master-detail); long-press is a quick-book shortcut
+    // straight to the booking sheet (the `with_long_press` gesture builder).
+    with_long_press(
+        card_button(
+            column(vec![
+                image(s.image, ImageShape::Rounded, ImageRatio::Square),
+                emphasis(s.name),
+                row(vec![text(s.price), rating(tenths(s.rating), 5)]),
+                badge(s.category, Tone::Info),
+            ]),
+            CardStyle::Filled,
+            Msg::SelectService(index),
+        ),
+        Msg::OpenService(index),
     )
 }
 

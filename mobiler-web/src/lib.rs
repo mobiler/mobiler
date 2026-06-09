@@ -845,23 +845,69 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let kids = render_all(children, send);
             view! { <div class="col">{kids}</div> }.into_any()
         }
-        Widget::Card { child, style, on_press } => {
+        Widget::Card { child, style, on_press, on_long_press } => {
             let class = format!("card {}", card_class(*style));
             let body = render(child, send);
-            match on_press {
-                Some(token) => {
-                    let (send, token) = (send.clone(), token.clone());
+            match (on_press, on_long_press) {
+                // Plain, non-interactive card.
+                (None, None) => view! { <div class=class>{body}</div> }.into_any(),
+                // Tappable and/or long-pressable — render a button with the relevant handlers.
+                (tap, long) => {
+                    let send = send.clone();
+                    // Web has no native long-press; shim it with a pointer-hold timer (~500 ms),
+                    // cancelled on pointerup/leave/cancel. A `long_fired` flag suppresses the
+                    // click that follows a successful hold so it doesn't also fire the tap.
+                    let timer: Rc<RefCell<Option<gloo_timers::callback::Timeout>>> =
+                        Rc::new(RefCell::new(None));
+                    let long_fired = Rc::new(RefCell::new(false));
+
+                    let on_pointerdown = {
+                        let (send, long, timer, long_fired) =
+                            (send.clone(), long.clone(), timer.clone(), long_fired.clone());
+                        move |_: web_sys::PointerEvent| {
+                            let Some(token) = long.clone() else { return };
+                            *long_fired.borrow_mut() = false;
+                            let (send, long_fired) = (send.clone(), long_fired.clone());
+                            *timer.borrow_mut() = Some(gloo_timers::callback::Timeout::new(
+                                500,
+                                move || {
+                                    *long_fired.borrow_mut() = true;
+                                    send(Action::Fired { token: token.clone() });
+                                },
+                            ));
+                        }
+                    };
+                    let cancel = {
+                        let timer = timer.clone();
+                        // Dropping the `Timeout` cancels the pending fire.
+                        move |_: web_sys::PointerEvent| { timer.borrow_mut().take(); }
+                    };
+                    let on_click = {
+                        let (send, tap, long_fired) = (send.clone(), tap.clone(), long_fired.clone());
+                        move |_| {
+                            // Suppress the tap that trails a long-press.
+                            if std::mem::take(&mut *long_fired.borrow_mut()) {
+                                return;
+                            }
+                            if let Some(token) = tap.clone() {
+                                send(Action::Fired { token });
+                            }
+                        }
+                    };
                     view! {
                         <button
                             class=format!("{class} card-tappable")
-                            on:click=move |_| send(Action::Fired { token: token.clone() })
+                            on:pointerdown=on_pointerdown
+                            on:pointerup=cancel.clone()
+                            on:pointerleave=cancel.clone()
+                            on:pointercancel=cancel
+                            on:click=on_click
                         >
                             {body}
                         </button>
                     }
                     .into_any()
                 }
-                None => view! { <div class=class>{body}</div> }.into_any(),
             }
         }
         // Z-stack. With `scrim`, the first child is a background image, darkened

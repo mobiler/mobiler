@@ -17,7 +17,8 @@ The `Widget` vocabulary covers layout (rows/columns/grids/cards/scrollers, paged
 **lazy lists**), inputs (text fields, toggles, segmented, search, rating), navigation
 (scaffold + tabs + FAB + sheets, and a two-pane **master-detail** split), media (images,
 avatars, a controllable **video player**, an embedded **web view**, an in-app **PDF viewer**,
-and an interactive **map**), feedback (progress, skeleton, swipe actions), an inline calendar,
+and an interactive **map**), gestures (tappable cards with **tap + long-press**, swipe actions),
+feedback (progress, skeleton), an inline calendar,
 **data-viz charts** — `Chart` in eight styles (bar, line, stacked, 100%-stacked, pie, donut,
 fitness-style progress rings, and a radial gauge) plus a variable-width stacked-region /
 coverage-gap `RegionChart` — and an **accessibility** wrapper (a screen-reader label / hint /
