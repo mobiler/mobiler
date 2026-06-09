@@ -4,6 +4,7 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
+    A11yRole, a11y, with_a11y_hint, with_a11y_role,
     BoxAlign, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
@@ -1106,7 +1107,7 @@ fn home(model: &Model) -> Widget {
         BoxAlign::BottomStart,
         true,
         vec![
-            image(HERO, ImageShape::Rounded, ImageRatio::Wide),
+            with_a11y_role(a11y(image(HERO, ImageShape::Rounded, ImageRatio::Wide), "Barbershop interior"), A11yRole::Image),
             column(vec![
                 title("Look sharp."),
                 caption("Top barbers near you — book in seconds."),
@@ -1118,7 +1119,11 @@ fn home(model: &Model) -> Widget {
         row(vec![
             column(vec![caption("Welcome back"), emphasis("Marcus")]),
             spacer(Spacing::Md),
-            icon_button(Icon::Bell, Msg::Notifications),
+            // Accessibility: an icon-only button has no text → give VoiceOver/TalkBack a name, hint, role.
+            with_a11y_role(
+                with_a11y_hint(a11y(icon_button(Icon::Bell, Msg::Notifications), "Notifications"), "Opens your alerts"),
+                A11yRole::Button,
+            ),
         ]),
         // Search bar (SearchField) — emits Input { id: "search", … }.
         search_field("search", "Search services…", model.search.as_str()),

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use crux_core::{App, Core, Request};
 use leptos::prelude::*;
 use mobiler_core::{
-    Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
     Rgb, Spacing, TextStyle, Theme, Tone, Widget,
@@ -809,6 +809,17 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 </div>
             }.into_any()
         }
+        // Accessibility wrapper: name the subtree for a screen reader (aria-label), give it a role,
+        // and the hint via `title`. Best-effort web mapping of iOS traits / Android semantics.
+        Widget::A11y { child, label, hint, role } => {
+            let body = render(child, send);
+            let role_attr = role.map(a11y_role_aria).unwrap_or("group");
+            view! {
+                <div class="a11y" role=role_attr aria-label=label.clone() title=hint.clone()>
+                    {body}
+                </div>
+            }.into_any()
+        }
         // A long/paged feed. Web has no pull gesture or reliable infinite-scroll on a sub-container,
         // so (like Scaffold pull-to-refresh) the gestures degrade to controls: a top "↻ Refresh"
         // button (while `on_refresh`), and a bottom "Load more" button (while `has_more && !loading`)
@@ -1212,6 +1223,16 @@ fn card_class(s: CardStyle) -> &'static str {
         CardStyle::Outlined => "card-outlined",
         CardStyle::Filled => "card-filled",
         CardStyle::Brand => "card-brand",
+    }
+}
+
+fn a11y_role_aria(role: A11yRole) -> &'static str {
+    match role {
+        A11yRole::Button => "button",
+        A11yRole::Link => "link",
+        A11yRole::Image => "img",
+        A11yRole::Header => "heading",
+        A11yRole::Adjustable => "slider",
     }
 }
 

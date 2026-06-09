@@ -49,6 +49,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -168,6 +173,7 @@ import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import dev.mobiler.barbershop.ui.theme.FadehouseTheme
+import dev.mobiler.barbershop.shared.types.A11yRole
 import dev.mobiler.barbershop.shared.types.Action
 import dev.mobiler.barbershop.shared.types.BoxAlign
 import dev.mobiler.barbershop.shared.types.ButtonStyle
@@ -888,6 +894,25 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 }
             } else {
                 Render(widget.primary, send)
+            }
+        }
+
+        // Accessibility wrapper: merge the subtree into ONE TalkBack node named `label` (+ hint folded
+        // in), with an optional role. mergeDescendants keeps a child's click action on the merged node.
+        is Widget.A11y -> {
+            val desc = widget.hint?.let { "${widget.label}. $it" } ?: widget.label
+            Box(
+                modifier = Modifier.semantics(mergeDescendants = true) {
+                    contentDescription = desc
+                    when (widget.role) {
+                        A11yRole.BUTTON -> role = Role.Button
+                        A11yRole.IMAGE -> role = Role.Image
+                        A11yRole.HEADER -> heading()
+                        A11yRole.LINK, A11yRole.ADJUSTABLE, null -> {}
+                    }
+                },
+            ) {
+                Render(widget.child, send)
             }
         }
 

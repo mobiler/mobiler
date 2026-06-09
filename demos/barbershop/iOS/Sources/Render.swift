@@ -161,6 +161,14 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .split(let primary, let detail, let showDetail, let onBack):
         return AnyView(SplitView(primary: primary, detail: detail, showDetail: showDetail, onBack: onBack, send: send))
 
+    // Accessibility wrapper: present the subtree as ONE VoiceOver element named `label`. `.combine`
+    // merges descendants (keeping any tap action) under one element so the override label sticks.
+    case .a11y(let child, let label, let hint, let role):
+        var v = AnyView(render(child, send).accessibilityElement(children: .combine).accessibilityLabel(label))
+        if let hint { v = AnyView(v.accessibilityHint(hint)) }
+        if let role { v = AnyView(v.accessibilityAddTraits(a11yTraits(role))) }
+        return v
+
     case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing):
         return AnyView(LazyListView(
             children: children, onLoadMore: onLoadMore, loading: loading,
@@ -1139,6 +1147,17 @@ private struct CardMod: ViewModifier {
 private func spacing(_ s: Spacing) -> CGFloat {
     let base: CGFloat = { switch s { case .xs: return 4; case .sm: return 8; case .md: return 12; case .lg: return 16; case .xl: return 24 } }()
     return base * (ActiveTheme.current?.densityScale ?? 1.0)
+}
+
+// Map an A11yRole to VoiceOver traits (best-effort; Adjustable has no static SwiftUI trait → none).
+private func a11yTraits(_ role: SharedTypes.A11yRole) -> AccessibilityTraits {
+    switch role {
+    case .button: return .isButton
+    case .link: return .isLink
+    case .image: return .isImage
+    case .header: return .isHeader
+    case .adjustable: return []
+    }
 }
 
 private func toneColors(_ tone: Tone) -> (Color, Color) {

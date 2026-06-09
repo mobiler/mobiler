@@ -21,7 +21,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    Action, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    A11yRole, Action, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FieldKind, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, Widget,
@@ -853,6 +853,33 @@ pub fn with_error(widget: Widget, message: impl Into<String>) -> Widget {
         Widget::TextField { id, placeholder, value, kind, .. } =>
             Widget::TextField { id, placeholder, value, kind, error: Some(message.into()) },
         other => other,
+    }
+}
+
+/// Wrap `child` so a screen reader (VoiceOver / TalkBack) announces the subtree as ONE element named
+/// `label` — gives an unlabeled `icon_button`/`image` a name, or groups a card's children into one
+/// announced element. Add `with_a11y_hint` / `with_a11y_role` for the activation hint + control type.
+#[must_use]
+pub fn a11y(child: Widget, label: impl Into<String>) -> Widget {
+    Widget::A11y { child: Box::new(child), label: label.into(), hint: None, role: None }
+}
+/// Set the accessibility activation hint (e.g. "Opens your bookings"); wraps `widget` if it isn't an
+/// [`a11y`] wrapper yet.
+#[must_use]
+pub fn with_a11y_hint(widget: Widget, hint: impl Into<String>) -> Widget {
+    match widget {
+        Widget::A11y { child, label, role, .. } =>
+            Widget::A11y { child, label, hint: Some(hint.into()), role },
+        other => Widget::A11y { child: Box::new(other), label: String::new(), hint: Some(hint.into()), role: None },
+    }
+}
+/// Set the accessibility role / control type; wraps `widget` if it isn't an [`a11y`] wrapper yet.
+#[must_use]
+pub fn with_a11y_role(widget: Widget, role: A11yRole) -> Widget {
+    match widget {
+        Widget::A11y { child, label, hint, .. } =>
+            Widget::A11y { child, label, hint, role: Some(role) },
+        other => Widget::A11y { child: Box::new(other), label: String::new(), hint: None, role: Some(role) },
     }
 }
 /// A search input (leading magnifier, pill); emits `Input { id, Text }` like [`text_field`].
