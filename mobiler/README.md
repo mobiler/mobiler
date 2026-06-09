@@ -101,6 +101,9 @@ ABI change. Bundled free plugins:
 | 📲 `push` | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** |
 | 🔥 `push-firebase-only` | push via Firebase on both platforms (one FCM token; alternative to `push`) — **experimental** |
 | 💳 `iap` | in-app purchase / subscriptions (StoreKit 2 / Play Billing) — **experimental, not yet device-tested** |
+| 🗺️ `geofence` | background geofence enter/exit + significant-location-change — **experimental** |
+| ⏰ `background-fetch` | periodic background wake (BGTaskScheduler / WorkManager) — **experimental** |
+| 📊 `analytics` | product analytics + crash reporting (Firebase Analytics + Crashlytics) — **experimental** |
 
 ```bash
 mobiler plugin list

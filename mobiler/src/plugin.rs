@@ -995,6 +995,35 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_analytics_registers_app_launch_firebase_deps_plugins_and_spm() {
+        let root = skeleton();
+        add_at(&root, "analytics").unwrap();
+
+        // Source copied with the package substituted; registered in handle() (no stream).
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/AnalyticsPlugin.kt").contains("package dev.mobiler.demo"));
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"analytics\" to AnalyticsPlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"analytics\": return await AnalyticsPlugin.handle"));
+        // app-launch hook → FirebaseApp.configure at launch.
+        assert!(read(&root, "iOS/Sources/App.swift").contains("AnalyticsPlugin.bootstrap()"), "app-launch hook injected");
+        // Android: both Firebase deps + the google-services AND crashlytics Gradle plugins.
+        let gradle = read(&root, "Android/app/build.gradle.kts");
+        assert!(gradle.contains("com.google.firebase:firebase-analytics"), "analytics dep");
+        assert!(gradle.contains("com.google.firebase:firebase-crashlytics"), "crashlytics dep");
+        assert!(gradle.contains("id(\"com.google.gms.google-services\")"), "google-services plugin applied");
+        assert!(gradle.contains("id(\"com.google.firebase.crashlytics\")"), "crashlytics plugin applied");
+        let gradle_proj = read(&root, "Android/build.gradle.kts");
+        assert!(gradle_proj.contains("com.google.firebase.crashlytics") && gradle_proj.contains("apply false"), "crashlytics plugin declared at project level");
+        // iOS: the Firebase SPM package + BOTH product dependencies.
+        let yml = read(&root, "iOS/project.yml");
+        assert!(yml.contains("url: https://github.com/firebase/firebase-ios-sdk"), "Firebase SPM package");
+        assert!(yml.contains("product: FirebaseAnalytics"), "FirebaseAnalytics product");
+        assert!(yml.contains("product: FirebaseCrashlytics"), "FirebaseCrashlytics product");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_bundled_push_firebase_only_injects_spm_package_and_registers_under_push() {
         let root = skeleton();
         add_at(&root, "push-firebase-only").unwrap();
