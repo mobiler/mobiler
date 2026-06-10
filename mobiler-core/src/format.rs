@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 /// A formatting locale — drives digit grouping, the decimal mark, currency placement, and the
 /// date order + month names. Map a device language tag (e.g. from a `locale` plugin) to one with
 /// [`Locale::from_tag`].
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Locale {
+    #[default]
     EnUs,
     EnGb,
     /// Swiss German — `1'234.50`, `31.12.2026`.
@@ -30,6 +31,8 @@ pub enum Locale {
     DeDe,
     FrFr,
     ItIt,
+    /// Ukrainian — `1 234,50` (no-break space grouping), `31.12.2026`, `січень`.
+    UkUa,
     /// Serbian, Latin script — `1.234,50`, `31.12.2026.`, `januar`.
     SrLatn,
     /// Serbian, Cyrillic script — `1.234,50`, `31.12.2026.`, `јануар`.
@@ -37,12 +40,15 @@ pub enum Locale {
 }
 
 /// A currency. Placement (symbol leading vs trailing) follows the [`Locale`].
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Currency {
     Chf,
+    #[default]
     Eur,
     Usd,
     Gbp,
+    /// Ukrainian hryvnia — trails the amount (`1 234,50 ₴`).
+    Uah,
     /// Serbian dinar — trails (`din.` in Latin, `дин.` in Cyrillic, else `RSD`).
     Rsd,
 }
@@ -53,6 +59,7 @@ enum Lang {
     De,
     Fr,
     It,
+    Uk,
     SrLatn,
     SrCyrl,
 }
@@ -67,6 +74,8 @@ impl Locale {
             Locale::DeDe | Locale::ItIt | Locale::SrLatn | Locale::SrCyrl => (".", ","),
             // French: narrow no-break space grouping, comma decimal.
             Locale::FrFr => ("\u{202f}", ","),
+            // Ukrainian: no-break space grouping, comma decimal.
+            Locale::UkUa => ("\u{a0}", ","),
         }
     }
 
@@ -76,6 +85,7 @@ impl Locale {
             Locale::DeCh | Locale::DeDe => Lang::De,
             Locale::FrCh | Locale::FrFr => Lang::Fr,
             Locale::ItCh | Locale::ItIt => Lang::It,
+            Locale::UkUa => Lang::Uk,
             Locale::SrLatn => Lang::SrLatn,
             Locale::SrCyrl => Lang::SrCyrl,
         }
@@ -99,6 +109,7 @@ impl Locale {
             ("fr", _) => Locale::FrFr,
             ("it", "ch") => Locale::ItCh,
             ("it", _) => Locale::ItIt,
+            ("uk", _) => Locale::UkUa,
             // Serbian: script wins; default to Cyrillic (the official script) when unspecified.
             ("sr", "latn") => Locale::SrLatn,
             ("sr", _) => Locale::SrCyrl,
@@ -187,6 +198,7 @@ pub fn format_currency(value: f64, currency: Currency, locale: Locale) -> String
             Locale::DeDe | Locale::FrFr | Locale::ItIt => format!("{num} €"),
             _ => format!("€{num}"),
         },
+        Currency::Uah => format!("{num} ₴"),
         Currency::Rsd => match locale {
             Locale::SrLatn => format!("{num} din."),
             Locale::SrCyrl => format!("{num} дин."),
@@ -211,6 +223,11 @@ const MONTHS_IT: [&str; 12] = [
     "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre",
     "ottobre", "novembre", "dicembre",
 ];
+// Ukrainian standalone (nominative) month names.
+const MONTHS_UK: [&str; 12] = [
+    "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень",
+    "вересень", "жовтень", "листопад", "грудень",
+];
 const MONTHS_SR_LATN: [&str; 12] = [
     "januar", "februar", "mart", "april", "maj", "jun", "jul", "avgust", "septembar", "oktobar",
     "novembar", "decembar",
@@ -229,6 +246,7 @@ pub fn month_name(month: u32, locale: Locale) -> &'static str {
         Lang::De => MONTHS_DE[idx],
         Lang::Fr => MONTHS_FR[idx],
         Lang::It => MONTHS_IT[idx],
+        Lang::Uk => MONTHS_UK[idx],
         Lang::SrLatn => MONTHS_SR_LATN[idx],
         Lang::SrCyrl => MONTHS_SR_CYRL[idx],
     }
@@ -246,7 +264,7 @@ pub fn format_date(year: i32, month: u32, day: u32, locale: Locale) -> String {
     match locale {
         Locale::EnUs => format!("{month:02}/{day:02}/{year}"),
         Locale::EnGb | Locale::FrFr | Locale::ItIt => format!("{day:02}/{month:02}/{year}"),
-        Locale::DeCh | Locale::FrCh | Locale::ItCh | Locale::DeDe => {
+        Locale::DeCh | Locale::FrCh | Locale::ItCh | Locale::DeDe | Locale::UkUa => {
             format!("{day:02}.{month:02}.{year}")
         }
         // Serbian uses a trailing dot: "31.12.2026."
@@ -269,9 +287,9 @@ pub fn format_date_long(year: i32, month: u32, day: u32, locale: Locale) -> Stri
             Locale::EnUs => format!("{m} {day}, {year}"),
             _ => format!("{day} {m} {year}"),
         },
-        // German + Serbian use the ordinal dot after the day; French/Italian do not.
+        // German + Serbian use the ordinal dot after the day; French/Italian/Ukrainian do not.
         Lang::De | Lang::SrLatn | Lang::SrCyrl => format!("{day}. {m} {year}"),
-        Lang::Fr | Lang::It => format!("{day} {m} {year}"),
+        Lang::Fr | Lang::It | Lang::Uk => format!("{day} {m} {year}"),
     }
 }
 
@@ -336,8 +354,28 @@ mod tests {
     }
 
     #[test]
+    fn ukrainian() {
+        // No-break space grouping, comma decimal, trailing ₴.
+        assert_eq!(format_int(1234567, Locale::UkUa), "1\u{a0}234\u{a0}567");
+        assert_eq!(format_number(1234.5, 2, Locale::UkUa), "1\u{a0}234,50");
+        assert_eq!(format_currency(1234.5, Currency::Uah, Locale::UkUa), "1\u{a0}234,50 ₴");
+        // dd.MM.yyyy (no trailing dot), nominative month name, day-month-year long form.
+        assert_eq!(format_date(2026, 12, 31, Locale::UkUa), "31.12.2026");
+        assert_eq!(month_name(1, Locale::UkUa), "січень");
+        assert_eq!(format_date_long(2026, 5, 5, Locale::UkUa), "5 травень 2026");
+    }
+
+    #[test]
+    fn defaults() {
+        assert_eq!(Locale::default(), Locale::EnUs);
+        assert_eq!(Currency::default(), Currency::Eur);
+    }
+
+    #[test]
     fn tag_parsing() {
         assert_eq!(Locale::from_tag("de-CH"), Some(Locale::DeCh));
+        assert_eq!(Locale::from_tag("uk"), Some(Locale::UkUa));
+        assert_eq!(Locale::from_tag("uk-UA"), Some(Locale::UkUa));
         assert_eq!(Locale::from_tag("fr_FR"), Some(Locale::FrFr));
         assert_eq!(Locale::from_tag("EN-us"), Some(Locale::EnUs));
         assert_eq!(Locale::from_tag("it"), Some(Locale::ItIt));
