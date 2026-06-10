@@ -55,6 +55,8 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <activity android:name=".FileExportActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity android:name=".FilePickerActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
     </application>
 

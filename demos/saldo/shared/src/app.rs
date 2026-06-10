@@ -1,12 +1,11 @@
 //! Saldo — a multilingual, SQLite-backed personal expense & money manager, built on Mobiler.
 //!
-//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 8** adds **recurring transactions**: a
-//! `recurring` rules table, a "Repeat" choice on the entry sheet, and catch-up materialization on launch
-//! (every occurrence due on or before today is posted and the rule's `next_date` advanced, via
-//! dependency-free civil-date arithmetic). Earlier chapters set up the four-tab shell, `SQLite`
-//! persistence with `cx.now()`, the accounts / transfers ledger, categories, the entry sheet, the Stats
-//! charts, locale-aware money/date formatting, and the multilingual `i18n` UI. CSV export / import /
-//! backup and the security/settings polish come next.
+//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 9** adds **data portability**: CSV export
+//! of the ledger and a full **JSON backup / restore** (the `files` + `filepicker` plugins) from a Data
+//! card in Settings. Earlier chapters set up the four-tab shell, `SQLite` persistence with `cx.now()`,
+//! the accounts / transfers ledger, categories, the entry sheet, the Stats charts, locale-aware
+//! money/date formatting, the multilingual `i18n` UI, and recurring transactions. Security (passcode /
+//! biometric) and the settings/theme polish come next.
 
 use std::sync::OnceLock;
 
@@ -206,7 +205,7 @@ impl AccountKind {
 
 // ---- rows ----
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Account {
     pub id: u32,
     pub name: String,
@@ -214,7 +213,7 @@ pub struct Account {
     pub opening: f64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Category {
     pub id: u32,
     pub name: String,
@@ -222,7 +221,7 @@ pub struct Category {
     pub parent_id: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Txn {
     pub id: u32,
     pub ts: String,
@@ -242,7 +241,7 @@ impl Txn {
 
 /// A scheduled rule. Its `next_date` is the next occurrence still to post; materialization posts every
 /// occurrence up to today and advances `next_date` past it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Recurring {
     pub id: u32,
     pub kind: TxnKind,
@@ -328,6 +327,14 @@ pub enum Msg {
     SetAccKind(AccountKind),
     SaveAccount,
     AccountSaved(bool),
+    // data: export / backup / restore
+    ExportCsv,
+    Backup,
+    DoExport(String, String), // (sandbox path, save-as name) — export after the write lands
+    ExportDone(bool),
+    Restore,
+    RestorePicked(String), // a file:// URI from the picker
+    RestoreRead(String),   // the file's contents
 }
 
 #[derive(Default)]
@@ -500,6 +507,45 @@ impl MobilerApp for SaldoApp {
                     load_all(cx);
                 }
             }
+
+            // Export the ledger as CSV: build the text in the core, write it to the sandbox, then hand
+            // it to the system save-picker. The two-step (write → export) is why DoExport carries the
+            // name through the write's callback.
+            Msg::ExportCsv => {
+                let name = format!("Saldo-{}.csv", model.today);
+                write_and_export(cx, "saldo-export.csv", name, &build_csv(model));
+            }
+            Msg::Backup => {
+                let name = format!("Saldo-Backup-{}.json", model.today);
+                write_and_export(cx, "saldo-backup.json", name, &build_backup(model));
+            }
+            Msg::DoExport(path, name) => {
+                let sql = serde_json::json!({ "path": path, "name": name }).to_string();
+                cx.plugin("files", "export", sql, |r| Msg::ExportDone(r.ok));
+            }
+            Msg::ExportDone(ok) => {
+                cx.notify("toast", "show", tr(model, if ok { "data.saved" } else { "data.cancelled" }));
+            }
+            // Restore: pick a backup file → read it → replace every table from it → reload.
+            Msg::Restore => cx.plugin("filepicker", "pick", "", |r| {
+                if r.ok { Msg::RestorePicked(r.output) } else { Msg::ExportDone(false) }
+            }),
+            Msg::RestorePicked(uri) => {
+                let sql = serde_json::json!({ "path": uri }).to_string();
+                cx.plugin("files", "read", sql, |r| {
+                    if r.ok { Msg::RestoreRead(r.output) } else { Msg::RestoreRead(String::new()) }
+                });
+            }
+            Msg::RestoreRead(json) => match serde_json::from_str::<Backup>(&json) {
+                Ok(backup) => {
+                    for stmt in restore_statements(&backup) {
+                        cx.plugin("sqlite", "exec", stmt, |_| Msg::Posted);
+                    }
+                    cx.notify("toast", "show", tr(model, "data.restored"));
+                    load_all(cx);
+                }
+                Err(_) => cx.notify("toast", "show", tr(model, "data.bad_backup")),
+            },
         }
     }
 
@@ -606,6 +652,108 @@ fn materialize(model: &Model, cx: &mut Cx<Msg>) {
     load_all(cx); // reflect the new txns + advanced next_dates (re-fires materialize, now a no-op)
 }
 
+// ---- data: export / backup / restore (the `files` + `filepicker` plugins) ----
+
+/// Write `content` to the app sandbox, then (on success) hand it to the system save-picker as `name`.
+fn write_and_export(cx: &mut Cx<Msg>, path: &str, name: String, content: &str) {
+    let p = path.to_string();
+    let input = serde_json::json!({ "path": path, "content": content }).to_string();
+    cx.plugin("files", "write", input, move |r| {
+        if r.ok { Msg::DoExport(p, name) } else { Msg::ExportDone(false) }
+    });
+}
+
+/// Quote a CSV field if it contains a comma, quote, or newline (doubling any embedded quotes).
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// The whole ledger as CSV (one header row + a row per transaction), newest first as loaded.
+fn build_csv(model: &Model) -> String {
+    let mut out = String::from("date,type,amount,account,to_account,category,note\n");
+    for t in &model.txns {
+        let cols = [
+            t.day().to_string(),
+            t.kind.db().to_string(),
+            format!("{:.2}", t.amount),
+            acct_name(&model.accounts, t.account_id).to_string(),
+            t.to_account_id.map(|id| acct_name(&model.accounts, id).to_string()).unwrap_or_default(),
+            t.category.clone(),
+            t.note.clone(),
+        ];
+        out.push_str(&cols.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
+        out.push('\n');
+    }
+    out
+}
+
+/// A full database snapshot — the JSON backup format (every table, ids included for exact restore).
+#[derive(Serialize, Deserialize)]
+struct Backup {
+    version: u32,
+    accounts: Vec<Account>,
+    categories: Vec<Category>,
+    txns: Vec<Txn>,
+    recurring: Vec<Recurring>,
+}
+
+fn build_backup(model: &Model) -> String {
+    serde_json::to_string(&Backup {
+        version: SCHEMA_VERSION,
+        accounts: model.accounts.clone(),
+        categories: model.categories.clone(),
+        txns: model.txns.clone(),
+        recurring: model.recurring.clone(),
+    })
+    .unwrap_or_default()
+}
+
+/// SQL to replace every table from a backup: clear all four, then re-insert each row **with its id**
+/// (so `account_id` / `parent_id` references survive). Returned as ready-to-exec `{sql, args}` strings.
+fn restore_statements(b: &Backup) -> Vec<String> {
+    let mut out = Vec::new();
+    for table in ["txn", "recurring", "category", "account"] {
+        out.push(serde_json::json!({ "sql": format!("DELETE FROM {table}") }).to_string());
+    }
+    for a in &b.accounts {
+        out.push(serde_json::json!({
+            "sql": "INSERT INTO account(id, name, kind, opening, sort) VALUES (?, ?, ?, ?, 0)",
+            "args": [a.id.to_string(), a.name.as_str(), a.kind.db(), a.opening.to_string()],
+        }).to_string());
+    }
+    for c in &b.categories {
+        let parent = c.parent_id.map_or(serde_json::Value::Null, |p| p.to_string().into());
+        out.push(serde_json::json!({
+            "sql": "INSERT INTO category(id, name, kind, parent_id, sort) VALUES (?, ?, ?, ?, 0)",
+            "args": [c.id.to_string(), c.name.as_str(), c.kind.as_str(), parent],
+        }).to_string());
+    }
+    for t in &b.txns {
+        let to = t.to_account_id.map_or(serde_json::Value::Null, |id| id.to_string().into());
+        out.push(serde_json::json!({
+            "sql": "INSERT INTO txn(id, ts, kind, amount, account_id, to_account_id, category, note) \
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "args": [t.id.to_string(), t.ts.as_str(), t.kind.db(), t.amount.to_string(),
+                     t.account_id.to_string(), to, t.category.as_str(), t.note.as_str()],
+        }).to_string());
+    }
+    for r in &b.recurring {
+        let to = r.to_account_id.map_or(serde_json::Value::Null, |id| id.to_string().into());
+        let end = r.end_date.clone().map_or(serde_json::Value::Null, Into::into);
+        out.push(serde_json::json!({
+            "sql": "INSERT INTO recurring(id, kind, amount, account_id, to_account_id, category, note, \
+                    freq, next_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "args": [r.id.to_string(), r.kind.db(), r.amount.to_string(), r.account_id.to_string(),
+                     to, r.category.as_str(), r.note.as_str(), r.freq.db(), r.next_date.as_str(), end],
+        }).to_string());
+    }
+    out
+}
+
 fn tab(current: Screen, screen: Screen, label: impl Into<String>, icon: Icon) -> mobiler_core::Tab {
     mobiler_core::tab_icon(label, icon, current == screen, Msg::Switch(screen))
 }
@@ -677,6 +825,16 @@ fn catalog() -> &'static Catalog {
             .with("settings.scheduled", &[("en", "Scheduled"), ("de", "Geplant"), ("fr", "Planifié"), ("it", "Pianificati"), ("uk", "Заплановані")])
             .with("recurring.next", &[("en", "next"), ("de", "nächste"), ("fr", "prochain"), ("it", "prossimo"), ("uk", "наступний")])
             .with("recurring.empty", &[("en", "No scheduled transactions. Pick a Repeat in the entry sheet to add one."), ("de", "Keine geplanten Buchungen. Wähle im Eingabefenster eine Wiederholung."), ("fr", "Aucune opération planifiée. Choisissez une répétition dans la feuille de saisie."), ("it", "Nessun movimento pianificato. Scegli una ripetizione nella scheda di inserimento."), ("uk", "Немає запланованих записів. Виберіть повторення у формі додавання.")])
+            // data (export / backup / restore)
+            .with("settings.data", &[("en", "Data"), ("de", "Daten"), ("fr", "Données"), ("it", "Dati"), ("uk", "Дані")])
+            .with("data.export_csv", &[("en", "Export CSV"), ("de", "CSV exportieren"), ("fr", "Exporter en CSV"), ("it", "Esporta CSV"), ("uk", "Експорт CSV")])
+            .with("data.backup", &[("en", "Back up"), ("de", "Sichern"), ("fr", "Sauvegarder"), ("it", "Backup"), ("uk", "Резервна копія")])
+            .with("data.restore", &[("en", "Restore from backup"), ("de", "Aus Sicherung wiederherstellen"), ("fr", "Restaurer depuis une sauvegarde"), ("it", "Ripristina da backup"), ("uk", "Відновити з резервної копії")])
+            .with("data.hint", &[("en", "Export sends a CSV of your transactions to Files. A backup saves everything as JSON; restoring it replaces all current data."), ("de", "Der Export schickt eine CSV deiner Buchungen an Dateien. Eine Sicherung speichert alles als JSON; beim Wiederherstellen werden alle aktuellen Daten ersetzt."), ("fr", "L'export envoie un CSV de vos opérations vers Fichiers. Une sauvegarde enregistre tout en JSON ; la restauration remplace toutes les données actuelles."), ("it", "L'esportazione invia un CSV dei tuoi movimenti a File. Un backup salva tutto come JSON; il ripristino sostituisce tutti i dati attuali."), ("uk", "Експорт надсилає CSV ваших записів у «Файли». Резервна копія зберігає все як JSON; відновлення замінює всі поточні дані.")])
+            .with("data.saved", &[("en", "Saved to Files."), ("de", "In Dateien gespeichert."), ("fr", "Enregistré dans Fichiers."), ("it", "Salvato in File."), ("uk", "Збережено у «Файлах».")])
+            .with("data.cancelled", &[("en", "Cancelled."), ("de", "Abgebrochen."), ("fr", "Annulé."), ("it", "Annullato."), ("uk", "Скасовано.")])
+            .with("data.restored", &[("en", "Restored from backup."), ("de", "Aus Sicherung wiederhergestellt."), ("fr", "Restauré depuis la sauvegarde."), ("it", "Ripristinato dal backup."), ("uk", "Відновлено з резервної копії.")])
+            .with("data.bad_backup", &[("en", "Couldn't read that backup file."), ("de", "Diese Sicherungsdatei konnte nicht gelesen werden."), ("fr", "Impossible de lire ce fichier de sauvegarde."), ("it", "Impossibile leggere quel file di backup."), ("uk", "Не вдалося прочитати цей файл резервної копії.")])
             // account sheet
             .with("sheet.newaccount", &[("en", "New account"), ("de", "Neues Konto"), ("fr", "Nouveau compte"), ("it", "Nuovo conto"), ("uk", "Новий рахунок")])
             .with("field.accname", &[("en", "Account name (e.g. Cash, Bank)"), ("de", "Kontoname (z. B. Bargeld, Bank)"), ("fr", "Nom du compte (p. ex. Espèces, Banque)"), ("it", "Nome del conto (es. Contanti, Banca)"), ("uk", "Назва рахунку (напр. Готівка, Банк)")])
@@ -1157,11 +1315,25 @@ fn settings(model: &Model) -> Widget {
         }
     }
 
+    let data = card(
+        column(vec![
+            subtitle(tr(model, "settings.data")),
+            caption(tr(model, "data.hint")),
+            spacer(Spacing::Sm),
+            button(tr(model, "data.export_csv"), ButtonStyle::Filled, Msg::ExportCsv),
+            button(tr(model, "data.backup"), ButtonStyle::Filled, Msg::Backup),
+            button(tr(model, "data.restore"), ButtonStyle::Outlined, Msg::Restore),
+        ]),
+        CardStyle::Elevated,
+    );
+
     column(vec![
         spacer(Spacing::Md),
         language,
         spacer(Spacing::Md),
         card(column(scheduled), CardStyle::Elevated),
+        spacer(Spacing::Md),
+        data,
     ])
 }
 
@@ -1691,5 +1863,55 @@ mod test {
         let (inc, exp) = monthly_totals(&txns, "2026-06");
         assert!((inc - 500.0).abs() < 1e-9);
         assert!((exp - 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn csv_fields_are_quoted_only_when_needed() {
+        assert_eq!(csv_field("Coffee"), "Coffee");
+        assert_eq!(csv_field("Lunch, tip"), "\"Lunch, tip\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+    }
+
+    fn sample_model() -> Model {
+        Model {
+            accounts: vec![
+                Account { id: 1, name: "Cash".into(), kind: AccountKind::Asset, opening: 100.0 },
+                Account { id: 2, name: "Bank, EU".into(), kind: AccountKind::Asset, opening: 0.0 },
+            ],
+            categories: cats(),
+            txns: vec![
+                expense(1, "2026-06-01 12:00:00", 4.0, "Coffee"),
+                Txn { id: 2, ts: "2026-06-02 12:00:00".into(), kind: TxnKind::Transfer, amount: 30.0,
+                      account_id: 1, to_account_id: Some(2), category: String::new(), note: "rent".into() },
+            ],
+            recurring: vec![rule(9, Freq::Monthly, "2026-07-01", None)],
+            ..Model::default()
+        }
+    }
+
+    #[test]
+    fn build_csv_has_a_header_and_quotes_embedded_commas() {
+        let csv = build_csv(&sample_model());
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "date,type,amount,account,to_account,category,note");
+        assert_eq!(lines.len(), 3); // header + 2 txns
+        assert!(lines[1].starts_with("2026-06-01,expense,4.00,Cash,,Coffee"));
+        assert!(lines[2].contains("\"Bank, EU\"")); // the transfer destination is quoted
+    }
+
+    #[test]
+    fn backup_round_trips_through_restore_statements() {
+        let json = build_backup(&sample_model());
+        let b: Backup = serde_json::from_str(&json).unwrap();
+        assert_eq!(b.accounts.len(), 2);
+        assert_eq!(b.txns.len(), 2);
+        assert_eq!(b.recurring.len(), 1);
+
+        let stmts = restore_statements(&b);
+        // 4 DELETEs + 2 accounts + 5 categories + 2 txns + 1 recurring = 14
+        assert_eq!(stmts.iter().filter(|s| s.contains("DELETE FROM")).count(), 4);
+        assert_eq!(stmts.len(), 14);
+        // ids are preserved so account_id references survive
+        assert!(stmts.iter().any(|s| s.contains("INSERT INTO account") && s.contains("\"1\"")));
     }
 }
