@@ -17,7 +17,7 @@ categories = ["wasm", "web-programming", "gui"]
 crate-type = ["lib"]
 
 [dependencies]
-mobiler-core = { path = "../mobiler-core", version = "0.30.0" }
+mobiler-core = { path = "../mobiler-core", version = "0.31.0" }
 crux_core = "0.18"
 leptos = { version = "0.7", features = ["csr"] }
 gloo-net = "0.6"
