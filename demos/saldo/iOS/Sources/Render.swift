@@ -1106,16 +1106,28 @@ private struct ScaffoldView: View {
             .transition(navTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Floating action button — the raised primary action, over the body bottom-trailing.
+            // With the glass look it's a frosted circle (à la the Substack search button) with a
+            // brand-tinted glyph; otherwise the classic solid rounded-square.
             .overlay(alignment: .bottomTrailing) {
                 if let fab = fab {
                     Button(action: { send(.fired(token: fab.onPress)) }) {
-                        Image(systemName: sfSymbol(fab.icon))
-                            .font(.title2)
-                            .frame(width: 56, height: 56)
-                            .background(theme?.brandColor ?? .accentColor)
-                            .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 18))
-                            .shadow(radius: 6, y: 3)
+                        if glassTabBar {
+                            Image(systemName: sfSymbol(fab.icon))
+                                .font(.title2.weight(.semibold))
+                                .foregroundColor(theme?.brandColor ?? .accentColor)
+                                .frame(width: 56, height: 56)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(Circle().strokeBorder(Color.primary.opacity(0.08)))
+                                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                        } else {
+                            Image(systemName: sfSymbol(fab.icon))
+                                .font(.title2)
+                                .frame(width: 56, height: 56)
+                                .background(theme?.brandColor ?? .accentColor)
+                                .foregroundColor(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                                .shadow(radius: 6, y: 3)
+                        }
                     }
                     .padding(.trailing, 18)
                     .padding(.bottom, floating ? 92 : 18) // sit above the floating bar
