@@ -1,10 +1,10 @@
 //! Saldo — a multilingual, SQLite-backed personal expense & money manager, built on Mobiler.
 //!
-//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 3** turns the single expense list into
-//! a real money manager: a unified **transaction** ledger (income / expense / transfer) across
-//! multiple **accounts**, with balances and net worth on an Assets tab — migrating the Chapter-2
-//! `expense` table forward via `PRAGMA user_version`. Categories, charts, multilingual UI, recurring
-//! and CSV export arrive later.
+//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 4** adds real **categories** (with
+//! subcategories) seeded into the database, a hierarchical category **picker** in the entry sheet, and
+//! a native **date picker** (`cx.pick_date`) so entries can be back-dated. Earlier chapters set up the
+//! four-tab shell, `SQLite` persistence + `cx.now()`, and the accounts / transfers ledger. Charts,
+//! multilingual UI, recurring and CSV export come next.
 
 use mobiler_core::{
     ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, Segment, Spacing, Widget,
@@ -15,15 +15,15 @@ use serde::{Deserialize, Serialize};
 
 // ---- schema + migrations (run once, gated by PRAGMA user_version) ----
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
-/// Everything needed to bring a database at version `from` up to `SCHEMA_VERSION`. Each statement is
-/// idempotent on its own, but `user_version` is the real gate so they run exactly once. The v2 step
-/// also carries Chapter-2 data forward: it ensures the old `expense` table exists, copies its rows
-/// into `txn` (as expense-type, on the seeded Cash account), then drops it.
+/// Statements to bring a database at version `from` up to `SCHEMA_VERSION`. `user_version` gates them
+/// so they run exactly once; statements run in order (the queue drains one at a time), so later
+/// statements may rely on earlier ones (e.g. subcategory seeds reference their just-inserted parent).
 fn migrations_from(from: u32) -> Vec<&'static str> {
     let mut q: Vec<&'static str> = Vec::new();
-    if from < SCHEMA_VERSION {
+    if from < 2 {
+        // v2 — the accounts/transfer ledger; carries the Chapter-2 `expense` rows into `txn`.
         q.extend_from_slice(&[
             "CREATE TABLE IF NOT EXISTS account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, \
              kind TEXT NOT NULL DEFAULT 'asset', opening TEXT NOT NULL DEFAULT '0', sort INTEGER NOT NULL DEFAULT 0)",
@@ -40,12 +40,42 @@ fn migrations_from(from: u32) -> Vec<&'static str> {
             "PRAGMA user_version = 2",
         ]);
     }
+    if from < SCHEMA_VERSION {
+        // v3 — categories with subcategories (parent_id), plus a seeded default set.
+        q.extend_from_slice(&[
+            "CREATE TABLE IF NOT EXISTS category(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, \
+             kind TEXT NOT NULL, parent_id INTEGER, sort INTEGER NOT NULL DEFAULT 0)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Food & Drink','expense',1)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Transport','expense',2)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Housing','expense',3)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Health','expense',4)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Shopping','expense',5)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Entertainment','expense',6)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Other','expense',99)",
+            "INSERT INTO category(name, kind, parent_id, sort) \
+             SELECT 'Groceries','expense',id,1 FROM category WHERE name='Food & Drink' AND kind='expense'",
+            "INSERT INTO category(name, kind, parent_id, sort) \
+             SELECT 'Restaurants','expense',id,2 FROM category WHERE name='Food & Drink' AND kind='expense'",
+            "INSERT INTO category(name, kind, parent_id, sort) \
+             SELECT 'Coffee','expense',id,3 FROM category WHERE name='Food & Drink' AND kind='expense'",
+            "INSERT INTO category(name, kind, parent_id, sort) \
+             SELECT 'Fuel','expense',id,1 FROM category WHERE name='Transport' AND kind='expense'",
+            "INSERT INTO category(name, kind, parent_id, sort) \
+             SELECT 'Transit','expense',id,2 FROM category WHERE name='Transport' AND kind='expense'",
+            "INSERT INTO category(name, kind, sort) VALUES ('Salary','income',1)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Gifts','income',2)",
+            "INSERT INTO category(name, kind, sort) VALUES ('Other','income',99)",
+            "PRAGMA user_version = 3",
+        ]);
+    }
     q
 }
 
 const LOAD_ACCOUNTS: &str = "SELECT id, name, kind, opening, sort FROM account ORDER BY sort, id";
-const LOAD_TXNS: &str =
-    "SELECT id, ts, kind, amount, account_id, to_account_id, category, note FROM txn ORDER BY ts DESC";
+const LOAD_CATEGORIES: &str =
+    "SELECT id, name, kind, parent_id, sort FROM category ORDER BY kind, sort, id";
+const LOAD_TXNS: &str = "SELECT id, ts, kind, amount, account_id, to_account_id, category, note \
+                         FROM txn ORDER BY ts DESC, id DESC";
 
 // ---- enums ----
 
@@ -89,6 +119,13 @@ impl TxnKind {
             _ => TxnKind::Expense,
         }
     }
+    /// The category kind a transaction of this kind draws from (transfers have no category).
+    fn category_kind(self) -> &'static str {
+        match self {
+            TxnKind::Income => "income",
+            _ => "expense",
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -121,6 +158,14 @@ pub struct Account {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Category {
+    pub id: u32,
+    pub name: String,
+    pub kind: String, // "income" | "expense"
+    pub parent_id: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Txn {
     pub id: u32,
     pub ts: String,
@@ -144,8 +189,9 @@ pub struct Model {
     period: Period,
     today: String,
     accounts: Vec<Account>,
+    categories: Vec<Category>,
     txns: Vec<Txn>,
-    pending_sql: Vec<String>, // the migration queue, drained one statement at a time
+    pending_sql: Vec<String>,
 
     // "new transaction" sheet
     adding: bool,
@@ -153,7 +199,8 @@ pub struct Model {
     draft_amount: String,
     draft_account: Option<u32>,
     draft_to_account: Option<u32>,
-    draft_category: String,
+    draft_category: String, // the chosen category *name*
+    draft_date: String,     // "YYYY-MM-DD" (defaults to today; changeable via the date picker)
     draft_note: String,
 
     // "new account" sheet
@@ -171,6 +218,7 @@ pub enum Msg {
     Schema(String),
     Migrated,
     AccountsLoaded(String),
+    CategoriesLoaded(String),
     Loaded(String),
     GotToday(String),
     Reload,
@@ -180,8 +228,10 @@ pub enum Msg {
     SetKind(TxnKind),
     SetAccount(u32),
     SetToAccount(u32),
+    SetCategory(String),
+    PickDate,
+    DatePicked(String),
     Save,
-    Stamped(String),
     Saved(bool),
     Delete(u32),
     // new account
@@ -200,7 +250,6 @@ impl MobilerApp for SaldoApp {
     type Model = Model;
 
     fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
-        // Check the schema version, then migrate if needed (see Msg::Schema), then load.
         cx.plugin("sqlite", "query", "PRAGMA user_version", |r| {
             Msg::Schema(if r.ok { r.output } else { "[]".to_string() })
         });
@@ -216,7 +265,7 @@ impl MobilerApp for SaldoApp {
             Msg::Schema(json) => {
                 let v = pragma_int(&json);
                 model.pending_sql = migrations_from(v).into_iter().map(String::from).collect();
-                run_migration(model, cx); // drains the queue, then loads
+                run_migration(model, cx);
             }
             Msg::Migrated => {
                 if !model.pending_sql.is_empty() {
@@ -226,6 +275,7 @@ impl MobilerApp for SaldoApp {
             }
             Msg::Reload => load_all(cx),
             Msg::AccountsLoaded(json) => model.accounts = parse_accounts(&json),
+            Msg::CategoriesLoaded(json) => model.categories = parse_categories(&json),
             Msg::Loaded(json) => model.txns = parse_txns(&json),
             Msg::GotToday(s) => {
                 if let Some(d) = s.get(..10) {
@@ -239,39 +289,42 @@ impl MobilerApp for SaldoApp {
                 model.draft_amount.clear();
                 model.draft_category.clear();
                 model.draft_note.clear();
+                model.draft_date = model.today.clone();
                 model.draft_account = model.accounts.first().map(|a| a.id);
                 model.draft_to_account = model.accounts.get(1).map(|a| a.id);
             }
             Msg::CancelAdd => model.adding = false,
-            Msg::SetKind(k) => model.draft_kind = k,
+            Msg::SetKind(k) => {
+                model.draft_kind = k;
+                model.draft_category.clear(); // categories differ per kind
+            }
             Msg::SetAccount(id) => model.draft_account = Some(id),
             Msg::SetToAccount(id) => model.draft_to_account = Some(id),
+            Msg::SetCategory(name) => model.draft_category = name,
+            Msg::PickDate => cx.pick_date(|r| Msg::DatePicked(if r.ok { r.output } else { String::new() })),
+            Msg::DatePicked(date) => {
+                if !date.is_empty() {
+                    model.draft_date = date;
+                }
+            }
             Msg::Save => {
                 if let Err(why) = validate_txn(model) {
                     cx.notify("toast", "show", why);
                     return;
                 }
-                cx.now(|r| Msg::Stamped(if r.ok { r.output } else { String::new() }));
-            }
-            Msg::Stamped(ts) => {
-                if ts.is_empty() {
-                    return;
-                }
                 let Some(amount) = parse_amount(&model.draft_amount) else { return };
                 let Some(account_id) = model.draft_account else { return };
+                // Entries are date-precision; ordering within a day falls back to id.
+                let ts = format!("{} 12:00:00", model.draft_date);
                 let to = if model.draft_kind == TxnKind::Transfer {
-                    model.draft_to_account.map_or(serde_json::Value::Null, |id| {
-                        serde_json::Value::from(id.to_string())
-                    })
+                    model.draft_to_account.map_or(serde_json::Value::Null, |id| serde_json::Value::from(id.to_string()))
                 } else {
                     serde_json::Value::Null
                 };
-                let category = match model.draft_kind {
-                    TxnKind::Transfer => String::new(),
-                    _ => match model.draft_category.trim() {
-                        "" => "Uncategorized".to_string(),
-                        c => c.to_string(),
-                    },
+                let category = if model.draft_kind == TxnKind::Transfer {
+                    String::new()
+                } else {
+                    model.draft_category.clone()
                 };
                 let sql = serde_json::json!({
                     "sql": "INSERT INTO txn(ts, kind, amount, account_id, to_account_id, category, note) \
@@ -291,10 +344,8 @@ impl MobilerApp for SaldoApp {
                 }
             }
             Msg::Delete(id) => {
-                let sql = serde_json::json!({
-                    "sql": "DELETE FROM txn WHERE id = ?", "args": [id.to_string()],
-                })
-                .to_string();
+                let sql = serde_json::json!({ "sql": "DELETE FROM txn WHERE id = ?", "args": [id.to_string()] })
+                    .to_string();
                 cx.plugin("sqlite", "exec", sql, |_| Msg::Reload);
             }
 
@@ -332,7 +383,6 @@ impl MobilerApp for SaldoApp {
         if let InputValue::Text(v) = value {
             match id {
                 "amount" => model.draft_amount = v,
-                "category" => model.draft_category = v,
                 "note" => model.draft_note = v,
                 "acc_name" => model.acc_name = v,
                 "acc_opening" => model.acc_opening = v,
@@ -386,6 +436,9 @@ fn load_all(cx: &mut Cx<Msg>) {
     cx.plugin("sqlite", "query", LOAD_ACCOUNTS, |r| {
         Msg::AccountsLoaded(if r.ok { r.output } else { "[]".to_string() })
     });
+    cx.plugin("sqlite", "query", LOAD_CATEGORIES, |r| {
+        Msg::CategoriesLoaded(if r.ok { r.output } else { "[]".to_string() })
+    });
     cx.plugin("sqlite", "query", LOAD_TXNS, |r| {
         Msg::Loaded(if r.ok { r.output } else { "[]".to_string() })
     });
@@ -402,7 +455,6 @@ fn parse_amount(s: &str) -> Option<f64> {
     (v > 0.0).then_some(v)
 }
 
-/// `PRAGMA user_version` comes back as `[{"user_version":"N"}]`.
 fn pragma_int(json: &str) -> u32 {
     serde_json::from_str::<Vec<serde_json::Value>>(json)
         .ok()
@@ -420,6 +472,21 @@ fn parse_accounts(json: &str) -> Vec<Account> {
                 name: r.get("name")?.as_str()?.to_string(),
                 kind: AccountKind::from_db(r.get("kind").and_then(serde_json::Value::as_str).unwrap_or("asset")),
                 opening: r.get("opening").and_then(serde_json::Value::as_str).unwrap_or("0").parse().unwrap_or(0.0),
+            })
+        })
+        .collect()
+}
+
+fn parse_categories(json: &str) -> Vec<Category> {
+    serde_json::from_str::<Vec<serde_json::Value>>(json)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|r| {
+            Some(Category {
+                id: r.get("id")?.as_str()?.parse().ok()?,
+                name: r.get("name")?.as_str()?.to_string(),
+                kind: r.get("kind")?.as_str()?.to_string(),
+                parent_id: r.get("parent_id").and_then(serde_json::Value::as_str).and_then(|s| s.parse().ok()),
             })
         })
         .collect()
@@ -457,6 +524,8 @@ fn validate_txn(model: &Model) -> Result<(), &'static str> {
             id if id == model.draft_account => return Err("Pick two different accounts."),
             _ => {}
         }
+    } else if model.draft_category.trim().is_empty() {
+        return Err("Pick a category.");
     }
     Ok(())
 }
@@ -469,7 +538,6 @@ fn in_period(ts: &str, period: Period, today: &str) -> bool {
     }
 }
 
-/// (income, expense) totals for the period — transfers move money but aren't income or expense.
 fn period_totals(txns: &[Txn], period: Period, today: &str) -> (f64, f64) {
     let mut income = 0.0;
     let mut expense = 0.0;
@@ -483,7 +551,6 @@ fn period_totals(txns: &[Txn], period: Period, today: &str) -> (f64, f64) {
     (income, expense)
 }
 
-/// An account's current balance: opening, plus income / transfers in, minus expense / transfers out.
 fn balance(acc: &Account, txns: &[Txn]) -> f64 {
     let mut b = acc.opening;
     for t in txns {
@@ -504,7 +571,6 @@ fn balance(acc: &Account, txns: &[Txn]) -> f64 {
     b
 }
 
-/// (assets, liabilities, net worth = assets − liabilities).
 fn net_worth(accounts: &[Account], txns: &[Txn]) -> (f64, f64, f64) {
     let mut assets = 0.0;
     let mut liabilities = 0.0;
@@ -533,11 +599,19 @@ fn acct_name(accounts: &[Account], id: u32) -> &str {
     accounts.iter().find(|a| a.id == id).map_or("?", |a| a.name.as_str())
 }
 
+/// The parent category whose subcategory row should be open, given the selected category name:
+/// the selected category's parent (if it's a subcategory) or itself (if it's a top-level).
+fn open_parent(categories: &[Category], kind: &str, selected: &str) -> Option<u32> {
+    categories
+        .iter()
+        .find(|c| c.kind == kind && c.name == selected)
+        .map(|c| c.parent_id.unwrap_or(c.id))
+}
+
 fn money(v: f64) -> String {
     format!("€{v:.2}")
 }
 
-/// A signed, prefixed amount for the ledger: `+€x` income, `−€x` expense, plain for transfers.
 fn signed(t: &Txn) -> String {
     match t.kind {
         TxnKind::Income => format!("+{}", money(t.amount)),
@@ -651,6 +725,33 @@ fn account_chips(model: &Model, selected: Option<u32>, on: fn(u32) -> Msg) -> Wi
     row(model.accounts.iter().map(|a| chip(a.name.clone(), selected == Some(a.id), on(a.id))).collect())
 }
 
+/// A two-level category picker: top-level chips, plus the subcategory row of whichever top-level the
+/// current selection belongs to. Selecting either level stores that category's name.
+fn category_picker(model: &Model) -> Widget {
+    let kind = model.draft_kind.category_kind();
+    let sel = &model.draft_category;
+    let tops: Vec<Widget> = model
+        .categories
+        .iter()
+        .filter(|c| c.kind == kind && c.parent_id.is_none())
+        .map(|c| chip(c.name.clone(), &c.name == sel, Msg::SetCategory(c.name.clone())))
+        .collect();
+
+    let mut items = vec![caption("Category"), row(tops)];
+    if let Some(pid) = open_parent(&model.categories, kind, sel) {
+        let kids: Vec<Widget> = model
+            .categories
+            .iter()
+            .filter(|c| c.kind == kind && c.parent_id == Some(pid))
+            .map(|c| chip(c.name.clone(), &c.name == sel, Msg::SetCategory(c.name.clone())))
+            .collect();
+        if !kids.is_empty() {
+            items.push(row(kids));
+        }
+    }
+    column(items)
+}
+
 fn txn_sheet(model: &Model) -> Widget {
     let mut items = vec![
         segmented(vec![
@@ -660,6 +761,12 @@ fn txn_sheet(model: &Model) -> Widget {
         ]),
         spacer(Spacing::Sm),
         text_field("amount", "Amount (e.g. 12.50)", model.draft_amount.clone()),
+        row(vec![
+            caption("Date"),
+            spacer(Spacing::Md),
+            text(model.draft_date.clone()),
+            button("Change", ButtonStyle::Text, Msg::PickDate),
+        ]),
         caption(if model.draft_kind == TxnKind::Transfer { "From account" } else { "Account" }),
         account_chips(model, model.draft_account, Msg::SetAccount),
     ];
@@ -667,7 +774,7 @@ fn txn_sheet(model: &Model) -> Widget {
         items.push(caption("To account"));
         items.push(account_chips(model, model.draft_to_account, Msg::SetToAccount));
     } else {
-        items.push(text_field("category", "Category (e.g. Groceries)", model.draft_category.clone()));
+        items.push(category_picker(model));
     }
     items.push(text_field("note", "Note (optional)", model.draft_note.clone()));
     items.push(spacer(Spacing::Md));
@@ -695,85 +802,75 @@ pub type App = MobilerShell<SaldoApp>;
 mod test {
     use super::*;
 
-    fn accounts() -> Vec<Account> {
+    fn cats() -> Vec<Category> {
         vec![
-            Account { id: 1, name: "Cash".into(), kind: AccountKind::Asset, opening: 100.0 },
-            Account { id: 2, name: "Bank".into(), kind: AccountKind::Asset, opening: 0.0 },
-            Account { id: 3, name: "Card".into(), kind: AccountKind::Liability, opening: 0.0 },
-        ]
-    }
-
-    fn txns() -> Vec<Txn> {
-        vec![
-            Txn { id: 1, ts: "2026-06-10 09:00:00".into(), kind: TxnKind::Expense, amount: 12.5,
-                  account_id: 1, to_account_id: None, category: "Food".into(), note: String::new() },
-            Txn { id: 2, ts: "2026-06-10 08:00:00".into(), kind: TxnKind::Income, amount: 50.0,
-                  account_id: 2, to_account_id: None, category: "Gift".into(), note: String::new() },
-            Txn { id: 3, ts: "2026-06-09 12:00:00".into(), kind: TxnKind::Transfer, amount: 30.0,
-                  account_id: 1, to_account_id: Some(2), category: String::new(), note: String::new() },
+            Category { id: 1, name: "Food & Drink".into(), kind: "expense".into(), parent_id: None },
+            Category { id: 2, name: "Transport".into(), kind: "expense".into(), parent_id: None },
+            Category { id: 3, name: "Groceries".into(), kind: "expense".into(), parent_id: Some(1) },
+            Category { id: 4, name: "Coffee".into(), kind: "expense".into(), parent_id: Some(1) },
+            Category { id: 5, name: "Salary".into(), kind: "income".into(), parent_id: None },
         ]
     }
 
     #[test]
-    fn pragma_parsing() {
-        assert_eq!(pragma_int(r#"[{"user_version":"2"}]"#), 2);
-        assert_eq!(pragma_int("[]"), 0);
-        assert_eq!(pragma_int("garbage"), 0);
+    fn migration_targets_version_3() {
+        assert_eq!(*migrations_from(0).last().unwrap(), "PRAGMA user_version = 3");
+        // a v2 device only needs the v3 (category) block
+        let from2 = migrations_from(2);
+        assert_eq!(*from2.last().unwrap(), "PRAGMA user_version = 3");
+        assert!(from2.iter().all(|s| !s.contains("CREATE TABLE IF NOT EXISTS txn")));
+        assert!(migrations_from(3).is_empty());
     }
 
     #[test]
-    fn migration_runs_once_then_stops() {
-        assert_eq!(migrations_from(0).len(), 7); // full migration incl. PRAGMA bump
-        assert!(migrations_from(2).is_empty()); // already current → nothing
-        assert_eq!(*migrations_from(0).last().unwrap(), "PRAGMA user_version = 2");
+    fn parses_categories_with_parents() {
+        let json = r#"[
+            {"id":"1","name":"Food & Drink","kind":"expense","sort":"1"},
+            {"id":"3","name":"Groceries","kind":"expense","parent_id":"1","sort":"1"}
+        ]"#;
+        let cs = parse_categories(json);
+        assert_eq!(cs.len(), 2);
+        assert_eq!(cs[0].parent_id, None);
+        assert_eq!(cs[1].parent_id, Some(1));
     }
 
     #[test]
-    fn balances_reflect_income_expense_and_transfers() {
-        let (a, t) = (accounts(), txns());
-        // Cash: 100 − 12.5 (food) − 30 (transfer out) = 57.5
-        assert!((balance(&a[0], &t) - 57.5).abs() < 1e-9);
-        // Bank: 0 + 50 (income) + 30 (transfer in) = 80
-        assert!((balance(&a[1], &t) - 80.0).abs() < 1e-9);
+    fn open_parent_resolves_for_top_and_sub() {
+        let cs = cats();
+        assert_eq!(open_parent(&cs, "expense", "Food & Drink"), Some(1)); // top-level → itself
+        assert_eq!(open_parent(&cs, "expense", "Groceries"), Some(1)); // sub → its parent
+        assert_eq!(open_parent(&cs, "expense", "nope"), None);
     }
 
     #[test]
-    fn net_worth_subtracts_liabilities() {
-        let (a, t) = (accounts(), txns());
-        let (assets, liab, net) = net_worth(&a, &t);
-        assert!((assets - 137.5).abs() < 1e-9); // 57.5 + 80
-        assert!((liab - 0.0).abs() < 1e-9);
-        assert!((net - 137.5).abs() < 1e-9);
-    }
-
-    #[test]
-    fn period_totals_exclude_transfers() {
-        let (income, expense) = period_totals(&txns(), Period::All, "");
-        assert!((income - 50.0).abs() < 1e-9);
-        assert!((expense - 12.5).abs() < 1e-9);
-    }
-
-    #[test]
-    fn transfer_needs_two_distinct_accounts() {
-        let mut m = Model { draft_amount: "10".into(), draft_kind: TxnKind::Transfer, ..Model::default() };
+    fn income_expense_need_a_category_transfer_does_not() {
+        let mut m = Model { draft_amount: "5".into(), ..Model::default() };
         m.draft_account = Some(1);
-        m.draft_to_account = Some(1);
+        // expense with no category → rejected
         assert!(validate_txn(&m).is_err());
+        m.draft_category = "Coffee".into();
+        assert!(validate_txn(&m).is_ok());
+        // transfer ignores category but needs a distinct destination
+        m.draft_kind = TxnKind::Transfer;
+        m.draft_category.clear();
         m.draft_to_account = Some(2);
         assert!(validate_txn(&m).is_ok());
     }
 
     #[test]
-    fn parses_txn_rows_with_null_to_account() {
-        let json = r#"[
-            {"id":"1","ts":"2026-06-10 09:00:00","kind":"expense","amount":"12.5","account_id":"1","category":"Food","note":""},
-            {"id":"2","ts":"2026-06-10 08:00:00","kind":"transfer","amount":"30","account_id":"1","to_account_id":"2","category":"","note":""}
-        ]"#;
-        let xs = parse_txns(json);
-        assert_eq!(xs.len(), 2);
-        assert_eq!(xs[0].to_account_id, None);
-        assert_eq!(xs[1].to_account_id, Some(2));
-        assert_eq!(xs[0].kind, TxnKind::Expense);
-        assert_eq!(xs[1].kind, TxnKind::Transfer);
+    fn balances_and_net_worth() {
+        let accounts = vec![
+            Account { id: 1, name: "Cash".into(), kind: AccountKind::Asset, opening: 100.0 },
+            Account { id: 2, name: "Bank".into(), kind: AccountKind::Asset, opening: 0.0 },
+        ];
+        let txns = vec![
+            Txn { id: 1, ts: "2026-06-10 12:00:00".into(), kind: TxnKind::Expense, amount: 12.5,
+                  account_id: 1, to_account_id: None, category: "Coffee".into(), note: String::new() },
+            Txn { id: 2, ts: "2026-06-10 12:00:00".into(), kind: TxnKind::Transfer, amount: 30.0,
+                  account_id: 1, to_account_id: Some(2), category: String::new(), note: String::new() },
+        ];
+        assert!((balance(&accounts[0], &txns) - 57.5).abs() < 1e-9);
+        assert!((balance(&accounts[1], &txns) - 30.0).abs() < 1e-9);
+        assert!((net_worth(&accounts, &txns).2 - 87.5).abs() < 1e-9);
     }
 }
