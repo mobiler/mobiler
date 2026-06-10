@@ -12,9 +12,9 @@ use std::sync::OnceLock;
 use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Currency, Cx, Icon, InputValue, Locale,
-    MobilerApp, MobilerShell, Rgb, Segment, Spacing, Widget, button, caption, card, chart, chip,
-    column, divider, donut_chart, emphasis, negotiate, row, scaffold, segment, segmented, spacer,
-    subtitle, text, text_field, with_fab, with_sheet,
+    MobilerApp, MobilerShell, Rgb, Segment, Spacing, Tone, Widget, button, caption, card, chart, chip,
+    column, divider, donut_chart, emphasis, negotiate, row, scaffold, scroller, segment, segmented,
+    spacer, subtitle, swipe_action, text, text_field, with_fab, with_sheet,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1380,13 +1380,19 @@ fn bills(model: &Model) -> Widget {
         return column(vec![header, spacer(Spacing::Xl), caption(tr(model, "bills.empty"))]);
     }
 
+    // Each day is a light header followed by one swipe-to-delete card per transaction (web, which has no
+    // swipe gesture, renders the Delete action inline). Cleaner than cramming a Delete button on every row.
     let mut sections = vec![header, spacer(Spacing::Md)];
     for (day, items) in group_by_day(&shown) {
-        let mut rows = vec![row(vec![subtitle(fmt_date(model, day)), spacer(Spacing::Md)]), divider()];
+        sections.push(row(vec![subtitle(fmt_date(model, day)), spacer(Spacing::Md)]));
+        sections.push(spacer(Spacing::Xs));
         for t in items {
-            rows.push(txn_row(model, t));
+            sections.push(swipe_action(
+                card(txn_row(model, t), CardStyle::Filled),
+                vec![(tr(model, "delete"), Tone::Danger, Msg::Delete(t.id))],
+            ));
+            sections.push(spacer(Spacing::Xs));
         }
-        sections.push(card(column(rows), CardStyle::Elevated));
         sections.push(spacer(Spacing::Sm));
     }
     column(sections)
@@ -1406,12 +1412,7 @@ fn txn_row(model: &Model, t: &Txn) -> Widget {
     } else {
         column(vec![text(title), caption(t.note.clone())])
     };
-    row(vec![
-        label,
-        spacer(Spacing::Md),
-        emphasis(signed(model, t)),
-        button(tr(model, "delete"), ButtonStyle::Text, Msg::Delete(t.id)),
-    ])
+    row(vec![label, spacer(Spacing::Md), emphasis(signed(model, t))])
 }
 
 fn assets(model: &Model) -> Widget {
@@ -1548,7 +1549,8 @@ fn stats(model: &Model) -> Widget {
 }
 
 fn account_chips(model: &Model, selected: Option<u32>, on: fn(u32) -> Msg) -> Widget {
-    row(model.accounts.iter().map(|a| chip(a.name.clone(), selected == Some(a.id), on(a.id))).collect())
+    // A horizontal rail so the chips keep their width and scroll instead of being crushed onto one row.
+    scroller(model.accounts.iter().map(|a| chip(a.name.clone(), selected == Some(a.id), on(a.id))).collect())
 }
 
 /// A two-level category picker: top-level chips, plus the subcategory row of whichever top-level the
@@ -1563,7 +1565,7 @@ fn category_picker(model: &Model) -> Widget {
         .map(|c| chip(c.name.clone(), &c.name == sel, Msg::SetCategory(c.name.clone())))
         .collect();
 
-    let mut items = vec![caption(tr(model, "field.category")), row(tops)];
+    let mut items = vec![caption(tr(model, "field.category")), scroller(tops)];
     if let Some(pid) = open_parent(&model.categories, kind, sel) {
         let kids: Vec<Widget> = model
             .categories
@@ -1572,7 +1574,7 @@ fn category_picker(model: &Model) -> Widget {
             .map(|c| chip(c.name.clone(), &c.name == sel, Msg::SetCategory(c.name.clone())))
             .collect();
         if !kids.is_empty() {
-            items.push(row(kids));
+            items.push(scroller(kids));
         }
     }
     column(items)
