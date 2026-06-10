@@ -300,6 +300,9 @@ pub struct Model {
     recurring_loaded: bool, // gate so materialization waits for both the rules and `today`
     lang_open: bool,        // Settings: the language "select" is expanded
     cur_open: bool,         // Settings: the currency "select" is expanded
+    lock_enabled: bool,     // the app-lock setting (persisted)
+    locked: bool,           // runtime: the app is currently locked, awaiting biometric unlock
+    lock_checked: bool,     // we've done the one-time launch lock decision (don't re-lock on reloads)
     pending_sql: Vec<String>,
 
     // "new transaction" sheet
@@ -336,6 +339,9 @@ pub enum Msg {
     ToggleCurPicker,
     SetLang(Option<String>),
     SetCurrency(Currency),
+    SetLock(bool),
+    Unlock,
+    Authed(bool),
     SettingsLoaded(String),
     // schema / load
     Schema(String),
@@ -429,7 +435,18 @@ impl MobilerApp for SaldoApp {
                 save_setting(cx, "currency", currency_code(c));
                 model.cur_open = false;
             }
+            Msg::SetLock(on) => {
+                model.lock_enabled = on;
+                save_setting(cx, "lock", if on { "1" } else { "" });
+            }
+            Msg::Unlock => {
+                cx.plugin("biometric", "authenticate", tr(model, "lock.prompt"), |r| Msg::Authed(r.ok));
+            }
+            Msg::Authed(ok) => model.locked = !ok,
             Msg::SettingsLoaded(json) => {
+                // Lock the app only on the FIRST settings load after launch — not on every reload.
+                let first_load = !model.lock_checked;
+                model.lock_checked = true;
                 for (k, v) in parse_settings(&json) {
                     match k.as_str() {
                         "lang" if !v.is_empty() => model.lang_override = Some(v),
@@ -437,6 +454,15 @@ impl MobilerApp for SaldoApp {
                             if let Some(c) = currency_from_code(&v) {
                                 model.currency = c;
                                 model.currency_pinned = true;
+                            }
+                        }
+                        "lock" if v == "1" => {
+                            model.lock_enabled = true;
+                            if first_load {
+                                model.locked = true;
+                                cx.plugin("biometric", "authenticate", tr(model, "lock.prompt"), |r| {
+                                    Msg::Authed(r.ok)
+                                });
                             }
                         }
                         _ => {}
@@ -683,6 +709,18 @@ impl MobilerApp for SaldoApp {
     }
 
     fn view(&self, model: &Model) -> Widget {
+        if model.locked {
+            // Cover everything with a lock screen until biometric (or the device passcode) succeeds.
+            let lock = column(vec![
+                spacer(Spacing::Xl),
+                spacer(Spacing::Xl),
+                subtitle(tr(model, "lock.title")),
+                caption(tr(model, "lock.hint")),
+                spacer(Spacing::Md),
+                button(tr(model, "lock.unlock"), ButtonStyle::Filled, Msg::Unlock),
+            ]);
+            return scaffold("Saldo", false, vec![], lock);
+        }
         let tabs = vec![
             tab(model.screen, Screen::Bills, tr(model, "tab.bills"), Icon::Home),
             tab(model.screen, Screen::Stats, tr(model, "tab.stats"), Icon::Star),
@@ -1001,6 +1039,15 @@ fn catalog() -> &'static Catalog {
             .with("categories.new_name", &[("en", "New category name"), ("de", "Name der neuen Kategorie"), ("fr", "Nom de la nouvelle catégorie"), ("it", "Nome della nuova categoria"), ("uk", "Назва нової категорії")])
             .with("action.add", &[("en", "Add"), ("de", "Hinzufügen"), ("fr", "Ajouter"), ("it", "Aggiungi"), ("uk", "Додати")])
             .with("action.done", &[("en", "Done"), ("de", "Fertig"), ("fr", "Terminé"), ("it", "Fatto"), ("uk", "Готово")])
+            // security / app lock
+            .with("settings.security", &[("en", "Security"), ("de", "Sicherheit"), ("fr", "Sécurité"), ("it", "Sicurezza"), ("uk", "Безпека")])
+            .with("lock.desc", &[("en", "Require Face ID, Touch ID, or your passcode to open Saldo."), ("de", "Face ID, Touch ID oder Code zum Öffnen von Saldo verlangen."), ("fr", "Exiger Face ID, Touch ID ou votre code pour ouvrir Saldo."), ("it", "Richiedi Face ID, Touch ID o il codice per aprire Saldo."), ("uk", "Вимагати Face ID, Touch ID або код для відкриття Saldo.")])
+            .with("lock.off", &[("en", "Off"), ("de", "Aus"), ("fr", "Désactivé"), ("it", "Disattivato"), ("uk", "Вимк.")])
+            .with("lock.on", &[("en", "On"), ("de", "Ein"), ("fr", "Activé"), ("it", "Attivato"), ("uk", "Увімк.")])
+            .with("lock.title", &[("en", "Saldo is locked"), ("de", "Saldo ist gesperrt"), ("fr", "Saldo est verrouillé"), ("it", "Saldo è bloccato"), ("uk", "Saldo заблоковано")])
+            .with("lock.hint", &[("en", "Unlock with Face ID, Touch ID, or your passcode."), ("de", "Mit Face ID, Touch ID oder Code entsperren."), ("fr", "Déverrouillez avec Face ID, Touch ID ou votre code."), ("it", "Sblocca con Face ID, Touch ID o il codice."), ("uk", "Розблокуйте за допомогою Face ID, Touch ID або коду.")])
+            .with("lock.unlock", &[("en", "Unlock"), ("de", "Entsperren"), ("fr", "Déverrouiller"), ("it", "Sblocca"), ("uk", "Розблокувати")])
+            .with("lock.prompt", &[("en", "Unlock Saldo"), ("de", "Saldo entsperren"), ("fr", "Déverrouiller Saldo"), ("it", "Sblocca Saldo"), ("uk", "Розблокувати Saldo")])
             .with("err.cat_name", &[("en", "Give the category a name."), ("de", "Gib der Kategorie einen Namen."), ("fr", "Donnez un nom à la catégorie."), ("it", "Dai un nome alla categoria."), ("uk", "Дайте категорії назву.")])
             .with("settings.system", &[("en", "System"), ("de", "System"), ("fr", "Système"), ("it", "Sistema"), ("uk", "Системна")])
             // validation errors (returned as keys by validate_txn)
@@ -1537,6 +1584,19 @@ fn settings(model: &Model) -> Widget {
         CardStyle::Elevated,
     );
 
+    let security = card(
+        column(vec![
+            subtitle(tr(model, "settings.security")),
+            caption(tr(model, "lock.desc")),
+            spacer(Spacing::Sm),
+            segmented(vec![
+                segment(tr(model, "lock.off"), !model.lock_enabled, Msg::SetLock(false)),
+                segment(tr(model, "lock.on"), model.lock_enabled, Msg::SetLock(true)),
+            ]),
+        ]),
+        CardStyle::Elevated,
+    );
+
     column(vec![
         spacer(Spacing::Md),
         language,
@@ -1544,6 +1604,8 @@ fn settings(model: &Model) -> Widget {
         currency,
         spacer(Spacing::Md),
         categories,
+        spacer(Spacing::Md),
+        security,
         spacer(Spacing::Md),
         card(column(scheduled), CardStyle::Elevated),
         spacer(Spacing::Md),
@@ -2138,6 +2200,7 @@ mod test {
             "field.amount", "kind.asset", "settings.language", "err.category",
             "settings.currency", "settings.categories", "categories.manage", "data.backup",
             "categories.top_level", "action.add", "action.done", "err.cat_name",
+            "settings.security", "lock.desc", "lock.title", "lock.unlock", "lock.prompt",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
