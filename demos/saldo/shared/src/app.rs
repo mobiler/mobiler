@@ -13,9 +13,9 @@ use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Corner, Currency, Cx, Density, FontFamily,
     Icon, InputValue, Locale, MobilerApp, MobilerShell, Rgb, Segment, Spacing, Theme, Tone, Widget,
-    button, caption, card, card_button, chart, chip, column, divider, donut_chart, emphasis, icon_button,
-    negotiate, row, scaffold, scroller, segment, segmented, spacer, subtitle, swipe_action, text,
-    text_field, with_fab, with_sheet, with_theme,
+    button, caption, card, card_button, chart, chip, column, decimal_field, divider, donut_chart,
+    emphasis, icon_button, negotiate, row, scaffold, scroller, segment, segmented, spacer, subtitle,
+    swipe_action, text, text_field, with_fab, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1913,7 +1913,7 @@ fn txn_sheet(model: &Model) -> Widget {
             segment(tr(model, "type.transfer"), model.draft_kind == TxnKind::Transfer, Msg::SetKind(TxnKind::Transfer)),
         ]),
         spacer(Spacing::Sm),
-        text_field("amount", tr(model, "field.amount"), model.draft_amount.clone()),
+        decimal_field("amount", tr(model, "field.amount"), model.draft_amount.clone()),
         row(vec![
             caption(tr(model, "field.date")),
             spacer(Spacing::Md),
@@ -1950,7 +1950,7 @@ fn account_sheet(model: &Model) -> Widget {
             segment(tr(model, "kind.asset"), model.acc_kind == AccountKind::Asset, Msg::SetAccKind(AccountKind::Asset)),
             segment(tr(model, "kind.liability"), model.acc_kind == AccountKind::Liability, Msg::SetAccKind(AccountKind::Liability)),
         ]),
-        text_field("acc_opening", tr(model, "field.opening"), model.acc_opening.clone()),
+        decimal_field("acc_opening", tr(model, "field.opening"), model.acc_opening.clone()),
         spacer(Spacing::Md),
         button(tr(model, "action.save"), ButtonStyle::Filled, Msg::SaveAccount),
     ])
