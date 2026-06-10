@@ -1216,28 +1216,18 @@ fn monthly_totals(txns: &[Txn], tag: &str) -> (f64, f64) {
     (income, expense)
 }
 
-/// Resolve a leaf category name to its **top-level** parent name (a subcategory → its parent, a
-/// top-level or unknown name → itself), so the Stats breakdown rolls subcategories up.
-fn top_category<'a>(categories: &'a [Category], kind: &str, name: &'a str) -> &'a str {
-    let Some(c) = categories.iter().find(|c| c.kind == kind && c.name == name) else {
-        return name;
-    };
-    match c.parent_id {
-        Some(pid) => categories.iter().find(|p| p.id == pid).map_or(name, |p| p.name.as_str()),
-        None => name,
-    }
-}
-
-/// In-period transactions of `kind`, summed by top-level category and sorted by amount descending.
+/// In-period transactions of `kind`, summed by the category **actually logged** (a subcategory shows as
+/// itself, not rolled up to its parent) and sorted by amount descending.
 fn category_breakdown(model: &Model, kind: TxnKind) -> Vec<(String, f64)> {
-    let ck = kind.category_kind();
     let mut totals: Vec<(String, f64)> = Vec::new();
     for t in model.txns.iter().filter(|t| t.kind == kind && in_period(&t.ts, model.period, &model.today))
     {
-        let name = top_category(&model.categories, ck, &t.category).to_string();
-        match totals.iter_mut().find(|(n, _)| *n == name) {
+        if t.category.is_empty() {
+            continue;
+        }
+        match totals.iter_mut().find(|(n, _)| *n == t.category) {
             Some((_, amt)) => *amt += t.amount,
-            None => totals.push((name, t.amount)),
+            None => totals.push((t.category.clone(), t.amount)),
         }
     }
     totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -1777,20 +1767,30 @@ fn account_chips(model: &Model, selected: Option<u32>, on: fn(u32) -> Msg) -> Wi
     scroller(model.accounts.iter().map(|a| chip(a.name.clone(), selected == Some(a.id), on(a.id))).collect())
 }
 
-/// A two-level category picker: top-level chips, plus the subcategory row of whichever top-level the
-/// current selection belongs to. Selecting either level stores that category's name.
+/// A two-level category picker. Top-level chips first; a `›` marks ones with subcategories. Tapping a
+/// top-level selects it *and* reveals its subcategories (labelled with the parent name) on a second rail,
+/// each directly selectable — so you can log to either a category or one of its subcategories.
 fn category_picker(model: &Model) -> Widget {
     let kind = model.draft_kind.category_kind();
     let sel = &model.draft_category;
+    let open = open_parent(&model.categories, kind, sel);
+    let has_kids =
+        |id: u32| model.categories.iter().any(|c| c.kind == kind && c.parent_id == Some(id));
+
     let tops: Vec<Widget> = model
         .categories
         .iter()
         .filter(|c| c.kind == kind && c.parent_id.is_none())
-        .map(|c| chip(c.name.clone(), &c.name == sel, Msg::SetCategory(c.name.clone())))
+        .map(|c| {
+            // highlight a parent while we're inside its subcategory group, too
+            let active = &c.name == sel || open == Some(c.id);
+            let label = if has_kids(c.id) { format!("{} ›", c.name) } else { c.name.clone() };
+            chip(label, active, Msg::SetCategory(c.name.clone()))
+        })
         .collect();
 
     let mut items = vec![caption(tr(model, "field.category")), scroller(tops)];
-    if let Some(pid) = open_parent(&model.categories, kind, sel) {
+    if let Some(pid) = open {
         let kids: Vec<Widget> = model
             .categories
             .iter()
@@ -1798,6 +1798,8 @@ fn category_picker(model: &Model) -> Widget {
             .map(|c| chip(c.name.clone(), &c.name == sel, Msg::SetCategory(c.name.clone())))
             .collect();
         if !kids.is_empty() {
+            let parent = model.categories.iter().find(|c| c.id == pid).map_or("", |c| c.name.as_str());
+            items.push(caption(format!("{parent}:")));
             items.push(scroller(kids));
         }
     }
@@ -2080,27 +2082,26 @@ mod test {
     }
 
     #[test]
-    fn category_breakdown_rolls_up_subcategories_and_sorts() {
+    fn category_breakdown_keeps_subcategories_distinct_and_sorts() {
         let model = Model {
             categories: cats(),
             today: "2026-06-10".into(),
             period: Period::All,
             txns: vec![
-                expense(1, "2026-06-01 12:00:00", 4.0, "Coffee"),     // → Food & Drink
-                expense(2, "2026-06-02 12:00:00", 6.0, "Groceries"),  // → Food & Drink
-                expense(3, "2026-06-03 12:00:00", 20.0, "Transport"), // top-level
+                expense(1, "2026-06-01 12:00:00", 4.0, "Coffee"),     // a subcategory
+                expense(2, "2026-06-02 12:00:00", 6.0, "Groceries"),  // a subcategory
+                expense(3, "2026-06-03 12:00:00", 20.0, "Transport"), // a top-level
                 Txn { id: 4, ts: "2026-06-04 12:00:00".into(), kind: TxnKind::Income, amount: 999.0,
                       account_id: 1, to_account_id: None, category: "Salary".into(), note: String::new() },
             ],
             ..Model::default()
         };
         let b = category_breakdown(&model, TxnKind::Expense);
-        // Transport (20) ranks above the rolled-up Food & Drink (10); income excluded
-        assert_eq!(b.len(), 2);
-        assert_eq!(b[0].0, "Transport");
-        assert!((b[0].1 - 20.0).abs() < 1e-9);
-        assert_eq!(b[1].0, "Food & Drink");
-        assert!((b[1].1 - 10.0).abs() < 1e-9);
+        // each logged category stands on its own (no roll-up); sorted by amount; income excluded
+        assert_eq!(b.len(), 3);
+        assert_eq!(b[0], ("Transport".to_string(), 20.0));
+        assert_eq!(b[1], ("Groceries".to_string(), 6.0));
+        assert_eq!(b[2], ("Coffee".to_string(), 4.0));
     }
 
     #[test]
