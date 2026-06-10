@@ -1,11 +1,12 @@
 //! Saldo — a multilingual, SQLite-backed personal expense & money manager, built on Mobiler.
 //!
-//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 7** makes the whole UI multilingual via
-//! the new `mobiler_core::i18n` primitive: it negotiates a UI language from the device, looks every
-//! label up in an in-memory `Catalog` (en/de/fr/it/uk, English fallback), and adds a language override
-//! on the Settings tab. Earlier chapters set up the four-tab shell, `SQLite` persistence with
-//! `cx.now()`, the accounts / transfers ledger, categories, the entry sheet, the Stats charts, and
-//! locale-aware money/date formatting. Recurring transactions and CSV export come next.
+//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 8** adds **recurring transactions**: a
+//! `recurring` rules table, a "Repeat" choice on the entry sheet, and catch-up materialization on launch
+//! (every occurrence due on or before today is posted and the rule's `next_date` advanced, via
+//! dependency-free civil-date arithmetic). Earlier chapters set up the four-tab shell, `SQLite`
+//! persistence with `cx.now()`, the accounts / transfers ledger, categories, the entry sheet, the Stats
+//! charts, locale-aware money/date formatting, and the multilingual `i18n` UI. CSV export / import /
+//! backup and the security/settings polish come next.
 
 use std::sync::OnceLock;
 
@@ -23,7 +24,7 @@ const SUPPORTED: [&str; 5] = ["en", "de", "fr", "it", "uk"];
 
 // ---- schema + migrations (run once, gated by PRAGMA user_version) ----
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 
 /// Statements to bring a database at version `from` up to `SCHEMA_VERSION`. `user_version` gates them
 /// so they run exactly once; statements run in order (the queue drains one at a time), so later
@@ -48,7 +49,7 @@ fn migrations_from(from: u32) -> Vec<&'static str> {
             "PRAGMA user_version = 2",
         ]);
     }
-    if from < SCHEMA_VERSION {
+    if from < 3 {
         // v3 — categories with subcategories (parent_id), plus a seeded default set.
         q.extend_from_slice(&[
             "CREATE TABLE IF NOT EXISTS category(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, \
@@ -76,6 +77,17 @@ fn migrations_from(from: u32) -> Vec<&'static str> {
             "PRAGMA user_version = 3",
         ]);
     }
+    if from < SCHEMA_VERSION {
+        // v4 — recurring rules. `next_date` is the next occurrence to post; materialization advances it.
+        // (The latest block gates on SCHEMA_VERSION; earlier blocks use their literal target version.)
+        q.extend_from_slice(&[
+            "CREATE TABLE IF NOT EXISTS recurring(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, \
+             amount TEXT NOT NULL, account_id INTEGER NOT NULL, to_account_id INTEGER, \
+             category TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', freq TEXT NOT NULL, \
+             next_date TEXT NOT NULL, end_date TEXT)",
+            "PRAGMA user_version = 4",
+        ]);
+    }
     q
 }
 
@@ -84,6 +96,9 @@ const LOAD_CATEGORIES: &str =
     "SELECT id, name, kind, parent_id, sort FROM category ORDER BY kind, sort, id";
 const LOAD_TXNS: &str = "SELECT id, ts, kind, amount, account_id, to_account_id, category, note \
                          FROM txn ORDER BY ts DESC, id DESC";
+const LOAD_RECURRING: &str =
+    "SELECT id, kind, amount, account_id, to_account_id, category, note, freq, next_date, end_date \
+     FROM recurring ORDER BY next_date, id";
 
 // ---- enums ----
 
@@ -132,6 +147,40 @@ impl TxnKind {
         match self {
             TxnKind::Income => "income",
             _ => "expense",
+        }
+    }
+}
+
+/// How often a recurring rule fires.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum Freq {
+    #[default]
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+impl Freq {
+    fn db(self) -> &'static str {
+        match self {
+            Freq::Daily => "daily",
+            Freq::Weekly => "weekly",
+            Freq::Monthly => "monthly",
+        }
+    }
+    fn from_db(s: &str) -> Self {
+        match s {
+            "weekly" => Freq::Weekly,
+            "monthly" => Freq::Monthly,
+            _ => Freq::Daily,
+        }
+    }
+    /// The catalog key for this frequency's label.
+    fn key(self) -> &'static str {
+        match self {
+            Freq::Daily => "freq.daily",
+            Freq::Weekly => "freq.weekly",
+            Freq::Monthly => "freq.monthly",
         }
     }
 }
@@ -191,6 +240,22 @@ impl Txn {
     }
 }
 
+/// A scheduled rule. Its `next_date` is the next occurrence still to post; materialization posts every
+/// occurrence up to today and advances `next_date` past it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recurring {
+    pub id: u32,
+    pub kind: TxnKind,
+    pub amount: f64,
+    pub account_id: u32,
+    pub to_account_id: Option<u32>,
+    pub category: String,
+    pub note: String,
+    pub freq: Freq,
+    pub next_date: String,        // "YYYY-MM-DD"
+    pub end_date: Option<String>, // inclusive; None = no end
+}
+
 #[derive(Default)]
 pub struct Model {
     screen: Screen,
@@ -204,6 +269,8 @@ pub struct Model {
     accounts: Vec<Account>,
     categories: Vec<Category>,
     txns: Vec<Txn>,
+    recurring: Vec<Recurring>,
+    recurring_loaded: bool, // gate so materialization waits for both the rules and `today`
     pending_sql: Vec<String>,
 
     // "new transaction" sheet
@@ -212,9 +279,10 @@ pub struct Model {
     draft_amount: String,
     draft_account: Option<u32>,
     draft_to_account: Option<u32>,
-    draft_category: String, // the chosen category *name*
-    draft_date: String,     // "YYYY-MM-DD" (defaults to today; changeable via the date picker)
+    draft_category: String,      // the chosen category *name*
+    draft_date: String,          // "YYYY-MM-DD" (defaults to today; changeable via the date picker)
     draft_note: String,
+    draft_freq: Option<Freq>,    // the "Repeat" choice (None = a one-off transaction)
 
     // "new account" sheet
     adding_account: bool,
@@ -236,8 +304,10 @@ pub enum Msg {
     AccountsLoaded(String),
     CategoriesLoaded(String),
     Loaded(String),
+    RecurringLoaded(String),
     GotToday(String),
     Reload,
+    Posted, // a fire-and-forget materialization write completed (no-op)
     // new transaction
     StartAdd,
     CancelAdd,
@@ -245,11 +315,13 @@ pub enum Msg {
     SetAccount(u32),
     SetToAccount(u32),
     SetCategory(String),
+    SetFreq(Option<Freq>),
     PickDate,
     DatePicked(String),
     Save,
     Saved(bool),
     Delete(u32),
+    DeleteRecurring(u32),
     // new account
     StartAddAccount,
     CancelAddAccount,
@@ -303,10 +375,17 @@ impl MobilerApp for SaldoApp {
             Msg::AccountsLoaded(json) => model.accounts = parse_accounts(&json),
             Msg::CategoriesLoaded(json) => model.categories = parse_categories(&json),
             Msg::Loaded(json) => model.txns = parse_txns(&json),
+            Msg::RecurringLoaded(json) => {
+                model.recurring = parse_recurring(&json);
+                model.recurring_loaded = true;
+                materialize(model, cx); // post any rules that came due (no-op once caught up)
+            }
+            Msg::Posted => {} // a materialization write landed; the reload after them refreshes the model
             Msg::GotToday(s) => {
                 if let Some(d) = s.get(..10) {
                     model.today = d.to_string();
                 }
+                materialize(model, cx); // `today` may have been the missing half
             }
 
             Msg::StartAdd => {
@@ -318,6 +397,7 @@ impl MobilerApp for SaldoApp {
                 model.draft_date = model.today.clone();
                 model.draft_account = model.accounts.first().map(|a| a.id);
                 model.draft_to_account = model.accounts.get(1).map(|a| a.id);
+                model.draft_freq = None;
             }
             Msg::CancelAdd => model.adding = false,
             Msg::SetKind(k) => {
@@ -327,6 +407,7 @@ impl MobilerApp for SaldoApp {
             Msg::SetAccount(id) => model.draft_account = Some(id),
             Msg::SetToAccount(id) => model.draft_to_account = Some(id),
             Msg::SetCategory(name) => model.draft_category = name,
+            Msg::SetFreq(f) => model.draft_freq = f,
             Msg::PickDate => cx.pick_date(|r| Msg::DatePicked(if r.ok { r.output } else { String::new() })),
             Msg::DatePicked(date) => {
                 if !date.is_empty() {
@@ -352,12 +433,22 @@ impl MobilerApp for SaldoApp {
                 } else {
                     model.draft_category.clone()
                 };
-                let sql = serde_json::json!({
-                    "sql": "INSERT INTO txn(ts, kind, amount, account_id, to_account_id, category, note) \
-                            VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    "args": [ts, model.draft_kind.db(), amount.to_string(),
-                             account_id.to_string(), to, category, model.draft_note.trim()],
-                })
+                let sql = if let Some(freq) = model.draft_freq {
+                    // A scheduled rule; materialization posts the first (and future) occurrences.
+                    serde_json::json!({
+                        "sql": "INSERT INTO recurring(kind, amount, account_id, to_account_id, category, \
+                                note, freq, next_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                        "args": [model.draft_kind.db(), amount.to_string(), account_id.to_string(),
+                                 to, category, model.draft_note.trim(), freq.db(), model.draft_date],
+                    })
+                } else {
+                    serde_json::json!({
+                        "sql": "INSERT INTO txn(ts, kind, amount, account_id, to_account_id, category, note) \
+                                VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        "args": [ts, model.draft_kind.db(), amount.to_string(),
+                                 account_id.to_string(), to, category, model.draft_note.trim()],
+                    })
+                }
                 .to_string();
                 cx.plugin("sqlite", "exec", sql, |r| Msg::Saved(r.ok));
             }
@@ -372,6 +463,13 @@ impl MobilerApp for SaldoApp {
             Msg::Delete(id) => {
                 let sql = serde_json::json!({ "sql": "DELETE FROM txn WHERE id = ?", "args": [id.to_string()] })
                     .to_string();
+                cx.plugin("sqlite", "exec", sql, |_| Msg::Reload);
+            }
+            Msg::DeleteRecurring(id) => {
+                // Deletes the rule only; transactions it already posted stay in the ledger.
+                let sql =
+                    serde_json::json!({ "sql": "DELETE FROM recurring WHERE id = ?", "args": [id.to_string()] })
+                        .to_string();
                 cx.plugin("sqlite", "exec", sql, |_| Msg::Reload);
             }
 
@@ -470,6 +568,42 @@ fn load_all(cx: &mut Cx<Msg>) {
     cx.plugin("sqlite", "query", LOAD_TXNS, |r| {
         Msg::Loaded(if r.ok { r.output } else { "[]".to_string() })
     });
+    cx.plugin("sqlite", "query", LOAD_RECURRING, |r| {
+        Msg::RecurringLoaded(if r.ok { r.output } else { "[]".to_string() })
+    });
+}
+
+/// Post every recurring occurrence due on or before `today`, then reload. A no-op until both the rules
+/// and `today` are loaded, and idempotent afterwards (once advanced, `next_date` is in the future).
+/// Runs the writes in order before the reload — the sqlite plugin serializes on one connection.
+fn materialize(model: &Model, cx: &mut Cx<Msg>) {
+    if !model.recurring_loaded || model.today.is_empty() {
+        return;
+    }
+    let (posts, updates) = due_posts(&model.recurring, &model.today);
+    if posts.is_empty() {
+        return;
+    }
+    for p in posts {
+        let to = p.to_account_id.map_or(serde_json::Value::Null, |id| id.to_string().into());
+        let sql = serde_json::json!({
+            "sql": "INSERT INTO txn(ts, kind, amount, account_id, to_account_id, category, note) \
+                    VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "args": [format!("{} 12:00:00", p.date), p.kind.db(), p.amount.to_string(),
+                     p.account_id.to_string(), to, p.category, p.note],
+        })
+        .to_string();
+        cx.plugin("sqlite", "exec", sql, |_| Msg::Posted);
+    }
+    for (id, next) in updates {
+        let sql = serde_json::json!({
+            "sql": "UPDATE recurring SET next_date = ? WHERE id = ?",
+            "args": [next, id.to_string()],
+        })
+        .to_string();
+        cx.plugin("sqlite", "exec", sql, |_| Msg::Posted);
+    }
+    load_all(cx); // reflect the new txns + advanced next_dates (re-fires materialize, now a no-op)
 }
 
 fn tab(current: Screen, screen: Screen, label: impl Into<String>, icon: Icon) -> mobiler_core::Tab {
@@ -534,6 +668,15 @@ fn catalog() -> &'static Catalog {
             .with("field.category", &[("en", "Category"), ("de", "Kategorie"), ("fr", "Catégorie"), ("it", "Categoria"), ("uk", "Категорія")])
             .with("field.note", &[("en", "Note (optional)"), ("de", "Notiz (optional)"), ("fr", "Note (facultatif)"), ("it", "Nota (facoltativa)"), ("uk", "Нотатка (необов'язково)")])
             .with("action.save", &[("en", "Save"), ("de", "Speichern"), ("fr", "Enregistrer"), ("it", "Salva"), ("uk", "Зберегти")])
+            // recurring
+            .with("field.repeat", &[("en", "Repeat"), ("de", "Wiederholen"), ("fr", "Répéter"), ("it", "Ripeti"), ("uk", "Повторювати")])
+            .with("freq.once", &[("en", "Once"), ("de", "Einmal"), ("fr", "Une fois"), ("it", "Una volta"), ("uk", "Один раз")])
+            .with("freq.daily", &[("en", "Daily"), ("de", "Täglich"), ("fr", "Quotidien"), ("it", "Giornaliero"), ("uk", "Щодня")])
+            .with("freq.weekly", &[("en", "Weekly"), ("de", "Wöchentlich"), ("fr", "Hebdomadaire"), ("it", "Settimanale"), ("uk", "Щотижня")])
+            .with("freq.monthly", &[("en", "Monthly"), ("de", "Monatlich"), ("fr", "Mensuel"), ("it", "Mensile"), ("uk", "Щомісяця")])
+            .with("settings.scheduled", &[("en", "Scheduled"), ("de", "Geplant"), ("fr", "Planifié"), ("it", "Pianificati"), ("uk", "Заплановані")])
+            .with("recurring.next", &[("en", "next"), ("de", "nächste"), ("fr", "prochain"), ("it", "prossimo"), ("uk", "наступний")])
+            .with("recurring.empty", &[("en", "No scheduled transactions. Pick a Repeat in the entry sheet to add one."), ("de", "Keine geplanten Buchungen. Wähle im Eingabefenster eine Wiederholung."), ("fr", "Aucune opération planifiée. Choisissez une répétition dans la feuille de saisie."), ("it", "Nessun movimento pianificato. Scegli una ripetizione nella scheda di inserimento."), ("uk", "Немає запланованих записів. Виберіть повторення у формі додавання.")])
             // account sheet
             .with("sheet.newaccount", &[("en", "New account"), ("de", "Neues Konto"), ("fr", "Nouveau compte"), ("it", "Nuovo conto"), ("uk", "Новий рахунок")])
             .with("field.accname", &[("en", "Account name (e.g. Cash, Bank)"), ("de", "Kontoname (z. B. Bargeld, Bank)"), ("fr", "Nom du compte (p. ex. Espèces, Banque)"), ("it", "Nome del conto (es. Contanti, Banca)"), ("uk", "Назва рахунку (напр. Готівка, Банк)")])
@@ -612,6 +755,27 @@ fn parse_txns(json: &str) -> Vec<Txn> {
                 to_account_id: r.get("to_account_id").and_then(serde_json::Value::as_str).and_then(|s| s.parse().ok()),
                 category: r.get("category").and_then(serde_json::Value::as_str).unwrap_or("").to_string(),
                 note: r.get("note").and_then(serde_json::Value::as_str).unwrap_or("").to_string(),
+            })
+        })
+        .collect()
+}
+
+fn parse_recurring(json: &str) -> Vec<Recurring> {
+    serde_json::from_str::<Vec<serde_json::Value>>(json)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|r| {
+            Some(Recurring {
+                id: r.get("id")?.as_str()?.parse().ok()?,
+                kind: TxnKind::from_db(r.get("kind").and_then(serde_json::Value::as_str).unwrap_or("expense")),
+                amount: r.get("amount")?.as_str()?.parse().ok()?,
+                account_id: r.get("account_id")?.as_str()?.parse().ok()?,
+                to_account_id: r.get("to_account_id").and_then(serde_json::Value::as_str).and_then(|s| s.parse().ok()),
+                category: r.get("category").and_then(serde_json::Value::as_str).unwrap_or("").to_string(),
+                note: r.get("note").and_then(serde_json::Value::as_str).unwrap_or("").to_string(),
+                freq: Freq::from_db(r.get("freq").and_then(serde_json::Value::as_str).unwrap_or("daily")),
+                next_date: r.get("next_date")?.as_str()?.to_string(),
+                end_date: r.get("end_date").and_then(serde_json::Value::as_str).map(str::to_string),
             })
         })
         .collect()
@@ -840,6 +1004,115 @@ fn fmt_date(model: &Model, ymd: &str) -> String {
     }
 }
 
+// ---- date arithmetic (for advancing recurring rules) ----
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// Days since 1970-01-01 (Howard Hinnant's `days_from_civil`); handles any proleptic Gregorian date.
+fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
+    let y = i64::from(if m <= 2 { y - 1 } else { y });
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400;
+    let m = i64::from(m);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Inverse of [`days_from_civil`].
+fn civil_from_days(z: i64) -> (i32, u32, u32) {
+    let z = z + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    // m ∈ 1..=12, d ∈ 1..=31 — both small and positive, so the casts are safe.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    (i32::try_from(if m <= 2 { y + 1 } else { y }).unwrap_or(0), m as u32, d as u32)
+}
+
+fn ymd_str(y: i32, m: u32, d: u32) -> String {
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// `"YYYY-MM-DD"` shifted by `n` days (negative shifts back).
+fn add_days(ymd: &str, n: i64) -> String {
+    let Some((y, m, d)) = parse_ymd(ymd) else { return ymd.to_string() };
+    let (ny, nm, nd) = civil_from_days(days_from_civil(y, m, d) + n);
+    ymd_str(ny, nm, nd)
+}
+
+/// The next occurrence after `ymd` for `freq`. Monthly keeps the day-of-month, clamped to the month's
+/// length (e.g. Jan 31 → Feb 28/29).
+fn advance(ymd: &str, freq: Freq) -> String {
+    match freq {
+        Freq::Daily => add_days(ymd, 1),
+        Freq::Weekly => add_days(ymd, 7),
+        Freq::Monthly => {
+            let Some((y, m, d)) = parse_ymd(ymd) else { return ymd.to_string() };
+            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            ymd_str(ny, nm, d.min(days_in_month(ny, nm)))
+        }
+    }
+}
+
+/// A transaction a recurring rule is due to post, on a given date.
+struct DuePost {
+    kind: TxnKind,
+    amount: f64,
+    account_id: u32,
+    to_account_id: Option<u32>,
+    category: String,
+    note: String,
+    date: String,
+}
+
+/// Catch-up materialization: every occurrence on or before `today` (and within `end_date`) becomes a
+/// post, and each rule that fired gets its advanced `next_date`. Pure — the caller turns these into SQL.
+fn due_posts(rules: &[Recurring], today: &str) -> (Vec<DuePost>, Vec<(u32, String)>) {
+    let mut posts = Vec::new();
+    let mut updates = Vec::new();
+    if today.is_empty() {
+        return (posts, updates);
+    }
+    for r in rules {
+        let mut next = r.next_date.clone();
+        let mut fired = false;
+        // bounded so a long-dormant daily rule can't post forever in one launch
+        for _ in 0..400 {
+            if next.as_str() > today || r.end_date.as_deref().is_some_and(|e| next.as_str() > e) {
+                break;
+            }
+            posts.push(DuePost {
+                kind: r.kind,
+                amount: r.amount,
+                account_id: r.account_id,
+                to_account_id: r.to_account_id,
+                category: r.category.clone(),
+                note: r.note.clone(),
+                date: next.clone(),
+            });
+            next = advance(&next, r.freq);
+            fired = true;
+        }
+        if fired {
+            updates.push((r.id, next));
+        }
+    }
+    (posts, updates)
+}
+
 // ---- view pieces ----
 
 fn period_seg(current: Period, p: Period, label: impl Into<String>) -> Segment {
@@ -855,8 +1128,8 @@ fn period_segments(model: &Model) -> Vec<Segment> {
     ]
 }
 
-/// The Settings tab — for now just a language picker (full settings arrive in a later chapter). A
-/// "System" chip clears the override (follow the device); each language chip sets it.
+/// The Settings tab — a language picker plus the list of scheduled (recurring) rules. A "System" chip
+/// clears the language override (follow the device); each language chip sets it.
 fn settings(model: &Model) -> Widget {
     let chosen = model.lang_override.as_deref();
     let mut chips = vec![chip(tr(model, "settings.system"), chosen.is_none(), Msg::SetLang(None))];
@@ -870,10 +1143,47 @@ fn settings(model: &Model) -> Widget {
         };
         chips.push(chip(label, chosen == Some(code), Msg::SetLang(Some(code.to_string()))));
     }
+    let language = card(
+        column(vec![subtitle(tr(model, "settings.language")), spacer(Spacing::Sm), row(chips)]),
+        CardStyle::Elevated,
+    );
+
+    let mut scheduled = vec![subtitle(tr(model, "settings.scheduled")), spacer(Spacing::Sm)];
+    if model.recurring.is_empty() {
+        scheduled.push(caption(tr(model, "recurring.empty")));
+    } else {
+        for r in &model.recurring {
+            scheduled.push(recurring_row(model, r));
+        }
+    }
+
     column(vec![
         spacer(Spacing::Md),
-        card(column(vec![subtitle(tr(model, "settings.language")), spacer(Spacing::Sm), row(chips)]),
-            CardStyle::Elevated),
+        language,
+        spacer(Spacing::Md),
+        card(column(scheduled), CardStyle::Elevated),
+    ])
+}
+
+fn recurring_row(model: &Model, r: &Recurring) -> Widget {
+    let label = match r.kind {
+        TxnKind::Transfer => format!(
+            "{} → {}",
+            acct_name(&model.accounts, r.account_id),
+            r.to_account_id.map_or("?", |id| acct_name(&model.accounts, id)),
+        ),
+        _ => r.category.clone(),
+    };
+    let detail = format!(
+        "{} · {} {}",
+        tr(model, r.freq.key()),
+        tr(model, "recurring.next"),
+        fmt_date(model, &r.next_date),
+    );
+    row(vec![
+        column(vec![text(format!("{} {label}", money(model, r.amount))), caption(detail)]),
+        spacer(Spacing::Md),
+        button(tr(model, "delete"), ButtonStyle::Text, Msg::DeleteRecurring(r.id)),
     ])
 }
 
@@ -1121,6 +1431,14 @@ fn txn_sheet(model: &Model) -> Widget {
         items.push(category_picker(model));
     }
     items.push(text_field("note", tr(model, "field.note"), model.draft_note.clone()));
+    // Repeat: a one-off (None) or a recurring rule. The rule's first occurrence posts immediately.
+    items.push(caption(tr(model, "field.repeat")));
+    items.push(segmented(vec![
+        segment(tr(model, "freq.once"), model.draft_freq.is_none(), Msg::SetFreq(None)),
+        segment(tr(model, "freq.daily"), model.draft_freq == Some(Freq::Daily), Msg::SetFreq(Some(Freq::Daily))),
+        segment(tr(model, "freq.weekly"), model.draft_freq == Some(Freq::Weekly), Msg::SetFreq(Some(Freq::Weekly))),
+        segment(tr(model, "freq.monthly"), model.draft_freq == Some(Freq::Monthly), Msg::SetFreq(Some(Freq::Monthly))),
+    ]));
     items.push(spacer(Spacing::Md));
     items.push(button(tr(model, "action.save"), ButtonStyle::Filled, Msg::Save));
     column(items)
@@ -1157,13 +1475,58 @@ mod test {
     }
 
     #[test]
-    fn migration_targets_version_3() {
-        assert_eq!(*migrations_from(0).last().unwrap(), "PRAGMA user_version = 3");
-        // a v2 device only needs the v3 (category) block
-        let from2 = migrations_from(2);
-        assert_eq!(*from2.last().unwrap(), "PRAGMA user_version = 3");
-        assert!(from2.iter().all(|s| !s.contains("CREATE TABLE IF NOT EXISTS txn")));
-        assert!(migrations_from(3).is_empty());
+    fn migration_targets_version_4() {
+        assert_eq!(*migrations_from(0).last().unwrap(), "PRAGMA user_version = 4");
+        // a v3 device only needs the v4 (recurring) block — not the earlier ones
+        let from3 = migrations_from(3);
+        assert_eq!(*from3.last().unwrap(), "PRAGMA user_version = 4");
+        assert!(from3.iter().any(|s| s.contains("CREATE TABLE IF NOT EXISTS recurring")));
+        assert!(from3.iter().all(|s| !s.contains("CREATE TABLE IF NOT EXISTS category")));
+        assert!(migrations_from(4).is_empty());
+    }
+
+    #[test]
+    fn date_arithmetic_advances_correctly() {
+        assert_eq!(add_days("2026-06-10", 1), "2026-06-11");
+        assert_eq!(add_days("2026-12-31", 1), "2027-01-01"); // year rollover
+        assert_eq!(add_days("2026-03-01", -1), "2026-02-28"); // 2026 isn't a leap year
+        assert_eq!(advance("2026-06-10", Freq::Daily), "2026-06-11");
+        assert_eq!(advance("2026-06-10", Freq::Weekly), "2026-06-17");
+        assert_eq!(advance("2026-06-10", Freq::Monthly), "2026-07-10");
+        assert_eq!(advance("2026-12-15", Freq::Monthly), "2027-01-15"); // month + year rollover
+        assert_eq!(advance("2026-01-31", Freq::Monthly), "2026-02-28"); // clamp to month length
+        assert_eq!(advance("2028-01-31", Freq::Monthly), "2028-02-29"); // 2028 is a leap year
+    }
+
+    fn rule(id: u32, freq: Freq, next: &str, end: Option<&str>) -> Recurring {
+        Recurring {
+            id, kind: TxnKind::Expense, amount: 10.0, account_id: 1, to_account_id: None,
+            category: "Coffee".into(), note: String::new(), freq,
+            next_date: next.into(), end_date: end.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn due_posts_catches_up_and_advances() {
+        // a monthly rule due since March, today June → posts Mar/Apr/May/Jun, next advances to July
+        let (posts, updates) = due_posts(&[rule(7, Freq::Monthly, "2026-03-10", None)], "2026-06-15");
+        assert_eq!(posts.len(), 4);
+        assert_eq!(posts[0].date, "2026-03-10");
+        assert_eq!(posts[3].date, "2026-06-10");
+        assert_eq!(updates, vec![(7, "2026-07-10".to_string())]);
+    }
+
+    #[test]
+    fn due_posts_respects_end_date_and_future_rules() {
+        // end_date in April caps a monthly rule at Mar/Apr even though today is June
+        let (posts, _) = due_posts(&[rule(1, Freq::Monthly, "2026-03-10", Some("2026-04-30"))], "2026-06-15");
+        assert_eq!(posts.len(), 2);
+        // a rule whose next_date is in the future posts nothing and isn't advanced
+        let (posts, updates) = due_posts(&[rule(2, Freq::Daily, "2026-07-01", None)], "2026-06-15");
+        assert!(posts.is_empty());
+        assert!(updates.is_empty());
+        // no `today` yet → nothing happens
+        assert_eq!(due_posts(&[rule(3, Freq::Daily, "2026-06-01", None)], "").0.len(), 0);
     }
 
     #[test]

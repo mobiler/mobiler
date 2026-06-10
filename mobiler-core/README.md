@@ -49,6 +49,9 @@ pub type App = MobilerShell<Counter>;
   markers + tap events, no API key).
 - **Accessibility** — `a11y(child, label)` (+ `with_a11y_hint` / `with_a11y_role`) names any
   widget for VoiceOver / TalkBack.
+- **Localization** — `format` (synchronous, ICU-free locale-aware currency / number / date
+  formatting via `Locale` + `Currency`) and `i18n` (`negotiate` a device language + a tiny
+  fallback-aware `Catalog` for translating UI strings in `view`).
 
 Most users go through the [`mobiler`](https://crates.io/crates/mobiler) CLI, which
 scaffolds a project wired to this crate and a generic native shell.
