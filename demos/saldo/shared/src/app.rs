@@ -318,8 +318,9 @@ pub struct Model {
     draft_note: String,
     draft_freq: Option<Freq>,    // the "Repeat" choice (None = a one-off transaction)
 
-    // "new account" sheet
+    // "new / edit account" sheet
     adding_account: bool,
+    editing_account: Option<u32>, // Some(id) when editing an existing account, None when adding
     acc_name: String,
     acc_kind: AccountKind,
     acc_opening: String,
@@ -372,6 +373,8 @@ pub enum Msg {
     DeleteRecurring(u32),
     // new account
     StartAddAccount,
+    EditAccount(u32),
+    DeleteAccount(u32),
     CancelAddAccount,
     SetAccKind(AccountKind),
     SaveAccount,
@@ -593,9 +596,33 @@ impl MobilerApp for SaldoApp {
 
             Msg::StartAddAccount => {
                 model.adding_account = true;
+                model.editing_account = None;
                 model.acc_name.clear();
                 model.acc_kind = AccountKind::Asset;
                 model.acc_opening.clear();
+            }
+            Msg::EditAccount(id) => {
+                if let Some(a) = model.accounts.iter().find(|a| a.id == id) {
+                    model.adding_account = true;
+                    model.editing_account = Some(id);
+                    model.acc_name = a.name.clone();
+                    model.acc_kind = a.kind;
+                    model.acc_opening = a.opening.to_string();
+                }
+            }
+            Msg::DeleteAccount(id) => {
+                // Keep the ledger consistent: refuse to delete an account that still has transactions.
+                let in_use = model
+                    .txns
+                    .iter()
+                    .any(|t| t.account_id == id || t.to_account_id == Some(id));
+                if in_use {
+                    cx.notify("toast", "show", tr(model, "err.acct_in_use"));
+                } else {
+                    let sql = serde_json::json!({ "sql": "DELETE FROM account WHERE id = ?", "args": [id.to_string()] })
+                        .to_string();
+                    cx.plugin("sqlite", "exec", sql, |_| Msg::Reload);
+                }
             }
             Msg::CancelAddAccount => model.adding_account = false,
             Msg::SetAccKind(k) => model.acc_kind = k,
@@ -605,10 +632,17 @@ impl MobilerApp for SaldoApp {
                     return;
                 }
                 let opening = model.acc_opening.trim().replace(',', ".").parse::<f64>().unwrap_or(0.0);
-                let sql = serde_json::json!({
-                    "sql": "INSERT INTO account(name, kind, opening, sort) VALUES (?, ?, ?, 0)",
-                    "args": [model.acc_name.trim(), model.acc_kind.db(), opening.to_string()],
-                })
+                let sql = if let Some(id) = model.editing_account {
+                    serde_json::json!({
+                        "sql": "UPDATE account SET name = ?, kind = ?, opening = ? WHERE id = ?",
+                        "args": [model.acc_name.trim(), model.acc_kind.db(), opening.to_string(), id.to_string()],
+                    })
+                } else {
+                    serde_json::json!({
+                        "sql": "INSERT INTO account(name, kind, opening, sort) VALUES (?, ?, ?, 0)",
+                        "args": [model.acc_name.trim(), model.acc_kind.db(), opening.to_string()],
+                    })
+                }
                 .to_string();
                 cx.plugin("sqlite", "exec", sql, |r| Msg::AccountSaved(r.ok));
             }
@@ -756,8 +790,9 @@ impl MobilerApp for SaldoApp {
         if model.adding {
             root = with_sheet(root, tr(model, "sheet.newtxn"), txn_sheet(model), Msg::CancelAdd);
         } else if model.adding_account {
-            root =
-                with_sheet(root, tr(model, "sheet.newaccount"), account_sheet(model), Msg::CancelAddAccount);
+            let title =
+                tr(model, if model.editing_account.is_some() { "sheet.editaccount" } else { "sheet.newaccount" });
+            root = with_sheet(root, title, account_sheet(model), Msg::CancelAddAccount);
         }
         with_theme(root, saldo_theme())
     }
@@ -1043,6 +1078,8 @@ fn catalog() -> &'static Catalog {
             .with("data.bad_backup", &[("en", "Couldn't read that backup file."), ("de", "Diese Sicherungsdatei konnte nicht gelesen werden."), ("fr", "Impossible de lire ce fichier de sauvegarde."), ("it", "Impossibile leggere quel file di backup."), ("uk", "Не вдалося прочитати цей файл резервної копії.")])
             // account sheet
             .with("sheet.newaccount", &[("en", "New account"), ("de", "Neues Konto"), ("fr", "Nouveau compte"), ("it", "Nuovo conto"), ("uk", "Новий рахунок")])
+            .with("sheet.editaccount", &[("en", "Edit account"), ("de", "Konto bearbeiten"), ("fr", "Modifier le compte"), ("it", "Modifica conto"), ("uk", "Редагувати рахунок")])
+            .with("err.acct_in_use", &[("en", "Can't delete an account with transactions."), ("de", "Konto mit Buchungen kann nicht gelöscht werden."), ("fr", "Impossible de supprimer un compte avec des opérations."), ("it", "Impossibile eliminare un conto con movimenti."), ("uk", "Не можна видалити рахунок із записами.")])
             .with("field.accname", &[("en", "Account name (e.g. Cash, Bank)"), ("de", "Kontoname (z. B. Bargeld, Bank)"), ("fr", "Nom du compte (p. ex. Espèces, Banque)"), ("it", "Nome del conto (es. Contanti, Banca)"), ("uk", "Назва рахунку (напр. Готівка, Банк)")])
             .with("kind.asset", &[("en", "Asset"), ("de", "Aktiv"), ("fr", "Actif"), ("it", "Attivo"), ("uk", "Актив")])
             .with("kind.liability", &[("en", "Liability"), ("de", "Passiv"), ("fr", "Passif"), ("it", "Passivo"), ("uk", "Пасив")])
@@ -1744,16 +1781,22 @@ fn assets(model: &Model) -> Widget {
         return column(vec![summary, spacer(Spacing::Xl), caption(tr(model, "assets.empty"))]);
     }
 
-    let mut rows = Vec::new();
+    // Tap a row to edit the account; swipe to delete it.
+    let mut rows = vec![summary, spacer(Spacing::Md)];
     for a in &model.accounts {
         let tag = if a.kind == AccountKind::Liability { tr(model, "liability.tag") } else { String::new() };
-        rows.push(row(vec![
+        let content = row(vec![
             text(format!("{}{tag}", a.name)),
             spacer(Spacing::Md),
             emphasis(money(model, balance(a, &model.txns))),
-        ]));
+        ]);
+        rows.push(swipe_action(
+            card_button(content, CardStyle::Filled, Msg::EditAccount(a.id)),
+            vec![(tr(model, "delete"), Tone::Danger, Msg::DeleteAccount(a.id))],
+        ));
+        rows.push(spacer(Spacing::Xs));
     }
-    column(vec![summary, spacer(Spacing::Md), card(column(rows), CardStyle::Elevated)])
+    column(rows)
 }
 
 /// The Stats tab: a category-breakdown donut (income/expense toggle, current period) with a ranked
@@ -2239,6 +2282,7 @@ mod test {
             "categories.top_level", "action.add", "action.done", "err.cat_name",
             "settings.security", "lock.desc", "lock.title", "lock.unlock", "lock.prompt",
             "settings.appearance", "appearance.light", "appearance.dark",
+            "sheet.editaccount", "err.acct_in_use",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
