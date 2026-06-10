@@ -39,7 +39,9 @@ new `mobiler_core::i18n` translation primitive we add along the way.
    entry sheet, and catch-up materialization on launch (dependency-free civil-date arithmetic).
 9. **[Export & backup](09-export-import-backup.md)** — a CSV export of the ledger and a full JSON
    backup/restore (the `files` + `filepicker` plugins), from a Data card in Settings.
-10. **Security, settings & polish** — passcode/biometric lock, settings, theming, icons, dark mode.
+10. **[Security, settings & polish](10-security-settings-polish.md)** — an optional biometric app lock
+    (`biometric`, device-passcode fallback), the Saldo brand theme (`with_theme`) with a light/dark
+    toggle, and a real app icon.
 
 > The look is intentionally clean and modern — Mobiler renders the same Rust `Widget` tree to native
 > SwiftUI, Jetpack Compose, and the web, so we describe *what* the UI is and the platforms draw it.

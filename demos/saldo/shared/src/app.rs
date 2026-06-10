@@ -1,20 +1,21 @@
 //! Saldo — a multilingual, SQLite-backed personal expense & money manager, built on Mobiler.
 //!
-//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 9** adds **data portability**: CSV export
-//! of the ledger and a full **JSON backup / restore** (the `files` + `filepicker` plugins) from a Data
-//! card in Settings. Earlier chapters set up the four-tab shell, `SQLite` persistence with `cx.now()`,
-//! the accounts / transfers ledger, categories, the entry sheet, the Stats charts, locale-aware
-//! money/date formatting, the multilingual `i18n` UI, and recurring transactions. Security (passcode /
-//! biometric) and the settings/theme polish come next.
+//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 10** is security & polish: an optional
+//! **biometric app lock** (`biometric` plugin, device-passcode fallback), the Saldo **brand theme**
+//! (`with_theme`) plus a light/dark toggle, and a real app icon. Earlier chapters set up the four-tab
+//! shell, `SQLite` persistence with `cx.now()`, the accounts / transfers ledger, categories, the entry
+//! sheet, the Stats charts, locale-aware money/date formatting, the multilingual `i18n` UI, recurring
+//! transactions, and CSV/JSON export & backup. This is the last chapter — Saldo is feature-complete.
 
 use std::sync::OnceLock;
 
 use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
-    ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Currency, Cx, Icon, InputValue, Locale,
-    MobilerApp, MobilerShell, Rgb, Segment, Spacing, Tone, Widget, button, caption, card, card_button,
-    chart, chip, column, divider, donut_chart, emphasis, icon_button, negotiate, row, scaffold,
-    scroller, segment, segmented, spacer, subtitle, swipe_action, text, text_field, with_fab, with_sheet,
+    ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Corner, Currency, Cx, Density, FontFamily,
+    Icon, InputValue, Locale, MobilerApp, MobilerShell, Rgb, Segment, Spacing, Theme, Tone, Widget,
+    button, caption, card, card_button, chart, chip, column, divider, donut_chart, emphasis, icon_button,
+    negotiate, row, scaffold, scroller, segment, segmented, spacer, subtitle, swipe_action, text,
+    text_field, with_fab, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -303,6 +304,7 @@ pub struct Model {
     lock_enabled: bool,     // the app-lock setting (persisted)
     locked: bool,           // runtime: the app is currently locked, awaiting biometric unlock
     lock_checked: bool,     // we've done the one-time launch lock decision (don't re-lock on reloads)
+    dark: bool,             // dark mode (persisted)
     pending_sql: Vec<String>,
 
     // "new transaction" sheet
@@ -340,6 +342,7 @@ pub enum Msg {
     SetLang(Option<String>),
     SetCurrency(Currency),
     SetLock(bool),
+    SetDark(bool),
     Unlock,
     Authed(bool),
     SettingsLoaded(String),
@@ -439,6 +442,10 @@ impl MobilerApp for SaldoApp {
                 model.lock_enabled = on;
                 save_setting(cx, "lock", if on { "1" } else { "" });
             }
+            Msg::SetDark(on) => {
+                model.dark = on;
+                save_setting(cx, "dark", if on { "1" } else { "" });
+            }
             Msg::Unlock => {
                 cx.plugin("biometric", "authenticate", tr(model, "lock.prompt"), |r| Msg::Authed(r.ok));
             }
@@ -465,6 +472,7 @@ impl MobilerApp for SaldoApp {
                                 });
                             }
                         }
+                        "dark" if v == "1" => model.dark = true,
                         _ => {}
                     }
                 }
@@ -719,7 +727,7 @@ impl MobilerApp for SaldoApp {
                 spacer(Spacing::Md),
                 button(tr(model, "lock.unlock"), ButtonStyle::Filled, Msg::Unlock),
             ]);
-            return scaffold("Saldo", false, vec![], lock);
+            return with_theme(scaffold("Saldo", model.dark, vec![], lock), saldo_theme());
         }
         let tabs = vec![
             tab(model.screen, Screen::Bills, tr(model, "tab.bills"), Icon::Home),
@@ -739,7 +747,7 @@ impl MobilerApp for SaldoApp {
             Screen::Settings => (tr(model, "tab.settings"), settings(model)),
         };
 
-        let mut root = scaffold(heading, false, tabs, body);
+        let mut root = scaffold(heading, model.dark, tabs, body);
         match model.screen {
             Screen::Bills => root = with_fab(root, Icon::Add, Msg::StartAdd),
             Screen::Assets => root = with_fab(root, Icon::Add, Msg::StartAddAccount),
@@ -751,7 +759,18 @@ impl MobilerApp for SaldoApp {
             root =
                 with_sheet(root, tr(model, "sheet.newaccount"), account_sheet(model), Msg::CancelAddAccount);
         }
-        root
+        with_theme(root, saldo_theme())
+    }
+}
+
+/// Saldo's brand: a confident teal (money/balance), friendly large corners, the system font.
+fn saldo_theme() -> Theme {
+    Theme {
+        seed: Rgb::new(0x0E, 0x9F, 0x8E),
+        accent: None,
+        corner: Corner::Large,
+        density: Density::Comfortable,
+        font: FontFamily::System,
     }
 }
 
@@ -1039,6 +1058,10 @@ fn catalog() -> &'static Catalog {
             .with("categories.new_name", &[("en", "New category name"), ("de", "Name der neuen Kategorie"), ("fr", "Nom de la nouvelle catégorie"), ("it", "Nome della nuova categoria"), ("uk", "Назва нової категорії")])
             .with("action.add", &[("en", "Add"), ("de", "Hinzufügen"), ("fr", "Ajouter"), ("it", "Aggiungi"), ("uk", "Додати")])
             .with("action.done", &[("en", "Done"), ("de", "Fertig"), ("fr", "Terminé"), ("it", "Fatto"), ("uk", "Готово")])
+            // appearance
+            .with("settings.appearance", &[("en", "Appearance"), ("de", "Darstellung"), ("fr", "Apparence"), ("it", "Aspetto"), ("uk", "Вигляд")])
+            .with("appearance.light", &[("en", "Light"), ("de", "Hell"), ("fr", "Clair"), ("it", "Chiaro"), ("uk", "Світла")])
+            .with("appearance.dark", &[("en", "Dark"), ("de", "Dunkel"), ("fr", "Sombre"), ("it", "Scuro"), ("uk", "Темна")])
             // security / app lock
             .with("settings.security", &[("en", "Security"), ("de", "Sicherheit"), ("fr", "Sécurité"), ("it", "Sicurezza"), ("uk", "Безпека")])
             .with("lock.desc", &[("en", "Require Face ID, Touch ID, or your passcode to open Saldo."), ("de", "Face ID, Touch ID oder Code zum Öffnen von Saldo verlangen."), ("fr", "Exiger Face ID, Touch ID ou votre code pour ouvrir Saldo."), ("it", "Richiedi Face ID, Touch ID o il codice per aprire Saldo."), ("uk", "Вимагати Face ID, Touch ID або код для відкриття Saldo.")])
@@ -1597,7 +1620,21 @@ fn settings(model: &Model) -> Widget {
         CardStyle::Elevated,
     );
 
+    let appearance = card(
+        column(vec![
+            subtitle(tr(model, "settings.appearance")),
+            spacer(Spacing::Sm),
+            segmented(vec![
+                segment(tr(model, "appearance.light"), !model.dark, Msg::SetDark(false)),
+                segment(tr(model, "appearance.dark"), model.dark, Msg::SetDark(true)),
+            ]),
+        ]),
+        CardStyle::Elevated,
+    );
+
     column(vec![
+        spacer(Spacing::Md),
+        appearance,
         spacer(Spacing::Md),
         language,
         spacer(Spacing::Sm),
@@ -2201,6 +2238,7 @@ mod test {
             "settings.currency", "settings.categories", "categories.manage", "data.backup",
             "categories.top_level", "action.add", "action.done", "err.cat_name",
             "settings.security", "lock.desc", "lock.title", "lock.unlock", "lock.prompt",
+            "settings.appearance", "appearance.light", "appearance.dark",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
