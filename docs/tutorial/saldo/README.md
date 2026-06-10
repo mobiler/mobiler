@@ -35,7 +35,8 @@ new `mobiler_core::i18n` translation primitive we add along the way.
 7. **[Go multilingual](07-go-multilingual.md)** — the new `mobiler_core::i18n` (language negotiation +
    a fallback-aware `Catalog`): translate every string into en/de/fr/it/uk, pick the language from the
    device, and let the user override it in Settings.
-8. **Recurring transactions** — schedule rules and materialize due entries on launch.
+8. **[Recurring transactions](08-recurring.md)** — a `recurring` rules table, a "Repeat" choice on the
+   entry sheet, and catch-up materialization on launch (dependency-free civil-date arithmetic).
 9. **Export, import & backup** — CSV export, CSV import, and full JSON backup/restore.
 10. **Security, settings & polish** — passcode/biometric lock, settings, theming, icons, dark mode.
 
