@@ -23,8 +23,9 @@ new `mobiler_core::i18n` translation primitive we add along the way.
 3. **[Accounts & transfers](03-accounts-and-transfers.md)** — a unified income/expense/transfer
    ledger across accounts, balances + net worth on the Assets tab, and a `PRAGMA user_version` schema
    migration that carries the Chapter-2 data forward.
-4. **Categories & the entry sheet** — editable income/expense categories with subcategories, the date
-   picker, the category picker.
+4. **[Categories & the entry sheet](04-categories-and-the-entry-sheet.md)** — a seeded category tree
+   (income/expense, two levels), a hierarchical category picker, and a native date picker for
+   back-dating (`cx.pick_date`).
 5. **Stats** — pie/donut by category, a net-worth trend line, monthly bars (the `Chart` widget).
 6. **Money & formatting** — locale-aware currency and dates with `mobiler_core::format` (and adding
    Ukrainian to the framework).
