@@ -29,8 +29,9 @@ new `mobiler_core::i18n` translation primitive we add along the way.
 5. **[Stats](05-stats.md)** — a category-breakdown donut (income/expense toggle, per period) with a
    ranked list, a net-worth trend line, and a monthly income-vs-expense bar chart — all from the
    `Chart` widget over pure aggregation helpers.
-6. **Money & formatting** — locale-aware currency and dates with `mobiler_core::format` (and adding
-   Ukrainian to the framework).
+6. **[Money & formatting](06-money-and-formatting.md)** — route every amount and date through
+   `mobiler_core::format`, pick the locale from the device (`cx.device_locale`), and add **Ukrainian**
+   (`Locale::UkUa` / `Currency::Uah`) to the framework.
 7. **Go multilingual** — the new `mobiler_core::i18n`: negotiate the device language, translate every
    string, let the user override.
 8. **Recurring transactions** — schedule rules and materialize due entries on launch.

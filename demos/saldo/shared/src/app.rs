@@ -1,17 +1,18 @@
 //! Saldo — a multilingual, SQLite-backed personal expense & money manager, built on Mobiler.
 //!
-//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 5** fills in the **Stats** tab: a
-//! category-breakdown donut (income/expense toggle, per period) with a ranked list, a net-worth trend
-//! line, and a monthly income-vs-expense bar chart — all from the `Chart` widget over pure aggregation
-//! helpers. Earlier chapters set up the four-tab shell, `SQLite` persistence + `cx.now()`, the accounts
-//! / transfers ledger, and real categories + the entry sheet (picker + `cx.pick_date`). Money
-//! formatting, multilingual UI, recurring and CSV export come next.
+//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 6** makes money and dates
+//! locale-aware: it reads the device locale at startup (`cx.device_locale` → `Locale::from_tag`) and
+//! formats every amount and date through `mobiler_core::format` (which gains **Ukrainian** —
+//! `Locale::UkUa` / `Currency::Uah`). Earlier chapters set up the four-tab shell, `SQLite` persistence
+//! with `cx.now()`, the accounts / transfers ledger, categories, the entry sheet, and the Stats charts.
+//! Translating the UI strings (multilingual `i18n`), recurring and CSV export come next.
 
+use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
-    ButtonStyle, CardStyle, ChartSeries, ChartStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell,
-    Rgb, Segment, Spacing, Widget, button, caption, card, chart, chip, column, divider, donut_chart,
-    emphasis, row, scaffold, segment, segmented, spacer, subtitle, text, text_field, with_fab,
-    with_sheet,
+    ButtonStyle, CardStyle, ChartSeries, ChartStyle, Currency, Cx, Icon, InputValue, Locale,
+    MobilerApp, MobilerShell, Rgb, Segment, Spacing, Widget, button, caption, card, chart, chip,
+    column, divider, donut_chart, emphasis, row, scaffold, segment, segmented, spacer, subtitle, text,
+    text_field, with_fab, with_sheet,
 };
 use serde::{Deserialize, Serialize};
 
@@ -190,6 +191,8 @@ pub struct Model {
     screen: Screen,
     period: Period,
     stats_kind: TxnKind, // expense/income toggle on the Stats tab
+    locale: Locale,      // formatting locale, from the device at startup
+    currency: Currency,  // base currency (defaulted from the locale; user-set in Settings later)
     today: String,
     accounts: Vec<Account>,
     categories: Vec<Category>,
@@ -218,6 +221,7 @@ pub enum Msg {
     Switch(Screen),
     SetPeriod(Period),
     SetStatsKind(TxnKind),
+    GotLocale(String),
     // schema / load
     Schema(String),
     Migrated,
@@ -258,6 +262,7 @@ impl MobilerApp for SaldoApp {
             Msg::Schema(if r.ok { r.output } else { "[]".to_string() })
         });
         cx.now(|r| Msg::GotToday(r.output));
+        cx.device_locale(|r| Msg::GotLocale(r.output));
     }
 
     #[allow(clippy::too_many_lines)]
@@ -266,6 +271,12 @@ impl MobilerApp for SaldoApp {
             Msg::Switch(s) => model.screen = s,
             Msg::SetPeriod(p) => model.period = p,
             Msg::SetStatsKind(k) => model.stats_kind = k,
+            Msg::GotLocale(tag) => {
+                if let Some(loc) = Locale::from_tag(&tag) {
+                    model.locale = loc;
+                    model.currency = default_currency(loc);
+                }
+            }
 
             Msg::Schema(json) => {
                 let v = pragma_int(&json);
@@ -701,15 +712,40 @@ fn open_parent(categories: &[Category], kind: &str, selected: &str) -> Option<u3
         .map(|c| c.parent_id.unwrap_or(c.id))
 }
 
-fn money(v: f64) -> String {
-    format!("€{v:.2}")
+/// A sensible default base currency for a freshly-detected locale (the user can change it in Settings
+/// later). Region-implied where obvious, otherwise the euro.
+fn default_currency(locale: Locale) -> Currency {
+    match locale {
+        Locale::UkUa => Currency::Uah,
+        Locale::EnUs => Currency::Usd,
+        Locale::EnGb => Currency::Gbp,
+        Locale::DeCh | Locale::FrCh | Locale::ItCh => Currency::Chf,
+        _ => Currency::Eur,
+    }
 }
 
-fn signed(t: &Txn) -> String {
+fn money(model: &Model, v: f64) -> String {
+    format_currency(v, model.currency, model.locale)
+}
+
+fn signed(model: &Model, t: &Txn) -> String {
     match t.kind {
-        TxnKind::Income => format!("+{}", money(t.amount)),
-        TxnKind::Expense => format!("−{}", money(t.amount)),
-        TxnKind::Transfer => money(t.amount),
+        TxnKind::Income => format!("+{}", money(model, t.amount)),
+        TxnKind::Expense => format!("−{}", money(model, t.amount)),
+        TxnKind::Transfer => money(model, t.amount),
+    }
+}
+
+/// Parse a `"YYYY-MM-DD"` prefix into `(year, month, day)`.
+fn parse_ymd(s: &str) -> Option<(i32, u32, u32)> {
+    Some((s.get(..4)?.parse().ok()?, s.get(5..7)?.parse().ok()?, s.get(8..10)?.parse().ok()?))
+}
+
+/// Format a `"YYYY-MM-DD"` date in the model's locale, falling back to the raw string.
+fn fmt_date(model: &Model, ymd: &str) -> String {
+    match parse_ymd(ymd) {
+        Some((y, m, d)) => format_date(y, m, d, model.locale),
+        None => ymd.to_string(),
     }
 }
 
@@ -736,10 +772,10 @@ fn bills(model: &Model) -> Widget {
                 period_seg(model.period, Period::All, "All"),
             ]),
             spacer(Spacing::Sm),
-            row(vec![caption("Income"), spacer(Spacing::Md), emphasis(money(income))]),
-            row(vec![caption("Expense"), spacer(Spacing::Md), emphasis(money(expense))]),
+            row(vec![caption("Income"), spacer(Spacing::Md), emphasis(money(model, income))]),
+            row(vec![caption("Expense"), spacer(Spacing::Md), emphasis(money(model, expense))]),
             divider(),
-            row(vec![caption("Net"), spacer(Spacing::Md), emphasis(money(income - expense))]),
+            row(vec![caption("Net"), spacer(Spacing::Md), emphasis(money(model, income - expense))]),
         ]),
         CardStyle::Filled,
     );
@@ -754,7 +790,7 @@ fn bills(model: &Model) -> Widget {
 
     let mut sections = vec![header, spacer(Spacing::Md)];
     for (day, items) in group_by_day(&shown) {
-        let mut rows = vec![row(vec![subtitle(day), spacer(Spacing::Md)]), divider()];
+        let mut rows = vec![row(vec![subtitle(fmt_date(model, day)), spacer(Spacing::Md)]), divider()];
         for t in items {
             rows.push(txn_row(model, t));
         }
@@ -781,7 +817,7 @@ fn txn_row(model: &Model, t: &Txn) -> Widget {
     row(vec![
         label,
         spacer(Spacing::Md),
-        emphasis(signed(t)),
+        emphasis(signed(model, t)),
         button("Delete", ButtonStyle::Text, Msg::Delete(t.id)),
     ])
 }
@@ -790,10 +826,10 @@ fn assets(model: &Model) -> Widget {
     let (assets_total, liabilities, net) = net_worth(&model.accounts, &model.txns);
     let summary = card(
         column(vec![
-            row(vec![caption("Assets"), spacer(Spacing::Md), emphasis(money(assets_total))]),
-            row(vec![caption("Liabilities"), spacer(Spacing::Md), emphasis(money(liabilities))]),
+            row(vec![caption("Assets"), spacer(Spacing::Md), emphasis(money(model, assets_total))]),
+            row(vec![caption("Liabilities"), spacer(Spacing::Md), emphasis(money(model, liabilities))]),
             divider(),
-            row(vec![text("Net worth"), spacer(Spacing::Md), emphasis(money(net))]),
+            row(vec![text("Net worth"), spacer(Spacing::Md), emphasis(money(model, net))]),
         ]),
         CardStyle::Filled,
     );
@@ -808,7 +844,7 @@ fn assets(model: &Model) -> Widget {
         rows.push(row(vec![
             text(format!("{}{tag}", a.name)),
             spacer(Spacing::Md),
-            emphasis(money(balance(a, &model.txns))),
+            emphasis(money(model, balance(a, &model.txns))),
         ]));
     }
     column(vec![summary, spacer(Spacing::Md), card(column(rows), CardStyle::Elevated)])
@@ -874,7 +910,7 @@ fn stats(model: &Model) -> Widget {
             items.push(row(vec![
                 text(name.clone()),
                 spacer(Spacing::Md),
-                emphasis(money(*amt)),
+                emphasis(money(model, *amt)),
                 caption(format!("{pct:.0}%")),
             ]));
         }
@@ -973,7 +1009,7 @@ fn txn_sheet(model: &Model) -> Widget {
         row(vec![
             caption("Date"),
             spacer(Spacing::Md),
-            text(model.draft_date.clone()),
+            text(fmt_date(model, &model.draft_date)),
             button("Change", ButtonStyle::Text, Msg::PickDate),
         ]),
         caption(if model.draft_kind == TxnKind::Transfer { "From account" } else { "Account" }),
@@ -1133,6 +1169,27 @@ mod test {
         assert!((b[0].1 - 20.0).abs() < 1e-9);
         assert_eq!(b[1].0, "Food & Drink");
         assert!((b[1].1 - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn currency_and_dates_follow_the_locale() {
+        // device locale drives both the formatting locale and a sensible default currency
+        let mut m = Model::default();
+        assert_eq!(money(&m, 1234.5), "€1,234.50"); // EnUs / Eur defaults
+        m.locale = Locale::UkUa;
+        m.currency = default_currency(Locale::UkUa);
+        assert_eq!(money(&m, 1234.5), "1\u{a0}234,50 ₴");
+        assert_eq!(fmt_date(&m, "2026-12-31"), "31.12.2026");
+        // an unparseable date falls back to the raw string
+        assert_eq!(fmt_date(&m, "n/a"), "n/a");
+    }
+
+    #[test]
+    fn default_currency_is_region_implied() {
+        assert_eq!(default_currency(Locale::UkUa), Currency::Uah);
+        assert_eq!(default_currency(Locale::DeCh), Currency::Chf);
+        assert_eq!(default_currency(Locale::EnUs), Currency::Usd);
+        assert_eq!(default_currency(Locale::DeDe), Currency::Eur);
     }
 
     #[test]
