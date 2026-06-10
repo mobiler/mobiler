@@ -26,7 +26,9 @@ new `mobiler_core::i18n` translation primitive we add along the way.
 4. **[Categories & the entry sheet](04-categories-and-the-entry-sheet.md)** — a seeded category tree
    (income/expense, two levels), a hierarchical category picker, and a native date picker for
    back-dating (`cx.pick_date`).
-5. **Stats** — pie/donut by category, a net-worth trend line, monthly bars (the `Chart` widget).
+5. **[Stats](05-stats.md)** — a category-breakdown donut (income/expense toggle, per period) with a
+   ranked list, a net-worth trend line, and a monthly income-vs-expense bar chart — all from the
+   `Chart` widget over pure aggregation helpers.
 6. **Money & formatting** — locale-aware currency and dates with `mobiler_core::format` (and adding
    Ukrainian to the framework).
 7. **Go multilingual** — the new `mobiler_core::i18n`: negotiate the device language, translate every

@@ -1,15 +1,17 @@
 //! Saldo — a multilingual, SQLite-backed personal expense & money manager, built on Mobiler.
 //!
-//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 4** adds real **categories** (with
-//! subcategories) seeded into the database, a hierarchical category **picker** in the entry sheet, and
-//! a native **date picker** (`cx.pick_date`) so entries can be back-dated. Earlier chapters set up the
-//! four-tab shell, `SQLite` persistence + `cx.now()`, and the accounts / transfers ledger. Charts,
-//! multilingual UI, recurring and CSV export come next.
+//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 5** fills in the **Stats** tab: a
+//! category-breakdown donut (income/expense toggle, per period) with a ranked list, a net-worth trend
+//! line, and a monthly income-vs-expense bar chart — all from the `Chart` widget over pure aggregation
+//! helpers. Earlier chapters set up the four-tab shell, `SQLite` persistence + `cx.now()`, the accounts
+//! / transfers ledger, and real categories + the entry sheet (picker + `cx.pick_date`). Money
+//! formatting, multilingual UI, recurring and CSV export come next.
 
 use mobiler_core::{
-    ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, Segment, Spacing, Widget,
-    button, caption, card, chip, column, divider, emphasis, row, scaffold, segment, segmented, spacer,
-    subtitle, text, text_field, with_fab, with_sheet,
+    ButtonStyle, CardStyle, ChartSeries, ChartStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell,
+    Rgb, Segment, Spacing, Widget, button, caption, card, chart, chip, column, divider, donut_chart,
+    emphasis, row, scaffold, segment, segmented, spacer, subtitle, text, text_field, with_fab,
+    with_sheet,
 };
 use serde::{Deserialize, Serialize};
 
@@ -187,6 +189,7 @@ impl Txn {
 pub struct Model {
     screen: Screen,
     period: Period,
+    stats_kind: TxnKind, // expense/income toggle on the Stats tab
     today: String,
     accounts: Vec<Account>,
     categories: Vec<Category>,
@@ -214,6 +217,7 @@ pub struct Model {
 pub enum Msg {
     Switch(Screen),
     SetPeriod(Period),
+    SetStatsKind(TxnKind),
     // schema / load
     Schema(String),
     Migrated,
@@ -261,6 +265,7 @@ impl MobilerApp for SaldoApp {
         match event {
             Msg::Switch(s) => model.screen = s,
             Msg::SetPeriod(p) => model.period = p,
+            Msg::SetStatsKind(k) => model.stats_kind = k,
 
             Msg::Schema(json) => {
                 let v = pragma_int(&json);
@@ -400,7 +405,7 @@ impl MobilerApp for SaldoApp {
         ];
         let (heading, body) = match model.screen {
             Screen::Bills => ("Saldo", bills(model)),
-            Screen::Stats => ("Stats", soon("Charts arrive in Chapter 5.")),
+            Screen::Stats => ("Stats", stats(model)),
             Screen::Assets => ("Assets", assets(model)),
             Screen::Settings => ("Settings", soon("Currency, language & more arrive later.")),
         };
@@ -584,6 +589,94 @@ fn net_worth(accounts: &[Account], txns: &[Txn]) -> (f64, f64, f64) {
     (assets, liabilities, assets - liabilities)
 }
 
+/// The last `n` `"YYYY-MM"` month tags, oldest→newest, ending at `today`'s month. Empty if `today`
+/// isn't a parseable date. We walk back month by month (rolling the year over at January) then reverse.
+fn month_tags(today: &str, n: usize) -> Vec<String> {
+    let (Some(mut y), Some(mut m)) = (
+        today.get(..4).and_then(|s| s.parse::<i32>().ok()),
+        today.get(5..7).and_then(|s| s.parse::<i32>().ok()),
+    ) else {
+        return Vec::new();
+    };
+    let mut tags = Vec::with_capacity(n);
+    for _ in 0..n {
+        tags.push(format!("{y:04}-{m:02}"));
+        m -= 1;
+        if m == 0 {
+            m = 12;
+            y -= 1;
+        }
+    }
+    tags.reverse();
+    tags
+}
+
+/// Net worth (assets − liabilities) counting only transactions on or before the end of `tag`'s month.
+/// `ts` is `"YYYY-MM-DD HH:MM:SS"`, so a lexical compare against `"{tag}-31 23:59:59"` is the cutoff.
+fn net_worth_asof(accounts: &[Account], txns: &[Txn], tag: &str) -> f64 {
+    let cutoff = format!("{tag}-31 23:59:59");
+    let upto: Vec<Txn> = txns.iter().filter(|t| t.ts.as_str() <= cutoff.as_str()).cloned().collect();
+    net_worth(accounts, &upto).2
+}
+
+/// `(income, expense)` totals for the single month `tag` (`"YYYY-MM"`).
+fn monthly_totals(txns: &[Txn], tag: &str) -> (f64, f64) {
+    let mut income = 0.0;
+    let mut expense = 0.0;
+    for t in txns.iter().filter(|t| t.ts.get(..7) == Some(tag)) {
+        match t.kind {
+            TxnKind::Income => income += t.amount,
+            TxnKind::Expense => expense += t.amount,
+            TxnKind::Transfer => {}
+        }
+    }
+    (income, expense)
+}
+
+/// Resolve a leaf category name to its **top-level** parent name (a subcategory → its parent, a
+/// top-level or unknown name → itself), so the Stats breakdown rolls subcategories up.
+fn top_category<'a>(categories: &'a [Category], kind: &str, name: &'a str) -> &'a str {
+    let Some(c) = categories.iter().find(|c| c.kind == kind && c.name == name) else {
+        return name;
+    };
+    match c.parent_id {
+        Some(pid) => categories.iter().find(|p| p.id == pid).map_or(name, |p| p.name.as_str()),
+        None => name,
+    }
+}
+
+/// In-period transactions of `kind`, summed by top-level category and sorted by amount descending.
+fn category_breakdown(model: &Model, kind: TxnKind) -> Vec<(String, f64)> {
+    let ck = kind.category_kind();
+    let mut totals: Vec<(String, f64)> = Vec::new();
+    for t in model.txns.iter().filter(|t| t.kind == kind && in_period(&t.ts, model.period, &model.today))
+    {
+        let name = top_category(&model.categories, ck, &t.category).to_string();
+        match totals.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, amt)) => *amt += t.amount,
+            None => totals.push((name, t.amount)),
+        }
+    }
+    totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    totals
+}
+
+/// A small flat palette; the Stats donut series and ranked list index into it so the colours line up.
+fn palette(i: usize) -> Rgb {
+    const COLORS: [(u8, u8, u8); 8] = [
+        (0x2F, 0x80, 0xED), // blue
+        (0xEB, 0x57, 0x57), // red
+        (0x27, 0xAE, 0x60), // green
+        (0xF2, 0xC9, 0x4C), // yellow
+        (0x9B, 0x51, 0xE0), // purple
+        (0xF2, 0x99, 0x4A), // orange
+        (0x56, 0xCC, 0xF2), // cyan
+        (0xBD, 0xBD, 0xBD), // grey
+    ];
+    let (r, g, b) = COLORS[i % COLORS.len()];
+    Rgb::new(r, g, b)
+}
+
 fn group_by_day<'a>(items: &[&'a Txn]) -> Vec<(&'a str, Vec<&'a Txn>)> {
     let mut out: Vec<(&str, Vec<&Txn>)> = Vec::new();
     for &t in items {
@@ -719,6 +812,122 @@ fn assets(model: &Model) -> Widget {
         ]));
     }
     column(vec![summary, spacer(Spacing::Md), card(column(rows), CardStyle::Elevated)])
+}
+
+/// The Stats tab: a category-breakdown donut (income/expense toggle, current period) with a ranked
+/// list, a net-worth trend line, and a monthly income-vs-expense bar chart — all from the `Chart` widget.
+#[allow(clippy::too_many_lines, clippy::cast_possible_truncation)] // money f64 → chart f32 is fine here
+fn stats(model: &Model) -> Widget {
+    if model.txns.is_empty() {
+        return column(vec![
+            spacer(Spacing::Xl),
+            caption("Add a few transactions and your charts appear here."),
+        ]);
+    }
+
+    let kind = model.stats_kind;
+    let controls = card(
+        column(vec![
+            segmented(vec![
+                period_seg(model.period, Period::Day, "Day"),
+                period_seg(model.period, Period::Month, "Month"),
+                period_seg(model.period, Period::All, "All"),
+            ]),
+            spacer(Spacing::Sm),
+            segmented(vec![
+                segment("Expense", kind == TxnKind::Expense, Msg::SetStatsKind(TxnKind::Expense)),
+                segment("Income", kind == TxnKind::Income, Msg::SetStatsKind(TxnKind::Income)),
+            ]),
+        ]),
+        CardStyle::Filled,
+    );
+
+    // 1. Category breakdown — donut + ranked list.
+    let breakdown = category_breakdown(model, kind);
+    let total: f64 = breakdown.iter().map(|(_, a)| a).sum();
+    let breakdown_card = if breakdown.is_empty() {
+        card(
+            column(vec![
+                subtitle("By category"),
+                spacer(Spacing::Sm),
+                caption(if kind == TxnKind::Income {
+                    "No income in this period."
+                } else {
+                    "No expenses in this period."
+                }),
+            ]),
+            CardStyle::Elevated,
+        )
+    } else {
+        let donut = donut_chart(
+            breakdown
+                .iter()
+                .enumerate()
+                .map(|(i, (name, amt))| {
+                    ChartSeries::new(name.clone(), vec![*amt as f32]).with_color(palette(i))
+                })
+                .collect(),
+        );
+        let mut items = vec![subtitle("By category"), spacer(Spacing::Sm), donut, divider()];
+        for (name, amt) in &breakdown {
+            let pct = if total > 0.0 { amt / total * 100.0 } else { 0.0 };
+            items.push(row(vec![
+                text(name.clone()),
+                spacer(Spacing::Md),
+                emphasis(money(*amt)),
+                caption(format!("{pct:.0}%")),
+            ]));
+        }
+        card(column(items), CardStyle::Elevated)
+    };
+
+    // 2. Net-worth trend (last 6 months).
+    let tags = month_tags(&model.today, 6);
+    let labels: Vec<String> = tags.iter().map(|t| t.get(5..7).unwrap_or(t).to_string()).collect();
+    let trend = tags.iter().map(|t| net_worth_asof(&model.accounts, &model.txns, t) as f32).collect();
+    let trend_card = card(
+        column(vec![
+            subtitle("Net-worth trend"),
+            spacer(Spacing::Sm),
+            chart(vec![ChartSeries::new("Net worth", trend)], labels.clone(), ChartStyle::Line, true, false),
+        ]),
+        CardStyle::Elevated,
+    );
+
+    // 3. Monthly income vs expense (last 6 months).
+    let (mut inc, mut exp) = (Vec::new(), Vec::new());
+    for t in &tags {
+        let (i, e) = monthly_totals(&model.txns, t);
+        inc.push(i as f32);
+        exp.push(e as f32);
+    }
+    let bars_card = card(
+        column(vec![
+            subtitle("Monthly income vs expense"),
+            spacer(Spacing::Sm),
+            chart(
+                vec![
+                    ChartSeries::new("Income", inc).with_color(palette(2)),
+                    ChartSeries::new("Expense", exp).with_color(palette(1)),
+                ],
+                labels,
+                ChartStyle::Bar,
+                true,
+                true,
+            ),
+        ]),
+        CardStyle::Elevated,
+    );
+
+    column(vec![
+        controls,
+        spacer(Spacing::Md),
+        breakdown_card,
+        spacer(Spacing::Md),
+        trend_card,
+        spacer(Spacing::Md),
+        bars_card,
+    ])
 }
 
 fn account_chips(model: &Model, selected: Option<u32>, on: fn(u32) -> Msg) -> Widget {
@@ -872,5 +1081,70 @@ mod test {
         assert!((balance(&accounts[0], &txns) - 57.5).abs() < 1e-9);
         assert!((balance(&accounts[1], &txns) - 30.0).abs() < 1e-9);
         assert!((net_worth(&accounts, &txns).2 - 87.5).abs() < 1e-9);
+    }
+
+    fn expense(id: u32, ts: &str, amount: f64, category: &str) -> Txn {
+        Txn { id, ts: ts.into(), kind: TxnKind::Expense, amount, account_id: 1,
+              to_account_id: None, category: category.into(), note: String::new() }
+    }
+
+    #[test]
+    fn month_tags_walk_back_with_year_rollover() {
+        assert_eq!(month_tags("2026-06-10", 3), ["2026-04", "2026-05", "2026-06"]);
+        // crossing a year boundary
+        assert_eq!(month_tags("2026-01-15", 3), ["2025-11", "2025-12", "2026-01"]);
+        assert_eq!(month_tags("2026-06-10", 1), ["2026-06"]);
+        assert!(month_tags("2026-06-10", 0).is_empty());
+        assert!(month_tags("", 6).is_empty());
+    }
+
+    #[test]
+    fn net_worth_asof_respects_the_month_cutoff() {
+        let accounts =
+            vec![Account { id: 1, name: "Cash".into(), kind: AccountKind::Asset, opening: 100.0 }];
+        let txns = vec![
+            expense(1, "2026-05-20 12:00:00", 10.0, "Coffee"),
+            expense(2, "2026-06-05 12:00:00", 25.0, "Coffee"),
+        ];
+        // only the May expense counts by end of May; both count by end of June
+        assert!((net_worth_asof(&accounts, &txns, "2026-05") - 90.0).abs() < 1e-9);
+        assert!((net_worth_asof(&accounts, &txns, "2026-06") - 65.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn category_breakdown_rolls_up_subcategories_and_sorts() {
+        let model = Model {
+            categories: cats(),
+            today: "2026-06-10".into(),
+            period: Period::All,
+            txns: vec![
+                expense(1, "2026-06-01 12:00:00", 4.0, "Coffee"),     // → Food & Drink
+                expense(2, "2026-06-02 12:00:00", 6.0, "Groceries"),  // → Food & Drink
+                expense(3, "2026-06-03 12:00:00", 20.0, "Transport"), // top-level
+                Txn { id: 4, ts: "2026-06-04 12:00:00".into(), kind: TxnKind::Income, amount: 999.0,
+                      account_id: 1, to_account_id: None, category: "Salary".into(), note: String::new() },
+            ],
+            ..Model::default()
+        };
+        let b = category_breakdown(&model, TxnKind::Expense);
+        // Transport (20) ranks above the rolled-up Food & Drink (10); income excluded
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].0, "Transport");
+        assert!((b[0].1 - 20.0).abs() < 1e-9);
+        assert_eq!(b[1].0, "Food & Drink");
+        assert!((b[1].1 - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn monthly_totals_splits_income_and_expense_for_the_month() {
+        let txns = vec![
+            expense(1, "2026-06-01 12:00:00", 12.0, "Coffee"),
+            Txn { id: 2, ts: "2026-06-02 12:00:00".into(), kind: TxnKind::Income, amount: 500.0,
+                  account_id: 1, to_account_id: None, category: "Salary".into(), note: String::new() },
+            expense(3, "2026-05-30 12:00:00", 99.0, "Coffee"), // different month, ignored
+        ];
+        let (inc, exp) = monthly_totals(&txns, "2026-06");
+        assert!((inc - 500.0).abs() < 1e-9);
+        assert!((exp - 12.0).abs() < 1e-9);
     }
 }
