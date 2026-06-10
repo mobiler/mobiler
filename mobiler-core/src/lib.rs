@@ -9,7 +9,9 @@ use std::marker::PhantomData;
 
 pub mod bunny;
 pub mod format;
+pub mod i18n;
 pub use format::{Currency, Locale};
+pub use i18n::{Catalog, negotiate};
 
 use crux_core::{
     App, Command,

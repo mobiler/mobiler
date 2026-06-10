@@ -1,20 +1,25 @@
 //! Saldo — a multilingual, SQLite-backed personal expense & money manager, built on Mobiler.
 //!
-//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 6** makes money and dates
-//! locale-aware: it reads the device locale at startup (`cx.device_locale` → `Locale::from_tag`) and
-//! formats every amount and date through `mobiler_core::format` (which gains **Ukrainian** —
-//! `Locale::UkUa` / `Currency::Uah`). Earlier chapters set up the four-tab shell, `SQLite` persistence
-//! with `cx.now()`, the accounts / transfers ledger, categories, the entry sheet, and the Stats charts.
-//! Translating the UI strings (multilingual `i18n`), recurring and CSV export come next.
+//! Grows over the tutorial (`docs/tutorial/saldo/`). **Chapter 7** makes the whole UI multilingual via
+//! the new `mobiler_core::i18n` primitive: it negotiates a UI language from the device, looks every
+//! label up in an in-memory `Catalog` (en/de/fr/it/uk, English fallback), and adds a language override
+//! on the Settings tab. Earlier chapters set up the four-tab shell, `SQLite` persistence with
+//! `cx.now()`, the accounts / transfers ledger, categories, the entry sheet, the Stats charts, and
+//! locale-aware money/date formatting. Recurring transactions and CSV export come next.
+
+use std::sync::OnceLock;
 
 use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
-    ButtonStyle, CardStyle, ChartSeries, ChartStyle, Currency, Cx, Icon, InputValue, Locale,
+    ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Currency, Cx, Icon, InputValue, Locale,
     MobilerApp, MobilerShell, Rgb, Segment, Spacing, Widget, button, caption, card, chart, chip,
-    column, divider, donut_chart, emphasis, row, scaffold, segment, segmented, spacer, subtitle, text,
-    text_field, with_fab, with_sheet,
+    column, divider, donut_chart, emphasis, negotiate, row, scaffold, segment, segmented, spacer,
+    subtitle, text, text_field, with_fab, with_sheet,
 };
 use serde::{Deserialize, Serialize};
+
+/// The UI languages Saldo ships (English is the base / fallback).
+const SUPPORTED: [&str; 5] = ["en", "de", "fr", "it", "uk"];
 
 // ---- schema + migrations (run once, gated by PRAGMA user_version) ----
 
@@ -190,9 +195,11 @@ impl Txn {
 pub struct Model {
     screen: Screen,
     period: Period,
-    stats_kind: TxnKind, // expense/income toggle on the Stats tab
-    locale: Locale,      // formatting locale, from the device at startup
-    currency: Currency,  // base currency (defaulted from the locale; user-set in Settings later)
+    stats_kind: TxnKind,         // expense/income toggle on the Stats tab
+    locale: Locale,              // formatting locale, from the device at startup
+    currency: Currency,          // base currency (defaulted from the locale; user-set in Settings later)
+    device_lang: String,         // UI language negotiated from the device at startup
+    lang_override: Option<String>, // a manual language choice from Settings (None = follow the device)
     today: String,
     accounts: Vec<Account>,
     categories: Vec<Category>,
@@ -222,6 +229,7 @@ pub enum Msg {
     SetPeriod(Period),
     SetStatsKind(TxnKind),
     GotLocale(String),
+    SetLang(Option<String>),
     // schema / load
     Schema(String),
     Migrated,
@@ -276,7 +284,9 @@ impl MobilerApp for SaldoApp {
                     model.locale = loc;
                     model.currency = default_currency(loc);
                 }
+                model.device_lang = negotiate(&tag, &SUPPORTED, "en");
             }
+            Msg::SetLang(choice) => model.lang_override = choice,
 
             Msg::Schema(json) => {
                 let v = pragma_int(&json);
@@ -325,7 +335,7 @@ impl MobilerApp for SaldoApp {
             }
             Msg::Save => {
                 if let Err(why) = validate_txn(model) {
-                    cx.notify("toast", "show", why);
+                    cx.notify("toast", "show", tr(model, why));
                     return;
                 }
                 let Some(amount) = parse_amount(&model.draft_amount) else { return };
@@ -356,7 +366,7 @@ impl MobilerApp for SaldoApp {
                     model.adding = false;
                     load_all(cx);
                 } else {
-                    cx.notify("toast", "show", "Could not save — please try again.");
+                    cx.notify("toast", "show", tr(model, "err.save"));
                 }
             }
             Msg::Delete(id) => {
@@ -375,7 +385,7 @@ impl MobilerApp for SaldoApp {
             Msg::SetAccKind(k) => model.acc_kind = k,
             Msg::SaveAccount => {
                 if model.acc_name.trim().is_empty() {
-                    cx.notify("toast", "show", "Give the account a name.");
+                    cx.notify("toast", "show", tr(model, "err.accname"));
                     return;
                 }
                 let opening = model.acc_opening.trim().replace(',', ".").parse::<f64>().unwrap_or(0.0);
@@ -409,16 +419,17 @@ impl MobilerApp for SaldoApp {
 
     fn view(&self, model: &Model) -> Widget {
         let tabs = vec![
-            tab(model.screen, Screen::Bills, "Bills", Icon::Home),
-            tab(model.screen, Screen::Stats, "Stats", Icon::Star),
-            tab(model.screen, Screen::Assets, "Assets", Icon::Cart),
-            tab(model.screen, Screen::Settings, "Settings", Icon::Settings),
+            tab(model.screen, Screen::Bills, tr(model, "tab.bills"), Icon::Home),
+            tab(model.screen, Screen::Stats, tr(model, "tab.stats"), Icon::Star),
+            tab(model.screen, Screen::Assets, tr(model, "tab.assets"), Icon::Cart),
+            tab(model.screen, Screen::Settings, tr(model, "tab.settings"), Icon::Settings),
         ];
+        // The Bills screen keeps the brand as its heading; the others use the (translated) tab name.
         let (heading, body) = match model.screen {
-            Screen::Bills => ("Saldo", bills(model)),
-            Screen::Stats => ("Stats", stats(model)),
-            Screen::Assets => ("Assets", assets(model)),
-            Screen::Settings => ("Settings", soon("Currency, language & more arrive later.")),
+            Screen::Bills => ("Saldo".to_string(), bills(model)),
+            Screen::Stats => (tr(model, "tab.stats"), stats(model)),
+            Screen::Assets => (tr(model, "tab.assets"), assets(model)),
+            Screen::Settings => (tr(model, "tab.settings"), settings(model)),
         };
 
         let mut root = scaffold(heading, false, tabs, body);
@@ -428,9 +439,10 @@ impl MobilerApp for SaldoApp {
             _ => {}
         }
         if model.adding {
-            root = with_sheet(root, "New transaction", txn_sheet(model), Msg::CancelAdd);
+            root = with_sheet(root, tr(model, "sheet.newtxn"), txn_sheet(model), Msg::CancelAdd);
         } else if model.adding_account {
-            root = with_sheet(root, "New account", account_sheet(model), Msg::CancelAddAccount);
+            root =
+                with_sheet(root, tr(model, "sheet.newaccount"), account_sheet(model), Msg::CancelAddAccount);
         }
         root
     }
@@ -460,8 +472,86 @@ fn load_all(cx: &mut Cx<Msg>) {
     });
 }
 
-fn tab(current: Screen, screen: Screen, label: &str, icon: Icon) -> mobiler_core::Tab {
+fn tab(current: Screen, screen: Screen, label: impl Into<String>, icon: Icon) -> mobiler_core::Tab {
     mobiler_core::tab_icon(label, icon, current == screen, Msg::Switch(screen))
+}
+
+// ---- localization ----
+
+/// The effective UI language: the manual override if set, otherwise the device-negotiated language.
+fn lang(model: &Model) -> &str {
+    model.lang_override.as_deref().unwrap_or(&model.device_lang)
+}
+
+/// Translate `key` into the model's effective language (see [`Catalog::tr`] for the fallback chain).
+fn tr(model: &Model, key: &'static str) -> String {
+    catalog().tr(key, lang(model)).to_string()
+}
+
+/// The app's translation table, built once. English is the base; a missing translation falls back to
+/// English, then to the key. User data (account and category names) is *not* translated — only chrome.
+fn catalog() -> &'static Catalog {
+    static CATALOG: OnceLock<Catalog> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        Catalog::new("en")
+            // tabs / headings
+            .with("tab.bills", &[("en", "Bills"), ("de", "Buchungen"), ("fr", "Opérations"), ("it", "Movimenti"), ("uk", "Операції")])
+            .with("tab.stats", &[("en", "Stats"), ("de", "Statistik"), ("fr", "Stats"), ("it", "Statistiche"), ("uk", "Статистика")])
+            .with("tab.assets", &[("en", "Assets"), ("de", "Konten"), ("fr", "Comptes"), ("it", "Conti"), ("uk", "Рахунки")])
+            .with("tab.settings", &[("en", "Settings"), ("de", "Einstellungen"), ("fr", "Réglages"), ("it", "Impostazioni"), ("uk", "Налаштування")])
+            // periods
+            .with("period.day", &[("en", "Day"), ("de", "Tag"), ("fr", "Jour"), ("it", "Giorno"), ("uk", "День")])
+            .with("period.month", &[("en", "Month"), ("de", "Monat"), ("fr", "Mois"), ("it", "Mese"), ("uk", "Місяць")])
+            .with("period.all", &[("en", "All"), ("de", "Alle"), ("fr", "Tout"), ("it", "Tutto"), ("uk", "Усе")])
+            // money / ledger
+            .with("income", &[("en", "Income"), ("de", "Einnahmen"), ("fr", "Revenus"), ("it", "Entrate"), ("uk", "Дохід")])
+            .with("expense", &[("en", "Expense"), ("de", "Ausgaben"), ("fr", "Dépenses"), ("it", "Uscite"), ("uk", "Витрати")])
+            .with("net", &[("en", "Net"), ("de", "Saldo"), ("fr", "Solde"), ("it", "Saldo"), ("uk", "Баланс")])
+            .with("delete", &[("en", "Delete"), ("de", "Löschen"), ("fr", "Supprimer"), ("it", "Elimina"), ("uk", "Видалити")])
+            .with("bills.empty", &[("en", "Nothing here yet — tap + to add a transaction."), ("de", "Noch nichts da — tippe auf +, um eine Buchung hinzuzufügen."), ("fr", "Rien pour l'instant — touchez + pour ajouter une opération."), ("it", "Ancora niente — tocca + per aggiungere un movimento."), ("uk", "Поки що порожньо — натисніть +, щоб додати запис.")])
+            // assets
+            .with("assets.assets", &[("en", "Assets"), ("de", "Vermögen"), ("fr", "Actifs"), ("it", "Attività"), ("uk", "Активи")])
+            .with("assets.liabilities", &[("en", "Liabilities"), ("de", "Schulden"), ("fr", "Passifs"), ("it", "Passività"), ("uk", "Пасиви")])
+            .with("networth", &[("en", "Net worth"), ("de", "Nettovermögen"), ("fr", "Valeur nette"), ("it", "Patrimonio netto"), ("uk", "Чисті активи")])
+            .with("assets.empty", &[("en", "Tap + to add an account."), ("de", "Tippe auf +, um ein Konto hinzuzufügen."), ("fr", "Touchez + pour ajouter un compte."), ("it", "Tocca + per aggiungere un conto."), ("uk", "Натисніть +, щоб додати рахунок.")])
+            .with("liability.tag", &[("en", " (liability)"), ("de", " (Schuld)"), ("fr", " (passif)"), ("it", " (passività)"), ("uk", " (пасив)")])
+            // stats
+            .with("stats.bycategory", &[("en", "By category"), ("de", "Nach Kategorie"), ("fr", "Par catégorie"), ("it", "Per categoria"), ("uk", "За категоріями")])
+            .with("stats.no_expense", &[("en", "No expenses in this period."), ("de", "Keine Ausgaben in diesem Zeitraum."), ("fr", "Aucune dépense sur cette période."), ("it", "Nessuna uscita in questo periodo."), ("uk", "Немає витрат за цей період.")])
+            .with("stats.no_income", &[("en", "No income in this period."), ("de", "Keine Einnahmen in diesem Zeitraum."), ("fr", "Aucun revenu sur cette période."), ("it", "Nessuna entrata in questo periodo."), ("uk", "Немає доходів за цей період.")])
+            .with("stats.empty", &[("en", "Add a few transactions and your charts appear here."), ("de", "Füge ein paar Buchungen hinzu, dann erscheinen hier deine Diagramme."), ("fr", "Ajoutez quelques opérations et vos graphiques apparaîtront ici."), ("it", "Aggiungi qualche movimento e i grafici appariranno qui."), ("uk", "Додайте кілька записів — і тут з'являться діаграми.")])
+            .with("stats.trend", &[("en", "Net-worth trend"), ("de", "Vermögensverlauf"), ("fr", "Évolution du patrimoine"), ("it", "Andamento del patrimonio"), ("uk", "Динаміка капіталу")])
+            .with("stats.monthly", &[("en", "Monthly income vs expense"), ("de", "Einnahmen und Ausgaben pro Monat"), ("fr", "Revenus et dépenses par mois"), ("it", "Entrate e uscite mensili"), ("uk", "Доходи та витрати за місяць")])
+            // entry sheet
+            .with("sheet.newtxn", &[("en", "New transaction"), ("de", "Neue Buchung"), ("fr", "Nouvelle opération"), ("it", "Nuovo movimento"), ("uk", "Новий запис")])
+            .with("type.transfer", &[("en", "Transfer"), ("de", "Umbuchung"), ("fr", "Virement"), ("it", "Trasferimento"), ("uk", "Переказ")])
+            .with("field.amount", &[("en", "Amount (e.g. 12.50)"), ("de", "Betrag (z. B. 12.50)"), ("fr", "Montant (p. ex. 12.50)"), ("it", "Importo (es. 12.50)"), ("uk", "Сума (напр. 12.50)")])
+            .with("field.date", &[("en", "Date"), ("de", "Datum"), ("fr", "Date"), ("it", "Data"), ("uk", "Дата")])
+            .with("action.change", &[("en", "Change"), ("de", "Ändern"), ("fr", "Modifier"), ("it", "Modifica"), ("uk", "Змінити")])
+            .with("field.account", &[("en", "Account"), ("de", "Konto"), ("fr", "Compte"), ("it", "Conto"), ("uk", "Рахунок")])
+            .with("field.from", &[("en", "From account"), ("de", "Von Konto"), ("fr", "Compte source"), ("it", "Dal conto"), ("uk", "З рахунку")])
+            .with("field.to", &[("en", "To account"), ("de", "Auf Konto"), ("fr", "Compte destinataire"), ("it", "Al conto"), ("uk", "На рахунок")])
+            .with("field.category", &[("en", "Category"), ("de", "Kategorie"), ("fr", "Catégorie"), ("it", "Categoria"), ("uk", "Категорія")])
+            .with("field.note", &[("en", "Note (optional)"), ("de", "Notiz (optional)"), ("fr", "Note (facultatif)"), ("it", "Nota (facoltativa)"), ("uk", "Нотатка (необов'язково)")])
+            .with("action.save", &[("en", "Save"), ("de", "Speichern"), ("fr", "Enregistrer"), ("it", "Salva"), ("uk", "Зберегти")])
+            // account sheet
+            .with("sheet.newaccount", &[("en", "New account"), ("de", "Neues Konto"), ("fr", "Nouveau compte"), ("it", "Nuovo conto"), ("uk", "Новий рахунок")])
+            .with("field.accname", &[("en", "Account name (e.g. Cash, Bank)"), ("de", "Kontoname (z. B. Bargeld, Bank)"), ("fr", "Nom du compte (p. ex. Espèces, Banque)"), ("it", "Nome del conto (es. Contanti, Banca)"), ("uk", "Назва рахунку (напр. Готівка, Банк)")])
+            .with("kind.asset", &[("en", "Asset"), ("de", "Aktiv"), ("fr", "Actif"), ("it", "Attivo"), ("uk", "Актив")])
+            .with("kind.liability", &[("en", "Liability"), ("de", "Passiv"), ("fr", "Passif"), ("it", "Passivo"), ("uk", "Пасив")])
+            .with("field.opening", &[("en", "Opening balance (optional)"), ("de", "Anfangssaldo (optional)"), ("fr", "Solde initial (facultatif)"), ("it", "Saldo iniziale (facoltativo)"), ("uk", "Початковий баланс (необов'язково)")])
+            // settings
+            .with("settings.language", &[("en", "Language"), ("de", "Sprache"), ("fr", "Langue"), ("it", "Lingua"), ("uk", "Мова")])
+            .with("settings.system", &[("en", "System"), ("de", "System"), ("fr", "Système"), ("it", "Sistema"), ("uk", "Системна")])
+            // validation errors (returned as keys by validate_txn)
+            .with("err.amount", &[("en", "Enter an amount greater than zero."), ("de", "Gib einen Betrag größer als null ein."), ("fr", "Saisissez un montant supérieur à zéro."), ("it", "Inserisci un importo maggiore di zero."), ("uk", "Введіть суму більше нуля.")])
+            .with("err.account", &[("en", "Pick an account."), ("de", "Wähle ein Konto."), ("fr", "Choisissez un compte."), ("it", "Scegli un conto."), ("uk", "Виберіть рахунок.")])
+            .with("err.dest", &[("en", "Pick a destination account."), ("de", "Wähle ein Zielkonto."), ("fr", "Choisissez un compte destinataire."), ("it", "Scegli un conto di destinazione."), ("uk", "Виберіть рахунок призначення.")])
+            .with("err.twoaccounts", &[("en", "Pick two different accounts."), ("de", "Wähle zwei verschiedene Konten."), ("fr", "Choisissez deux comptes différents."), ("it", "Scegli due conti diversi."), ("uk", "Виберіть два різні рахунки.")])
+            .with("err.category", &[("en", "Pick a category."), ("de", "Wähle eine Kategorie."), ("fr", "Choisissez une catégorie."), ("it", "Scegli una categoria."), ("uk", "Виберіть категорію.")])
+            .with("err.save", &[("en", "Could not save — please try again."), ("de", "Speichern fehlgeschlagen — bitte erneut versuchen."), ("fr", "Échec de l'enregistrement — réessayez."), ("it", "Salvataggio non riuscito — riprova."), ("uk", "Не вдалося зберегти — спробуйте ще раз.")])
+            .with("err.accname", &[("en", "Give the account a name."), ("de", "Gib dem Konto einen Namen."), ("fr", "Donnez un nom au compte."), ("it", "Dai un nome al conto."), ("uk", "Дайте рахунку назву.")])
+    })
 }
 
 // ---- pure helpers (unit-tested) ----
@@ -527,21 +617,22 @@ fn parse_txns(json: &str) -> Vec<Txn> {
         .collect()
 }
 
+/// Returns a translation **key** (not English) on failure, so the caller can localize the toast.
 fn validate_txn(model: &Model) -> Result<(), &'static str> {
     if parse_amount(&model.draft_amount).is_none() {
-        return Err("Enter an amount greater than zero.");
+        return Err("err.amount");
     }
     if model.draft_account.is_none() {
-        return Err("Pick an account.");
+        return Err("err.account");
     }
     if model.draft_kind == TxnKind::Transfer {
         match model.draft_to_account {
-            None => return Err("Pick a destination account."),
-            id if id == model.draft_account => return Err("Pick two different accounts."),
+            None => return Err("err.dest"),
+            id if id == model.draft_account => return Err("err.twoaccounts"),
             _ => {}
         }
     } else if model.draft_category.trim().is_empty() {
-        return Err("Pick a category.");
+        return Err("err.category");
     }
     Ok(())
 }
@@ -751,12 +842,39 @@ fn fmt_date(model: &Model, ymd: &str) -> String {
 
 // ---- view pieces ----
 
-fn soon(msg: &str) -> Widget {
-    column(vec![spacer(Spacing::Xl), caption(msg)])
+fn period_seg(current: Period, p: Period, label: impl Into<String>) -> Segment {
+    segment(label, current == p, Msg::SetPeriod(p))
 }
 
-fn period_seg(current: Period, p: Period, label: &str) -> Segment {
-    segment(label, current == p, Msg::SetPeriod(p))
+/// The translated Day / Month / All period control, shared by the Bills and Stats tabs.
+fn period_segments(model: &Model) -> Vec<Segment> {
+    vec![
+        period_seg(model.period, Period::Day, tr(model, "period.day")),
+        period_seg(model.period, Period::Month, tr(model, "period.month")),
+        period_seg(model.period, Period::All, tr(model, "period.all")),
+    ]
+}
+
+/// The Settings tab — for now just a language picker (full settings arrive in a later chapter). A
+/// "System" chip clears the override (follow the device); each language chip sets it.
+fn settings(model: &Model) -> Widget {
+    let chosen = model.lang_override.as_deref();
+    let mut chips = vec![chip(tr(model, "settings.system"), chosen.is_none(), Msg::SetLang(None))];
+    for code in SUPPORTED {
+        let label = match code {
+            "de" => "Deutsch",
+            "fr" => "Français",
+            "it" => "Italiano",
+            "uk" => "Українська",
+            _ => "English",
+        };
+        chips.push(chip(label, chosen == Some(code), Msg::SetLang(Some(code.to_string()))));
+    }
+    column(vec![
+        spacer(Spacing::Md),
+        card(column(vec![subtitle(tr(model, "settings.language")), spacer(Spacing::Sm), row(chips)]),
+            CardStyle::Elevated),
+    ])
 }
 
 fn bills(model: &Model) -> Widget {
@@ -766,26 +884,18 @@ fn bills(model: &Model) -> Widget {
 
     let header = card(
         column(vec![
-            segmented(vec![
-                period_seg(model.period, Period::Day, "Day"),
-                period_seg(model.period, Period::Month, "Month"),
-                period_seg(model.period, Period::All, "All"),
-            ]),
+            segmented(period_segments(model)),
             spacer(Spacing::Sm),
-            row(vec![caption("Income"), spacer(Spacing::Md), emphasis(money(model, income))]),
-            row(vec![caption("Expense"), spacer(Spacing::Md), emphasis(money(model, expense))]),
+            row(vec![caption(tr(model, "income")), spacer(Spacing::Md), emphasis(money(model, income))]),
+            row(vec![caption(tr(model, "expense")), spacer(Spacing::Md), emphasis(money(model, expense))]),
             divider(),
-            row(vec![caption("Net"), spacer(Spacing::Md), emphasis(money(model, income - expense))]),
+            row(vec![caption(tr(model, "net")), spacer(Spacing::Md), emphasis(money(model, income - expense))]),
         ]),
         CardStyle::Filled,
     );
 
     if shown.is_empty() {
-        return column(vec![
-            header,
-            spacer(Spacing::Xl),
-            caption("Nothing here yet — tap + to add a transaction."),
-        ]);
+        return column(vec![header, spacer(Spacing::Xl), caption(tr(model, "bills.empty"))]);
     }
 
     let mut sections = vec![header, spacer(Spacing::Md)];
@@ -818,7 +928,7 @@ fn txn_row(model: &Model, t: &Txn) -> Widget {
         label,
         spacer(Spacing::Md),
         emphasis(signed(model, t)),
-        button("Delete", ButtonStyle::Text, Msg::Delete(t.id)),
+        button(tr(model, "delete"), ButtonStyle::Text, Msg::Delete(t.id)),
     ])
 }
 
@@ -826,21 +936,21 @@ fn assets(model: &Model) -> Widget {
     let (assets_total, liabilities, net) = net_worth(&model.accounts, &model.txns);
     let summary = card(
         column(vec![
-            row(vec![caption("Assets"), spacer(Spacing::Md), emphasis(money(model, assets_total))]),
-            row(vec![caption("Liabilities"), spacer(Spacing::Md), emphasis(money(model, liabilities))]),
+            row(vec![caption(tr(model, "assets.assets")), spacer(Spacing::Md), emphasis(money(model, assets_total))]),
+            row(vec![caption(tr(model, "assets.liabilities")), spacer(Spacing::Md), emphasis(money(model, liabilities))]),
             divider(),
-            row(vec![text("Net worth"), spacer(Spacing::Md), emphasis(money(model, net))]),
+            row(vec![text(tr(model, "networth")), spacer(Spacing::Md), emphasis(money(model, net))]),
         ]),
         CardStyle::Filled,
     );
 
     if model.accounts.is_empty() {
-        return column(vec![summary, spacer(Spacing::Xl), caption("Tap + to add an account.")]);
+        return column(vec![summary, spacer(Spacing::Xl), caption(tr(model, "assets.empty"))]);
     }
 
     let mut rows = Vec::new();
     for a in &model.accounts {
-        let tag = if a.kind == AccountKind::Liability { " (liability)" } else { "" };
+        let tag = if a.kind == AccountKind::Liability { tr(model, "liability.tag") } else { String::new() };
         rows.push(row(vec![
             text(format!("{}{tag}", a.name)),
             spacer(Spacing::Md),
@@ -855,24 +965,17 @@ fn assets(model: &Model) -> Widget {
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)] // money f64 → chart f32 is fine here
 fn stats(model: &Model) -> Widget {
     if model.txns.is_empty() {
-        return column(vec![
-            spacer(Spacing::Xl),
-            caption("Add a few transactions and your charts appear here."),
-        ]);
+        return column(vec![spacer(Spacing::Xl), caption(tr(model, "stats.empty"))]);
     }
 
     let kind = model.stats_kind;
     let controls = card(
         column(vec![
-            segmented(vec![
-                period_seg(model.period, Period::Day, "Day"),
-                period_seg(model.period, Period::Month, "Month"),
-                period_seg(model.period, Period::All, "All"),
-            ]),
+            segmented(period_segments(model)),
             spacer(Spacing::Sm),
             segmented(vec![
-                segment("Expense", kind == TxnKind::Expense, Msg::SetStatsKind(TxnKind::Expense)),
-                segment("Income", kind == TxnKind::Income, Msg::SetStatsKind(TxnKind::Income)),
+                segment(tr(model, "expense"), kind == TxnKind::Expense, Msg::SetStatsKind(TxnKind::Expense)),
+                segment(tr(model, "income"), kind == TxnKind::Income, Msg::SetStatsKind(TxnKind::Income)),
             ]),
         ]),
         CardStyle::Filled,
@@ -884,13 +987,9 @@ fn stats(model: &Model) -> Widget {
     let breakdown_card = if breakdown.is_empty() {
         card(
             column(vec![
-                subtitle("By category"),
+                subtitle(tr(model, "stats.bycategory")),
                 spacer(Spacing::Sm),
-                caption(if kind == TxnKind::Income {
-                    "No income in this period."
-                } else {
-                    "No expenses in this period."
-                }),
+                caption(tr(model, if kind == TxnKind::Income { "stats.no_income" } else { "stats.no_expense" })),
             ]),
             CardStyle::Elevated,
         )
@@ -904,7 +1003,7 @@ fn stats(model: &Model) -> Widget {
                 })
                 .collect(),
         );
-        let mut items = vec![subtitle("By category"), spacer(Spacing::Sm), donut, divider()];
+        let mut items = vec![subtitle(tr(model, "stats.bycategory")), spacer(Spacing::Sm), donut, divider()];
         for (name, amt) in &breakdown {
             let pct = if total > 0.0 { amt / total * 100.0 } else { 0.0 };
             items.push(row(vec![
@@ -923,9 +1022,9 @@ fn stats(model: &Model) -> Widget {
     let trend = tags.iter().map(|t| net_worth_asof(&model.accounts, &model.txns, t) as f32).collect();
     let trend_card = card(
         column(vec![
-            subtitle("Net-worth trend"),
+            subtitle(tr(model, "stats.trend")),
             spacer(Spacing::Sm),
-            chart(vec![ChartSeries::new("Net worth", trend)], labels.clone(), ChartStyle::Line, true, false),
+            chart(vec![ChartSeries::new(tr(model, "networth"), trend)], labels.clone(), ChartStyle::Line, true, false),
         ]),
         CardStyle::Elevated,
     );
@@ -939,12 +1038,12 @@ fn stats(model: &Model) -> Widget {
     }
     let bars_card = card(
         column(vec![
-            subtitle("Monthly income vs expense"),
+            subtitle(tr(model, "stats.monthly")),
             spacer(Spacing::Sm),
             chart(
                 vec![
-                    ChartSeries::new("Income", inc).with_color(palette(2)),
-                    ChartSeries::new("Expense", exp).with_color(palette(1)),
+                    ChartSeries::new(tr(model, "income"), inc).with_color(palette(2)),
+                    ChartSeries::new(tr(model, "expense"), exp).with_color(palette(1)),
                 ],
                 labels,
                 ChartStyle::Bar,
@@ -982,7 +1081,7 @@ fn category_picker(model: &Model) -> Widget {
         .map(|c| chip(c.name.clone(), &c.name == sel, Msg::SetCategory(c.name.clone())))
         .collect();
 
-    let mut items = vec![caption("Category"), row(tops)];
+    let mut items = vec![caption(tr(model, "field.category")), row(tops)];
     if let Some(pid) = open_parent(&model.categories, kind, sel) {
         let kids: Vec<Widget> = model
             .categories
@@ -1000,43 +1099,43 @@ fn category_picker(model: &Model) -> Widget {
 fn txn_sheet(model: &Model) -> Widget {
     let mut items = vec![
         segmented(vec![
-            segment("Expense", model.draft_kind == TxnKind::Expense, Msg::SetKind(TxnKind::Expense)),
-            segment("Income", model.draft_kind == TxnKind::Income, Msg::SetKind(TxnKind::Income)),
-            segment("Transfer", model.draft_kind == TxnKind::Transfer, Msg::SetKind(TxnKind::Transfer)),
+            segment(tr(model, "expense"), model.draft_kind == TxnKind::Expense, Msg::SetKind(TxnKind::Expense)),
+            segment(tr(model, "income"), model.draft_kind == TxnKind::Income, Msg::SetKind(TxnKind::Income)),
+            segment(tr(model, "type.transfer"), model.draft_kind == TxnKind::Transfer, Msg::SetKind(TxnKind::Transfer)),
         ]),
         spacer(Spacing::Sm),
-        text_field("amount", "Amount (e.g. 12.50)", model.draft_amount.clone()),
+        text_field("amount", tr(model, "field.amount"), model.draft_amount.clone()),
         row(vec![
-            caption("Date"),
+            caption(tr(model, "field.date")),
             spacer(Spacing::Md),
             text(fmt_date(model, &model.draft_date)),
-            button("Change", ButtonStyle::Text, Msg::PickDate),
+            button(tr(model, "action.change"), ButtonStyle::Text, Msg::PickDate),
         ]),
-        caption(if model.draft_kind == TxnKind::Transfer { "From account" } else { "Account" }),
+        caption(tr(model, if model.draft_kind == TxnKind::Transfer { "field.from" } else { "field.account" })),
         account_chips(model, model.draft_account, Msg::SetAccount),
     ];
     if model.draft_kind == TxnKind::Transfer {
-        items.push(caption("To account"));
+        items.push(caption(tr(model, "field.to")));
         items.push(account_chips(model, model.draft_to_account, Msg::SetToAccount));
     } else {
         items.push(category_picker(model));
     }
-    items.push(text_field("note", "Note (optional)", model.draft_note.clone()));
+    items.push(text_field("note", tr(model, "field.note"), model.draft_note.clone()));
     items.push(spacer(Spacing::Md));
-    items.push(button("Save", ButtonStyle::Filled, Msg::Save));
+    items.push(button(tr(model, "action.save"), ButtonStyle::Filled, Msg::Save));
     column(items)
 }
 
 fn account_sheet(model: &Model) -> Widget {
     column(vec![
-        text_field("acc_name", "Account name (e.g. Cash, Bank)", model.acc_name.clone()),
+        text_field("acc_name", tr(model, "field.accname"), model.acc_name.clone()),
         segmented(vec![
-            segment("Asset", model.acc_kind == AccountKind::Asset, Msg::SetAccKind(AccountKind::Asset)),
-            segment("Liability", model.acc_kind == AccountKind::Liability, Msg::SetAccKind(AccountKind::Liability)),
+            segment(tr(model, "kind.asset"), model.acc_kind == AccountKind::Asset, Msg::SetAccKind(AccountKind::Asset)),
+            segment(tr(model, "kind.liability"), model.acc_kind == AccountKind::Liability, Msg::SetAccKind(AccountKind::Liability)),
         ]),
-        text_field("acc_opening", "Opening balance (optional)", model.acc_opening.clone()),
+        text_field("acc_opening", tr(model, "field.opening"), model.acc_opening.clone()),
         spacer(Spacing::Md),
-        button("Save", ButtonStyle::Filled, Msg::SaveAccount),
+        button(tr(model, "action.save"), ButtonStyle::Filled, Msg::SaveAccount),
     ])
 }
 
@@ -1182,6 +1281,32 @@ mod test {
         assert_eq!(fmt_date(&m, "2026-12-31"), "31.12.2026");
         // an unparseable date falls back to the raw string
         assert_eq!(fmt_date(&m, "n/a"), "n/a");
+    }
+
+    #[test]
+    fn language_override_beats_the_device_then_translates() {
+        let mut m = Model { device_lang: "uk".into(), ..Model::default() };
+        assert_eq!(lang(&m), "uk"); // follows the device by default
+        assert_eq!(tr(&m, "action.save"), "Зберегти");
+        m.lang_override = Some("de".into()); // manual choice wins
+        assert_eq!(lang(&m), "de");
+        assert_eq!(tr(&m, "action.save"), "Speichern");
+        // a key with no translation for the language falls back to English (the catalog default)
+        assert_eq!(tr(&m, "tab.bills"), "Buchungen");
+    }
+
+    #[test]
+    fn catalog_covers_every_language_for_each_key() {
+        // guard against a half-translated key slipping in: every entry must have all five languages
+        let c = catalog();
+        for key in [
+            "tab.bills", "period.day", "income", "net", "bills.empty", "stats.trend",
+            "field.amount", "kind.asset", "settings.language", "err.category",
+        ] {
+            for langs in SUPPORTED {
+                assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
+            }
+        }
     }
 
     #[test]
