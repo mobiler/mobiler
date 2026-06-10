@@ -37,7 +37,8 @@ new `mobiler_core::i18n` translation primitive we add along the way.
    device, and let the user override it in Settings.
 8. **[Recurring transactions](08-recurring.md)** — a `recurring` rules table, a "Repeat" choice on the
    entry sheet, and catch-up materialization on launch (dependency-free civil-date arithmetic).
-9. **Export, import & backup** — CSV export, CSV import, and full JSON backup/restore.
+9. **[Export & backup](09-export-import-backup.md)** — a CSV export of the ledger and a full JSON
+   backup/restore (the `files` + `filepicker` plugins), from a Data card in Settings.
 10. **Security, settings & polish** — passcode/biometric lock, settings, theming, icons, dark mode.
 
 > The look is intentionally clean and modern — Mobiler renders the same Rust `Widget` tree to native
