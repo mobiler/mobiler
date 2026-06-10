@@ -13,8 +13,8 @@ use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Currency, Cx, Icon, InputValue, Locale,
     MobilerApp, MobilerShell, Rgb, Segment, Spacing, Tone, Widget, button, caption, card, card_button,
-    chart, chip, column, divider, donut_chart, emphasis, negotiate, row, scaffold, scroller, segment,
-    segmented, spacer, subtitle, swipe_action, text, text_field, with_fab, with_sheet,
+    chart, chip, column, divider, donut_chart, emphasis, icon_button, negotiate, row, scaffold,
+    scroller, segment, segmented, spacer, subtitle, swipe_action, text, text_field, with_fab, with_sheet,
 };
 use serde::{Deserialize, Serialize};
 
@@ -298,6 +298,8 @@ pub struct Model {
     txns: Vec<Txn>,
     recurring: Vec<Recurring>,
     recurring_loaded: bool, // gate so materialization waits for both the rules and `today`
+    lang_open: bool,        // Settings: the language "select" is expanded
+    cur_open: bool,         // Settings: the currency "select" is expanded
     pending_sql: Vec<String>,
 
     // "new transaction" sheet
@@ -330,6 +332,8 @@ pub enum Msg {
     SetPeriod(Period),
     SetStatsKind(TxnKind),
     GotLocale(String),
+    ToggleLangPicker,
+    ToggleCurPicker,
     SetLang(Option<String>),
     SetCurrency(Currency),
     SettingsLoaded(String),
@@ -412,14 +416,18 @@ impl MobilerApp for SaldoApp {
                 }
                 model.device_lang = negotiate(&tag, &SUPPORTED, "en");
             }
+            Msg::ToggleLangPicker => model.lang_open = !model.lang_open,
+            Msg::ToggleCurPicker => model.cur_open = !model.cur_open,
             Msg::SetLang(choice) => {
                 save_setting(cx, "lang", choice.as_deref().unwrap_or(""));
                 model.lang_override = choice;
+                model.lang_open = false; // collapse the "select" after choosing
             }
             Msg::SetCurrency(c) => {
                 model.currency = c;
                 model.currency_pinned = true;
                 save_setting(cx, "currency", currency_code(c));
+                model.cur_open = false;
             }
             Msg::SettingsLoaded(json) => {
                 for (k, v) in parse_settings(&json) {
@@ -682,10 +690,14 @@ impl MobilerApp for SaldoApp {
             tab(model.screen, Screen::Settings, tr(model, "tab.settings"), Icon::Settings),
         ];
         // The Bills screen keeps the brand as its heading; the others use the (translated) tab name.
+        // Category management is a full screen (not a modal sheet) so it always has a clear way out.
         let (heading, body) = match model.screen {
             Screen::Bills => ("Saldo".to_string(), bills(model)),
             Screen::Stats => (tr(model, "tab.stats"), stats(model)),
             Screen::Assets => (tr(model, "tab.assets"), assets(model)),
+            Screen::Settings if model.managing_categories => {
+                (tr(model, "categories.manage"), category_manager(model))
+            }
             Screen::Settings => (tr(model, "tab.settings"), settings(model)),
         };
 
@@ -700,13 +712,6 @@ impl MobilerApp for SaldoApp {
         } else if model.adding_account {
             root =
                 with_sheet(root, tr(model, "sheet.newaccount"), account_sheet(model), Msg::CancelAddAccount);
-        } else if model.managing_categories {
-            root = with_sheet(
-                root,
-                tr(model, "categories.manage"),
-                category_manager(model),
-                Msg::CancelManageCategories,
-            );
         }
         root
     }
@@ -995,6 +1000,7 @@ fn catalog() -> &'static Catalog {
             .with("categories.top_level", &[("en", "Top level"), ("de", "Oberste Ebene"), ("fr", "Niveau supérieur"), ("it", "Livello principale"), ("uk", "Верхній рівень")])
             .with("categories.new_name", &[("en", "New category name"), ("de", "Name der neuen Kategorie"), ("fr", "Nom de la nouvelle catégorie"), ("it", "Nome della nuova categoria"), ("uk", "Назва нової категорії")])
             .with("action.add", &[("en", "Add"), ("de", "Hinzufügen"), ("fr", "Ajouter"), ("it", "Aggiungi"), ("uk", "Додати")])
+            .with("action.done", &[("en", "Done"), ("de", "Fertig"), ("fr", "Terminé"), ("it", "Fatto"), ("uk", "Готово")])
             .with("err.cat_name", &[("en", "Give the category a name."), ("de", "Gib der Kategorie einen Namen."), ("fr", "Donnez un nom à la catégorie."), ("it", "Dai un nome alla categoria."), ("uk", "Дайте категорії назву.")])
             .with("settings.system", &[("en", "System"), ("de", "System"), ("fr", "Système"), ("it", "Sistema"), ("uk", "Системна")])
             // validation errors (returned as keys by validate_txn)
@@ -1440,13 +1446,35 @@ fn period_segments(model: &Model) -> Vec<Segment> {
 }
 
 /// One selectable row in a settings list — a full-width tappable tile, accented with a trailing check
-/// when it's the current choice. (A vertical list beats a chip row here: the labels keep their width.)
+/// when it's the current choice.
 fn choice_row(label: impl Into<String>, selected: bool, msg: Msg) -> Widget {
     card_button(
         row(vec![text(label), spacer(Spacing::Md), text(if selected { "✓" } else { "" })]),
         if selected { CardStyle::Brand } else { CardStyle::Outlined },
         msg,
     )
+}
+
+/// A compact, collapsible "select" (the framework has no native dropdown): a header row showing the
+/// current value that expands the `options` inline when tapped, and collapses once a choice is made.
+fn select_field(title: String, current: String, open: bool, toggle: Msg, options: Vec<Widget>) -> Widget {
+    let header = card_button(
+        row(vec![
+            text(title),
+            spacer(Spacing::Md),
+            caption(current),
+            text(if open { " ▴" } else { " ▾" }),
+        ]),
+        CardStyle::Outlined,
+        toggle,
+    );
+    if open {
+        let mut items = vec![header, spacer(Spacing::Xs)];
+        items.extend(options);
+        column(items)
+    } else {
+        header
+    }
 }
 
 /// The endonym (a language's own name) for a code — shown untranslated so anyone can spot their language.
@@ -1463,16 +1491,31 @@ fn endonym(code: &str) -> &'static str {
 /// The Settings tab — language + currency pickers (vertical lists), the scheduled rules, and the Data card.
 fn settings(model: &Model) -> Widget {
     let chosen = model.lang_override.as_deref();
-    let mut lang = vec![subtitle(tr(model, "settings.language")), spacer(Spacing::Xs)];
-    lang.push(choice_row(tr(model, "settings.system"), chosen.is_none(), Msg::SetLang(None)));
+    let lang_current = chosen.map_or_else(|| tr(model, "settings.system"), |c| endonym(c).to_string());
+    let mut lang_opts =
+        vec![choice_row(tr(model, "settings.system"), chosen.is_none(), Msg::SetLang(None))];
     for code in SUPPORTED {
-        lang.push(choice_row(endonym(code), chosen == Some(code), Msg::SetLang(Some(code.to_string()))));
+        lang_opts.push(choice_row(endonym(code), chosen == Some(code), Msg::SetLang(Some(code.to_string()))));
     }
+    let language = select_field(
+        tr(model, "settings.language"),
+        lang_current,
+        model.lang_open,
+        Msg::ToggleLangPicker,
+        lang_opts,
+    );
 
-    let mut currency = vec![subtitle(tr(model, "settings.currency")), spacer(Spacing::Xs)];
-    for (cur, code) in CURRENCIES {
-        currency.push(choice_row(code, model.currency == cur, Msg::SetCurrency(cur)));
-    }
+    let cur_opts: Vec<Widget> = CURRENCIES
+        .iter()
+        .map(|(cur, code)| choice_row(*code, model.currency == *cur, Msg::SetCurrency(*cur)))
+        .collect();
+    let currency = select_field(
+        tr(model, "settings.currency"),
+        currency_code(model.currency).to_string(),
+        model.cur_open,
+        Msg::ToggleCurPicker,
+        cur_opts,
+    );
 
     let mut scheduled = vec![subtitle(tr(model, "settings.scheduled")), spacer(Spacing::Sm)];
     if model.recurring.is_empty() {
@@ -1506,9 +1549,9 @@ fn settings(model: &Model) -> Widget {
 
     column(vec![
         spacer(Spacing::Md),
-        column(lang),
-        spacer(Spacing::Md),
-        column(currency),
+        language,
+        spacer(Spacing::Sm),
+        currency,
         spacer(Spacing::Md),
         categories,
         spacer(Spacing::Md),
@@ -1812,8 +1855,9 @@ fn account_sheet(model: &Model) -> Widget {
     ])
 }
 
-/// The category editor: an income/expense toggle, an "add" form (name + an optional parent to nest
-/// under), and the current category tree with swipe-to-delete. The list stays open while you add more.
+/// The category editor (a full screen, not a sheet). A Done button to leave, an income/expense toggle,
+/// an "add" card (name + an optional parent to nest under), and the current tree — each top-level
+/// category grouped with its subcategories in one card, every row with a trash button.
 fn category_manager(model: &Model) -> Widget {
     let kind = model.cat_kind.category_kind();
     let tops: Vec<&Category> =
@@ -1827,34 +1871,44 @@ fn category_manager(model: &Model) -> Widget {
     for c in &tops {
         parents.push(chip(c.name.clone(), model.cat_parent == Some(c.id), Msg::SetCatParent(Some(c.id))));
     }
+    let add_card = card(
+        column(vec![
+            caption(tr(model, "categories.add_under")),
+            scroller(parents),
+            spacer(Spacing::Xs),
+            text_field("cat_name", tr(model, "categories.new_name"), model.cat_name.clone()),
+            button(tr(model, "action.add"), ButtonStyle::Filled, Msg::AddCategory),
+        ]),
+        CardStyle::Outlined,
+    );
 
     let mut items = vec![
+        button(tr(model, "action.done"), ButtonStyle::Filled, Msg::CancelManageCategories),
+        spacer(Spacing::Sm),
         segmented(vec![
             segment(tr(model, "expense"), model.cat_kind == TxnKind::Expense, Msg::SetCatKind(TxnKind::Expense)),
             segment(tr(model, "income"), model.cat_kind == TxnKind::Income, Msg::SetCatKind(TxnKind::Income)),
         ]),
         spacer(Spacing::Sm),
-        caption(tr(model, "categories.add_under")),
-        scroller(parents),
-        text_field("cat_name", tr(model, "categories.new_name"), model.cat_name.clone()),
-        button(tr(model, "action.add"), ButtonStyle::Filled, Msg::AddCategory),
-        divider(),
+        add_card,
+        spacer(Spacing::Md),
     ];
+    // each top-level + its subcategories grouped in one card
     for top in &tops {
-        items.push(cat_manage_row(model, top, false));
+        let mut rows = vec![cat_manage_row(top, false)];
         for sub in model.categories.iter().filter(|c| c.kind == kind && c.parent_id == Some(top.id)) {
-            items.push(cat_manage_row(model, sub, true));
+            rows.push(cat_manage_row(sub, true));
         }
+        items.push(card(column(rows), CardStyle::Filled));
+        items.push(spacer(Spacing::Xs));
     }
     column(items)
 }
 
-fn cat_manage_row(model: &Model, c: &Category, sub: bool) -> Widget {
+fn cat_manage_row(c: &Category, sub: bool) -> Widget {
     let label = if sub { format!("↳ {}", c.name) } else { c.name.clone() };
-    swipe_action(
-        card(row(vec![text(label), spacer(Spacing::Md)]), CardStyle::Filled),
-        vec![(tr(model, "delete"), Tone::Danger, Msg::DeleteCategory(c.id))],
-    )
+    let name = if sub { caption(label) } else { text(label) };
+    row(vec![name, spacer(Spacing::Md), icon_button(Icon::Delete, Msg::DeleteCategory(c.id))])
 }
 
 /// The Crux app the FFI + codegen target — `MobilerShell` over `SaldoApp`.
@@ -2082,7 +2136,7 @@ mod test {
             "tab.bills", "period.day", "income", "net", "bills.empty", "stats.trend",
             "field.amount", "kind.asset", "settings.language", "err.category",
             "settings.currency", "settings.categories", "categories.manage", "data.backup",
-            "categories.top_level", "action.add", "err.cat_name",
+            "categories.top_level", "action.add", "action.done", "err.cat_name",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
