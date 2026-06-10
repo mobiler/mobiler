@@ -20,7 +20,9 @@ new `mobiler_core::i18n` translation primitive we add along the way.
 2. **[Persist with SQLite](02-persist-with-sqlite.md)** — the schema, creating it on launch,
    insert/query with bound params, a new `cx.now()` capability, day-grouping, period filters, and the
    "the Model isn't persisted — re-read it on launch" pattern.
-3. **Accounts & transfers** — the Assets tab: accounts, balances, net worth, transfers.
+3. **[Accounts & transfers](03-accounts-and-transfers.md)** — a unified income/expense/transfer
+   ledger across accounts, balances + net worth on the Assets tab, and a `PRAGMA user_version` schema
+   migration that carries the Chapter-2 data forward.
 4. **Categories & the entry sheet** — editable income/expense categories with subcategories, the date
    picker, the category picker.
 5. **Stats** — pie/donut by category, a net-worth trend line, monthly bars (the `Chart` widget).
