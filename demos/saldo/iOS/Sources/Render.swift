@@ -985,6 +985,10 @@ private struct SplitView: View {
     }
 }
 
+// Bottom tab bar style: a floating frosted-glass capsule (content scrolls/blurs behind it) vs the
+// classic opaque bar stacked below the body. Flip to `false` to opt out of the glass look.
+private let glassTabBar = true
+
 private struct ScaffoldView: View {
     let title: String
     let content: SharedTypes.Widget
@@ -1063,7 +1067,9 @@ private struct ScaffoldView: View {
 
     // Top bar + scrollable body, optionally with the phone's bottom tab-bar.
     private func mainColumn(showBottomTabs: Bool) -> some View {
-        VStack(spacing: 0) {
+        let showTabs = showBottomTabs && !tabs.isEmpty
+        let floating = glassTabBar && showTabs
+        return VStack(spacing: 0) {
             HStack {
                 if let back = back {
                     Button(action: { send(.fired(token: back)) }) {
@@ -1090,6 +1096,8 @@ private struct ScaffoldView: View {
                     render(self.content, send)
                 }
                     .padding(16)
+                    // clearance so the last row can scroll clear of the floating glass bar
+                    .padding(.bottom, floating ? 88 : 0)
                     .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
                     .frame(maxWidth: .infinity)
             }
@@ -1109,30 +1117,54 @@ private struct ScaffoldView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 18))
                             .shadow(radius: 6, y: 3)
                     }
-                    .padding(18)
+                    .padding(.trailing, 18)
+                    .padding(.bottom, floating ? 92 : 18) // sit above the floating bar
                 }
+            }
+            // Glass tab bar floats over the body so content blurs through behind it.
+            .overlay(alignment: .bottom) {
+                if floating { floatingTabBar }
             }
 
-            if showBottomTabs && !tabs.isEmpty {
+            // Classic opaque bar (when the glass look is opted out).
+            if showTabs && !glassTabBar {
                 Divider()
-                HStack {
-                    ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
-                        Button(action: { send(.fired(token: tab.onSelect)) }) {
-                            VStack(spacing: 2) {
-                                if let icon = tab.icon {
-                                    Image(systemName: sfSymbol(icon)).font(.system(size: 20))
-                                }
-                                Text(tab.label).font(.caption)
-                            }
-                            .fontWeight(tab.selected ? .semibold : .regular)
-                            .foregroundColor(tab.selected ? .accentColor : .secondary)
-                            .frame(maxWidth: .infinity)
-                        }
-                    }
-                }
-                .padding(.vertical, 10)
+                tabButtons.padding(.vertical, 10)
             }
         }
+    }
+
+    // The row of tab buttons, shared by the classic and glass bars.
+    private var tabButtons: some View {
+        HStack {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                Button(action: { send(.fired(token: tab.onSelect)) }) {
+                    VStack(spacing: 2) {
+                        if let icon = tab.icon {
+                            Image(systemName: sfSymbol(icon)).font(.system(size: 20))
+                        }
+                        Text(tab.label).font(.caption)
+                    }
+                    .fontWeight(tab.selected ? .semibold : .regular)
+                    .foregroundColor(tab.selected ? .accentColor : .secondary)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    // A floating, frosted-glass capsule — translucent, with the scrolling content visible (blurred)
+    // behind it. (`.ultraThinMaterial` is the system glass material; iOS 26's `.glassEffect()` adds the
+    // Liquid Glass refraction on top — a later refinement, gated by the iOS 26 SDK.)
+    private var floatingTabBar: some View {
+        tabButtons
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.06)))
+            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
     }
 
     // Vertical navigation rail (regular width) — the iPad twin of the bottom tabs.
