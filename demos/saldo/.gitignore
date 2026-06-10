@@ -25,3 +25,6 @@
 
 # local reference screenshots (not part of the app)
 refs/
+
+# local scratch (screenshots, etc.)
+tmp/

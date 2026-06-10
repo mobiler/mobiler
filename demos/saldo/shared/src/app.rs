@@ -12,9 +12,9 @@ use std::sync::OnceLock;
 use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Currency, Cx, Icon, InputValue, Locale,
-    MobilerApp, MobilerShell, Rgb, Segment, Spacing, Tone, Widget, button, caption, card, chart, chip,
-    column, divider, donut_chart, emphasis, negotiate, row, scaffold, scroller, segment, segmented,
-    spacer, subtitle, swipe_action, text, text_field, with_fab, with_sheet,
+    MobilerApp, MobilerShell, Rgb, Segment, Spacing, Tone, Widget, button, caption, card, card_button,
+    chart, chip, column, divider, donut_chart, emphasis, negotiate, row, scaffold, scroller, segment,
+    segmented, spacer, subtitle, swipe_action, text, text_field, with_fab, with_sheet,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +23,7 @@ const SUPPORTED: [&str; 5] = ["en", "de", "fr", "it", "uk"];
 
 // ---- schema + migrations (run once, gated by PRAGMA user_version) ----
 
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 
 /// Statements to bring a database at version `from` up to `SCHEMA_VERSION`. `user_version` gates them
 /// so they run exactly once; statements run in order (the queue drains one at a time), so later
@@ -76,15 +76,22 @@ fn migrations_from(from: u32) -> Vec<&'static str> {
             "PRAGMA user_version = 3",
         ]);
     }
-    if from < SCHEMA_VERSION {
+    if from < 4 {
         // v4 — recurring rules. `next_date` is the next occurrence to post; materialization advances it.
-        // (The latest block gates on SCHEMA_VERSION; earlier blocks use their literal target version.)
         q.extend_from_slice(&[
             "CREATE TABLE IF NOT EXISTS recurring(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, \
              amount TEXT NOT NULL, account_id INTEGER NOT NULL, to_account_id INTEGER, \
              category TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', freq TEXT NOT NULL, \
              next_date TEXT NOT NULL, end_date TEXT)",
             "PRAGMA user_version = 4",
+        ]);
+    }
+    if from < SCHEMA_VERSION {
+        // v5 — a key/value settings store (UI language override + base currency, persisted across launches).
+        // (The latest block gates on SCHEMA_VERSION; earlier blocks use their literal target version.)
+        q.extend_from_slice(&[
+            "CREATE TABLE IF NOT EXISTS setting(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            "PRAGMA user_version = 5",
         ]);
     }
     q
@@ -98,6 +105,25 @@ const LOAD_TXNS: &str = "SELECT id, ts, kind, amount, account_id, to_account_id,
 const LOAD_RECURRING: &str =
     "SELECT id, kind, amount, account_id, to_account_id, category, note, freq, next_date, end_date \
      FROM recurring ORDER BY next_date, id";
+const LOAD_SETTINGS: &str = "SELECT key, value FROM setting";
+
+/// The currencies the picker offers, paired with their ISO code (used to persist + restore the choice).
+const CURRENCIES: [(Currency, &str); 6] = [
+    (Currency::Eur, "EUR"),
+    (Currency::Usd, "USD"),
+    (Currency::Gbp, "GBP"),
+    (Currency::Chf, "CHF"),
+    (Currency::Uah, "UAH"),
+    (Currency::Rsd, "RSD"),
+];
+
+fn currency_code(c: Currency) -> &'static str {
+    CURRENCIES.iter().find(|(cur, _)| *cur == c).map_or("EUR", |(_, code)| *code)
+}
+
+fn currency_from_code(code: &str) -> Option<Currency> {
+    CURRENCIES.iter().find(|(_, c)| *c == code).map(|(cur, _)| *cur)
+}
 
 // ---- enums ----
 
@@ -256,12 +282,14 @@ pub struct Recurring {
 }
 
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools)] // UI state — several independent on/off flags is natural here
 pub struct Model {
     screen: Screen,
     period: Period,
     stats_kind: TxnKind,         // expense/income toggle on the Stats tab
     locale: Locale,              // formatting locale, from the device at startup
-    currency: Currency,          // base currency (defaulted from the locale; user-set in Settings later)
+    currency: Currency,          // base currency — persisted setting, else defaulted from the device
+    currency_pinned: bool,       // true once a saved/chosen currency wins over the device default
     device_lang: String,         // UI language negotiated from the device at startup
     lang_override: Option<String>, // a manual language choice from Settings (None = follow the device)
     today: String,
@@ -297,6 +325,8 @@ pub enum Msg {
     SetStatsKind(TxnKind),
     GotLocale(String),
     SetLang(Option<String>),
+    SetCurrency(Currency),
+    SettingsLoaded(String),
     // schema / load
     Schema(String),
     Migrated,
@@ -361,11 +391,36 @@ impl MobilerApp for SaldoApp {
             Msg::GotLocale(tag) => {
                 if let Some(loc) = Locale::from_tag(&tag) {
                     model.locale = loc;
-                    model.currency = default_currency(loc);
+                    // Only fill the currency from the device if the user hasn't pinned one.
+                    if !model.currency_pinned {
+                        model.currency = default_currency(loc);
+                    }
                 }
                 model.device_lang = negotiate(&tag, &SUPPORTED, "en");
             }
-            Msg::SetLang(choice) => model.lang_override = choice,
+            Msg::SetLang(choice) => {
+                save_setting(cx, "lang", choice.as_deref().unwrap_or(""));
+                model.lang_override = choice;
+            }
+            Msg::SetCurrency(c) => {
+                model.currency = c;
+                model.currency_pinned = true;
+                save_setting(cx, "currency", currency_code(c));
+            }
+            Msg::SettingsLoaded(json) => {
+                for (k, v) in parse_settings(&json) {
+                    match k.as_str() {
+                        "lang" if !v.is_empty() => model.lang_override = Some(v),
+                        "currency" => {
+                            if let Some(c) = currency_from_code(&v) {
+                                model.currency = c;
+                                model.currency_pinned = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
 
             Msg::Schema(json) => {
                 let v = pragma_int(&json);
@@ -617,6 +672,30 @@ fn load_all(cx: &mut Cx<Msg>) {
     cx.plugin("sqlite", "query", LOAD_RECURRING, |r| {
         Msg::RecurringLoaded(if r.ok { r.output } else { "[]".to_string() })
     });
+    cx.plugin("sqlite", "query", LOAD_SETTINGS, |r| {
+        Msg::SettingsLoaded(if r.ok { r.output } else { "[]".to_string() })
+    });
+}
+
+/// Persist a single key/value setting (UPSERT). All sqlite args are strings.
+fn save_setting(cx: &mut Cx<Msg>, key: &str, value: &str) {
+    let sql = serde_json::json!({
+        "sql": "INSERT INTO setting(key, value) VALUES (?, ?) \
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "args": [key, value],
+    })
+    .to_string();
+    cx.plugin("sqlite", "exec", sql, |_| Msg::Posted);
+}
+
+fn parse_settings(json: &str) -> Vec<(String, String)> {
+    serde_json::from_str::<Vec<serde_json::Value>>(json)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|r| {
+            Some((r.get("key")?.as_str()?.to_string(), r.get("value")?.as_str()?.to_string()))
+        })
+        .collect()
 }
 
 /// Post every recurring occurrence due on or before `today`, then reload. A no-op until both the rules
@@ -843,6 +922,7 @@ fn catalog() -> &'static Catalog {
             .with("field.opening", &[("en", "Opening balance (optional)"), ("de", "Anfangssaldo (optional)"), ("fr", "Solde initial (facultatif)"), ("it", "Saldo iniziale (facoltativo)"), ("uk", "Початковий баланс (необов'язково)")])
             // settings
             .with("settings.language", &[("en", "Language"), ("de", "Sprache"), ("fr", "Langue"), ("it", "Lingua"), ("uk", "Мова")])
+            .with("settings.currency", &[("en", "Currency"), ("de", "Währung"), ("fr", "Devise"), ("it", "Valuta"), ("uk", "Валюта")])
             .with("settings.system", &[("en", "System"), ("de", "System"), ("fr", "Système"), ("it", "Sistema"), ("uk", "Системна")])
             // validation errors (returned as keys by validate_txn)
             .with("err.amount", &[("en", "Enter an amount greater than zero."), ("de", "Gib einen Betrag größer als null ein."), ("fr", "Saisissez un montant supérieur à zéro."), ("it", "Inserisci un importo maggiore di zero."), ("uk", "Введіть суму більше нуля.")])
@@ -1286,25 +1366,40 @@ fn period_segments(model: &Model) -> Vec<Segment> {
     ]
 }
 
-/// The Settings tab — a language picker plus the list of scheduled (recurring) rules. A "System" chip
-/// clears the language override (follow the device); each language chip sets it.
+/// One selectable row in a settings list — a full-width tappable tile, accented with a trailing check
+/// when it's the current choice. (A vertical list beats a chip row here: the labels keep their width.)
+fn choice_row(label: impl Into<String>, selected: bool, msg: Msg) -> Widget {
+    card_button(
+        row(vec![text(label), spacer(Spacing::Md), text(if selected { "✓" } else { "" })]),
+        if selected { CardStyle::Brand } else { CardStyle::Outlined },
+        msg,
+    )
+}
+
+/// The endonym (a language's own name) for a code — shown untranslated so anyone can spot their language.
+fn endonym(code: &str) -> &'static str {
+    match code {
+        "de" => "Deutsch",
+        "fr" => "Français",
+        "it" => "Italiano",
+        "uk" => "Українська",
+        _ => "English",
+    }
+}
+
+/// The Settings tab — language + currency pickers (vertical lists), the scheduled rules, and the Data card.
 fn settings(model: &Model) -> Widget {
     let chosen = model.lang_override.as_deref();
-    let mut chips = vec![chip(tr(model, "settings.system"), chosen.is_none(), Msg::SetLang(None))];
+    let mut lang = vec![subtitle(tr(model, "settings.language")), spacer(Spacing::Xs)];
+    lang.push(choice_row(tr(model, "settings.system"), chosen.is_none(), Msg::SetLang(None)));
     for code in SUPPORTED {
-        let label = match code {
-            "de" => "Deutsch",
-            "fr" => "Français",
-            "it" => "Italiano",
-            "uk" => "Українська",
-            _ => "English",
-        };
-        chips.push(chip(label, chosen == Some(code), Msg::SetLang(Some(code.to_string()))));
+        lang.push(choice_row(endonym(code), chosen == Some(code), Msg::SetLang(Some(code.to_string()))));
     }
-    let language = card(
-        column(vec![subtitle(tr(model, "settings.language")), spacer(Spacing::Sm), row(chips)]),
-        CardStyle::Elevated,
-    );
+
+    let mut currency = vec![subtitle(tr(model, "settings.currency")), spacer(Spacing::Xs)];
+    for (cur, code) in CURRENCIES {
+        currency.push(choice_row(code, model.currency == cur, Msg::SetCurrency(cur)));
+    }
 
     let mut scheduled = vec![subtitle(tr(model, "settings.scheduled")), spacer(Spacing::Sm)];
     if model.recurring.is_empty() {
@@ -1329,7 +1424,9 @@ fn settings(model: &Model) -> Widget {
 
     column(vec![
         spacer(Spacing::Md),
-        language,
+        column(lang),
+        spacer(Spacing::Md),
+        column(currency),
         spacer(Spacing::Md),
         card(column(scheduled), CardStyle::Elevated),
         spacer(Spacing::Md),
@@ -1649,14 +1746,30 @@ mod test {
     }
 
     #[test]
-    fn migration_targets_version_4() {
-        assert_eq!(*migrations_from(0).last().unwrap(), "PRAGMA user_version = 4");
-        // a v3 device only needs the v4 (recurring) block — not the earlier ones
-        let from3 = migrations_from(3);
-        assert_eq!(*from3.last().unwrap(), "PRAGMA user_version = 4");
-        assert!(from3.iter().any(|s| s.contains("CREATE TABLE IF NOT EXISTS recurring")));
-        assert!(from3.iter().all(|s| !s.contains("CREATE TABLE IF NOT EXISTS category")));
-        assert!(migrations_from(4).is_empty());
+    fn migration_targets_version_5() {
+        assert_eq!(*migrations_from(0).last().unwrap(), "PRAGMA user_version = 5");
+        // a v4 device only needs the v5 (setting) block — not the earlier ones
+        let from4 = migrations_from(4);
+        assert_eq!(*from4.last().unwrap(), "PRAGMA user_version = 5");
+        assert!(from4.iter().any(|s| s.contains("CREATE TABLE IF NOT EXISTS setting")));
+        assert!(from4.iter().all(|s| !s.contains("CREATE TABLE IF NOT EXISTS recurring")));
+        assert!(migrations_from(5).is_empty());
+    }
+
+    #[test]
+    fn currency_codes_round_trip() {
+        for (cur, code) in CURRENCIES {
+            assert_eq!(currency_code(cur), code);
+            assert_eq!(currency_from_code(code), Some(cur));
+        }
+        assert_eq!(currency_from_code("XYZ"), None);
+    }
+
+    #[test]
+    fn parses_settings_rows() {
+        let json = r#"[{"key":"lang","value":"uk"},{"key":"currency","value":"EUR"}]"#;
+        let s = parse_settings(json);
+        assert_eq!(s, vec![("lang".to_string(), "uk".to_string()), ("currency".to_string(), "EUR".to_string())]);
     }
 
     #[test]
