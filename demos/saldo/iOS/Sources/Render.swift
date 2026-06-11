@@ -204,9 +204,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             Button(action: { send(.fired(token: onPress)) }) {
                 Text(label).font(.subheadline)
                     .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(selected ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
-                    .foregroundColor(selected ? Color.accentColor : .primary)
-                    .overlay(Capsule().stroke(selected ? Color.accentColor : .clear))
+                    .background(selected ? ActiveTheme.accent.opacity(0.18) : Color.gray.opacity(0.12))
+                    .foregroundColor(selected ? ActiveTheme.accent : .primary)
+                    .overlay(Capsule().stroke(selected ? ActiveTheme.accent : .clear))
                     .clipShape(Capsule())
             }.buttonStyle(.plain)
         )
@@ -271,7 +271,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                         Text(seg.label).font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
-                            .background(seg.selected ? Color.accentColor : Color.clear)
+                            .background(seg.selected ? ActiveTheme.accent : Color.clear)
                             .foregroundColor(seg.selected ? .white : .secondary)
                             .clipShape(Capsule())
                     }.buttonStyle(.plain)
@@ -296,7 +296,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             Button(action: { send(.input(id: id, value: .bool(!value))) }) {
                 HStack(spacing: 10) {
                     Image(systemName: value ? "checkmark.square.fill" : "square")
-                        .foregroundColor(value ? .accentColor : .secondary)
+                        .foregroundColor(value ? ActiveTheme.accent : .secondary)
                     Text(label).foregroundColor(.primary)
                     Spacer()
                 }
@@ -343,6 +343,15 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 /// app-global, like dark mode.
 enum ActiveTheme {
     nonisolated(unsafe) static var current: Theme?
+    /// The themed brand accent for custom controls. SwiftUI's `.tint` does NOT change
+    /// `ActiveTheme.accent`, so custom views that used it rendered in the system blue — read this
+    /// instead so selected chips/segments/tabs/toggles all match the brand.
+    static var accent: Color { current?.accentColor ?? .accentColor }
+    /// The app background — a faint brand tint in light mode (so white cards float and the glass
+    /// tab bar has something to refract), the system background in dark mode.
+    static var appBackground: Color {
+        Color(red: 0xE9 / 255.0, green: 0xF6 / 255.0, blue: 0xF1 / 255.0) // Aqua Mint
+    }
 }
 
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
@@ -505,7 +514,7 @@ private struct ChartView: View {
         if i < series.count, let c = series[i].color {
             return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
         }
-        return i == 0 ? Color.accentColor : chartPalette[(i - 1) % chartPalette.count]
+        return i == 0 ? ActiveTheme.accent : chartPalette[(i - 1) % chartPalette.count]
     }
     private func mag(_ i: Int) -> Float { i < series.count ? series[i].values.reduce(0, +) : 0 }
     private func fmtTick(_ v: Float) -> String {
@@ -918,7 +927,7 @@ private struct CalendarView: View {
                     let isSel = selected.map { Int($0) == day } ?? false
                     Button(action: { send(.fired(token: token)) }) {
                         Text("\(day)").frame(maxWidth: .infinity, minHeight: 32)
-                            .background(isSel ? Color.accentColor : Color.clear)
+                            .background(isSel ? ActiveTheme.accent : Color.clear)
                             .foregroundColor(isSel ? .white : .primary)
                             .clipShape(Circle())
                     }.buttonStyle(.plain)
@@ -942,10 +951,10 @@ private struct RatingView: View {
                 if let tokens = onRate, i - 1 < tokens.count {
                     let token = tokens[i - 1]
                     Button(action: { send(.fired(token: token)) }) {
-                        Image(systemName: name).foregroundColor(.accentColor)
+                        Image(systemName: name).foregroundColor(ActiveTheme.accent)
                     }.buttonStyle(.plain)
                 } else {
-                    Image(systemName: name).foregroundColor(.accentColor)
+                    Image(systemName: name).foregroundColor(ActiveTheme.accent)
                 }
             }
         }
@@ -1050,6 +1059,7 @@ private struct ScaffoldView: View {
                 mainColumn(showBottomTabs: true)
             }
         }
+        .background((darkMode ? Color(.systemBackground) : ActiveTheme.appBackground).ignoresSafeArea())
         .preferredColorScheme(darkMode ? .dark : .light)
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls.
@@ -1183,7 +1193,7 @@ private struct ScaffoldView: View {
                         Text(tab.label).font(.caption)
                     }
                     .fontWeight(tab.selected ? .semibold : .regular)
-                    .foregroundColor(tab.selected ? .accentColor : .secondary)
+                    .foregroundColor(tab.selected ? ActiveTheme.accent : .secondary)
                     .frame(maxWidth: .infinity)
                 }
             }
@@ -1213,11 +1223,11 @@ private struct ScaffoldView: View {
                         Text(tab.label)
                     }
                     .fontWeight(tab.selected ? .semibold : .regular)
-                    .foregroundColor(tab.selected ? .accentColor : .secondary)
+                    .foregroundColor(tab.selected ? ActiveTheme.accent : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 12)
                     .padding(.horizontal, 14)
-                    .background(tab.selected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    .background(tab.selected ? ActiveTheme.accent.opacity(0.12) : Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
@@ -1315,7 +1325,7 @@ private func toneColors(_ tone: Tone) -> (Color, Color) {
     case .success: return (Color.green.opacity(0.15), .green)
     case .warning: return (Color.orange.opacity(0.15), .orange)
     case .danger: return (Color.red.opacity(0.15), .red)
-    case .info: return (Color.accentColor.opacity(0.15), .accentColor)
+    case .info: return (ActiveTheme.accent.opacity(0.15), ActiveTheme.accent)
     }
 }
 
@@ -1369,7 +1379,7 @@ private func sfSymbol(_ icon: Icon) -> String {
 }
 
 private func iconTint(_ icon: Icon) -> Color {
-    switch icon { case .star: return .accentColor; default: return .primary }
+    switch icon { case .star: return ActiveTheme.accent; default: return .primary }
 }
 
 private func imageShape(_ s: ImageShape) -> AnyShape {

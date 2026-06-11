@@ -441,6 +441,11 @@ private final class PickerSheetController: UIViewController, UIPickerViewDataSou
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        // Match the app's brand tint (this sheet is presented outside SwiftUI's `.tint`).
+        if let seed = ActiveTheme.current?.seed {
+            view.tintColor = UIColor(red: CGFloat(seed.r) / 255, green: CGFloat(seed.g) / 255,
+                                     blue: CGFloat(seed.b) / 255, alpha: 1)
+        }
 
         let toolbar = UIToolbar()
         toolbar.translatesAutoresizingMaskIntoConstraints = false

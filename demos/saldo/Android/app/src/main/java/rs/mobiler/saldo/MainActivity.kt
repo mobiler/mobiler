@@ -284,7 +284,9 @@ fun App(core: Core = viewModel()) {
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
     activeTheme = appTheme
     SaldoTheme(darkTheme = dark, theme = appTheme) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        // A faint Aqua Mint tint in light mode (cards float on it); the system background in dark.
+        val appBg = if (dark) MaterialTheme.colorScheme.background else Color(0xFFE9F6F1)
+        Surface(modifier = Modifier.fillMaxSize(), color = appBg) {
             if (view is Widget.Scaffold) {
                 // Scaffold provides its own bars + scrollable body.
                 Render(view) { action -> core.update(action) }
