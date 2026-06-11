@@ -14,8 +14,8 @@ use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Corner, Currency, Cx, Density, FontFamily,
     Icon, InputValue, Locale, MobilerApp, MobilerShell, Rgb, Segment, Spacing, Theme, Tone, Widget,
     badge, button, caption, card, card_button, chart, chip, column, decimal_field, divider,
-    donut_chart, emphasis, icon_button, negotiate, row, scaffold, scroller, segment, segmented, spacer,
-    subtitle, swipe_action, text, text_field, with_fab, with_sheet, with_theme,
+    donut_chart, emphasis, negotiate, row, scaffold, scroller, segment, segmented, spacer, subtitle,
+    swipe_action, text, text_field, with_fab, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -326,11 +326,13 @@ pub struct Model {
     acc_kind: AccountKind,
     acc_opening: String,
 
-    // "manage categories" sheet
+    // "manage categories" screen + its add/edit sheet
     managing_categories: bool,
-    cat_kind: TxnKind,         // which set is being edited (income/expense)
-    cat_name: String,          // the new category's name
-    cat_parent: Option<u32>,   // add under this top-level (None = a new top-level category)
+    cat_sheet: bool,              // the add/edit category sheet is open
+    editing_category: Option<u32>, // Some(id) when renaming, None when adding
+    cat_kind: TxnKind,           // which set is shown/edited (income/expense)
+    cat_name: String,            // the category's name (draft)
+    cat_parent: Option<u32>,     // add under this top-level (None = a new top-level category)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -384,8 +386,11 @@ pub enum Msg {
     StartManageCategories,
     CancelManageCategories,
     SetCatKind(TxnKind),
+    StartAddCategory,
+    EditCategory(u32),
+    CancelCatSheet,
     SetCatParent(Option<u32>),
-    AddCategory,
+    SaveCategory,
     CategoryChanged(bool),
     DeleteCategory(u32),
     // data: export / backup / restore
@@ -678,39 +683,61 @@ impl MobilerApp for SaldoApp {
 
             Msg::StartManageCategories => {
                 model.managing_categories = true;
-                model.form_error = None;
                 model.cat_kind = TxnKind::Expense;
+            }
+            Msg::CancelManageCategories => model.managing_categories = false,
+            Msg::SetCatKind(k) => model.cat_kind = k,
+            Msg::StartAddCategory => {
+                model.cat_sheet = true;
+                model.editing_category = None;
+                model.form_error = None;
                 model.cat_name.clear();
                 model.cat_parent = None;
             }
-            Msg::CancelManageCategories => {
-                model.managing_categories = false;
+            Msg::EditCategory(id) => {
+                if let Some(c) = model.categories.iter().find(|c| c.id == id) {
+                    model.cat_sheet = true;
+                    model.editing_category = Some(id);
+                    model.form_error = None;
+                    model.cat_name = c.name.clone();
+                    model.cat_kind = TxnKind::from_db(&c.kind);
+                    model.cat_parent = c.parent_id;
+                }
+            }
+            Msg::CancelCatSheet => {
+                model.cat_sheet = false;
                 model.form_error = None;
             }
-            Msg::SetCatKind(k) => {
-                model.cat_kind = k;
-                model.cat_parent = None; // parents differ per kind
-            }
             Msg::SetCatParent(p) => model.cat_parent = p,
-            Msg::AddCategory => {
+            Msg::SaveCategory => {
                 if model.cat_name.trim().is_empty() {
                     model.form_error = Some("err.cat_name");
                     return;
                 }
-                let parent =
-                    model.cat_parent.map_or(serde_json::Value::Null, |id| id.to_string().into());
-                let sql = serde_json::json!({
-                    "sql": "INSERT INTO category(name, kind, parent_id, sort) VALUES (?, ?, ?, 99)",
-                    "args": [model.cat_name.trim(), model.cat_kind.category_kind(), parent],
-                })
+                let sql = if let Some(id) = model.editing_category {
+                    serde_json::json!({
+                        "sql": "UPDATE category SET name = ? WHERE id = ?",
+                        "args": [model.cat_name.trim(), id.to_string()],
+                    })
+                } else {
+                    let parent =
+                        model.cat_parent.map_or(serde_json::Value::Null, |id| id.to_string().into());
+                    serde_json::json!({
+                        "sql": "INSERT INTO category(name, kind, parent_id, sort) VALUES (?, ?, ?, 99)",
+                        "args": [model.cat_name.trim(), model.cat_kind.category_kind(), parent],
+                    })
+                }
                 .to_string();
                 cx.plugin("sqlite", "exec", sql, |r| Msg::CategoryChanged(r.ok));
             }
             Msg::CategoryChanged(ok) => {
                 if ok {
-                    model.cat_name.clear(); // keep the sheet open to add more
+                    model.cat_sheet = false;
+                    model.cat_name.clear();
                     model.form_error = None;
                     load_all(cx);
+                } else {
+                    model.form_error = Some("err.save");
                 }
             }
             Msg::DeleteCategory(id) => {
@@ -822,6 +849,10 @@ impl MobilerApp for SaldoApp {
             let title =
                 tr(model, if model.editing_account.is_some() { "sheet.editaccount" } else { "sheet.newaccount" });
             root = with_sheet(root, title, account_sheet(model), Msg::CancelAddAccount);
+        } else if model.cat_sheet {
+            let title =
+                tr(model, if model.editing_category.is_some() { "sheet.editcategory" } else { "sheet.newcategory" });
+            root = with_sheet(root, title, category_sheet(model), Msg::CancelCatSheet);
         }
         with_theme(root, saldo_theme())
     }
@@ -1120,6 +1151,9 @@ fn catalog() -> &'static Catalog {
             // categories
             .with("settings.categories", &[("en", "Categories"), ("de", "Kategorien"), ("fr", "Catégories"), ("it", "Categorie"), ("uk", "Категорії")])
             .with("categories.manage", &[("en", "Manage categories"), ("de", "Kategorien verwalten"), ("fr", "Gérer les catégories"), ("it", "Gestisci categorie"), ("uk", "Керувати категоріями")])
+            .with("categories.add", &[("en", "Add category"), ("de", "Kategorie hinzufügen"), ("fr", "Ajouter une catégorie"), ("it", "Aggiungi categoria"), ("uk", "Додати категорію")])
+            .with("sheet.newcategory", &[("en", "New category"), ("de", "Neue Kategorie"), ("fr", "Nouvelle catégorie"), ("it", "Nuova categoria"), ("uk", "Нова категорія")])
+            .with("sheet.editcategory", &[("en", "Rename category"), ("de", "Kategorie umbenennen"), ("fr", "Renommer la catégorie"), ("it", "Rinomina categoria"), ("uk", "Перейменувати категорію")])
             .with("categories.add_under", &[("en", "Add under"), ("de", "Hinzufügen unter"), ("fr", "Ajouter sous"), ("it", "Aggiungi sotto"), ("uk", "Додати в")])
             .with("categories.top_level", &[("en", "Top level"), ("de", "Oberste Ebene"), ("fr", "Niveau supérieur"), ("it", "Livello principale"), ("uk", "Верхній рівень")])
             .with("categories.new_name", &[("en", "New category name"), ("de", "Name der neuen Kategorie"), ("fr", "Nom de la nouvelle catégorie"), ("it", "Nome della nuova categoria"), ("uk", "Назва нової категорії")])
@@ -1650,6 +1684,7 @@ fn settings(model: &Model) -> Widget {
     } else {
         for r in &model.recurring {
             scheduled.push(recurring_row(model, r));
+            scheduled.push(spacer(Spacing::Xs));
         }
     }
 
@@ -1711,7 +1746,7 @@ fn settings(model: &Model) -> Widget {
         spacer(Spacing::Md),
         security,
         spacer(Spacing::Md),
-        card(column(scheduled), CardStyle::Elevated),
+        column(scheduled),
         spacer(Spacing::Md),
         data,
     ])
@@ -1732,11 +1767,17 @@ fn recurring_row(model: &Model, r: &Recurring) -> Widget {
         tr(model, "recurring.next"),
         fmt_date(model, &r.next_date),
     );
-    row(vec![
-        column(vec![text(format!("{} {label}", money(model, r.amount))), caption(detail)]),
-        spacer(Spacing::Md),
-        button(tr(model, "delete"), ButtonStyle::Text, Msg::DeleteRecurring(r.id)),
-    ])
+    // Swipe to delete the rule — consistent with the transactions, accounts, and categories lists.
+    swipe_action(
+        card(
+            row(vec![
+                column(vec![text(format!("{} {label}", money(model, r.amount))), caption(detail)]),
+                spacer(Spacing::Md),
+            ]),
+            CardStyle::Filled,
+        ),
+        vec![(tr(model, "delete"), Tone::Danger, Msg::DeleteRecurring(r.id))],
+    )
 }
 
 fn bills(model: &Model) -> Widget {
@@ -2048,31 +2089,13 @@ fn account_sheet(model: &Model) -> Widget {
     column(items)
 }
 
-/// The category editor (a full screen, not a sheet). A Done button to leave, an income/expense toggle,
-/// an "add" card (name + an optional parent to nest under), and the current tree — each top-level
-/// category grouped with its subcategories in one card, every row with a trash button.
+/// The category editor (a full screen). Done to leave, an income/expense toggle, an Add button, then a
+/// flat indented list of categories (subcategories under their parent) — each a card you **tap to
+/// rename** and **swipe to delete**, exactly like the accounts and transactions lists.
 fn category_manager(model: &Model) -> Widget {
     let kind = model.cat_kind.category_kind();
     let tops: Vec<&Category> =
         model.categories.iter().filter(|c| c.kind == kind && c.parent_id.is_none()).collect();
-
-    let mut parents = vec![chip(
-        tr(model, "categories.top_level"),
-        model.cat_parent.is_none(),
-        Msg::SetCatParent(None),
-    )];
-    for c in &tops {
-        parents.push(chip(c.name.clone(), model.cat_parent == Some(c.id), Msg::SetCatParent(Some(c.id))));
-    }
-    let mut add_items = vec![
-        caption(tr(model, "categories.add_under")),
-        scroller(parents),
-        spacer(Spacing::Xs),
-        text_field("cat_name", tr(model, "categories.new_name"), model.cat_name.clone()),
-    ];
-    add_items.extend(error_banner(model));
-    add_items.push(button(tr(model, "action.add"), ButtonStyle::Filled, Msg::AddCategory));
-    let add_card = card(column(add_items), CardStyle::Outlined);
 
     let mut items = vec![
         button(tr(model, "action.done"), ButtonStyle::Filled, Msg::CancelManageCategories),
@@ -2082,25 +2105,52 @@ fn category_manager(model: &Model) -> Widget {
             segment(tr(model, "income"), model.cat_kind == TxnKind::Income, Msg::SetCatKind(TxnKind::Income)),
         ]),
         spacer(Spacing::Sm),
-        add_card,
-        spacer(Spacing::Md),
+        button(tr(model, "categories.add"), ButtonStyle::Outlined, Msg::StartAddCategory),
+        spacer(Spacing::Sm),
     ];
-    // each top-level + its subcategories grouped in one card
     for top in &tops {
-        let mut rows = vec![cat_manage_row(top, false)];
-        for sub in model.categories.iter().filter(|c| c.kind == kind && c.parent_id == Some(top.id)) {
-            rows.push(cat_manage_row(sub, true));
-        }
-        items.push(card(column(rows), CardStyle::Filled));
+        items.push(cat_row(model, top, false));
         items.push(spacer(Spacing::Xs));
+        for sub in model.categories.iter().filter(|c| c.kind == kind && c.parent_id == Some(top.id)) {
+            items.push(cat_row(model, sub, true));
+            items.push(spacer(Spacing::Xs));
+        }
     }
     column(items)
 }
 
-fn cat_manage_row(c: &Category, sub: bool) -> Widget {
+/// One category row: a tap-to-rename card with swipe-to-delete (subcategories shown indented).
+fn cat_row(model: &Model, c: &Category, sub: bool) -> Widget {
     let label = if sub { format!("↳ {}", c.name) } else { c.name.clone() };
-    let name = if sub { caption(label) } else { text(label) };
-    row(vec![name, spacer(Spacing::Md), icon_button(Icon::Delete, Msg::DeleteCategory(c.id))])
+    let content = if sub { row(vec![caption(label)]) } else { row(vec![text(label)]) };
+    swipe_action(
+        card_button(content, CardStyle::Filled, Msg::EditCategory(c.id)),
+        vec![(tr(model, "delete"), Tone::Danger, Msg::DeleteCategory(c.id))],
+    )
+}
+
+/// The add/edit category sheet: a name field (plus a parent picker when adding), the same shape as the
+/// account sheet. Editing renames; adding nests under the chosen parent for the current income/expense set.
+fn category_sheet(model: &Model) -> Widget {
+    let mut items =
+        vec![text_field("cat_name", tr(model, "categories.new_name"), model.cat_name.clone())];
+    if model.editing_category.is_none() {
+        let kind = model.cat_kind.category_kind();
+        let mut parents = vec![chip(
+            tr(model, "categories.top_level"),
+            model.cat_parent.is_none(),
+            Msg::SetCatParent(None),
+        )];
+        for c in model.categories.iter().filter(|c| c.kind == kind && c.parent_id.is_none()) {
+            parents.push(chip(c.name.clone(), model.cat_parent == Some(c.id), Msg::SetCatParent(Some(c.id))));
+        }
+        items.push(caption(tr(model, "categories.add_under")));
+        items.push(scroller(parents));
+    }
+    items.push(spacer(Spacing::Md));
+    items.extend(error_banner(model));
+    items.push(save_bar(model, Msg::SaveCategory, Msg::CancelCatSheet));
+    column(items)
 }
 
 /// The Crux app the FFI + codegen target — `MobilerShell` over `SaldoApp`.
@@ -2337,6 +2387,7 @@ mod test {
             "settings.security", "lock.desc", "lock.title", "lock.unlock", "lock.prompt",
             "settings.appearance", "appearance.light", "appearance.dark",
             "sheet.editaccount", "err.acct_in_use", "action.cancel", "err.dest", "err.twoaccounts",
+            "categories.add", "sheet.newcategory", "sheet.editcategory",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
