@@ -989,6 +989,31 @@ private struct SplitView: View {
 // classic opaque bar stacked below the body. Flip to `false` to opt out of the glass look.
 private let glassTabBar = true
 
+private extension View {
+    // The real iOS 26 Liquid Glass material in `shape` (translucent, refractive). Compiled only when
+    // built with the iOS 26 SDK (`compiler(>=6.2)` = Xcode 26); older SDKs / OS versions fall back to a
+    // frosted `.ultraThinMaterial`, so this builds on any Xcode and degrades gracefully below iOS 26.
+    @ViewBuilder
+    func glassPill<S: InsettableShape>(_ shape: S) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(in: shape)
+        } else {
+            self.frostedPill(shape)
+        }
+        #else
+        self.frostedPill(shape)
+        #endif
+    }
+
+    @ViewBuilder
+    func frostedPill<S: InsettableShape>(_ shape: S) -> some View {
+        self.background(.ultraThinMaterial, in: shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
+            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+}
+
 private struct ScaffoldView: View {
     let title: String
     let content: SharedTypes.Widget
@@ -1116,9 +1141,7 @@ private struct ScaffoldView: View {
                                 .font(.title2.weight(.semibold))
                                 .foregroundColor(theme?.brandColor ?? .accentColor)
                                 .frame(width: 56, height: 56)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(Circle().strokeBorder(Color.primary.opacity(0.08)))
-                                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                                .glassPill(Circle())
                         } else {
                             Image(systemName: sfSymbol(fab.icon))
                                 .font(.title2)
@@ -1165,16 +1188,13 @@ private struct ScaffoldView: View {
         }
     }
 
-    // A floating, frosted-glass capsule — translucent, with the scrolling content visible (blurred)
-    // behind it. (`.ultraThinMaterial` is the system glass material; iOS 26's `.glassEffect()` adds the
-    // Liquid Glass refraction on top — a later refinement, gated by the iOS 26 SDK.)
+    // A floating Liquid Glass capsule — translucent and refractive (iOS 26), with the scrolling content
+    // visible behind it; a frosted `.ultraThinMaterial` capsule below iOS 26.
     private var floatingTabBar: some View {
         tabButtons
             .padding(.vertical, 10)
-            .padding(.horizontal, 14)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.06)))
-            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+            .padding(.horizontal, 18)
+            .glassPill(Capsule())
             .padding(.horizontal, 16)
             .padding(.bottom, 6)
     }
