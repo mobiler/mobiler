@@ -1272,10 +1272,44 @@ private struct ButtonStyleMod: ViewModifier {
     init(_ s: SharedTypes.ButtonStyle) { style = s }
     func body(content: Content) -> some View {
         switch style {
-        case .filled: return AnyView(content.buttonStyle(.borderedProminent))
-        case .outlined: return AnyView(content.buttonStyle(.bordered))
-        case .text: return AnyView(content.buttonStyle(.borderless))
+        case .filled: return AnyView(content.buttonStyle(BrandButtonStyle(kind: .filled)))
+        case .outlined: return AnyView(content.buttonStyle(BrandButtonStyle(kind: .outlined)))
+        case .text: return AnyView(content.buttonStyle(BrandButtonStyle(kind: .text)))
         }
+    }
+}
+
+/// Saldo's buttons. The native `.bordered`/`.borderedProminent` styles read as flat grey and follow
+/// SwiftUI's `.tint` (which doesn't reach a presented sheet → they came out blue). This draws them in
+/// the brand colour explicitly: a solid pill (filled), a soft-tinted bordered pill (outlined), or plain
+/// coloured text — rounded, semibold, with a gentle press state.
+private struct BrandButtonStyle: SwiftUI.ButtonStyle {
+    enum Kind { case filled, outlined, text }
+    let kind: Kind
+
+    func makeBody(configuration: Configuration) -> some View {
+        let accent = ActiveTheme.accent
+        let radius = ActiveTheme.current?.cardRadius ?? 14
+        return configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundColor(kind == .filled ? .white : accent)
+            .padding(.horizontal, kind == .text ? 4 : 18)
+            .padding(.vertical, kind == .text ? 4 : 11)
+            .background {
+                switch kind {
+                case .filled: RoundedRectangle(cornerRadius: radius).fill(accent)
+                case .outlined: RoundedRectangle(cornerRadius: radius).fill(accent.opacity(0.10))
+                case .text: Color.clear
+                }
+            }
+            .overlay {
+                if kind == .outlined {
+                    RoundedRectangle(cornerRadius: radius).stroke(accent.opacity(0.45), lineWidth: 1)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: radius))
+            .opacity(configuration.isPressed ? 0.65 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
