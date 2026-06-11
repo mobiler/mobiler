@@ -383,33 +383,51 @@ enum DateTimePlugin {
 }
 
 /// Native single-choice picker — request/response. Input `{"title": String, "options": [String],
-/// "selected": Int}`. Presents an action sheet (the current option marked with a ✓) — the iOS-native
-/// "simple list" chooser. Resolves `ok=true` with the chosen index as a string, or `ok=false` on cancel.
+/// "selected": Int}`. Presents a `UIPickerView` **wheel** in an action sheet — the exact look & feel of
+/// the date/time picker. Resolves `ok=true` with the chosen index as a string, or `ok=false` on cancel.
 @MainActor
 enum PickerPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "choose" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
         guard let data = input.data(using: .utf8),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let options = obj["options"] as? [String] else {
+              let options = obj["options"] as? [String], !options.isEmpty else {
             return PluginResponse(ok: false, output: "bad input")
         }
         let title = obj["title"] as? String
-        let selected = obj["selected"] as? Int ?? -1
+        let selected = obj["selected"] as? Int ?? 0
         guard let presenter = topViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
+            let picker = UIPickerView()
+            let source = PickerSource(options: options)
+            PickerSource.retained = source // the picker holds its data source / delegate weakly
+            picker.dataSource = source
+            picker.delegate = source
+            picker.translatesAutoresizingMaskIntoConstraints = false
+            if selected >= 0, selected < options.count {
+                picker.selectRow(selected, inComponent: 0, animated: false)
+            }
+
+            // An action sheet with blank message lines reserves room for the wheel — same as the date picker.
+            let alert = UIAlertController(title: title, message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .actionSheet)
+            alert.view.addSubview(picker)
+            NSLayoutConstraint.activate([
+                picker.centerXAnchor.constraint(equalTo: alert.view.centerXAnchor),
+                picker.topAnchor.constraint(equalTo: alert.view.topAnchor, constant: 48),
+                picker.widthAnchor.constraint(equalTo: alert.view.widthAnchor, constant: -16),
+            ])
+
             var resumed = false
-            func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
-            let alert = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-            for (i, opt) in options.enumerated() {
-                alert.addAction(UIAlertAction(title: i == selected ? "✓ \(opt)" : opt, style: .default) { _ in
-                    done(PluginResponse(ok: true, output: String(i)))
-                })
+            func done(_ r: PluginResponse) {
+                if !resumed { resumed = true; PickerSource.retained = nil; cont.resume(returning: r) }
             }
             alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
                 done(PluginResponse(ok: false, output: "cancel"))
+            })
+            alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
+                done(PluginResponse(ok: true, output: String(picker.selectedRow(inComponent: 0))))
             })
             // iPad presents action sheets in a popover, which needs a source.
             alert.popoverPresentationController?.sourceView = presenter.view
@@ -417,6 +435,19 @@ enum PickerPlugin {
                 x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
             presenter.present(alert, animated: true)
         }
+    }
+}
+
+/// Data source + delegate for the `PickerPlugin` wheel — a single column of string rows. Retained
+/// statically while the sheet is up (UIPickerView holds these weakly), like the photo/camera delegates.
+private final class PickerSource: NSObject, UIPickerViewDataSource, UIPickerViewDelegate {
+    static var retained: PickerSource?
+    private let options: [String]
+    init(options: [String]) { self.options = options }
+    func numberOfComponents(in pickerView: UIPickerView) -> Int { 1 }
+    func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int { options.count }
+    func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
+        row >= 0 && row < options.count ? options[row] : nil
     }
 }
 

@@ -146,10 +146,9 @@ pub enum Period {
 }
 
 /// A Settings sub-screen opened from the Settings list (each is its own page with a Back button).
+/// Appearance / language / currency / security stay inline on the Settings root, so they're not here.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsSub {
-    Appearance,
-    Security,
     Scheduled,
     Data,
 }
@@ -1821,29 +1820,59 @@ fn endonym(code: &str) -> &'static str {
     }
 }
 
-/// The Settings tab — a clean list of rows (the category-list look). Language and currency open a
-/// **native picker**; everything else opens its own sub-screen ([`settings_sub_page`]).
+/// The Settings tab. The quick toggles — **appearance, language, currency, security** — stay inline
+/// at the top (language & currency open a native picker); below them, the items that need more room
+/// (**categories, scheduled, data**) are rows that open their own sub-screen ([`settings_sub_page`]).
 fn settings(model: &Model) -> Widget {
     let lang_value = model
         .lang_override
         .as_deref()
         .map_or_else(|| tr(model, "settings.system"), |c| endonym(c).to_string());
-    let appearance_value = tr(model, if model.dark { "appearance.dark" } else { "appearance.light" });
-    let security_value = tr(model, if model.lock_enabled { "lock.on" } else { "lock.off" });
     let scheduled_value =
         if model.recurring.is_empty() { "—".to_string() } else { model.recurring.len().to_string() };
 
-    let rows = vec![
-        nav_row(tr(model, "settings.appearance"), Some(appearance_value), Msg::OpenSettingsSub(SettingsSub::Appearance)),
-        nav_row(tr(model, "settings.language"), Some(lang_value), Msg::PickLanguage),
-        nav_row(tr(model, "settings.currency"), Some(currency_code(model.currency).to_string()), Msg::PickCurrency),
+    let appearance = card(
+        column(vec![
+            subtitle(tr(model, "settings.appearance")),
+            spacer(Spacing::Sm),
+            segmented(vec![
+                segment(tr(model, "appearance.light"), !model.dark, Msg::SetDark(false)),
+                segment(tr(model, "appearance.dark"), model.dark, Msg::SetDark(true)),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    );
+    let security = card(
+        column(vec![
+            subtitle(tr(model, "settings.security")),
+            caption(tr(model, "lock.desc")),
+            spacer(Spacing::Sm),
+            segmented(vec![
+                segment(tr(model, "lock.off"), !model.lock_enabled, Msg::SetLock(false)),
+                segment(tr(model, "lock.on"), model.lock_enabled, Msg::SetLock(true)),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    );
+
+    let subpages = [
         nav_row(tr(model, "settings.categories"), None, Msg::StartManageCategories),
-        nav_row(tr(model, "settings.security"), Some(security_value), Msg::OpenSettingsSub(SettingsSub::Security)),
         nav_row(tr(model, "settings.scheduled"), Some(scheduled_value), Msg::OpenSettingsSub(SettingsSub::Scheduled)),
         nav_row(tr(model, "settings.data"), None, Msg::OpenSettingsSub(SettingsSub::Data)),
     ];
-    let mut items = vec![spacer(Spacing::Md)];
-    for r in rows {
+
+    let mut items = vec![
+        spacer(Spacing::Md),
+        appearance,
+        spacer(Spacing::Sm),
+        nav_row(tr(model, "settings.language"), Some(lang_value), Msg::PickLanguage),
+        spacer(Spacing::Xs),
+        nav_row(tr(model, "settings.currency"), Some(currency_code(model.currency).to_string()), Msg::PickCurrency),
+        spacer(Spacing::Sm),
+        security,
+        spacer(Spacing::Md),
+    ];
+    for r in subpages {
         items.push(r);
         items.push(spacer(Spacing::Xs));
     }
@@ -1852,11 +1881,10 @@ fn settings(model: &Model) -> Widget {
 
 /// Title for the open Settings sub-screen (shown in the nav bar).
 fn settings_sub_title(model: &Model) -> String {
-    match model.settings_sub {
-        Some(SettingsSub::Appearance) => tr(model, "settings.appearance"),
-        Some(SettingsSub::Security) => tr(model, "settings.security"),
-        Some(SettingsSub::Scheduled) => tr(model, "settings.scheduled"),
-        _ => tr(model, "settings.data"),
+    if model.settings_sub == Some(SettingsSub::Scheduled) {
+        tr(model, "settings.scheduled")
+    } else {
+        tr(model, "settings.data")
     }
 }
 
@@ -1866,38 +1894,21 @@ fn settings_sub_page(model: &Model) -> Widget {
         button(tr(model, "action.back"), ButtonStyle::Outlined, Msg::CloseSettingsSub),
         spacer(Spacing::Md),
     ];
-    match model.settings_sub {
-        Some(SettingsSub::Appearance) => {
-            items.push(segmented(vec![
-                segment(tr(model, "appearance.light"), !model.dark, Msg::SetDark(false)),
-                segment(tr(model, "appearance.dark"), model.dark, Msg::SetDark(true)),
-            ]));
-        }
-        Some(SettingsSub::Security) => {
-            items.push(caption(tr(model, "lock.desc")));
-            items.push(spacer(Spacing::Sm));
-            items.push(segmented(vec![
-                segment(tr(model, "lock.off"), !model.lock_enabled, Msg::SetLock(false)),
-                segment(tr(model, "lock.on"), model.lock_enabled, Msg::SetLock(true)),
-            ]));
-        }
-        Some(SettingsSub::Scheduled) => {
-            if model.recurring.is_empty() {
-                items.push(caption(tr(model, "recurring.empty")));
-            } else {
-                for r in &model.recurring {
-                    items.push(recurring_row(model, r));
-                    items.push(spacer(Spacing::Xs));
-                }
+    if model.settings_sub == Some(SettingsSub::Scheduled) {
+        if model.recurring.is_empty() {
+            items.push(caption(tr(model, "recurring.empty")));
+        } else {
+            for r in &model.recurring {
+                items.push(recurring_row(model, r));
+                items.push(spacer(Spacing::Xs));
             }
         }
-        _ => {
-            items.push(caption(tr(model, "data.hint")));
-            items.push(spacer(Spacing::Sm));
-            items.push(button(tr(model, "data.export_csv"), ButtonStyle::Filled, Msg::ExportCsv));
-            items.push(button(tr(model, "data.backup"), ButtonStyle::Filled, Msg::Backup));
-            items.push(button(tr(model, "data.restore"), ButtonStyle::Outlined, Msg::Restore));
-        }
+    } else {
+        items.push(caption(tr(model, "data.hint")));
+        items.push(spacer(Spacing::Sm));
+        items.push(button(tr(model, "data.export_csv"), ButtonStyle::Filled, Msg::ExportCsv));
+        items.push(button(tr(model, "data.backup"), ButtonStyle::Filled, Msg::Backup));
+        items.push(button(tr(model, "data.restore"), ButtonStyle::Outlined, Msg::Restore));
     }
     column(items)
 }
