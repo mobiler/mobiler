@@ -2331,10 +2331,10 @@ fn category_manager(model: &Model) -> Widget {
 /// plus an Add-subcategory button.
 fn category_detail(model: &Model, id: u32) -> Widget {
     let Some(cat) = model.categories.iter().find(|c| c.id == id) else {
-        return column(vec![button(tr(model, "action.back"), ButtonStyle::Filled, Msg::CloseCategory)]);
+        return column(vec![button(tr(model, "action.back"), ButtonStyle::Outlined, Msg::CloseCategory)]);
     };
     let mut items = vec![
-        button(tr(model, "action.back"), ButtonStyle::Filled, Msg::CloseCategory),
+        button(tr(model, "action.back"), ButtonStyle::Outlined, Msg::CloseCategory),
         spacer(Spacing::Sm),
         caption(tr(model, "categories.name")),
         cat_swipe_row(model, cat),
