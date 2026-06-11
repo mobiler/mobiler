@@ -1184,6 +1184,7 @@ fn catalog() -> &'static Catalog {
             .with("categories.new_name", &[("en", "New category name"), ("de", "Name der neuen Kategorie"), ("fr", "Nom de la nouvelle catégorie"), ("it", "Nome della nuova categoria"), ("uk", "Назва нової категорії")])
             .with("action.add", &[("en", "Add"), ("de", "Hinzufügen"), ("fr", "Ajouter"), ("it", "Aggiungi"), ("uk", "Додати")])
             .with("action.done", &[("en", "Done"), ("de", "Fertig"), ("fr", "Terminé"), ("it", "Fatto"), ("uk", "Готово")])
+            .with("action.edit", &[("en", "Edit"), ("de", "Bearbeiten"), ("fr", "Modifier"), ("it", "Modifica"), ("uk", "Редагувати")])
             // appearance
             .with("settings.appearance", &[("en", "Appearance"), ("de", "Darstellung"), ("fr", "Apparence"), ("it", "Aspetto"), ("uk", "Вигляд")])
             .with("appearance.light", &[("en", "Light"), ("de", "Hell"), ("fr", "Clair"), ("it", "Chiaro"), ("uk", "Світла")])
@@ -2145,8 +2146,9 @@ fn category_manager(model: &Model) -> Widget {
     column(items)
 }
 
-/// A single top-level category's detail screen: Back, tap the name to rename, its subcategories (tap to
-/// rename/delete each), an Add-subcategory button, and Delete (the whole category) — all via the editor.
+/// A single top-level category's detail screen: Back, the category itself and each subcategory as a
+/// **swipe → Edit / Delete** row (the iOS-native idiom — Edit opens a rename sheet, Delete removes it),
+/// plus an Add-subcategory button.
 fn category_detail(model: &Model, id: u32) -> Widget {
     let Some(cat) = model.categories.iter().find(|c| c.id == id) else {
         return column(vec![button(tr(model, "action.back"), ButtonStyle::Filled, Msg::CloseCategory)]);
@@ -2155,40 +2157,37 @@ fn category_detail(model: &Model, id: u32) -> Widget {
         button(tr(model, "action.back"), ButtonStyle::Filled, Msg::CloseCategory),
         spacer(Spacing::Sm),
         caption(tr(model, "categories.name")),
-        card_button(
-            row(vec![text(cat.name.clone()), spacer(Spacing::Md), caption(tr(model, "action.change"))]),
-            CardStyle::Filled,
-            Msg::EditCategory(id),
-        ),
+        cat_swipe_row(model, cat),
         spacer(Spacing::Md),
         row(vec![subtitle(tr(model, "categories.subcategories")), spacer(Spacing::Md)]),
         spacer(Spacing::Xs),
     ];
     for sub in model.categories.iter().filter(|c| c.parent_id == Some(id)) {
-        items.push(card_button(
-            row(vec![text(sub.name.clone()), spacer(Spacing::Md), caption(tr(model, "action.change"))]),
-            CardStyle::Filled,
-            Msg::EditCategory(sub.id),
-        ));
+        items.push(cat_swipe_row(model, sub));
         items.push(spacer(Spacing::Xs));
     }
     items.push(button(tr(model, "categories.add_sub"), ButtonStyle::Outlined, Msg::StartAddCategory(Some(id))));
-    items.push(spacer(Spacing::Md));
-    items.push(button(tr(model, "categories.delete"), ButtonStyle::Outlined, Msg::DeleteCategory(id)));
     column(items)
 }
 
-/// The add/edit name sheet: just a name field, plus a Delete button when editing. The parent is decided
-/// by where you opened it from (the list = a new top-level, a detail screen = a subcategory).
+/// A category row that swipes to reveal Edit + Delete (the row body has no tap, so the swipe is reliable).
+fn cat_swipe_row(model: &Model, c: &Category) -> Widget {
+    swipe_action(
+        card(row(vec![text(c.name.clone()), spacer(Spacing::Md)]), CardStyle::Filled),
+        vec![
+            (tr(model, "action.edit"), Tone::Info, Msg::EditCategory(c.id)),
+            (tr(model, "delete"), Tone::Danger, Msg::DeleteCategory(c.id)),
+        ],
+    )
+}
+
+/// The rename / add name sheet — just a name field. (Delete is the row's swipe action, not in here.) The
+/// parent is decided by where you opened it from (the list = a new top-level, a detail = a subcategory).
 fn category_sheet(model: &Model) -> Widget {
     let mut items =
         vec![text_field("cat_name", tr(model, "categories.new_name"), model.cat_name.clone())];
     items.push(spacer(Spacing::Md));
     items.extend(error_banner(model));
-    if let Some(id) = model.editing_category {
-        items.push(button(tr(model, "categories.delete"), ButtonStyle::Outlined, Msg::DeleteCategory(id)));
-        items.push(spacer(Spacing::Xs));
-    }
     items.push(save_bar(model, Msg::SaveCategory, Msg::CancelCatSheet));
     column(items)
 }
@@ -2428,7 +2427,7 @@ mod test {
             "settings.appearance", "appearance.light", "appearance.dark",
             "sheet.editaccount", "err.acct_in_use", "action.cancel", "err.dest", "err.twoaccounts",
             "categories.add", "sheet.newcategory", "sheet.editcategory", "categories.add_sub",
-            "categories.subcategories", "categories.name", "categories.delete", "action.back",
+            "categories.subcategories", "categories.name", "action.back", "action.edit",
             "account.delete",
         ] {
             for langs in SUPPORTED {
