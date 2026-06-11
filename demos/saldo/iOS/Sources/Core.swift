@@ -446,6 +446,13 @@ private final class PickerSheetController: UIViewController, UIPickerViewDataSou
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         let titleItem = UIBarButtonItem(title: title, style: .plain, target: nil, action: nil)
         titleItem.isEnabled = false
+        // The title is a non-tappable label; keep it fully legible (a disabled item is greyed out by default).
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: UIColor.label,
+            .font: UIFont.preferredFont(forTextStyle: .headline),
+        ]
+        titleItem.setTitleTextAttributes(titleAttrs, for: .normal)
+        titleItem.setTitleTextAttributes(titleAttrs, for: .disabled)
         toolbar.items = [
             UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)),
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
@@ -464,7 +471,7 @@ private final class PickerSheetController: UIViewController, UIPickerViewDataSou
         view.addSubview(toolbar)
         view.addSubview(picker)
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
             toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             picker.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
