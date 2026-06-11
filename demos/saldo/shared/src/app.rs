@@ -319,6 +319,7 @@ pub struct Model {
     draft_date: String,          // "YYYY-MM-DD" (defaults to today; changeable via the date picker)
     draft_note: String,
     draft_freq: Option<Freq>,    // the "Repeat" choice (None = a one-off transaction)
+    editing_recurring: Option<u32>, // Some(id) when the sheet is editing an existing scheduled rule
 
     // "new / edit account" sheet
     adding_account: bool,
@@ -377,6 +378,7 @@ pub enum Msg {
     Save,
     Saved(bool),
     Delete(u32),
+    EditRecurring(u32),
     DeleteRecurring(u32),
     // new account
     StartAddAccount,
@@ -539,9 +541,11 @@ impl MobilerApp for SaldoApp {
                 model.draft_account = model.accounts.first().map(|a| a.id);
                 model.draft_to_account = model.accounts.get(1).map(|a| a.id);
                 model.draft_freq = None;
+                model.editing_recurring = None;
             }
             Msg::CancelAdd => {
                 model.adding = false;
+                model.editing_recurring = None;
                 model.form_error = None;
             }
             Msg::SetKind(k) => {
@@ -586,28 +590,60 @@ impl MobilerApp for SaldoApp {
                 } else {
                     model.draft_category.clone()
                 };
-                let sql = if let Some(freq) = model.draft_freq {
-                    // A scheduled rule; materialization posts the first (and future) occurrences.
-                    serde_json::json!({
+                let note = model.draft_note.trim().to_string();
+                if let Some(rid) = model.editing_recurring {
+                    // Editing an existing scheduled rule: update it in place (the date field
+                    // reschedules its next occurrence). No transaction is posted on an edit.
+                    let freq = model.draft_freq.unwrap_or(Freq::Monthly);
+                    let sql = serde_json::json!({
+                        "sql": "UPDATE recurring SET kind = ?, amount = ?, account_id = ?, to_account_id = ?, \
+                                category = ?, note = ?, freq = ?, next_date = ? WHERE id = ?",
+                        "args": [model.draft_kind.db(), amount.to_string(), account_id.to_string(), to,
+                                 category, note, freq.db(), model.draft_date, rid.to_string()],
+                    })
+                    .to_string();
+                    cx.plugin("sqlite", "exec", sql, |r| Msg::Saved(r.ok));
+                } else if let Some(freq) = model.draft_freq {
+                    // A new scheduled rule. Post the first occurrence right away if it's already due
+                    // (so it shows in the ledger immediately, via the same path as a one-off), and
+                    // schedule the rule one period on. A future-dated rule posts nothing yet —
+                    // materialize() handles it on the launch the date arrives. This keeps the first
+                    // entry visible without depending on a materialization round-trip.
+                    let (due_now, next_date) = first_schedule(&model.draft_date, &model.today, freq);
+                    if due_now {
+                        let post = serde_json::json!({
+                            "sql": "INSERT INTO txn(ts, kind, amount, account_id, to_account_id, category, note) \
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            "args": [ts, model.draft_kind.db(), amount.to_string(),
+                                     account_id.to_string(), to.clone(), category.clone(), note.clone()],
+                        })
+                        .to_string();
+                        cx.plugin("sqlite", "exec", post, |_| Msg::Posted);
+                    }
+                    let rule = serde_json::json!({
                         "sql": "INSERT INTO recurring(kind, amount, account_id, to_account_id, category, \
                                 note, freq, next_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                         "args": [model.draft_kind.db(), amount.to_string(), account_id.to_string(),
-                                 to, category, model.draft_note.trim(), freq.db(), model.draft_date],
+                                 to, category, note, freq.db(), next_date],
                     })
+                    .to_string();
+                    cx.plugin("sqlite", "exec", rule, |r| Msg::Saved(r.ok));
+                    cx.toast(tr(model, "recurring.created"));
                 } else {
-                    serde_json::json!({
+                    let sql = serde_json::json!({
                         "sql": "INSERT INTO txn(ts, kind, amount, account_id, to_account_id, category, note) \
                                 VALUES (?, ?, ?, ?, ?, ?, ?)",
                         "args": [ts, model.draft_kind.db(), amount.to_string(),
-                                 account_id.to_string(), to, category, model.draft_note.trim()],
+                                 account_id.to_string(), to, category, note],
                     })
+                    .to_string();
+                    cx.plugin("sqlite", "exec", sql, |r| Msg::Saved(r.ok));
                 }
-                .to_string();
-                cx.plugin("sqlite", "exec", sql, |r| Msg::Saved(r.ok));
             }
             Msg::Saved(ok) => {
                 if ok {
                     model.adding = false;
+                    model.editing_recurring = None;
                     model.form_error = None;
                     load_all(cx);
                 } else {
@@ -619,8 +655,27 @@ impl MobilerApp for SaldoApp {
                     .to_string();
                 cx.plugin("sqlite", "exec", sql, |_| Msg::Reload);
             }
+            Msg::EditRecurring(id) => {
+                // Open the entry sheet pre-filled from the rule so it can be changed or cancelled.
+                if let Some(r) = model.recurring.iter().find(|r| r.id == id) {
+                    model.adding = true;
+                    model.editing_recurring = Some(id);
+                    model.form_error = None;
+                    model.draft_kind = r.kind;
+                    model.draft_amount = r.amount.to_string();
+                    model.draft_account = Some(r.account_id);
+                    model.draft_to_account = r.to_account_id;
+                    model.draft_category = r.category.clone();
+                    model.draft_date = r.next_date.clone();
+                    model.draft_note = r.note.clone();
+                    model.draft_freq = Some(r.freq);
+                }
+            }
             Msg::DeleteRecurring(id) => {
-                // Deletes the rule only; transactions it already posted stay in the ledger.
+                // Cancels the rule only; transactions it already posted stay in the ledger. Also
+                // closes the entry sheet when the cancel came from the edit view.
+                model.adding = false;
+                model.editing_recurring = None;
                 let sql =
                     serde_json::json!({ "sql": "DELETE FROM recurring WHERE id = ?", "args": [id.to_string()] })
                         .to_string();
@@ -1158,6 +1213,8 @@ fn catalog() -> &'static Catalog {
             .with("settings.scheduled", &[("en", "Scheduled"), ("de", "Geplant"), ("fr", "Planifié"), ("it", "Pianificati"), ("uk", "Заплановані")])
             .with("recurring.next", &[("en", "next"), ("de", "nächste"), ("fr", "prochain"), ("it", "prossimo"), ("uk", "наступний")])
             .with("recurring.empty", &[("en", "No scheduled transactions. Pick a Repeat in the entry sheet to add one."), ("de", "Keine geplanten Buchungen. Wähle im Eingabefenster eine Wiederholung."), ("fr", "Aucune opération planifiée. Choisissez une répétition dans la feuille de saisie."), ("it", "Nessun movimento pianificato. Scegli una ripetizione nella scheda di inserimento."), ("uk", "Немає запланованих записів. Виберіть повторення у формі додавання.")])
+            .with("recurring.created", &[("en", "Scheduled — first entry added."), ("de", "Geplant – erste Buchung hinzugefügt."), ("fr", "Planifié — première opération ajoutée."), ("it", "Pianificato — primo movimento aggiunto."), ("uk", "Заплановано — перший запис додано.")])
+            .with("recurring.stop", &[("en", "Stop repeating"), ("de", "Wiederholung beenden"), ("fr", "Arrêter la répétition"), ("it", "Interrompi ripetizione"), ("uk", "Зупинити повторення")])
             // data (export / backup / restore)
             .with("settings.data", &[("en", "Data"), ("de", "Daten"), ("fr", "Données"), ("it", "Dati"), ("uk", "Дані")])
             .with("data.export_csv", &[("en", "Export CSV"), ("de", "CSV exportieren"), ("fr", "Exporter en CSV"), ("it", "Esporta CSV"), ("uk", "Експорт CSV")])
@@ -1610,6 +1667,16 @@ fn advance(ymd: &str, freq: Freq) -> String {
     }
 }
 
+/// For a brand-new scheduled rule dated `date`: whether to post its first occurrence right away
+/// (it's due on or before `today`) and the `next_date` the rule should carry afterwards. A
+/// future-dated rule posts nothing yet and keeps its own date; a due one posts now and advances
+/// one period — so `materialize` never double-posts that first occurrence.
+fn first_schedule(date: &str, today: &str, freq: Freq) -> (bool, String) {
+    let due_now = !date.is_empty() && date <= today;
+    let next = if due_now { advance(date, freq) } else { date.to_string() };
+    (due_now, next)
+}
+
 /// A transaction a recurring rule is due to post, on a given date.
 struct DuePost {
     kind: TxnKind,
@@ -1832,17 +1899,33 @@ fn recurring_row(model: &Model, r: &Recurring) -> Widget {
         tr(model, "recurring.next"),
         fmt_date(model, &r.next_date),
     );
-    // Swipe to delete the rule — consistent with the transactions, accounts, and categories lists.
-    swipe_action(
-        card(
-            row(vec![
-                column(vec![text(format!("{} {label}", money(model, r.amount))), caption(detail)]),
-                spacer(Spacing::Md),
-            ]),
-            CardStyle::Filled,
-        ),
-        vec![(tr(model, "delete"), Tone::Danger, Msg::DeleteRecurring(r.id))],
+    // Tap to edit (change or cancel) the rule — same tap-to-edit pattern as the accounts list, so
+    // the gesture is unambiguous (no swipe to fight with the tap).
+    card_button(
+        row(vec![
+            column(vec![text(format!("{} {label}", money(model, r.amount))), caption(detail)]),
+            spacer(Spacing::Md),
+            caption("›"),
+        ]),
+        CardStyle::Filled,
+        Msg::EditRecurring(r.id),
     )
+}
+
+/// The scheduled-rules block shown on the Home tab (and reused in Settings): a heading and one
+/// tap-to-edit row per rule. Empty when there are no rules, so Home only shows it when relevant.
+fn scheduled_section(model: &Model) -> Vec<Widget> {
+    if model.recurring.is_empty() {
+        return Vec::new();
+    }
+    let mut items =
+        vec![row(vec![subtitle(tr(model, "settings.scheduled")), spacer(Spacing::Md)]), spacer(Spacing::Xs)];
+    for r in &model.recurring {
+        items.push(recurring_row(model, r));
+        items.push(spacer(Spacing::Xs));
+    }
+    items.push(spacer(Spacing::Sm));
+    items
 }
 
 fn bills(model: &Model) -> Widget {
@@ -1863,12 +1946,17 @@ fn bills(model: &Model) -> Widget {
     );
 
     if shown.is_empty() {
-        return column(vec![header, spacer(Spacing::Xl), caption(tr(model, "bills.empty"))]);
+        let mut out = vec![header, spacer(Spacing::Md)];
+        out.extend(scheduled_section(model));
+        out.push(spacer(Spacing::Lg));
+        out.push(caption(tr(model, "bills.empty")));
+        return column(out);
     }
 
     // Each day is a light header followed by one swipe-to-delete card per transaction (web, which has no
     // swipe gesture, renders the Delete action inline). Cleaner than cramming a Delete button on every row.
     let mut sections = vec![header, spacer(Spacing::Md)];
+    sections.extend(scheduled_section(model));
     for (day, items) in group_by_day(&shown) {
         sections.push(row(vec![subtitle(fmt_date(model, day)), spacer(Spacing::Md)]));
         sections.push(spacer(Spacing::Xs));
@@ -2143,16 +2231,24 @@ fn txn_sheet(model: &Model) -> Widget {
         items.push(category_picker(model));
     }
     items.push(text_field("note", tr(model, "field.note"), model.draft_note.clone()));
-    // Repeat: a one-off (None) or a recurring rule. The rule's first occurrence posts immediately.
+    // Repeat: a one-off (None) or a recurring rule. A new rule's first occurrence posts immediately;
+    // when editing a rule the "Once" option is dropped (it's already a schedule — cancel it below).
     items.push(caption(tr(model, "field.repeat")));
-    items.push(segmented(vec![
-        segment(tr(model, "freq.once"), model.draft_freq.is_none(), Msg::SetFreq(None)),
-        segment(tr(model, "freq.daily"), model.draft_freq == Some(Freq::Daily), Msg::SetFreq(Some(Freq::Daily))),
-        segment(tr(model, "freq.weekly"), model.draft_freq == Some(Freq::Weekly), Msg::SetFreq(Some(Freq::Weekly))),
-        segment(tr(model, "freq.monthly"), model.draft_freq == Some(Freq::Monthly), Msg::SetFreq(Some(Freq::Monthly))),
-    ]));
+    let mut freq_segs = Vec::new();
+    if model.editing_recurring.is_none() {
+        freq_segs.push(segment(tr(model, "freq.once"), model.draft_freq.is_none(), Msg::SetFreq(None)));
+    }
+    freq_segs.push(segment(tr(model, "freq.daily"), model.draft_freq == Some(Freq::Daily), Msg::SetFreq(Some(Freq::Daily))));
+    freq_segs.push(segment(tr(model, "freq.weekly"), model.draft_freq == Some(Freq::Weekly), Msg::SetFreq(Some(Freq::Weekly))));
+    freq_segs.push(segment(tr(model, "freq.monthly"), model.draft_freq == Some(Freq::Monthly), Msg::SetFreq(Some(Freq::Monthly))));
+    items.push(segmented(freq_segs));
     items.push(spacer(Spacing::Md));
     items.extend(error_banner(model));
+    // When editing a scheduled rule, offer a one-tap way to stop it (its posted entries stay).
+    if let Some(id) = model.editing_recurring {
+        items.push(button(tr(model, "recurring.stop"), ButtonStyle::Outlined, Msg::DeleteRecurring(id)));
+        items.push(spacer(Spacing::Xs));
+    }
     items.push(save_bar(model, Msg::Save, Msg::CancelAdd));
     column(items)
 }
@@ -2340,6 +2436,18 @@ mod test {
     }
 
     #[test]
+    fn first_schedule_posts_due_and_defers_future() {
+        // a rule dated today posts now and is scheduled one period on (so materialize won't re-post it)
+        assert_eq!(first_schedule("2026-06-15", "2026-06-15", Freq::Monthly), (true, "2026-07-15".to_string()));
+        // a past date (catch-up) also posts now
+        assert_eq!(first_schedule("2026-06-10", "2026-06-15", Freq::Weekly), (true, "2026-06-17".to_string()));
+        // a future date posts nothing yet and keeps its own date for materialize to pick up
+        assert_eq!(first_schedule("2026-07-01", "2026-06-15", Freq::Monthly), (false, "2026-07-01".to_string()));
+        // no `today` yet → don't post (avoid an entry with an empty date)
+        assert_eq!(first_schedule("2026-06-15", "", Freq::Daily), (false, "2026-06-15".to_string()));
+    }
+
+    #[test]
     fn parses_categories_with_parents() {
         let json = r#"[
             {"id":"1","name":"Food & Drink","kind":"expense","sort":"1"},
@@ -2496,7 +2604,7 @@ mod test {
             "sheet.editaccount", "err.acct_in_use", "action.cancel", "err.dest", "err.twoaccounts",
             "categories.add", "sheet.newcategory", "sheet.editcategory", "categories.add_sub",
             "categories.subcategories", "categories.name", "action.back", "action.edit",
-            "account.delete", "stats.trends",
+            "account.delete", "stats.trends", "recurring.created", "recurring.stop",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
