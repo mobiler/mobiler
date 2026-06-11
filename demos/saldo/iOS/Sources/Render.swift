@@ -1336,9 +1336,11 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .close: return "xmark"
     case .settings: return "gearshape"
     case .check: return "checkmark"
-    case .star: return "star.fill"
+    // Saldo finance tab glyphs (per-app remap — the framework Icon set has no
+    // chart/ledger/wallet symbol, but the glyph mapping is the app's own).
+    case .star: return "chart.line.uptrend.xyaxis"   // Stats
     case .info: return "info.circle"
-    case .home: return "house.fill"
+    case .home: return "list.bullet.rectangle.fill"  // Bills (the ledger)
     case .search: return "magnifyingglass"
     case .menu: return "line.3.horizontal"
     case .filter: return "line.3.horizontal.decrease.circle"
@@ -1346,7 +1348,7 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .forward: return "chevron.right"
     case .down: return "chevron.down"
     case .bell: return "bell.fill"
-    case .cart: return "cart.fill"
+    case .cart: return "wallet.bifold.fill"           // Assets (accounts / net worth)
     case .share: return "square.and.arrow.up"
     case .heart: return "heart"
     case .heartFilled: return "heart.fill"

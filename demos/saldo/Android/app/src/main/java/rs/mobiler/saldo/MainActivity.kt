@@ -56,6 +56,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
@@ -1249,9 +1252,11 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.CLOSE -> Icons.Default.Close
     WidgetIcon.SETTINGS -> Icons.Default.Settings
     WidgetIcon.CHECK -> Icons.Default.Check
-    WidgetIcon.STAR -> Icons.Default.Star
+    // Saldo finance tab glyphs (per-app remap — the framework Icon set has no
+    // chart/ledger/wallet symbol, but the glyph mapping is the app's own).
+    WidgetIcon.STAR -> Icons.AutoMirrored.Filled.ShowChart   // Stats
     WidgetIcon.INFO -> Icons.Default.Info
-    WidgetIcon.HOME -> Icons.Default.Home
+    WidgetIcon.HOME -> Icons.AutoMirrored.Filled.ReceiptLong  // Bills (the ledger)
     WidgetIcon.SEARCH -> Icons.Default.Search
     WidgetIcon.MENU -> Icons.Default.Menu
     WidgetIcon.FILTER -> Icons.Default.FilterList
@@ -1259,7 +1264,7 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.FORWARD -> Icons.AutoMirrored.Filled.ArrowForward
     WidgetIcon.DOWN -> Icons.Default.KeyboardArrowDown
     WidgetIcon.BELL -> Icons.Default.Notifications
-    WidgetIcon.CART -> Icons.Default.ShoppingCart
+    WidgetIcon.CART -> Icons.Default.AccountBalanceWallet     // Assets (accounts / net worth)
     WidgetIcon.SHARE -> Icons.Default.Share
     WidgetIcon.HEART -> Icons.Default.FavoriteBorder
     WidgetIcon.HEARTFILLED -> Icons.Default.Favorite
