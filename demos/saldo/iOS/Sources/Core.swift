@@ -143,6 +143,7 @@ enum Plugins {
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
         case "datetime": return await DateTimePlugin.handle(op: op, input: input)
+        case "picker": return await PickerPlugin.handle(op: op, input: input)
         case "photo": return await PhotoPlugin.handle(op: op, input: input)
         case "camera": return await CameraPlugin.handle(op: op, input: input)
         case "sqlite": return await SqlitePlugin.handle(op: op, input: input)
@@ -371,6 +372,44 @@ enum DateTimePlugin {
             })
             alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
                 done(PluginResponse(ok: true, output: fmt.string(from: picker.date)))
+            })
+            // iPad presents action sheets in a popover, which needs a source.
+            alert.popoverPresentationController?.sourceView = presenter.view
+            alert.popoverPresentationController?.sourceRect = CGRect(
+                x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+            presenter.present(alert, animated: true)
+        }
+    }
+}
+
+/// Native single-choice picker — request/response. Input `{"title": String, "options": [String],
+/// "selected": Int}`. Presents an action sheet (the current option marked with a ✓) — the iOS-native
+/// "simple list" chooser. Resolves `ok=true` with the chosen index as a string, or `ok=false` on cancel.
+@MainActor
+enum PickerPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "choose" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        guard let data = input.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let options = obj["options"] as? [String] else {
+            return PluginResponse(ok: false, output: "bad input")
+        }
+        let title = obj["title"] as? String
+        let selected = obj["selected"] as? Int ?? -1
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            var resumed = false
+            func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
+            let alert = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+            for (i, opt) in options.enumerated() {
+                alert.addAction(UIAlertAction(title: i == selected ? "✓ \(opt)" : opt, style: .default) { _ in
+                    done(PluginResponse(ok: true, output: String(i)))
+                })
+            }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+                done(PluginResponse(ok: false, output: "cancel"))
             })
             // iPad presents action sheets in a popover, which needs a source.
             alert.popoverPresentationController?.sourceView = presenter.view

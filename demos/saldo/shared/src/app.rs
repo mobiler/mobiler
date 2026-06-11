@@ -145,6 +145,15 @@ pub enum Period {
     All,
 }
 
+/// A Settings sub-screen opened from the Settings list (each is its own page with a Back button).
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SettingsSub {
+    Appearance,
+    Security,
+    Scheduled,
+    Data,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum TxnKind {
     #[default]
@@ -300,8 +309,7 @@ pub struct Model {
     txns: Vec<Txn>,
     recurring: Vec<Recurring>,
     recurring_loaded: bool, // gate so materialization waits for both the rules and `today`
-    lang_open: bool,        // Settings: the language "select" is expanded
-    cur_open: bool,         // Settings: the currency "select" is expanded
+    settings_sub: Option<SettingsSub>, // an open Settings sub-screen (None = the Settings list)
     lock_enabled: bool,     // the app-lock setting (persisted)
     locked: bool,           // runtime: the app is currently locked, awaiting biometric unlock
     lock_checked: bool,     // we've done the one-time launch lock decision (don't re-lock on reloads)
@@ -346,10 +354,12 @@ pub enum Msg {
     StatsPrevMonth,
     StatsNextMonth,
     GotLocale(String),
-    ToggleLangPicker,
-    ToggleCurPicker,
-    SetLang(Option<String>),
-    SetCurrency(Currency),
+    PickLanguage,
+    LanguagePicked(String),
+    PickCurrency,
+    CurrencyPicked(String),
+    OpenSettingsSub(SettingsSub),
+    CloseSettingsSub,
     SetLock(bool),
     SetDark(bool),
     Unlock,
@@ -428,7 +438,10 @@ impl MobilerApp for SaldoApp {
     #[allow(clippy::too_many_lines)]
     fn update(&self, event: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match event {
-            Msg::Switch(s) => model.screen = s,
+            Msg::Switch(s) => {
+                model.screen = s;
+                model.settings_sub = None; // re-entering Settings shows the list, not a stale sub-screen
+            }
             Msg::SetPeriod(p) => model.period = p,
             Msg::SetStatsKind(k) => model.stats_kind = k,
             Msg::StatsPrevMonth => model.stats_month = shift_month(&stats_month(model), -1),
@@ -449,18 +462,49 @@ impl MobilerApp for SaldoApp {
                 }
                 model.device_lang = negotiate(&tag, &SUPPORTED, "en");
             }
-            Msg::ToggleLangPicker => model.lang_open = !model.lang_open,
-            Msg::ToggleCurPicker => model.cur_open = !model.cur_open,
-            Msg::SetLang(choice) => {
-                save_setting(cx, "lang", choice.as_deref().unwrap_or(""));
-                model.lang_override = choice;
-                model.lang_open = false; // collapse the "select" after choosing
+            Msg::OpenSettingsSub(sub) => model.settings_sub = Some(sub),
+            Msg::CloseSettingsSub => model.settings_sub = None,
+            Msg::PickLanguage => {
+                // index 0 = "System", then one per SUPPORTED language (shown by endonym).
+                let mut options = vec![tr(model, "settings.system")];
+                options.extend(SUPPORTED.iter().map(|c| endonym(c).to_string()));
+                let selected = model
+                    .lang_override
+                    .as_deref()
+                    .and_then(|c| SUPPORTED.iter().position(|s| *s == c).map(|i| i + 1))
+                    .unwrap_or(0);
+                let input = serde_json::json!({
+                    "title": tr(model, "settings.language"), "options": options, "selected": selected,
+                })
+                .to_string();
+                cx.plugin("picker", "choose", input, |r| {
+                    Msg::LanguagePicked(if r.ok { r.output } else { String::new() })
+                });
             }
-            Msg::SetCurrency(c) => {
-                model.currency = c;
-                model.currency_pinned = true;
-                save_setting(cx, "currency", currency_code(c));
-                model.cur_open = false;
+            Msg::LanguagePicked(s) => {
+                if let Ok(idx) = s.parse::<usize>() {
+                    let choice = lang_at_index(idx);
+                    save_setting(cx, "lang", choice.as_deref().unwrap_or(""));
+                    model.lang_override = choice;
+                }
+            }
+            Msg::PickCurrency => {
+                let options: Vec<String> = CURRENCIES.iter().map(|(_, code)| (*code).to_string()).collect();
+                let selected = CURRENCIES.iter().position(|(c, _)| *c == model.currency).unwrap_or(0);
+                let input = serde_json::json!({
+                    "title": tr(model, "settings.currency"), "options": options, "selected": selected,
+                })
+                .to_string();
+                cx.plugin("picker", "choose", input, |r| {
+                    Msg::CurrencyPicked(if r.ok { r.output } else { String::new() })
+                });
+            }
+            Msg::CurrencyPicked(s) => {
+                if let Some((c, _)) = s.parse::<usize>().ok().and_then(|i| CURRENCIES.get(i)) {
+                    model.currency = *c;
+                    model.currency_pinned = true;
+                    save_setting(cx, "currency", currency_code(*c));
+                }
             }
             Msg::SetLock(on) => {
                 model.lock_enabled = on;
@@ -911,6 +955,9 @@ impl MobilerApp for SaldoApp {
             Screen::Bills => ("Saldo".to_string(), bills(model)),
             Screen::Stats => (tr(model, "tab.stats"), stats(model)),
             Screen::Assets => (tr(model, "tab.assets"), assets(model)),
+            Screen::Settings if model.settings_sub.is_some() => {
+                (settings_sub_title(model), settings_sub_page(model))
+            }
             Screen::Settings if model.managing_categories => match model.cat_detail {
                 Some(id) => {
                     let name = model.categories.iter().find(|c| c.id == id).map_or(String::new(), |c| c.name.clone());
@@ -1740,34 +1787,27 @@ fn period_segments(model: &Model) -> Vec<Segment> {
 
 /// One selectable row in a settings list — a full-width tappable tile, accented with a trailing check
 /// when it's the current choice.
-fn choice_row(label: impl Into<String>, selected: bool, msg: Msg) -> Widget {
-    card_button(
-        row(vec![text(label), spacer(Spacing::Md), text(if selected { "✓" } else { "" })]),
-        if selected { CardStyle::Brand } else { CardStyle::Outlined },
-        msg,
-    )
+/// A bold right-pointing disclosure chevron — the "tap to open" affordance, made clearly visible
+/// (the old dimmed caption "›" was easy to miss). Shared by the Settings and category lists.
+fn chevron() -> Widget {
+    emphasis("›")
 }
 
-/// A compact, collapsible "select" (the framework has no native dropdown): a header row showing the
-/// current value that expands the `options` inline when tapped, and collapses once a choice is made.
-fn select_field(title: String, current: String, open: bool, toggle: Msg, options: Vec<Widget>) -> Widget {
-    let header = card_button(
-        row(vec![
-            text(title),
-            spacer(Spacing::Md),
-            caption(current),
-            text(if open { " ▴" } else { " ▾" }),
-        ]),
-        CardStyle::Outlined,
-        toggle,
-    );
-    if open {
-        let mut items = vec![header, spacer(Spacing::Xs)];
-        items.extend(options);
-        column(items)
-    } else {
-        header
+/// A list row: a label, an optional trailing value, and a disclosure chevron — the shared look for the
+/// Settings list and the category list. Tapping fires `msg` (open a sub-screen, or a native picker).
+fn nav_row(label: impl Into<String>, value: Option<String>, msg: Msg) -> Widget {
+    let mut content = vec![text(label.into()), spacer(Spacing::Md)];
+    if let Some(v) = value {
+        content.push(caption(v));
     }
+    content.push(chevron());
+    card_button(row(content), CardStyle::Outlined, msg)
+}
+
+/// Map a language-picker index back to a choice: index 0 = follow the device (None), then `SUPPORTED`
+/// in order. Out-of-range (shouldn't happen) falls back to None. Mirrors the option list in `PickLanguage`.
+fn lang_at_index(idx: usize) -> Option<String> {
+    idx.checked_sub(1).and_then(|i| SUPPORTED.get(i)).map(|c| (*c).to_string())
 }
 
 /// The endonym (a language's own name) for a code — shown untranslated so anyone can spot their language.
@@ -1781,107 +1821,85 @@ fn endonym(code: &str) -> &'static str {
     }
 }
 
-/// The Settings tab — language + currency pickers (vertical lists), the scheduled rules, and the Data card.
+/// The Settings tab — a clean list of rows (the category-list look). Language and currency open a
+/// **native picker**; everything else opens its own sub-screen ([`settings_sub_page`]).
 fn settings(model: &Model) -> Widget {
-    let chosen = model.lang_override.as_deref();
-    let lang_current = chosen.map_or_else(|| tr(model, "settings.system"), |c| endonym(c).to_string());
-    let mut lang_opts =
-        vec![choice_row(tr(model, "settings.system"), chosen.is_none(), Msg::SetLang(None))];
-    for code in SUPPORTED {
-        lang_opts.push(choice_row(endonym(code), chosen == Some(code), Msg::SetLang(Some(code.to_string()))));
+    let lang_value = model
+        .lang_override
+        .as_deref()
+        .map_or_else(|| tr(model, "settings.system"), |c| endonym(c).to_string());
+    let appearance_value = tr(model, if model.dark { "appearance.dark" } else { "appearance.light" });
+    let security_value = tr(model, if model.lock_enabled { "lock.on" } else { "lock.off" });
+    let scheduled_value =
+        if model.recurring.is_empty() { "—".to_string() } else { model.recurring.len().to_string() };
+
+    let rows = vec![
+        nav_row(tr(model, "settings.appearance"), Some(appearance_value), Msg::OpenSettingsSub(SettingsSub::Appearance)),
+        nav_row(tr(model, "settings.language"), Some(lang_value), Msg::PickLanguage),
+        nav_row(tr(model, "settings.currency"), Some(currency_code(model.currency).to_string()), Msg::PickCurrency),
+        nav_row(tr(model, "settings.categories"), None, Msg::StartManageCategories),
+        nav_row(tr(model, "settings.security"), Some(security_value), Msg::OpenSettingsSub(SettingsSub::Security)),
+        nav_row(tr(model, "settings.scheduled"), Some(scheduled_value), Msg::OpenSettingsSub(SettingsSub::Scheduled)),
+        nav_row(tr(model, "settings.data"), None, Msg::OpenSettingsSub(SettingsSub::Data)),
+    ];
+    let mut items = vec![spacer(Spacing::Md)];
+    for r in rows {
+        items.push(r);
+        items.push(spacer(Spacing::Xs));
     }
-    let language = select_field(
-        tr(model, "settings.language"),
-        lang_current,
-        model.lang_open,
-        Msg::ToggleLangPicker,
-        lang_opts,
-    );
+    column(items)
+}
 
-    let cur_opts: Vec<Widget> = CURRENCIES
-        .iter()
-        .map(|(cur, code)| choice_row(*code, model.currency == *cur, Msg::SetCurrency(*cur)))
-        .collect();
-    let currency = select_field(
-        tr(model, "settings.currency"),
-        currency_code(model.currency).to_string(),
-        model.cur_open,
-        Msg::ToggleCurPicker,
-        cur_opts,
-    );
-
-    let mut scheduled = vec![subtitle(tr(model, "settings.scheduled")), spacer(Spacing::Sm)];
-    if model.recurring.is_empty() {
-        scheduled.push(caption(tr(model, "recurring.empty")));
-    } else {
-        for r in &model.recurring {
-            scheduled.push(recurring_row(model, r));
-            scheduled.push(spacer(Spacing::Xs));
-        }
+/// Title for the open Settings sub-screen (shown in the nav bar).
+fn settings_sub_title(model: &Model) -> String {
+    match model.settings_sub {
+        Some(SettingsSub::Appearance) => tr(model, "settings.appearance"),
+        Some(SettingsSub::Security) => tr(model, "settings.security"),
+        Some(SettingsSub::Scheduled) => tr(model, "settings.scheduled"),
+        _ => tr(model, "settings.data"),
     }
+}
 
-    let data = card(
-        column(vec![
-            subtitle(tr(model, "settings.data")),
-            caption(tr(model, "data.hint")),
-            spacer(Spacing::Sm),
-            button(tr(model, "data.export_csv"), ButtonStyle::Filled, Msg::ExportCsv),
-            button(tr(model, "data.backup"), ButtonStyle::Filled, Msg::Backup),
-            button(tr(model, "data.restore"), ButtonStyle::Outlined, Msg::Restore),
-        ]),
-        CardStyle::Elevated,
-    );
-
-    let categories = card(
-        column(vec![
-            subtitle(tr(model, "settings.categories")),
-            spacer(Spacing::Sm),
-            button(tr(model, "categories.manage"), ButtonStyle::Filled, Msg::StartManageCategories),
-        ]),
-        CardStyle::Elevated,
-    );
-
-    let security = card(
-        column(vec![
-            subtitle(tr(model, "settings.security")),
-            caption(tr(model, "lock.desc")),
-            spacer(Spacing::Sm),
-            segmented(vec![
-                segment(tr(model, "lock.off"), !model.lock_enabled, Msg::SetLock(false)),
-                segment(tr(model, "lock.on"), model.lock_enabled, Msg::SetLock(true)),
-            ]),
-        ]),
-        CardStyle::Elevated,
-    );
-
-    let appearance = card(
-        column(vec![
-            subtitle(tr(model, "settings.appearance")),
-            spacer(Spacing::Sm),
-            segmented(vec![
+/// A Settings sub-screen (opened from the list): a Back button, then that section's controls.
+fn settings_sub_page(model: &Model) -> Widget {
+    let mut items = vec![
+        button(tr(model, "action.back"), ButtonStyle::Outlined, Msg::CloseSettingsSub),
+        spacer(Spacing::Md),
+    ];
+    match model.settings_sub {
+        Some(SettingsSub::Appearance) => {
+            items.push(segmented(vec![
                 segment(tr(model, "appearance.light"), !model.dark, Msg::SetDark(false)),
                 segment(tr(model, "appearance.dark"), model.dark, Msg::SetDark(true)),
-            ]),
-        ]),
-        CardStyle::Elevated,
-    );
-
-    column(vec![
-        spacer(Spacing::Md),
-        appearance,
-        spacer(Spacing::Md),
-        language,
-        spacer(Spacing::Sm),
-        currency,
-        spacer(Spacing::Md),
-        categories,
-        spacer(Spacing::Md),
-        security,
-        spacer(Spacing::Md),
-        column(scheduled),
-        spacer(Spacing::Md),
-        data,
-    ])
+            ]));
+        }
+        Some(SettingsSub::Security) => {
+            items.push(caption(tr(model, "lock.desc")));
+            items.push(spacer(Spacing::Sm));
+            items.push(segmented(vec![
+                segment(tr(model, "lock.off"), !model.lock_enabled, Msg::SetLock(false)),
+                segment(tr(model, "lock.on"), model.lock_enabled, Msg::SetLock(true)),
+            ]));
+        }
+        Some(SettingsSub::Scheduled) => {
+            if model.recurring.is_empty() {
+                items.push(caption(tr(model, "recurring.empty")));
+            } else {
+                for r in &model.recurring {
+                    items.push(recurring_row(model, r));
+                    items.push(spacer(Spacing::Xs));
+                }
+            }
+        }
+        _ => {
+            items.push(caption(tr(model, "data.hint")));
+            items.push(spacer(Spacing::Sm));
+            items.push(button(tr(model, "data.export_csv"), ButtonStyle::Filled, Msg::ExportCsv));
+            items.push(button(tr(model, "data.backup"), ButtonStyle::Filled, Msg::Backup));
+            items.push(button(tr(model, "data.restore"), ButtonStyle::Outlined, Msg::Restore));
+        }
+    }
+    column(items)
 }
 
 fn recurring_row(model: &Model, r: &Recurring) -> Widget {
@@ -1905,7 +1923,7 @@ fn recurring_row(model: &Model, r: &Recurring) -> Widget {
         row(vec![
             column(vec![text(format!("{} {label}", money(model, r.amount))), caption(detail)]),
             spacer(Spacing::Md),
-            caption("›"),
+            chevron(),
         ]),
         CardStyle::Filled,
         Msg::EditRecurring(r.id),
@@ -2290,12 +2308,8 @@ fn category_manager(model: &Model) -> Widget {
     ];
     for top in model.categories.iter().filter(|c| c.kind == kind && c.parent_id.is_none()) {
         let n = model.categories.iter().filter(|c| c.parent_id == Some(top.id)).count();
-        let trailing = if n > 0 { format!("{n}  ›") } else { "›".to_string() };
-        items.push(card_button(
-            row(vec![text(top.name.clone()), spacer(Spacing::Md), caption(trailing)]),
-            CardStyle::Filled,
-            Msg::OpenCategory(top.id),
-        ));
+        let count = if n > 0 { Some(n.to_string()) } else { None };
+        items.push(nav_row(top.name.clone(), count, Msg::OpenCategory(top.id)));
         items.push(spacer(Spacing::Xs));
     }
     column(items)
@@ -2610,6 +2624,14 @@ mod test {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
             }
         }
+    }
+
+    #[test]
+    fn lang_index_maps_to_choice() {
+        assert_eq!(lang_at_index(0), None); // "System" → follow the device
+        assert_eq!(lang_at_index(1), Some("en".to_string())); // SUPPORTED[0]
+        assert_eq!(lang_at_index(5), Some("uk".to_string())); // SUPPORTED[4]
+        assert_eq!(lang_at_index(6), None); // out of range → System
     }
 
     #[test]
