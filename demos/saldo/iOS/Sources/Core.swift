@@ -383,8 +383,9 @@ enum DateTimePlugin {
 }
 
 /// Native single-choice picker — request/response. Input `{"title": String, "options": [String],
-/// "selected": Int}`. Presents a `UIPickerView` **wheel** in an action sheet — the exact look & feel of
-/// the date/time picker. Resolves `ok=true` with the chosen index as a string, or `ok=false` on cancel.
+/// "selected": Int}`. Presents a `UIPickerView` **wheel** in a half-height **bottom sheet** (a Cancel /
+/// title / Done toolbar above the wheel) — like the new-transaction sheet, so it has no stray popover
+/// arrow. Resolves `ok=true` with the chosen index as a string, or `ok=false` on cancel/dismiss.
 @MainActor
 enum PickerPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
@@ -400,50 +401,96 @@ enum PickerPlugin {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
-            let picker = UIPickerView()
-            let source = PickerSource(options: options)
-            PickerSource.retained = source // the picker holds its data source / delegate weakly
-            picker.dataSource = source
-            picker.delegate = source
-            picker.translatesAutoresizingMaskIntoConstraints = false
-            if selected >= 0, selected < options.count {
-                picker.selectRow(selected, inComponent: 0, animated: false)
-            }
-
-            // An action sheet with blank message lines reserves room for the wheel — same as the date picker.
-            let alert = UIAlertController(title: title, message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .actionSheet)
-            alert.view.addSubview(picker)
-            NSLayoutConstraint.activate([
-                picker.centerXAnchor.constraint(equalTo: alert.view.centerXAnchor),
-                picker.topAnchor.constraint(equalTo: alert.view.topAnchor, constant: 48),
-                picker.widthAnchor.constraint(equalTo: alert.view.widthAnchor, constant: -16),
-            ])
-
             var resumed = false
-            func done(_ r: PluginResponse) {
-                if !resumed { resumed = true; PickerSource.retained = nil; cont.resume(returning: r) }
+            func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
+            let vc = PickerSheetController(
+                title: title, options: options, selected: selected,
+                onDone: { done(PluginResponse(ok: true, output: String($0))) },
+                onCancel: { done(PluginResponse(ok: false, output: "cancel")) })
+            vc.modalPresentationStyle = .pageSheet
+            if let sheet = vc.sheetPresentationController {
+                sheet.detents = [.medium()]
+                sheet.prefersGrabberVisible = true
             }
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
-                done(PluginResponse(ok: false, output: "cancel"))
-            })
-            alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
-                done(PluginResponse(ok: true, output: String(picker.selectedRow(inComponent: 0))))
-            })
-            // iPad presents action sheets in a popover, which needs a source.
-            alert.popoverPresentationController?.sourceView = presenter.view
-            alert.popoverPresentationController?.sourceRect = CGRect(
-                x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
-            presenter.present(alert, animated: true)
+            vc.presentationController?.delegate = vc // swipe-to-dismiss = cancel
+            presenter.present(vc, animated: true)
         }
     }
 }
 
-/// Data source + delegate for the `PickerPlugin` wheel — a single column of string rows. Retained
-/// statically while the sheet is up (UIPickerView holds these weakly), like the photo/camera delegates.
-private final class PickerSource: NSObject, UIPickerViewDataSource, UIPickerViewDelegate {
-    static var retained: PickerSource?
+/// The bottom-sheet host for the picker wheel — a Cancel / title / Done toolbar over a single-column
+/// `UIPickerView`. Owns its data source/delegate (retained by the presentation, so no static needed).
+private final class PickerSheetController: UIViewController, UIPickerViewDataSource, UIPickerViewDelegate, UIAdaptivePresentationControllerDelegate {
     private let options: [String]
-    init(options: [String]) { self.options = options }
+    private let initialSelected: Int
+    private let onDone: (Int) -> Void
+    private let onCancel: () -> Void
+    private let picker = UIPickerView()
+    private var finished = false
+
+    init(title: String?, options: [String], selected: Int, onDone: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
+        self.options = options
+        self.initialSelected = selected
+        self.onDone = onDone
+        self.onCancel = onCancel
+        super.init(nibName: nil, bundle: nil)
+        self.title = title
+    }
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        let toolbar = UIToolbar()
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        let titleItem = UIBarButtonItem(title: title, style: .plain, target: nil, action: nil)
+        titleItem.isEnabled = false
+        toolbar.items = [
+            UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)),
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            titleItem,
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(doneTapped)),
+        ]
+
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        picker.dataSource = self
+        picker.delegate = self
+        if initialSelected >= 0, initialSelected < options.count {
+            picker.selectRow(initialSelected, inComponent: 0, animated: false)
+        }
+
+        view.addSubview(toolbar)
+        view.addSubview(picker)
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            picker.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            picker.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            picker.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            picker.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+        ])
+    }
+
+    @objc private func doneTapped() {
+        guard !finished else { return }
+        finished = true
+        let idx = picker.selectedRow(inComponent: 0)
+        dismiss(animated: true) { self.onDone(idx) }
+    }
+    @objc private func cancelTapped() {
+        guard !finished else { return }
+        finished = true
+        dismiss(animated: true) { self.onCancel() }
+    }
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        guard !finished else { return }
+        finished = true
+        onCancel()
+    }
+
     func numberOfComponents(in pickerView: UIPickerView) -> Int { 1 }
     func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int { options.count }
     func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
