@@ -9,7 +9,7 @@
 
 use std::sync::OnceLock;
 
-use mobiler_core::format::{format_currency, format_date};
+use mobiler_core::format::{format_currency, format_date, month_name};
 use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Corner, Currency, Cx, Density, FontFamily,
     Icon, InputValue, Locale, MobilerApp, MobilerShell, Rgb, Segment, Spacing, Theme, Tone, Widget,
@@ -288,6 +288,7 @@ pub struct Model {
     screen: Screen,
     period: Period,
     stats_kind: TxnKind,         // expense/income toggle on the Stats tab
+    stats_month: String,         // the month shown on Stats ("YYYY-MM"; empty = the current month)
     locale: Locale,              // formatting locale, from the device at startup
     currency: Currency,          // base currency — persisted setting, else defaulted from the device
     currency_pinned: bool,       // true once a saved/chosen currency wins over the device default
@@ -341,6 +342,8 @@ pub enum Msg {
     Switch(Screen),
     SetPeriod(Period),
     SetStatsKind(TxnKind),
+    StatsPrevMonth,
+    StatsNextMonth,
     GotLocale(String),
     ToggleLangPicker,
     ToggleCurPicker,
@@ -426,6 +429,14 @@ impl MobilerApp for SaldoApp {
             Msg::Switch(s) => model.screen = s,
             Msg::SetPeriod(p) => model.period = p,
             Msg::SetStatsKind(k) => model.stats_kind = k,
+            Msg::StatsPrevMonth => model.stats_month = shift_month(&stats_month(model), -1),
+            Msg::StatsNextMonth => {
+                // don't navigate past the current month — there's nothing there yet
+                let next = shift_month(&stats_month(model), 1);
+                if model.today.get(..7).is_none_or(|now| next.as_str() <= now) {
+                    model.stats_month = next;
+                }
+            }
             Msg::GotLocale(tag) => {
                 if let Some(loc) = Locale::from_tag(&tag) {
                     model.locale = loc;
@@ -1122,6 +1133,7 @@ fn catalog() -> &'static Catalog {
             .with("stats.no_expense", &[("en", "No expenses in this period."), ("de", "Keine Ausgaben in diesem Zeitraum."), ("fr", "Aucune dépense sur cette période."), ("it", "Nessuna uscita in questo periodo."), ("uk", "Немає витрат за цей період.")])
             .with("stats.no_income", &[("en", "No income in this period."), ("de", "Keine Einnahmen in diesem Zeitraum."), ("fr", "Aucun revenu sur cette période."), ("it", "Nessuna entrata in questo periodo."), ("uk", "Немає доходів за цей період.")])
             .with("stats.empty", &[("en", "Add a few transactions and your charts appear here."), ("de", "Füge ein paar Buchungen hinzu, dann erscheinen hier deine Diagramme."), ("fr", "Ajoutez quelques opérations et vos graphiques apparaîtront ici."), ("it", "Aggiungi qualche movimento e i grafici appariranno qui."), ("uk", "Додайте кілька записів — і тут з'являться діаграми.")])
+            .with("stats.trends", &[("en", "Trends over time"), ("de", "Verlauf über Zeit"), ("fr", "Tendances dans le temps"), ("it", "Andamenti nel tempo"), ("uk", "Динаміка з часом")])
             .with("stats.trend", &[("en", "Net-worth trend"), ("de", "Vermögensverlauf"), ("fr", "Évolution du patrimoine"), ("it", "Andamento del patrimonio"), ("uk", "Динаміка капіталу")])
             .with("stats.monthly", &[("en", "Monthly income vs expense"), ("de", "Einnahmen und Ausgaben pro Monat"), ("fr", "Revenus et dépenses par mois"), ("it", "Entrate e uscite mensili"), ("uk", "Доходи та витрати за місяць")])
             // entry sheet
@@ -1413,12 +1425,11 @@ fn monthly_totals(txns: &[Txn], tag: &str) -> (f64, f64) {
     (income, expense)
 }
 
-/// In-period transactions of `kind`, summed by the category **actually logged** (a subcategory shows as
-/// itself, not rolled up to its parent) and sorted by amount descending.
-fn category_breakdown(model: &Model, kind: TxnKind) -> Vec<(String, f64)> {
+/// Transactions of `kind` in the given month (`"YYYY-MM"`), summed by the category **actually logged**
+/// (a subcategory shows as itself, not rolled up) and sorted by amount descending.
+fn category_breakdown(model: &Model, kind: TxnKind, month: &str) -> Vec<(String, f64)> {
     let mut totals: Vec<(String, f64)> = Vec::new();
-    for t in model.txns.iter().filter(|t| t.kind == kind && in_period(&t.ts, model.period, &model.today))
-    {
+    for t in model.txns.iter().filter(|t| t.kind == kind && t.ts.get(..7) == Some(month)) {
         if t.category.is_empty() {
             continue;
         }
@@ -1429,6 +1440,34 @@ fn category_breakdown(model: &Model, kind: TxnKind) -> Vec<(String, f64)> {
     }
     totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     totals
+}
+
+/// The month currently shown on Stats — the saved selection, or the current month if none.
+fn stats_month(model: &Model) -> String {
+    if model.stats_month.is_empty() {
+        model.today.get(..7).unwrap_or("").to_string()
+    } else {
+        model.stats_month.clone()
+    }
+}
+
+/// Shift a `"YYYY-MM"` month by `delta` months (handles year rollover).
+fn shift_month(ym: &str, delta: i32) -> String {
+    let (Some(y), Some(m)) =
+        (ym.get(..4).and_then(|s| s.parse::<i32>().ok()), ym.get(5..7).and_then(|s| s.parse::<i32>().ok()))
+    else {
+        return ym.to_string();
+    };
+    let idx = y * 12 + (m - 1) + delta;
+    format!("{:04}-{:02}", idx.div_euclid(12), idx.rem_euclid(12) + 1)
+}
+
+/// A `"YYYY-MM"` month as a localized label, e.g. "June 2026".
+fn fmt_month(model: &Model, ym: &str) -> String {
+    match (ym.get(..4), ym.get(5..7).and_then(|s| s.parse::<u32>().ok())) {
+        (Some(y), Some(m)) => format!("{} {y}", month_name(m, model.locale)),
+        _ => ym.to_string(),
+    }
 }
 
 /// A small flat palette; the Stats donut series and ranked list index into it so the colours line up.
@@ -1894,8 +1933,9 @@ fn assets(model: &Model) -> Widget {
     column(rows)
 }
 
-/// The Stats tab: a category-breakdown donut (income/expense toggle, current period) with a ranked
-/// list, a net-worth trend line, and a monthly income-vs-expense bar chart — all from the `Chart` widget.
+/// The Stats tab, in two halves: **this month** (navigable ‹ / › with that month's income/expense/net
+/// and a category-breakdown donut + ranked list), and **trends over time** (a 12-month net-worth line
+/// and a 6-month income-vs-expense bar chart) — all from the `Chart` widget.
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)] // money f64 → chart f32 is fine here
 fn stats(model: &Model) -> Widget {
     if model.txns.is_empty() {
@@ -1903,20 +1943,34 @@ fn stats(model: &Model) -> Widget {
     }
 
     let kind = model.stats_kind;
-    let controls = card(
+    let month = stats_month(model);
+
+    // --- This month: a ‹ Month Year › navigator + that month's income / expense / net ---
+    let (income, expense) = monthly_totals(&model.txns, &month);
+    let header = card(
         column(vec![
-            segmented(period_segments(model)),
-            spacer(Spacing::Sm),
-            segmented(vec![
-                segment(tr(model, "expense"), kind == TxnKind::Expense, Msg::SetStatsKind(TxnKind::Expense)),
-                segment(tr(model, "income"), kind == TxnKind::Income, Msg::SetStatsKind(TxnKind::Income)),
+            row(vec![
+                button("‹", ButtonStyle::Text, Msg::StatsPrevMonth),
+                spacer(Spacing::Md),
+                subtitle(fmt_month(model, &month)),
+                spacer(Spacing::Md),
+                button("›", ButtonStyle::Text, Msg::StatsNextMonth),
             ]),
+            spacer(Spacing::Sm),
+            row(vec![caption(tr(model, "income")), spacer(Spacing::Md), emphasis(money(model, income))]),
+            row(vec![caption(tr(model, "expense")), spacer(Spacing::Md), emphasis(money(model, expense))]),
+            divider(),
+            row(vec![caption(tr(model, "net")), spacer(Spacing::Md), emphasis(money(model, income - expense))]),
         ]),
         CardStyle::Filled,
     );
 
-    // 1. Category breakdown — donut + ranked list.
-    let breakdown = category_breakdown(model, kind);
+    // Category breakdown for the selected month — donut + ranked list, expense/income toggle.
+    let toggle = segmented(vec![
+        segment(tr(model, "expense"), kind == TxnKind::Expense, Msg::SetStatsKind(TxnKind::Expense)),
+        segment(tr(model, "income"), kind == TxnKind::Income, Msg::SetStatsKind(TxnKind::Income)),
+    ]);
+    let breakdown = category_breakdown(model, kind, &month);
     let total: f64 = breakdown.iter().map(|(_, a)| a).sum();
     let breakdown_card = if breakdown.is_empty() {
         card(
@@ -1950,22 +2004,23 @@ fn stats(model: &Model) -> Widget {
         card(column(items), CardStyle::Elevated)
     };
 
-    // 2. Net-worth trend (last 6 months).
-    let tags = month_tags(&model.today, 6);
-    let labels: Vec<String> = tags.iter().map(|t| t.get(5..7).unwrap_or(t).to_string()).collect();
-    let trend = tags.iter().map(|t| net_worth_asof(&model.accounts, &model.txns, t) as f32).collect();
+    // --- Trends over time: net worth (12 months, line) + income vs expense (6 months, bars) ---
+    let line_tags = month_tags(&model.today, 12);
+    let line_labels: Vec<String> = line_tags.iter().map(|t| t.get(5..7).unwrap_or(t).to_string()).collect();
+    let trend = line_tags.iter().map(|t| net_worth_asof(&model.accounts, &model.txns, t) as f32).collect();
     let trend_card = card(
         column(vec![
             subtitle(tr(model, "stats.trend")),
             spacer(Spacing::Sm),
-            chart(vec![ChartSeries::new(tr(model, "networth"), trend)], labels.clone(), ChartStyle::Line, true, false),
+            chart(vec![ChartSeries::new(tr(model, "networth"), trend)], line_labels, ChartStyle::Line, true, false),
         ]),
         CardStyle::Elevated,
     );
 
-    // 3. Monthly income vs expense (last 6 months).
+    let bar_tags = month_tags(&model.today, 6);
+    let bar_labels: Vec<String> = bar_tags.iter().map(|t| t.get(5..7).unwrap_or(t).to_string()).collect();
     let (mut inc, mut exp) = (Vec::new(), Vec::new());
-    for t in &tags {
+    for t in &bar_tags {
         let (i, e) = monthly_totals(&model.txns, t);
         inc.push(i as f32);
         exp.push(e as f32);
@@ -1979,7 +2034,7 @@ fn stats(model: &Model) -> Widget {
                     ChartSeries::new(tr(model, "income"), inc).with_color(palette(2)),
                     ChartSeries::new(tr(model, "expense"), exp).with_color(palette(1)),
                 ],
-                labels,
+                bar_labels,
                 ChartStyle::Bar,
                 true,
                 true,
@@ -1989,10 +2044,14 @@ fn stats(model: &Model) -> Widget {
     );
 
     column(vec![
-        controls,
+        header,
+        spacer(Spacing::Sm),
+        toggle,
         spacer(Spacing::Md),
         breakdown_card,
-        spacer(Spacing::Md),
+        spacer(Spacing::Lg),
+        subtitle(tr(model, "stats.trends")),
+        spacer(Spacing::Sm),
         trend_card,
         spacer(Spacing::Md),
         bars_card,
@@ -2354,6 +2413,15 @@ mod test {
     }
 
     #[test]
+    fn shift_month_handles_year_rollover() {
+        assert_eq!(shift_month("2026-06", -1), "2026-05");
+        assert_eq!(shift_month("2026-06", 1), "2026-07");
+        assert_eq!(shift_month("2026-01", -1), "2025-12"); // back across the year
+        assert_eq!(shift_month("2026-12", 1), "2027-01"); // forward across the year
+        assert_eq!(shift_month("2026-06", -7), "2025-11");
+    }
+
+    #[test]
     fn net_worth_asof_respects_the_month_cutoff() {
         let accounts =
             vec![Account { id: 1, name: "Cash".into(), kind: AccountKind::Asset, opening: 100.0 }];
@@ -2381,7 +2449,7 @@ mod test {
             ],
             ..Model::default()
         };
-        let b = category_breakdown(&model, TxnKind::Expense);
+        let b = category_breakdown(&model, TxnKind::Expense, "2026-06");
         // each logged category stands on its own (no roll-up); sorted by amount; income excluded
         assert_eq!(b.len(), 3);
         assert_eq!(b[0], ("Transport".to_string(), 20.0));
@@ -2428,7 +2496,7 @@ mod test {
             "sheet.editaccount", "err.acct_in_use", "action.cancel", "err.dest", "err.twoaccounts",
             "categories.add", "sheet.newcategory", "sheet.editcategory", "categories.add_sub",
             "categories.subcategories", "categories.name", "action.back", "action.edit",
-            "account.delete",
+            "account.delete", "stats.trends",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
