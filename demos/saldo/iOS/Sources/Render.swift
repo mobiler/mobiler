@@ -124,7 +124,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(VStack(alignment: .leading, spacing: 6) { childViews(children, send) })
 
     case .card(let child, let style, let onPress, let onLongPress):
-        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)))
+        // contentShape makes the WHOLE card hit-testable — without it a tappable Outlined card (a
+        // transparent fill) only registers taps on its text/chevron, not the empty middle.
+        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)).contentShape(Rectangle()))
         var view = body
         if let token = onPress {
             view = AnyView(Button(action: { send(.fired(token: token)) }) { body }.buttonStyle(.plain))
