@@ -13,9 +13,9 @@ use mobiler_core::format::{format_currency, format_date};
 use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Corner, Currency, Cx, Density, FontFamily,
     Icon, InputValue, Locale, MobilerApp, MobilerShell, Rgb, Segment, Spacing, Theme, Tone, Widget,
-    button, caption, card, card_button, chart, chip, column, decimal_field, divider, donut_chart,
-    emphasis, icon_button, negotiate, row, scaffold, scroller, segment, segmented, spacer, subtitle,
-    swipe_action, text, text_field, with_fab, with_sheet, with_theme,
+    badge, button, caption, card, card_button, chart, chip, column, decimal_field, divider,
+    donut_chart, emphasis, icon_button, negotiate, row, scaffold, scroller, segment, segmented, spacer,
+    subtitle, swipe_action, text, text_field, with_fab, with_sheet, with_theme,
 };
 use serde::{Deserialize, Serialize};
 
@@ -305,6 +305,7 @@ pub struct Model {
     locked: bool,           // runtime: the app is currently locked, awaiting biometric unlock
     lock_checked: bool,     // we've done the one-time launch lock decision (don't re-lock on reloads)
     dark: bool,             // dark mode (persisted)
+    form_error: Option<&'static str>, // a validation error (catalog key) to show in the open sheet
     pending_sql: Vec<String>,
 
     // "new transaction" sheet
@@ -511,6 +512,7 @@ impl MobilerApp for SaldoApp {
 
             Msg::StartAdd => {
                 model.adding = true;
+                model.form_error = None;
                 model.draft_kind = TxnKind::Expense;
                 model.draft_amount.clear();
                 model.draft_category.clear();
@@ -520,14 +522,26 @@ impl MobilerApp for SaldoApp {
                 model.draft_to_account = model.accounts.get(1).map(|a| a.id);
                 model.draft_freq = None;
             }
-            Msg::CancelAdd => model.adding = false,
+            Msg::CancelAdd => {
+                model.adding = false;
+                model.form_error = None;
+            }
             Msg::SetKind(k) => {
                 model.draft_kind = k;
                 model.draft_category.clear(); // categories differ per kind
             }
-            Msg::SetAccount(id) => model.draft_account = Some(id),
-            Msg::SetToAccount(id) => model.draft_to_account = Some(id),
-            Msg::SetCategory(name) => model.draft_category = name,
+            Msg::SetAccount(id) => {
+                model.draft_account = Some(id);
+                model.form_error = None;
+            }
+            Msg::SetToAccount(id) => {
+                model.draft_to_account = Some(id);
+                model.form_error = None;
+            }
+            Msg::SetCategory(name) => {
+                model.draft_category = name;
+                model.form_error = None;
+            }
             Msg::SetFreq(f) => model.draft_freq = f,
             Msg::PickDate => cx.pick_date(|r| Msg::DatePicked(if r.ok { r.output } else { String::new() })),
             Msg::DatePicked(date) => {
@@ -537,7 +551,7 @@ impl MobilerApp for SaldoApp {
             }
             Msg::Save => {
                 if let Err(why) = validate_txn(model) {
-                    cx.notify("toast", "show", tr(model, why));
+                    model.form_error = Some(why); // shown inline in the sheet
                     return;
                 }
                 let Some(amount) = parse_amount(&model.draft_amount) else { return };
@@ -576,9 +590,10 @@ impl MobilerApp for SaldoApp {
             Msg::Saved(ok) => {
                 if ok {
                     model.adding = false;
+                    model.form_error = None;
                     load_all(cx);
                 } else {
-                    cx.notify("toast", "show", tr(model, "err.save"));
+                    model.form_error = Some("err.save");
                 }
             }
             Msg::Delete(id) => {
@@ -597,6 +612,7 @@ impl MobilerApp for SaldoApp {
             Msg::StartAddAccount => {
                 model.adding_account = true;
                 model.editing_account = None;
+                model.form_error = None;
                 model.acc_name.clear();
                 model.acc_kind = AccountKind::Asset;
                 model.acc_opening.clear();
@@ -605,6 +621,7 @@ impl MobilerApp for SaldoApp {
                 if let Some(a) = model.accounts.iter().find(|a| a.id == id) {
                     model.adding_account = true;
                     model.editing_account = Some(id);
+                    model.form_error = None;
                     model.acc_name = a.name.clone();
                     model.acc_kind = a.kind;
                     model.acc_opening = a.opening.to_string();
@@ -624,11 +641,14 @@ impl MobilerApp for SaldoApp {
                     cx.plugin("sqlite", "exec", sql, |_| Msg::Reload);
                 }
             }
-            Msg::CancelAddAccount => model.adding_account = false,
+            Msg::CancelAddAccount => {
+                model.adding_account = false;
+                model.form_error = None;
+            }
             Msg::SetAccKind(k) => model.acc_kind = k,
             Msg::SaveAccount => {
                 if model.acc_name.trim().is_empty() {
-                    cx.notify("toast", "show", tr(model, "err.accname"));
+                    model.form_error = Some("err.accname");
                     return;
                 }
                 let opening = model.acc_opening.trim().replace(',', ".").parse::<f64>().unwrap_or(0.0);
@@ -649,17 +669,24 @@ impl MobilerApp for SaldoApp {
             Msg::AccountSaved(ok) => {
                 if ok {
                     model.adding_account = false;
+                    model.form_error = None;
                     load_all(cx);
+                } else {
+                    model.form_error = Some("err.save");
                 }
             }
 
             Msg::StartManageCategories => {
                 model.managing_categories = true;
+                model.form_error = None;
                 model.cat_kind = TxnKind::Expense;
                 model.cat_name.clear();
                 model.cat_parent = None;
             }
-            Msg::CancelManageCategories => model.managing_categories = false,
+            Msg::CancelManageCategories => {
+                model.managing_categories = false;
+                model.form_error = None;
+            }
             Msg::SetCatKind(k) => {
                 model.cat_kind = k;
                 model.cat_parent = None; // parents differ per kind
@@ -667,7 +694,7 @@ impl MobilerApp for SaldoApp {
             Msg::SetCatParent(p) => model.cat_parent = p,
             Msg::AddCategory => {
                 if model.cat_name.trim().is_empty() {
-                    cx.notify("toast", "show", tr(model, "err.cat_name"));
+                    model.form_error = Some("err.cat_name");
                     return;
                 }
                 let parent =
@@ -682,6 +709,7 @@ impl MobilerApp for SaldoApp {
             Msg::CategoryChanged(ok) => {
                 if ok {
                     model.cat_name.clear(); // keep the sheet open to add more
+                    model.form_error = None;
                     load_all(cx);
                 }
             }
@@ -739,6 +767,7 @@ impl MobilerApp for SaldoApp {
 
     fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
         if let InputValue::Text(v) = value {
+            model.form_error = None; // typing clears a shown validation error
             match id {
                 "amount" => model.draft_amount = v,
                 "note" => model.draft_note = v,
@@ -1057,6 +1086,7 @@ fn catalog() -> &'static Catalog {
             .with("field.category", &[("en", "Category"), ("de", "Kategorie"), ("fr", "Catégorie"), ("it", "Categoria"), ("uk", "Категорія")])
             .with("field.note", &[("en", "Note (optional)"), ("de", "Notiz (optional)"), ("fr", "Note (facultatif)"), ("it", "Nota (facoltativa)"), ("uk", "Нотатка (необов'язково)")])
             .with("action.save", &[("en", "Save"), ("de", "Speichern"), ("fr", "Enregistrer"), ("it", "Salva"), ("uk", "Зберегти")])
+            .with("action.cancel", &[("en", "Cancel"), ("de", "Abbrechen"), ("fr", "Annuler"), ("it", "Annulla"), ("uk", "Скасувати")])
             // recurring
             .with("field.repeat", &[("en", "Repeat"), ("de", "Wiederholen"), ("fr", "Répéter"), ("it", "Ripeti"), ("uk", "Повторювати")])
             .with("freq.once", &[("en", "Once"), ("de", "Einmal"), ("fr", "Une fois"), ("it", "Una volta"), ("uk", "Один раз")])
@@ -1948,6 +1978,22 @@ fn category_picker(model: &Model) -> Widget {
     column(items)
 }
 
+/// The inline validation error (a danger badge) for the open sheet, if any — always visible, unlike a
+/// toast that the keyboard can cover.
+fn error_banner(model: &Model) -> Vec<Widget> {
+    model
+        .form_error
+        .map_or_else(Vec::new, |key| vec![badge(tr(model, key), Tone::Danger), spacer(Spacing::Sm)])
+}
+
+/// A Cancel + Save row, so every sheet has a visible way out even with the keyboard up.
+fn save_bar(model: &Model, save: Msg, cancel: Msg) -> Widget {
+    row(vec![
+        button(tr(model, "action.cancel"), ButtonStyle::Outlined, cancel),
+        button(tr(model, "action.save"), ButtonStyle::Filled, save),
+    ])
+}
+
 fn txn_sheet(model: &Model) -> Widget {
     let mut items = vec![
         segmented(vec![
@@ -1982,12 +2028,13 @@ fn txn_sheet(model: &Model) -> Widget {
         segment(tr(model, "freq.monthly"), model.draft_freq == Some(Freq::Monthly), Msg::SetFreq(Some(Freq::Monthly))),
     ]));
     items.push(spacer(Spacing::Md));
-    items.push(button(tr(model, "action.save"), ButtonStyle::Filled, Msg::Save));
+    items.extend(error_banner(model));
+    items.push(save_bar(model, Msg::Save, Msg::CancelAdd));
     column(items)
 }
 
 fn account_sheet(model: &Model) -> Widget {
-    column(vec![
+    let mut items = vec![
         text_field("acc_name", tr(model, "field.accname"), model.acc_name.clone()),
         segmented(vec![
             segment(tr(model, "kind.asset"), model.acc_kind == AccountKind::Asset, Msg::SetAccKind(AccountKind::Asset)),
@@ -1995,8 +2042,10 @@ fn account_sheet(model: &Model) -> Widget {
         ]),
         decimal_field("acc_opening", tr(model, "field.opening"), model.acc_opening.clone()),
         spacer(Spacing::Md),
-        button(tr(model, "action.save"), ButtonStyle::Filled, Msg::SaveAccount),
-    ])
+    ];
+    items.extend(error_banner(model));
+    items.push(save_bar(model, Msg::SaveAccount, Msg::CancelAddAccount));
+    column(items)
 }
 
 /// The category editor (a full screen, not a sheet). A Done button to leave, an income/expense toggle,
@@ -2015,16 +2064,15 @@ fn category_manager(model: &Model) -> Widget {
     for c in &tops {
         parents.push(chip(c.name.clone(), model.cat_parent == Some(c.id), Msg::SetCatParent(Some(c.id))));
     }
-    let add_card = card(
-        column(vec![
-            caption(tr(model, "categories.add_under")),
-            scroller(parents),
-            spacer(Spacing::Xs),
-            text_field("cat_name", tr(model, "categories.new_name"), model.cat_name.clone()),
-            button(tr(model, "action.add"), ButtonStyle::Filled, Msg::AddCategory),
-        ]),
-        CardStyle::Outlined,
-    );
+    let mut add_items = vec![
+        caption(tr(model, "categories.add_under")),
+        scroller(parents),
+        spacer(Spacing::Xs),
+        text_field("cat_name", tr(model, "categories.new_name"), model.cat_name.clone()),
+    ];
+    add_items.extend(error_banner(model));
+    add_items.push(button(tr(model, "action.add"), ButtonStyle::Filled, Msg::AddCategory));
+    let add_card = card(column(add_items), CardStyle::Outlined);
 
     let mut items = vec![
         button(tr(model, "action.done"), ButtonStyle::Filled, Msg::CancelManageCategories),
@@ -2164,16 +2212,22 @@ mod test {
     }
 
     #[test]
-    fn income_expense_need_a_category_transfer_does_not() {
-        let mut m = Model { draft_amount: "5".into(), ..Model::default() };
+    fn validate_txn_reports_each_missing_required_field() {
+        // every required-field failure returns a specific (translatable) error key
+        let mut m = Model::default();
+        assert_eq!(validate_txn(&m), Err("err.amount")); // no amount
+        m.draft_amount = "5".into();
+        assert_eq!(validate_txn(&m), Err("err.account")); // no account
         m.draft_account = Some(1);
-        // expense with no category → rejected
-        assert!(validate_txn(&m).is_err());
+        assert_eq!(validate_txn(&m), Err("err.category")); // expense/income needs a category
         m.draft_category = "Coffee".into();
         assert!(validate_txn(&m).is_ok());
-        // transfer ignores category but needs a distinct destination
+        // transfer: ignores category, needs a destination, and it must differ from the source
         m.draft_kind = TxnKind::Transfer;
         m.draft_category.clear();
+        assert_eq!(validate_txn(&m), Err("err.dest"));
+        m.draft_to_account = Some(1);
+        assert_eq!(validate_txn(&m), Err("err.twoaccounts"));
         m.draft_to_account = Some(2);
         assert!(validate_txn(&m).is_ok());
     }
@@ -2282,7 +2336,7 @@ mod test {
             "categories.top_level", "action.add", "action.done", "err.cat_name",
             "settings.security", "lock.desc", "lock.title", "lock.unlock", "lock.prompt",
             "settings.appearance", "appearance.light", "appearance.dark",
-            "sheet.editaccount", "err.acct_in_use",
+            "sheet.editaccount", "err.acct_in_use", "action.cancel", "err.dest", "err.twoaccounts",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
