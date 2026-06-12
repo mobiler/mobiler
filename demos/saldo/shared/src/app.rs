@@ -153,6 +153,14 @@ pub enum SettingsSub {
     Data,
 }
 
+/// The Stats period granularity — navigate month-by-month or year-by-year.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum StatsGran {
+    #[default]
+    Month,
+    Year,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum TxnKind {
     #[default]
@@ -297,6 +305,8 @@ pub struct Model {
     period: Period,
     stats_kind: TxnKind,         // expense/income toggle on the Stats tab
     stats_month: String,         // the month shown on Stats ("YYYY-MM"; empty = the current month)
+    stats_gran: StatsGran,       // navigate by month or by year
+    stats_cat: Option<String>,   // a top category drilled into for its subcategory breakdown
     locale: Locale,              // formatting locale, from the device at startup
     currency: Currency,          // base currency — persisted setting, else defaulted from the device
     currency_pinned: bool,       // true once a saved/chosen currency wins over the device default
@@ -350,8 +360,11 @@ pub enum Msg {
     Switch(Screen),
     SetPeriod(Period),
     SetStatsKind(TxnKind),
-    StatsPrevMonth,
-    StatsNextMonth,
+    SetStatsGran(StatsGran),
+    StatsPrev,
+    StatsNext,
+    OpenStatsCat(String),
+    CloseStatsCat,
     GotLocale(String),
     PickLanguage,
     LanguagePicked(String),
@@ -442,15 +455,28 @@ impl MobilerApp for SaldoApp {
                 model.settings_sub = None; // re-entering Settings shows the list, not a stale sub-screen
             }
             Msg::SetPeriod(p) => model.period = p,
-            Msg::SetStatsKind(k) => model.stats_kind = k,
-            Msg::StatsPrevMonth => model.stats_month = shift_month(&stats_month(model), -1),
-            Msg::StatsNextMonth => {
-                // don't navigate past the current month — there's nothing there yet
-                let next = shift_month(&stats_month(model), 1);
+            Msg::SetStatsKind(k) => {
+                model.stats_kind = k;
+                model.stats_cat = None; // a category drill doesn't carry across the expense/income switch
+            }
+            Msg::SetStatsGran(g) => {
+                model.stats_gran = g;
+                model.stats_cat = None;
+            }
+            Msg::StatsPrev => {
+                model.stats_cat = None;
+                model.stats_month = shift_month(&stats_month(model), -stats_step(model));
+            }
+            Msg::StatsNext => {
+                // don't navigate past the current month/year — there's nothing there yet
+                model.stats_cat = None;
+                let next = shift_month(&stats_month(model), stats_step(model));
                 if model.today.get(..7).is_none_or(|now| next.as_str() <= now) {
                     model.stats_month = next;
                 }
             }
+            Msg::OpenStatsCat(name) => model.stats_cat = Some(name),
+            Msg::CloseStatsCat => model.stats_cat = None,
             Msg::GotLocale(tag) => {
                 if let Some(loc) = Locale::from_tag(&tag) {
                     model.locale = loc;
@@ -1237,6 +1263,8 @@ fn catalog() -> &'static Catalog {
             .with("stats.trends", &[("en", "Trends over time"), ("de", "Verlauf über Zeit"), ("fr", "Tendances dans le temps"), ("it", "Andamenti nel tempo"), ("uk", "Динаміка з часом")])
             .with("stats.trend", &[("en", "Net-worth trend"), ("de", "Vermögensverlauf"), ("fr", "Évolution du patrimoine"), ("it", "Andamento del patrimonio"), ("uk", "Динаміка капіталу")])
             .with("stats.monthly", &[("en", "Monthly income vs expense"), ("de", "Einnahmen und Ausgaben pro Monat"), ("fr", "Revenus et dépenses par mois"), ("it", "Entrate e uscite mensili"), ("uk", "Доходи та витрати за місяць")])
+            .with("stats.month", &[("en", "Month"), ("de", "Monat"), ("fr", "Mois"), ("it", "Mese"), ("uk", "Місяць")])
+            .with("stats.year", &[("en", "Year"), ("de", "Jahr"), ("fr", "Année"), ("it", "Anno"), ("uk", "Рік")])
             // entry sheet
             .with("sheet.newtxn", &[("en", "New transaction"), ("de", "Neue Buchung"), ("fr", "Nouvelle opération"), ("it", "Nuovo movimento"), ("uk", "Новий запис")])
             .with("type.transfer", &[("en", "Transfer"), ("de", "Umbuchung"), ("fr", "Virement"), ("it", "Trasferimento"), ("uk", "Переказ")])
@@ -1506,19 +1534,20 @@ fn month_tags(today: &str, n: usize) -> Vec<String> {
     tags
 }
 
-/// Net worth (assets − liabilities) counting only transactions on or before the end of `tag`'s month.
-/// `ts` is `"YYYY-MM-DD HH:MM:SS"`, so a lexical compare against `"{tag}-31 23:59:59"` is the cutoff.
+/// Net worth (assets − liabilities) counting only transactions on or before the end of `tag`'s period.
+/// `ts` is `"YYYY-MM-DD HH:MM:SS"`; the cutoff is end-of-month for a `"YYYY-MM"` tag or end-of-year for
+/// a `"YYYY"` tag (a lexical compare on the strings).
 fn net_worth_asof(accounts: &[Account], txns: &[Txn], tag: &str) -> f64 {
-    let cutoff = format!("{tag}-31 23:59:59");
+    let cutoff = if tag.len() == 4 { format!("{tag}-12-31 23:59:59") } else { format!("{tag}-31 23:59:59") };
     let upto: Vec<Txn> = txns.iter().filter(|t| t.ts.as_str() <= cutoff.as_str()).cloned().collect();
     net_worth(accounts, &upto).2
 }
 
-/// `(income, expense)` totals for the single month `tag` (`"YYYY-MM"`).
+/// `(income, expense)` totals for the period `tag` — a `ts` prefix (`"YYYY-MM"` month or `"YYYY"` year).
 fn monthly_totals(txns: &[Txn], tag: &str) -> (f64, f64) {
     let mut income = 0.0;
     let mut expense = 0.0;
-    for t in txns.iter().filter(|t| t.ts.get(..7) == Some(tag)) {
+    for t in txns.iter().filter(|t| t.ts.starts_with(tag)) {
         match t.kind {
             TxnKind::Income => income += t.amount,
             TxnKind::Expense => expense += t.amount,
@@ -1528,12 +1557,32 @@ fn monthly_totals(txns: &[Txn], tag: &str) -> (f64, f64) {
     (income, expense)
 }
 
-/// Transactions of `kind` in the given month (`"YYYY-MM"`), summed by the category **actually logged**
-/// (a subcategory shows as itself, not rolled up) and sorted by amount descending.
-fn category_breakdown(model: &Model, kind: TxnKind, month: &str) -> Vec<(String, f64)> {
+/// Transactions of `kind` in `period` (a `ts` prefix — `"YYYY-MM"` month or `"YYYY"` year), rolled up
+/// to the **top-level** category and sorted by amount descending. Subcategories aggregate into their
+/// parent, so the main breakdown stays tidy; [`subcategory_breakdown`] splits one parent back out.
+fn category_breakdown(model: &Model, kind: TxnKind, period: &str) -> Vec<(String, f64)> {
     let mut totals: Vec<(String, f64)> = Vec::new();
-    for t in model.txns.iter().filter(|t| t.kind == kind && t.ts.get(..7) == Some(month)) {
+    for t in model.txns.iter().filter(|t| t.kind == kind && t.ts.starts_with(period)) {
         if t.category.is_empty() {
+            continue;
+        }
+        let name = top_category_name(&model.categories, kind, &t.category);
+        match totals.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, amt)) => *amt += t.amount,
+            None => totals.push((name, t.amount)),
+        }
+    }
+    totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    totals
+}
+
+/// Within the top-level category `top`, the breakdown by the leaf category actually logged (each
+/// subcategory on its own; amounts booked straight to the parent show under `top` itself), sorted
+/// by amount descending — the drill-down behind a tapped slice of [`category_breakdown`].
+fn subcategory_breakdown(model: &Model, kind: TxnKind, period: &str, top: &str) -> Vec<(String, f64)> {
+    let mut totals: Vec<(String, f64)> = Vec::new();
+    for t in model.txns.iter().filter(|t| t.kind == kind && t.ts.starts_with(period)) {
+        if t.category.is_empty() || top_category_name(&model.categories, kind, &t.category) != top {
             continue;
         }
         match totals.iter_mut().find(|(n, _)| *n == t.category) {
@@ -1543,6 +1592,13 @@ fn category_breakdown(model: &Model, kind: TxnKind, month: &str) -> Vec<(String,
     }
     totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     totals
+}
+
+/// Whether `top` has more than its own direct spending in `period` (i.e. real subcategories to drill
+/// into) — so the breakdown row is only made tappable when there's something behind it.
+fn has_subcategory_detail(model: &Model, kind: TxnKind, period: &str, top: &str) -> bool {
+    let subs = subcategory_breakdown(model, kind, period, top);
+    subs.len() > 1 || subs.first().is_some_and(|(n, _)| n != top)
 }
 
 /// The month currently shown on Stats — the saved selection, or the current month if none.
@@ -1571,6 +1627,57 @@ fn fmt_month(model: &Model, ym: &str) -> String {
         (Some(y), Some(m)) => format!("{} {y}", month_name(m, model.locale)),
         _ => ym.to_string(),
     }
+}
+
+/// How many months the ‹ › navigator steps — one month, or a whole year.
+fn stats_step(model: &Model) -> i32 {
+    match model.stats_gran {
+        StatsGran::Month => 1,
+        StatsGran::Year => 12,
+    }
+}
+
+/// The active Stats period as a `ts`-prefix filter: `"YYYY-MM"` in month mode, `"YYYY"` in year mode.
+fn stats_period(model: &Model) -> String {
+    let ym = stats_month(model);
+    match model.stats_gran {
+        StatsGran::Month => ym,
+        StatsGran::Year => ym.get(..4).unwrap_or(&ym).to_string(),
+    }
+}
+
+/// The active Stats period as a localized heading: "June 2026" (month) or "2026" (year).
+fn fmt_period(model: &Model) -> String {
+    let ym = stats_month(model);
+    match model.stats_gran {
+        StatsGran::Month => fmt_month(model, &ym),
+        StatsGran::Year => ym.get(..4).unwrap_or(&ym).to_string(),
+    }
+}
+
+/// The top-level category name for a logged leaf name: a subcategory rolls up to its parent; a
+/// top-level (or an unknown/renamed) name maps to itself. Lets the main breakdown group by parent.
+fn top_category_name(categories: &[Category], kind: TxnKind, leaf: &str) -> String {
+    let k = kind.category_kind();
+    let Some(cat) = categories.iter().find(|c| c.kind == k && c.name == leaf) else {
+        return leaf.to_string();
+    };
+    match cat.parent_id {
+        Some(pid) => categories
+            .iter()
+            .find(|c| c.id == pid)
+            .map_or_else(|| leaf.to_string(), |p| p.name.clone()),
+        None => leaf.to_string(),
+    }
+}
+
+/// The last `n` years as `"YYYY"`, oldest then newest (so 3 from 2026 gives 2024, 2025, 2026).
+fn year_tags(today: &str, n: usize) -> Vec<String> {
+    let Some(y0) = today.get(..4).and_then(|s| s.parse::<i32>().ok()) else {
+        return Vec::new();
+    };
+    let n = i32::try_from(n).unwrap_or(0);
+    (0..n).rev().map(|k| format!("{:04}", y0 - k)).collect()
 }
 
 /// A small flat palette; the Stats donut series and ranked list index into it so the colours line up.
@@ -2050,9 +2157,62 @@ fn assets(model: &Model) -> Widget {
     column(rows)
 }
 
-/// The Stats tab, in two halves: **this month** (navigable ‹ / › with that month's income/expense/net
-/// and a category-breakdown donut + ranked list), and **trends over time** (a 12-month net-worth line
-/// and a 6-month income-vs-expense bar chart) — all from the `Chart` widget.
+/// One ranked-list row under the category breakdown: name · amount · %, plus a chevron when it can be
+/// drilled into its subcategories (in which case the whole row is tappable).
+fn breakdown_row(model: &Model, name: &str, amt: f64, total: f64, drillable: bool) -> Widget {
+    let pct = if total > 0.0 { amt / total * 100.0 } else { 0.0 };
+    let mut content =
+        vec![text(name.to_string()), spacer(Spacing::Md), emphasis(money(model, amt)), caption(format!("{pct:.0}%"))];
+    if drillable {
+        content.push(chevron());
+        card_button(row(content), CardStyle::Filled, Msg::OpenStatsCat(name.to_string()))
+    } else {
+        card(row(content), CardStyle::Filled)
+    }
+}
+
+/// The category-breakdown block: a donut + a ranked card list. At the top level it rolls subcategories
+/// up to their parent (tap a parent that has subcategories to drill in); inside a drill it shows that
+/// parent's subcategories with a Back. `period` is the active `"YYYY-MM"` / `"YYYY"` prefix.
+#[allow(clippy::cast_possible_truncation)] // money f64 → chart f32 is fine for a chart
+fn category_section(model: &Model, kind: TxnKind, period: &str) -> Vec<Widget> {
+    let drilled = model.stats_cat.clone();
+    let rows = match &drilled {
+        Some(top) => subcategory_breakdown(model, kind, period, top),
+        None => category_breakdown(model, kind, period),
+    };
+    let total: f64 = rows.iter().map(|(_, a)| a).sum();
+    let heading = drilled.clone().unwrap_or_else(|| tr(model, "stats.bycategory"));
+
+    let mut out = Vec::new();
+    if let Some(top) = &drilled {
+        out.push(button(format!("‹  {top}"), ButtonStyle::Text, Msg::CloseStatsCat));
+        out.push(spacer(Spacing::Xs));
+    }
+    if rows.is_empty() {
+        let key = if kind == TxnKind::Income { "stats.no_income" } else { "stats.no_expense" };
+        out.push(card(column(vec![subtitle(heading), spacer(Spacing::Sm), caption(tr(model, key))]), CardStyle::Elevated));
+        return out;
+    }
+    let donut = donut_chart(
+        rows.iter()
+            .enumerate()
+            .map(|(i, (n, a))| ChartSeries::new(n.clone(), vec![*a as f32]).with_color(palette(i)))
+            .collect(),
+    );
+    out.push(card(column(vec![subtitle(heading), spacer(Spacing::Sm), donut]), CardStyle::Elevated));
+    out.push(spacer(Spacing::Sm));
+    for (name, amt) in &rows {
+        let drillable = drilled.is_none() && has_subcategory_detail(model, kind, period, name);
+        out.push(breakdown_row(model, name, *amt, total, drillable));
+        out.push(spacer(Spacing::Xs));
+    }
+    out
+}
+
+/// The Stats tab: a **Month / Year** granularity toggle, a ‹ / › period navigator with that period's
+/// income / expense / net, a category-breakdown donut you can **drill into subcategories**, and a
+/// trends section (net-worth line + income-vs-expense bars) that follows the same granularity.
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)] // money f64 → chart f32 is fine here
 fn stats(model: &Model) -> Widget {
     if model.txns.is_empty() {
@@ -2060,18 +2220,23 @@ fn stats(model: &Model) -> Widget {
     }
 
     let kind = model.stats_kind;
-    let month = stats_month(model);
+    let period = stats_period(model);
 
-    // --- This month: a ‹ Month Year › navigator + that month's income / expense / net ---
-    let (income, expense) = monthly_totals(&model.txns, &month);
+    let gran = segmented(vec![
+        segment(tr(model, "stats.month"), model.stats_gran == StatsGran::Month, Msg::SetStatsGran(StatsGran::Month)),
+        segment(tr(model, "stats.year"), model.stats_gran == StatsGran::Year, Msg::SetStatsGran(StatsGran::Year)),
+    ]);
+
+    // --- The period: a ‹ navigator › + that period's income / expense / net ---
+    let (income, expense) = monthly_totals(&model.txns, &period);
     let header = card(
         column(vec![
             row(vec![
-                button("‹", ButtonStyle::Text, Msg::StatsPrevMonth),
+                button("‹", ButtonStyle::Text, Msg::StatsPrev),
                 spacer(Spacing::Md),
-                subtitle(fmt_month(model, &month)),
+                subtitle(fmt_period(model)),
                 spacer(Spacing::Md),
-                button("›", ButtonStyle::Text, Msg::StatsNextMonth),
+                button("›", ButtonStyle::Text, Msg::StatsNext),
             ]),
             spacer(Spacing::Sm),
             row(vec![caption(tr(model, "income")), spacer(Spacing::Md), emphasis(money(model, income))]),
@@ -2082,60 +2247,35 @@ fn stats(model: &Model) -> Widget {
         CardStyle::Filled,
     );
 
-    // Category breakdown for the selected month — donut + ranked list, expense/income toggle.
     let toggle = segmented(vec![
         segment(tr(model, "expense"), kind == TxnKind::Expense, Msg::SetStatsKind(TxnKind::Expense)),
         segment(tr(model, "income"), kind == TxnKind::Income, Msg::SetStatsKind(TxnKind::Income)),
     ]);
-    let breakdown = category_breakdown(model, kind, &month);
-    let total: f64 = breakdown.iter().map(|(_, a)| a).sum();
-    let breakdown_card = if breakdown.is_empty() {
-        card(
-            column(vec![
-                subtitle(tr(model, "stats.bycategory")),
-                spacer(Spacing::Sm),
-                caption(tr(model, if kind == TxnKind::Income { "stats.no_income" } else { "stats.no_expense" })),
-            ]),
-            CardStyle::Elevated,
-        )
-    } else {
-        let donut = donut_chart(
-            breakdown
-                .iter()
-                .enumerate()
-                .map(|(i, (name, amt))| {
-                    ChartSeries::new(name.clone(), vec![*amt as f32]).with_color(palette(i))
-                })
-                .collect(),
-        );
-        let mut items = vec![subtitle(tr(model, "stats.bycategory")), spacer(Spacing::Sm), donut, divider()];
-        for (name, amt) in &breakdown {
-            let pct = if total > 0.0 { amt / total * 100.0 } else { 0.0 };
-            items.push(row(vec![
-                text(name.clone()),
-                spacer(Spacing::Md),
-                emphasis(money(model, *amt)),
-                caption(format!("{pct:.0}%")),
-            ]));
-        }
-        card(column(items), CardStyle::Elevated)
-    };
 
-    // --- Trends over time: net worth (12 months, line) + income vs expense (6 months, bars) ---
-    let line_tags = month_tags(&model.today, 12);
-    let line_labels: Vec<String> = line_tags.iter().map(|t| t.get(5..7).unwrap_or(t).to_string()).collect();
+    // --- Trends: net worth (line) + income vs expense (bars), at the selected granularity ---
+    let (line_tags, bar_tags) = match model.stats_gran {
+        StatsGran::Year => (year_tags(&model.today, 5), year_tags(&model.today, 5)),
+        StatsGran::Month => (month_tags(&model.today, 12), month_tags(&model.today, 6)),
+    };
+    let label = |t: &str| match model.stats_gran {
+        StatsGran::Year => t.to_string(),
+        StatsGran::Month => t.get(5..7).unwrap_or(t).to_string(),
+    };
     let trend = line_tags.iter().map(|t| net_worth_asof(&model.accounts, &model.txns, t) as f32).collect();
     let trend_card = card(
         column(vec![
             subtitle(tr(model, "stats.trend")),
             spacer(Spacing::Sm),
-            chart(vec![ChartSeries::new(tr(model, "networth"), trend)], line_labels, ChartStyle::Line, true, false),
+            chart(
+                vec![ChartSeries::new(tr(model, "networth"), trend)],
+                line_tags.iter().map(|t| label(t)).collect(),
+                ChartStyle::Line,
+                true,
+                false,
+            ),
         ]),
         CardStyle::Elevated,
     );
-
-    let bar_tags = month_tags(&model.today, 6);
-    let bar_labels: Vec<String> = bar_tags.iter().map(|t| t.get(5..7).unwrap_or(t).to_string()).collect();
     let (mut inc, mut exp) = (Vec::new(), Vec::new());
     for t in &bar_tags {
         let (i, e) = monthly_totals(&model.txns, t);
@@ -2151,7 +2291,7 @@ fn stats(model: &Model) -> Widget {
                     ChartSeries::new(tr(model, "income"), inc).with_color(palette(2)),
                     ChartSeries::new(tr(model, "expense"), exp).with_color(palette(1)),
                 ],
-                bar_labels,
+                bar_tags.iter().map(|t| label(t)).collect(),
                 ChartStyle::Bar,
                 true,
                 true,
@@ -2160,19 +2300,15 @@ fn stats(model: &Model) -> Widget {
         CardStyle::Elevated,
     );
 
-    column(vec![
-        header,
-        spacer(Spacing::Sm),
-        toggle,
-        spacer(Spacing::Md),
-        breakdown_card,
-        spacer(Spacing::Lg),
-        subtitle(tr(model, "stats.trends")),
-        spacer(Spacing::Sm),
-        trend_card,
-        spacer(Spacing::Md),
-        bars_card,
-    ])
+    let mut out = vec![gran, spacer(Spacing::Sm), header, spacer(Spacing::Sm), toggle, spacer(Spacing::Md)];
+    out.extend(category_section(model, kind, &period));
+    out.push(spacer(Spacing::Lg));
+    out.push(subtitle(tr(model, "stats.trends")));
+    out.push(spacer(Spacing::Sm));
+    out.push(trend_card);
+    out.push(spacer(Spacing::Md));
+    out.push(bars_card);
+    column(out)
 }
 
 fn account_chips(model: &Model, selected: Option<u32>, on: fn(u32) -> Msg) -> Widget {
@@ -2567,27 +2703,60 @@ mod test {
         assert!((net_worth_asof(&accounts, &txns, "2026-06") - 65.0).abs() < 1e-9);
     }
 
-    #[test]
-    fn category_breakdown_keeps_subcategories_distinct_and_sorts() {
-        let model = Model {
+    fn breakdown_model() -> Model {
+        Model {
             categories: cats(),
             today: "2026-06-10".into(),
-            period: Period::All,
             txns: vec![
-                expense(1, "2026-06-01 12:00:00", 4.0, "Coffee"),     // a subcategory
-                expense(2, "2026-06-02 12:00:00", 6.0, "Groceries"),  // a subcategory
-                expense(3, "2026-06-03 12:00:00", 20.0, "Transport"), // a top-level
+                expense(1, "2026-06-01 12:00:00", 4.0, "Coffee"),       // sub of Food & Drink
+                expense(2, "2026-06-02 12:00:00", 6.0, "Groceries"),    // sub of Food & Drink
+                expense(3, "2026-06-03 12:00:00", 20.0, "Transport"),   // a top-level
+                expense(5, "2025-06-03 12:00:00", 100.0, "Transport"),  // a previous year
                 Txn { id: 4, ts: "2026-06-04 12:00:00".into(), kind: TxnKind::Income, amount: 999.0,
                       account_id: 1, to_account_id: None, category: "Salary".into(), note: String::new() },
             ],
             ..Model::default()
-        };
-        let b = category_breakdown(&model, TxnKind::Expense, "2026-06");
-        // each logged category stands on its own (no roll-up); sorted by amount; income excluded
-        assert_eq!(b.len(), 3);
-        assert_eq!(b[0], ("Transport".to_string(), 20.0));
-        assert_eq!(b[1], ("Groceries".to_string(), 6.0));
-        assert_eq!(b[2], ("Coffee".to_string(), 4.0));
+        }
+    }
+
+    #[test]
+    fn category_breakdown_rolls_subcategories_up_to_the_parent() {
+        let m = breakdown_model();
+        // Coffee + Groceries roll up into Food & Drink (=10); Transport stands alone; sorted desc; income out
+        let b = category_breakdown(&m, TxnKind::Expense, "2026-06");
+        assert_eq!(b, vec![("Transport".to_string(), 20.0), ("Food & Drink".to_string(), 10.0)]);
+        // the year prefix sums every month of 2026 (the 2025 Transport is excluded)
+        assert_eq!(category_breakdown(&m, TxnKind::Expense, "2026")[0], ("Transport".to_string(), 20.0));
+    }
+
+    #[test]
+    fn subcategory_breakdown_splits_one_parent() {
+        let m = breakdown_model();
+        let subs = subcategory_breakdown(&m, TxnKind::Expense, "2026-06", "Food & Drink");
+        assert_eq!(subs, vec![("Groceries".to_string(), 6.0), ("Coffee".to_string(), 4.0)]);
+        // Food & Drink has real subcategories to drill into; Transport (booked directly) does not
+        assert!(has_subcategory_detail(&m, TxnKind::Expense, "2026-06", "Food & Drink"));
+        assert!(!has_subcategory_detail(&m, TxnKind::Expense, "2026-06", "Transport"));
+    }
+
+    #[test]
+    fn top_category_name_resolves_parent_or_self() {
+        let cs = cats();
+        assert_eq!(top_category_name(&cs, TxnKind::Expense, "Coffee"), "Food & Drink"); // sub → parent
+        assert_eq!(top_category_name(&cs, TxnKind::Expense, "Transport"), "Transport"); // top → itself
+        assert_eq!(top_category_name(&cs, TxnKind::Expense, "Gone"), "Gone"); // unknown → itself
+    }
+
+    #[test]
+    fn year_tags_walk_back() {
+        assert_eq!(year_tags("2026-06-10", 3), ["2024", "2025", "2026"]);
+        assert_eq!(year_tags("2026-01-01", 1), ["2026"]);
+        assert!(year_tags("", 5).is_empty());
+        // net worth as-of a year tag counts through year-end
+        let accounts = vec![Account { id: 1, name: "Cash".into(), kind: AccountKind::Asset, opening: 0.0 }];
+        let txns = vec![expense(1, "2026-03-01 12:00:00", 10.0, "Coffee")];
+        assert!((net_worth_asof(&accounts, &txns, "2026") + 10.0).abs() < 1e-9);
+        assert!(net_worth_asof(&accounts, &txns, "2025").abs() < 1e-9);
     }
 
     #[test]
@@ -2630,6 +2799,7 @@ mod test {
             "categories.add", "sheet.newcategory", "sheet.editcategory", "categories.add_sub",
             "categories.subcategories", "categories.name", "action.back", "action.edit",
             "account.delete", "stats.trends", "recurring.created", "recurring.stop",
+            "stats.month", "stats.year",
         ] {
             for langs in SUPPORTED {
                 assert_ne!(c.tr(key, langs), key, "missing {langs} translation for {key}");
