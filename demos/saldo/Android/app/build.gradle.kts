@@ -28,6 +28,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Debug-sign the release build so the shareable APK sideloads onto any device
+            // (a real Play upload uses an upload key; that's the separate release lane).
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
