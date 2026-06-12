@@ -10,8 +10,15 @@ Mobiler's CLI generates a **mobile-only** project — a Rust core plus native iO
 web target:
 
 ```sh
-mobiler new saldo --package rs.mobiler.saldo
+mobiler new saldo --package com.yourname.saldo
 ```
+
+> **Use your own `--package`.** This is the app's bundle identifier (iOS) / application ID (Android),
+> and it must be **globally unique** across the App Store and Google Play. Use a reverse-DNS id you
+> control: a domain you own (`com.acme.saldo`), or — with no domain — something like
+> `io.github.<your-username>.saldo`. Don't ship `com.example.*` or this tutorial's own `rs.mobiler.*`;
+> the stores reject identifiers that are already registered or that you don't own. It's just a string
+> you can change later, but it's simplest to set it correctly now.
 
 You get:
 
