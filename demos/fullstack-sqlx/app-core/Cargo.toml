@@ -12,3 +12,10 @@ domain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 mobiler-core = { path = "../../../mobiler-core" }
+
+# Test-only: drives the app through the real Crux ABI (`MobilerShell` as a
+# `crux_core::App`) so tests can count the effects an `update` call actually enqueues
+# (`Command::effects()`) — `Cx`'s internal request queue is private to mobiler-core, so
+# this is the only way to observe "how many requests were queued" from outside it.
+[dev-dependencies]
+crux_core = "0.18.0"
