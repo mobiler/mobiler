@@ -4,6 +4,14 @@ import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 
+// Keeps every non-HTTP plugin compiling unchanged now that PluginResponse.output is
+// bytes: they all construct responses from Strings.
+extension PluginResponse {
+    init(ok: Bool, output: String) {
+        self.init(ok: ok, output: [UInt8](output.utf8))
+    }
+}
+
 // NOTE (verify on macOS): `SharedTypes` is the facet-generated ABI types package
 // (Widget/Action/Effect/Request/Requests/PluginCall/PluginResponse/...). `CoreFfi`
 // comes from the uniffi-generated bindings for the `shared` crate; depending on the
@@ -175,8 +183,9 @@ enum Plugins {
     }
 }
 
-/// HTTP capability (paired with `cx.http`/`get`/`post`/... in Rust). `op` is the
-/// method; `input` is `{"url": ..., "body": ...}`. Returns the body; `ok` = 2xx.
+/// HTTP capability (paired with `cx.request`/`get`/`post`/`put`/... in Rust). `op` is
+/// the method; `input` is `{"url":..., "headers":[{"name":...,"value":...}], "body":...}`.
+/// Returns a bincode `HttpOutcome` in `output`; `ok` = 2xx.
 enum HttpPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
         guard
@@ -185,22 +194,52 @@ enum HttpPlugin {
             let urlString = obj["url"] as? String,
             let url = URL(string: urlString)
         else {
-            return PluginResponse(ok: false, output: "invalid http request")
+            return transportError("invalid http request envelope")
         }
+
         var req = URLRequest(url: url)
         req.httpMethod = op
+
+        var callerSetContentType = false
+        if let headers = obj["headers"] as? [[String: Any]] {
+            for h in headers {
+                guard let name = h["name"] as? String, let value = h["value"] as? String else { continue }
+                req.addValue(value, forHTTPHeaderField: name)
+                if name.lowercased() == "content-type" { callerSetContentType = true }
+            }
+        }
+
         if let body = obj["body"] as? String {
             req.httpBody = body.data(using: .utf8)
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if !callerSetContentType {
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
         }
+
         do {
             let (respData, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            let ok = (200..<300).contains(code)
-            return PluginResponse(ok: ok, output: String(data: respData, encoding: .utf8) ?? "")
+            guard let http = resp as? HTTPURLResponse else {
+                return transportError("non-HTTP response")
+            }
+            let headers = http.allHeaderFields.compactMap { key, value -> HttpHeader? in
+                guard let name = key as? String else { return nil }
+                return HttpHeader(name: name, value: String(describing: value))
+            }
+            let status = UInt16(http.statusCode)
+            let outcome = HttpOutcome.response(status: status, headers: headers, body: [UInt8](respData))
+            return PluginResponse(ok: (200..<300).contains(http.statusCode), output: encode(outcome))
         } catch {
-            return PluginResponse(ok: false, output: error.localizedDescription)
+            // URLSession throws only when no response was obtained.
+            return transportError(error.localizedDescription)
         }
+    }
+
+    private static func encode(_ outcome: HttpOutcome) -> [UInt8] {
+        (try? outcome.bincodeSerialize()) ?? []
+    }
+
+    private static func transportError(_ message: String) -> PluginResponse {
+        PluginResponse(ok: false, output: encode(.transportError(message: message)))
     }
 }
 
