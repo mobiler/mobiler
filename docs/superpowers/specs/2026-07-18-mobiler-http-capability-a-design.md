@@ -91,10 +91,22 @@ New shared type in `mobiler-core`, bincode-serialized into `PluginResponse.outpu
 code-generated to Swift and Kotlin alongside `Widget`/`Action`:
 
 ```rust
+/// One header. A named struct, not a (String, String) tuple: the shared types
+/// contain no tuples anywhere today (see MapMarker et al.), and tuple codegen
+/// into Swift/Kotlin is the least reliable corner of serde-reflection.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[repr(C)]          // required for Facet enums — cf. Widget, mobiler-ui/src/lib.rs:434
 pub enum HttpOutcome {
     Response {
         status: u16,
-        headers: Vec<(String, String)>,
+        headers: Vec<HttpHeader>,
         body: Vec<u8>,
     },
     /// No HTTP response was obtained — for any reason. Chiefly network failure
@@ -108,6 +120,22 @@ pub enum HttpOutcome {
 Bincode, not JSON-with-base64: encoding the envelope as JSON would force the body
 back through base64 and defeat the reason `output` became bytes. Bincode is already
 the house serialization across the FFI, so the shells have both directions available.
+
+**Use crux's format, never bincode directly.** crux pins bincode `=1.3` and configures
+it `DefaultOptions::new().with_fixint_encoding().allow_trailing_bytes()`
+(`crux_core-0.18.0/src/bridge/formats.rs:8-13`). bincode 2.x's `config::standard()` is
+*varint* — a different wire format. The Swift/Kotlin decoders that serde-generate emits
+expect crux's encoding, so calling bincode directly would compile cleanly and produce
+silent garbage across the FFI. Go through `crux_core::bridge::{BincodeFfiFormat,
+FfiFormat}` (both public), which also means **no new dependency** on any mobiler crate.
+
+**Codegen registration.** `HttpOutcome` is hidden inside a `Vec<u8>`, so
+`TypeRegistry::register_app::<App>()` will **not** reach it. Every app's `codegen.rs`
+must add an explicit `.register_type::<HttpOutcome>()?` (crux_core 0.18
+`type_generation/facet.rs:194`, bound `T: Facet`). That is six files — the five demos
+plus the template — and they are per-app, exactly the class of omission that bit the
+`spm_packages` rollout. Without this the shells have no generated encoder and would
+have to hand-roll bincode in Swift and Kotlin.
 
 Accessors on the core side:
 
