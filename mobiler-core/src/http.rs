@@ -173,7 +173,14 @@ impl<'a, E> RequestBuilder<'a, E> {
 /// opaque "malformed http response".
 fn decode_outcome(r: &PluginResponse) -> HttpOutcome {
     HttpOutcome::decode(&r.output).unwrap_or_else(|e| {
-        let message = r.as_text().map(str::to_string).unwrap_or_else(|| format!("malformed http response: {e}"));
+        // An empty `output` decodes as `Some("")` via `as_text()`, which is not a
+        // diagnostic message worth preferring over the bincode error — only fall back
+        // to the text when there is actually text to show.
+        let message = r
+            .as_text()
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("malformed http response: {e}"));
         HttpOutcome::TransportError { message }
     })
 }
@@ -261,6 +268,21 @@ mod tests {
         let r = PluginResponse { ok: false, output: vec![0xff, 0xfe, 0xfd] };
         match decode_outcome(&r) {
             HttpOutcome::TransportError { message } => {
+                assert!(message.starts_with("malformed http response:"), "got: {message}");
+            }
+            other => panic!("expected TransportError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_outcome_keeps_the_bincode_error_for_an_empty_payload() {
+        // An empty `output` is valid UTF-8 text ("") but that's not a diagnosable
+        // message — `TransportError { message: "" }` would be undebuggable. Preferring
+        // the bincode decode error keeps the failure self-diagnosing.
+        let r = PluginResponse { ok: false, output: Vec::new() };
+        match decode_outcome(&r) {
+            HttpOutcome::TransportError { message } => {
+                assert!(!message.is_empty(), "expected a diagnostic message, got empty string");
                 assert!(message.starts_with("malformed http response:"), "got: {message}");
             }
             other => panic!("expected TransportError, got {other:?}"),

@@ -106,7 +106,13 @@ impl MobilerApp for Notes {
                     model.error = None;
                 }
             }
-            Msg::Failed(e) => model.error = Some(e),
+            Msg::Failed(e) => {
+                model.error = Some(e);
+                // Any failed mutation (e.g. the optimistic delete below) can leave the
+                // in-memory list out of sync with the server, so reconcile by
+                // refetching — same as a plain `Msg::Refresh`.
+                self.update(Msg::Refresh, model, cx);
+            }
             Msg::Delete(id) => {
                 model.notes.retain(|n| n.id != id); // optimistic
                 cx.delete(format!("{API}/notes/{id}"), |r| {
@@ -195,6 +201,23 @@ mod tests {
         app.update(Msg::Delete(1), &mut m, &mut Cx::default());
         assert_eq!(m.notes.len(), 1);
         assert_eq!(m.notes[0].id, 2);
+    }
+
+    #[test]
+    fn failed_delete_reports_the_error_and_reconciles_with_the_server() {
+        let app = Notes;
+        let mut m = Model::default();
+        m.notes = vec![Note { id: 1, title: "a".into(), body: "".into() }];
+        // The delete removed the note optimistically...
+        app.update(Msg::Delete(1), &mut m, &mut Cx::default());
+        assert!(m.notes.is_empty());
+        // ...but the server-side delete failed: the error must be reported, and the
+        // reconciling refetch restores the note (as if `Msg::Refresh` ran).
+        let mut cx = Cx::default();
+        app.update(Msg::Failed("server returned 500".into()), &mut m, &mut cx);
+        assert_eq!(m.error.as_deref(), Some("server returned 500"));
+        app.update(Msg::GotNotes(serde_json::to_string(&vec![Note { id: 1, title: "a".into(), body: "".into() }]).unwrap()), &mut m, &mut cx);
+        assert_eq!(m.notes.len(), 1, "the reconciling refresh must restore the note the server still has");
     }
 
     #[test]
