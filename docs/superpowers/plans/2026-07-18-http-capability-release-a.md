@@ -1057,15 +1057,26 @@ cx.get(format!("{API}/notes"), |r| {
 
 Apply the same shape at line 60 (`cx.post`) and line 74 (`cx.delete`). In `demos/fullstack-todo/todo-core/src/lib.rs`, update lines 55, 103, 106 and 122 the same way — `parse_list(&resp)` and `after_mutation` now take an `HttpOutcome`, so change their signatures and read the body via `.text().unwrap_or_default()`.
 
-- [ ] **Step 2: Verify the whole workspace**
+- [ ] **Step 2: Verify every workspace**
+
+`mobiler-web` and each demo are **separate workspaces** — the root workspace is only
+`["mobiler", "mobiler-ui", "mobiler-core", "xtask"]`, so `--workspace` from the root
+does **not** cover them and stayed green even mid-migration. Build each explicitly:
 
 ```bash
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace -- -D warnings
+# root workspace
+cargo build --workspace && cargo test --workspace && cargo clippy --workspace -- -D warnings
+
+# standalone: web shell
+(cd mobiler-web && cargo check --target wasm32-unknown-unknown && cargo clippy -- -D warnings)
+
+# standalone: every demo
+for d in demos/*/ demos/*/mobile/; do
+  [ -f "$d/Cargo.toml" ] && (cd "$d" && echo "--- $d" && cargo build && cargo test) || true
+done
 ```
 
-Expected: all clean. This is the first point where a workspace-wide build should succeed.
+Expected: all clean. This is the first point at which every workspace builds.
 
 - [ ] **Step 3: Bump versions**
 
