@@ -347,7 +347,9 @@ class HttpPlugin : MobilerPlugin {
             val mediaType = if (callerSetContentType) null else "application/json".toMediaType()
             val reqBody = when {
                 bodyStr != null -> bodyStr.toRequestBody(mediaType)
-                needsBody -> "".toRequestBody(mediaType)
+                // A bodyless PUT/POST/PATCH must send no Content-Type at all — matching
+                // iOS's addValue and web's fetch, which both omit it for an empty body.
+                needsBody -> "".toRequestBody(null)
                 else -> null
             }
 

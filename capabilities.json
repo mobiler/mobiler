@@ -1,7 +1,7 @@
 {
   "_comment": "Single source of truth for Mobiler's built-in capabilities. Edit here, then run `cargo run -p xtask -- gen-readme` to rebuild the capability sections of the READMEs (CI runs `--check` to keep them in sync). This file is PUBLIC: free + shipped (and planned-free) capabilities only. The paid/monetization roadmap lives in the gitignored capabilities-private.json. Fields: name, short (lowercase phrase for inline prose), api (rendered as a code span), plugin (the {plugin} in the {plugin,op,input} envelope), tier (free|paid), status (shipped|in-progress|planned), since (version), notes (table cell).",
   "capabilities": [
-    { "name": "HTTP", "short": "HTTP", "api": "cx.get / cx.post / cx.patch / cx.delete", "plugin": "http", "tier": "free", "status": "shipped", "since": "0.4.0", "notes": "request/response (JSON)" },
+    { "name": "HTTP", "short": "HTTP", "api": "cx.get / cx.post / cx.put / cx.patch / cx.delete / cx.request (builder)", "plugin": "http", "tier": "free", "status": "shipped", "since": "0.4.0", "notes": "headers + byte body/response" },
     { "name": "Storage", "short": "storage", "api": "cx.save (+ restore on launch)", "plugin": "storage", "tier": "free", "status": "shipped", "since": "0.3.0", "notes": "persist the model" },
     { "name": "Clipboard", "short": "clipboard", "api": "cx.copy(text)", "plugin": "clipboard", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "copy text" },
     { "name": "Share", "short": "share", "api": "cx.share(text)", "plugin": "share", "tier": "free", "status": "shipped", "since": "0.7.0", "notes": "system share sheet" },

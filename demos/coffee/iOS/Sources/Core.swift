@@ -207,7 +207,9 @@ enum HttpPlugin {
                 guard let name = key as? String else { return nil }
                 return HttpHeader(name: name, value: String(describing: value))
             }
-            let status = UInt16(http.statusCode)
+            // Clamp rather than trap: `UInt16(_:)` crashes on an out-of-range status
+            // code, and a hard crash in the shell is worse than a clamped value.
+            let status = UInt16(clamping: http.statusCode)
             let outcome = HttpOutcome.response(status: status, headers: headers, body: [UInt8](respData))
             return PluginResponse(ok: (200..<300).contains(http.statusCode), output: encode(outcome))
         } catch {

@@ -452,13 +452,20 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     // Only default Content-Type when the caller did not set one.
     let caller_set_content_type =
         req_headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("content-type"));
-    let mut builder = builder;
+
+    // `RequestBuilder::header` maps to `web_sys::Headers::set`, which REPLACES
+    // any existing value for that name — unlike iOS's `addValue` and Android's
+    // `addHeader`, which both APPEND. Build a `gloo_net::http::Headers` and
+    // `append` into it instead, so repeated names (Set-Cookie, Accept) survive
+    // on web the same way they do on the native shells.
+    let gloo_headers = gloo_net::http::Headers::new();
     for (name, value) in &req_headers {
-        builder = builder.header(name, value);
+        gloo_headers.append(name, value);
     }
     if body.is_some() && !caller_set_content_type {
-        builder = builder.header("Content-Type", "application/json");
+        gloo_headers.append("Content-Type", "application/json");
     }
+    let builder = builder.headers(gloo_headers);
 
     let request = match body {
         Some(b) => builder.body(b),
@@ -477,9 +484,15 @@ async fn perform(call: &PluginCall) -> PluginResponse {
                 .entries()
                 .map(|(name, value)| HttpHeader { name, value })
                 .collect();
-            let bytes = resp.binary().await.unwrap_or_default();
-            let outcome = HttpOutcome::Response { status, headers, body: bytes };
-            PluginResponse { ok: (200..300).contains(&status), output: outcome.encode() }
+            match resp.binary().await {
+                Ok(bytes) => {
+                    let outcome = HttpOutcome::Response { status, headers, body: bytes };
+                    PluginResponse { ok: (200..300).contains(&status), output: outcome.encode() }
+                }
+                // A body-read failure (truncated/aborted stream) is a transport
+                // failure, not a successful empty response — match native shells.
+                Err(e) => http_transport_error(e.to_string()),
+            }
         }
         Err(e) => http_transport_error(e.to_string()),
     }

@@ -57,7 +57,9 @@ impl HttpOutcome {
         }
     }
 
-    /// The body as text, or `None` if it is not valid UTF-8 (or there is no body).
+    /// The body as text, or `None` if it is not valid UTF-8 or this is a
+    /// `TransportError` (which has no body at all). An empty-but-present body
+    /// returns `Some("")`, not `None`.
     pub fn text(&self) -> Option<&str> {
         std::str::from_utf8(self.body()).ok().filter(|_| matches!(self, Self::Response { .. }))
     }
@@ -163,11 +165,17 @@ impl<'a, E> RequestBuilder<'a, E> {
 /// Decode what the shell put in `PluginResponse.output`. A shell that returns
 /// something undecodable is a bug, but it must not panic the app — surface it as a
 /// transport error instead.
+///
+/// When the payload is valid UTF-8 text rather than a bincode `HttpOutcome` — e.g. an
+/// old shell that predates this capability, or a "plugin not available" message from a
+/// shell with no `http` plugin registered — surface that text verbatim instead of the
+/// bincode decode error, so version skew is self-diagnosing rather than reading as an
+/// opaque "malformed http response".
 fn decode_outcome(r: &PluginResponse) -> HttpOutcome {
-    HttpOutcome::decode(&r.output)
-        .unwrap_or_else(|e| HttpOutcome::TransportError {
-            message: format!("malformed http response: {e}"),
-        })
+    HttpOutcome::decode(&r.output).unwrap_or_else(|e| {
+        let message = r.as_text().map(str::to_string).unwrap_or_else(|| format!("malformed http response: {e}"));
+        HttpOutcome::TransportError { message }
+    })
 }
 
 #[cfg(test)]
@@ -233,5 +241,29 @@ mod tests {
     #[test]
     fn decode_rejects_garbage_without_panicking() {
         assert!(HttpOutcome::decode(&[0xff, 0xff, 0xff]).is_err());
+    }
+
+    #[test]
+    fn decode_outcome_falls_back_to_plain_text_for_undecodable_utf8_payloads() {
+        // A shell that returns a plain-text message instead of a bincode HttpOutcome
+        // (old shell after a core upgrade, or "plugin not available") should have that
+        // message surface verbatim, not get replaced by an opaque bincode error.
+        let r = PluginResponse::text(false, "plugin 'http' not available");
+        match decode_outcome(&r) {
+            HttpOutcome::TransportError { message } => {
+                assert_eq!(message, "plugin 'http' not available");
+            }
+            other => panic!("expected TransportError, got {other:?}"),
+        }
+
+        // Genuinely undecodable, non-UTF-8 bytes still produce a diagnosable message
+        // rather than panicking.
+        let r = PluginResponse { ok: false, output: vec![0xff, 0xfe, 0xfd] };
+        match decode_outcome(&r) {
+            HttpOutcome::TransportError { message } => {
+                assert!(message.starts_with("malformed http response:"), "got: {message}");
+            }
+            other => panic!("expected TransportError, got {other:?}"),
+        }
     }
 }

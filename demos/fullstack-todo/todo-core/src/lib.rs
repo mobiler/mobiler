@@ -70,9 +70,21 @@ fn parse_list(resp: &HttpOutcome) -> Msg {
     }
 }
 
+/// A meaningful message for a non-success outcome: branches on the variant so a real
+/// transport failure ("connection refused") is never rendered as the generic "request
+/// failed" a plain `.text()` call would produce (transport errors have no body).
 fn err_of(resp: &HttpOutcome) -> String {
-    let body = resp.text().unwrap_or_default();
-    if body.is_empty() { "request failed".to_string() } else { body.to_string() }
+    match resp {
+        HttpOutcome::TransportError { message } => format!("network error: {message}"),
+        HttpOutcome::Response { status, .. } => {
+            let body = resp.text().unwrap_or_default();
+            if body.is_empty() {
+                format!("server returned {status}")
+            } else {
+                format!("server returned {status}: {body}")
+            }
+        }
+    }
 }
 
 impl MobilerApp for TodoApp {
@@ -203,5 +215,14 @@ mod test {
         let mut m = Model::default();
         app.input("new", InputValue::Text("milk".into()), &mut m, &mut Cx::default());
         assert_eq!(m.input, "milk");
+    }
+
+    #[test]
+    fn err_of_distinguishes_transport_failure_from_bad_status() {
+        let transport = HttpOutcome::TransportError { message: "connection refused".into() };
+        assert_eq!(err_of(&transport), "network error: connection refused");
+
+        let not_found = HttpOutcome::Response { status: 404, headers: vec![], body: b"missing".to_vec() };
+        assert_eq!(err_of(&not_found), "server returned 404: missing");
     }
 }
