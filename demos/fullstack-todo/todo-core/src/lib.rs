@@ -7,9 +7,9 @@
 
 use domain::{NewTodo, Todo, TodoPatch, TODOS_PATH, active_count};
 use mobiler_core::{
-    ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, PluginResponse,
-    Spacing, Tone, Widget, badge, button, caption, card, checkbox, column, icon_button, row,
-    scaffold, spacer, text, text_field, title,
+    ButtonStyle, CardStyle, Cx, HttpOutcome, Icon, InputValue, MobilerApp, MobilerShell, Spacing,
+    Tone, Widget, badge, button, caption, card, checkbox, column, icon_button, row, scaffold,
+    spacer, text, text_field, title,
 };
 use serde::{Deserialize, Serialize};
 
@@ -56,22 +56,23 @@ fn load(cx: &mut Cx<Msg>) {
 }
 
 /// Continuation for mutations (POST/PATCH/DELETE): on success, refetch the list.
-fn after_mutation(resp: PluginResponse) -> Msg {
-    if resp.ok { Msg::Reload } else { Msg::Failed(err_of(&resp)) }
+fn after_mutation(resp: HttpOutcome) -> Msg {
+    if resp.is_success() { Msg::Reload } else { Msg::Failed(err_of(&resp)) }
 }
 
-fn parse_list(resp: &PluginResponse) -> Msg {
-    if !resp.ok {
+fn parse_list(resp: &HttpOutcome) -> Msg {
+    if !resp.is_success() {
         return Msg::Failed(err_of(resp));
     }
-    match serde_json::from_str::<Vec<Todo>>(&resp.output) {
+    match serde_json::from_str::<Vec<Todo>>(resp.text().unwrap_or_default()) {
         Ok(todos) => Msg::Loaded(todos),
         Err(e) => Msg::Failed(format!("parse error: {e}")),
     }
 }
 
-fn err_of(resp: &PluginResponse) -> String {
-    if resp.output.is_empty() { "request failed".to_string() } else { resp.output.clone() }
+fn err_of(resp: &HttpOutcome) -> String {
+    let body = resp.text().unwrap_or_default();
+    if body.is_empty() { "request failed".to_string() } else { body.to_string() }
 }
 
 impl MobilerApp for TodoApp {

@@ -140,12 +140,12 @@ impl MobilerApp for Coffee {
             Msg::OpenRecipe => cx.open_url("https://en.wikipedia.org/wiki/Coffee"),
             Msg::ToastHi => cx.toast("Brewing… ☕ (toast from the Rust core)"),
             Msg::Tap => cx.haptic("medium"),
-            Msg::WhatDevice => cx.device_model(|r| Msg::GotDevice(r.output)),
+            Msg::WhatDevice => cx.device_model(|r| Msg::GotDevice(r.as_text().unwrap_or_default().to_string())),
             Msg::GotDevice(info) => model.device_info = info,
             Msg::AskConfirm => cx.confirm("Add to cart?", "Add this coffee to your order?", |r| Msg::Confirmed(r.ok)),
             Msg::Confirmed(ok) => cx.toast(if ok { "Added to cart ✓" } else { "Cancelled" }),
-            Msg::PickPhoto => cx.pick_photo(|r| Msg::GotPhoto(if r.ok { r.output } else { String::new() })),
-            Msg::CapturePhoto => cx.capture_photo(|r| Msg::GotPhoto(if r.ok { r.output } else { String::new() })),
+            Msg::PickPhoto => cx.pick_photo(|r| Msg::GotPhoto(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })),
+            Msg::CapturePhoto => cx.capture_photo(|r| Msg::GotPhoto(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })),
             Msg::GotPhoto(uri) => {
                 if !uri.is_empty() {
                     model.picked_photo = Some(uri);
@@ -154,7 +154,8 @@ impl MobilerApp for Coffee {
             // Scanner plugin (free, bundled). Returns "<format>:<value>" (e.g. "qr:…",
             // "ean13:…"); on cancel / no camera / denied it returns ok:false (output = reason).
             Msg::ScanCode => cx.plugin("scanner", "scan", "", |r| {
-                Msg::GotScan(if r.ok { r.output } else { format!("(no scan: {})", r.output) })
+                let text = r.as_text().unwrap_or_default();
+                Msg::GotScan(if r.ok { text.to_string() } else { format!("(no scan: {text})") })
             }),
             Msg::GotScan(result) => model.scanned = Some(result),
             // Auth demo: store a secret in the keychain/keystore, then require a biometric
@@ -175,14 +176,14 @@ impl MobilerApp for Coffee {
                 if resp.ok {
                     cx.plugin("securestore", "get", r#"{"key":"demo"}"#, Msg::RevealedSecret);
                 } else {
-                    model.secret_status = Some(format!("Auth failed: {}", resp.output));
+                    model.secret_status = Some(format!("Auth failed: {}", resp.as_text().unwrap_or_default()));
                 }
             }
             Msg::RevealedSecret(resp) => {
                 model.secret_status = Some(if resp.ok {
-                    format!("Unlocked secret: {}", resp.output)
+                    format!("Unlocked secret: {}", resp.as_text().unwrap_or_default())
                 } else {
-                    format!("Read failed: {}", resp.output)
+                    format!("Read failed: {}", resp.as_text().unwrap_or_default())
                 });
             }
             // WebSocket echo: connect → on open, send "hello from mobiler" → recv the echo.
@@ -196,13 +197,13 @@ impl MobilerApp for Coffee {
                     cx.plugin("websocket", "recv", "", Msg::WsFrame);
                     cx.plugin("websocket", "send", "hello from mobiler", Msg::WsSent);
                 } else {
-                    model.ws_status = Some(format!("WS connect failed: {}", resp.output));
+                    model.ws_status = Some(format!("WS connect failed: {}", resp.as_text().unwrap_or_default()));
                 }
             }
             Msg::WsSent(_) => {}
             Msg::WsFrame(resp) => {
                 model.ws_status = Some(if resp.ok {
-                    format!("Echo: {}", resp.output)
+                    format!("Echo: {}", resp.as_text().unwrap_or_default())
                 } else {
                     "WS closed".into()
                 });
@@ -227,14 +228,14 @@ impl MobilerApp for Coffee {
                         Msg::NotifScheduled,
                     );
                 } else {
-                    model.notif_status = Some(format!("Notifications not allowed: {}", resp.output));
+                    model.notif_status = Some(format!("Notifications not allowed: {}", resp.as_text().unwrap_or_default()));
                 }
             }
             Msg::NotifScheduled(resp) => {
                 model.notif_status = Some(if resp.ok {
                     "Reminder set — background the app to see it fire".into()
                 } else {
-                    format!("Schedule failed: {}", resp.output)
+                    format!("Schedule failed: {}", resp.as_text().unwrap_or_default())
                 });
             }
         }

@@ -441,10 +441,10 @@ impl MobilerApp for SaldoApp {
 
     fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
         cx.plugin("sqlite", "query", "PRAGMA user_version", |r| {
-            Msg::Schema(if r.ok { r.output } else { "[]".to_string() })
+            Msg::Schema(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
         });
-        cx.now(|r| Msg::GotToday(r.output));
-        cx.device_locale(|r| Msg::GotLocale(r.output));
+        cx.now(|r| Msg::GotToday(r.as_text().unwrap_or_default().to_string()));
+        cx.device_locale(|r| Msg::GotLocale(r.as_text().unwrap_or_default().to_string()));
     }
 
     #[allow(clippy::too_many_lines)]
@@ -503,7 +503,7 @@ impl MobilerApp for SaldoApp {
                 })
                 .to_string();
                 cx.plugin("picker", "choose", input, |r| {
-                    Msg::LanguagePicked(if r.ok { r.output } else { String::new() })
+                    Msg::LanguagePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
                 });
             }
             Msg::LanguagePicked(s) => {
@@ -521,7 +521,7 @@ impl MobilerApp for SaldoApp {
                 })
                 .to_string();
                 cx.plugin("picker", "choose", input, |r| {
-                    Msg::CurrencyPicked(if r.ok { r.output } else { String::new() })
+                    Msg::CurrencyPicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
                 });
             }
             Msg::CurrencyPicked(s) => {
@@ -634,7 +634,7 @@ impl MobilerApp for SaldoApp {
                 model.form_error = None;
             }
             Msg::SetFreq(f) => model.draft_freq = f,
-            Msg::PickDate => cx.pick_date(|r| Msg::DatePicked(if r.ok { r.output } else { String::new() })),
+            Msg::PickDate => cx.pick_date(|r| Msg::DatePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })),
             Msg::DatePicked(date) => {
                 if !date.is_empty() {
                     model.draft_date = date;
@@ -919,12 +919,12 @@ impl MobilerApp for SaldoApp {
             }
             // Restore: pick a backup file → read it → replace every table from it → reload.
             Msg::Restore => cx.plugin("filepicker", "pick", "", |r| {
-                if r.ok { Msg::RestorePicked(r.output) } else { Msg::ExportDone(false) }
+                if r.ok { Msg::RestorePicked(r.as_text().unwrap_or_default().to_string()) } else { Msg::ExportDone(false) }
             }),
             Msg::RestorePicked(uri) => {
                 let sql = serde_json::json!({ "path": uri }).to_string();
                 cx.plugin("files", "read", sql, |r| {
-                    if r.ok { Msg::RestoreRead(r.output) } else { Msg::RestoreRead(String::new()) }
+                    if r.ok { Msg::RestoreRead(r.as_text().unwrap_or_default().to_string()) } else { Msg::RestoreRead(String::new()) }
                 });
             }
             Msg::RestoreRead(json) => match serde_json::from_str::<Backup>(&json) {
@@ -1039,19 +1039,19 @@ fn run_migration(model: &mut Model, cx: &mut Cx<Msg>) {
 
 fn load_all(cx: &mut Cx<Msg>) {
     cx.plugin("sqlite", "query", LOAD_ACCOUNTS, |r| {
-        Msg::AccountsLoaded(if r.ok { r.output } else { "[]".to_string() })
+        Msg::AccountsLoaded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
     });
     cx.plugin("sqlite", "query", LOAD_CATEGORIES, |r| {
-        Msg::CategoriesLoaded(if r.ok { r.output } else { "[]".to_string() })
+        Msg::CategoriesLoaded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
     });
     cx.plugin("sqlite", "query", LOAD_TXNS, |r| {
-        Msg::Loaded(if r.ok { r.output } else { "[]".to_string() })
+        Msg::Loaded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
     });
     cx.plugin("sqlite", "query", LOAD_RECURRING, |r| {
-        Msg::RecurringLoaded(if r.ok { r.output } else { "[]".to_string() })
+        Msg::RecurringLoaded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
     });
     cx.plugin("sqlite", "query", LOAD_SETTINGS, |r| {
-        Msg::SettingsLoaded(if r.ok { r.output } else { "[]".to_string() })
+        Msg::SettingsLoaded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
     });
 }
 

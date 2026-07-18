@@ -36,13 +36,17 @@ impl MobilerApp for Notes {
     type Model = Model;
 
     fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
-        cx.get(format!("{API}/notes"), |r| Msg::GotNotes(if r.ok { r.output } else { String::new() }));
+        cx.get(format!("{API}/notes"), |r| {
+            Msg::GotNotes(r.text().unwrap_or_default().to_string())
+        });
     }
 
     fn update(&self, msg: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match msg {
             Msg::Refresh => {
-                cx.get(format!("{API}/notes"), |r| Msg::GotNotes(if r.ok { r.output } else { String::new() }));
+                cx.get(format!("{API}/notes"), |r| {
+                    Msg::GotNotes(r.text().unwrap_or_default().to_string())
+                });
             }
             Msg::GotNotes(body) => match serde_json::from_str::<Vec<Note>>(&body) {
                 Ok(notes) => {
@@ -58,7 +62,7 @@ impl MobilerApp for Notes {
                     let new = NewNote { title: t.to_string(), body: model.draft_body.trim().to_string() };
                     let payload = serde_json::to_string(&new).unwrap_or_default();
                     cx.post(format!("{API}/notes"), payload, |r| {
-                        Msg::Added(if r.ok { r.output } else { String::new() })
+                        Msg::Added(r.text().unwrap_or_default().to_string())
                     });
                 }
             }
