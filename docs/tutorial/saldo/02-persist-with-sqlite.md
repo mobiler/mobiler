@@ -36,7 +36,7 @@ A finance app stamps each entry with the date it happened — but the pure core 
 
 ```rust
 // in mobiler_core: a built-in `datetime` op with no UI
-cx.now(|r| Msg::Stamped(r.output)); // r.output = "YYYY-MM-DD HH:MM:SS" (local)
+cx.now(|r| Msg::Stamped(r.as_text().unwrap_or_default().to_string())); // "YYYY-MM-DD HH:MM:SS" (local)
 ```
 
 `cx.now()` resolves immediately (no picker) with a sortable local timestamp — and its first 10
@@ -57,7 +57,7 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS expense(\
 ```rust
 fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
     cx.plugin("sqlite", "exec", SCHEMA, |_| Msg::Reload); // create, then load
-    cx.now(|r| Msg::GotToday(r.output));                  // stamp "today" for the filter
+    cx.now(|r| Msg::GotToday(r.as_text().unwrap_or_default().to_string())); // stamp "today" for the filter
 }
 ```
 
@@ -74,7 +74,7 @@ Msg::Save => {
         cx.notify("toast", "show", "Enter an amount greater than zero.");
         return;
     }
-    cx.now(|r| Msg::Stamped(if r.ok { r.output } else { String::new() }));
+    cx.now(|r| Msg::Stamped(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
 }
 Msg::Stamped(ts) => {
     // bound parameters — never concatenate user text into SQL
@@ -105,7 +105,7 @@ Msg::Delete(id) => {
 fn load(cx: &mut Cx<Msg>) {
     cx.plugin("sqlite", "query",
         "SELECT id, ts, amount, category, note FROM expense ORDER BY ts DESC",
-        |r| Msg::Loaded(if r.ok { r.output } else { "[]".to_string() }));
+        |r| Msg::Loaded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() }));
 }
 ```
 

@@ -11,7 +11,7 @@ identical — install **`geolocation` OR `geolocation-fused`**, not both.
 
 ```rust
 cx.plugin("geolocation", "get", "", Msg::GotLocation),
-Msg::GotLocation(r) => if r.ok { /* r.output = "lat,lng" */ },
+Msg::GotLocation(r) => if r.ok { /* r.as_text() = "lat,lng" */ },
 ```
 
 - **Android** — `FusedLocationProviderClient.getCurrentLocation(PRIORITY_HIGH_ACCURACY)` (falls back to

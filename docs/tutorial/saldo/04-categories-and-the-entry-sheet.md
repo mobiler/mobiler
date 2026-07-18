@@ -82,7 +82,7 @@ with the system date picker — that's the built-in `cx.pick_date` capability fr
 plugin:
 
 ```rust
-Msg::PickDate         => cx.pick_date(|r| Msg::DatePicked(if r.ok { r.output } else { String::new() })),
+Msg::PickDate         => cx.pick_date(|r| Msg::DatePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })),
 Msg::DatePicked(date) => if !date.is_empty() { model.draft_date = date; },
 ```
 

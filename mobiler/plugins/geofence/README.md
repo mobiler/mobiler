@@ -36,8 +36,8 @@ cx.plugin("geofence", "stopSignificantChanges", "", Msg::Noop),
 //    a dead process (buffered by the shell) isn't missed.
 cx.subscribe("geofence", "geofence", "events", "", Msg::GeoEvent),
 Msg::GeoEvent(r) => if r.ok {
-    // r.output = {"type":"geofence","id":"shop","event":"enter"|"exit"}
-    //         or {"type":"location","lat":..,"lng":..}
+    // r.as_text() = {"type":"geofence","id":"shop","event":"enter"|"exit"}
+    //            or {"type":"location","lat":..,"lng":..}
 },
 ```
 

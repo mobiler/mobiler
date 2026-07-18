@@ -17,13 +17,13 @@ surfaces, both riding existing Mobiler primitives (no ABI change):
 ```rust
 // 1) Get the device token (one-shot) → POST it (with your tenant) to your backend.
 cx.plugin("push", "register", "", Msg::PushToken),
-Msg::PushToken(r) => if r.ok { /* r.output = {"token":"…","platform":"apns"|"fcm"} */ },
+Msg::PushToken(r) => if r.ok { /* r.as_text() = {"token":"…","platform":"apns"|"fcm"} */ },
 
 // 2) Subscribe to inbound pushes (the streaming primitive) — do this at startup so a tap that
 //    launched the app (buffered by the shell) isn't missed.
 cx.subscribe("push", "push", "events", "", Msg::PushEvent),
 Msg::PushEvent(r) => if r.ok {
-    // r.output = the notification's JSON payload (foreground-received OR tapped),
+    // r.as_text() = the notification's JSON payload (foreground-received OR tapped),
     //            or {"type":"token_refresh","token":"…"} when the OS rotates the token.
 },
 ```
@@ -79,5 +79,5 @@ curl -X POST -H "Authorization: Bearer <oauth-token>" -H "Content-Type: applicat
 
 - Requires `POST_NOTIFICATIONS` (Android 13+, added by the plugin) and notification authorization
   (requested by `register`).
-- Tenant scoping is app-side: POST `{token, tenant, platform}` to your backend via `cx.http` and let
+- Tenant scoping is app-side: POST `{token, tenant, platform}` to your backend via `cx.post`/`cx.request` and let
   the backend target the right device set.

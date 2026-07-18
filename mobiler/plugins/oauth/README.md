@@ -14,15 +14,15 @@ let url = format!(
 let input = serde_json::json!({ "url": url, "scheme": SCHEME }).to_string();
 cx.plugin("oauth", "login", input, Msg::LoggedIn);
 
-// 2. On success, r.output is the redirect URL — parse `code`+`state`, then exchange via cx.http
-//    (POST the token endpoint) and store the tokens with the `securestore` plugin.
-Msg::LoggedIn(r) => { if r.ok { /* parse code from r.output */ } else { /* r.output = "cancelled"/error */ } }
+// 2. On success, r.as_text() is the redirect URL — parse `code`+`state`, then exchange via
+//    cx.request/cx.post (POST the token endpoint) and store the tokens with the `securestore` plugin.
+Msg::LoggedIn(r) => { if r.ok { /* parse code from r.as_text() */ } else { /* r.as_text() = "cancelled"/error */ } }
 ```
 
 - `op` = `login`; `input` = JSON `{"url": "<authorize URL>", "scheme": "<callback scheme>"}`.
   `ok:true` → `output` is the full redirect URL (`"<scheme>://oauth?code=…&state=…"`); `ok:false`
   → `"cancelled"` (user dismissed) or an error message.
-- **This plugin owns only the browser redirect step.** Token exchange is `cx.http`; token storage
+- **This plugin owns only the browser redirect step.** Token exchange is `cx.request`/`cx.post`; token storage
   is the `securestore` plugin; PKCE/`state` are built into the authorize URL by your core. See
   `app-core-usage.rs` for the full compose.
 - **iOS:** `ASWebAuthenticationSession` (system `AuthenticationServices`) — a private, SSO-capable

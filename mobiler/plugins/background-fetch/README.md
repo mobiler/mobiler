@@ -26,7 +26,7 @@ cx.plugin("background-fetch", "cancel", r#"{"id":"refresh"}"#, Msg::Noop),
 // 2) Subscribe to wake events — do this at startup so a wake that ran while the app was dead
 //    (buffered by the shell) isn't missed.
 cx.subscribe("background-fetch", "background-fetch", "events", "", Msg::Fetch),
-Msg::Fetch(r) => if r.ok { /* r.output = {"type":"fetch","id":"refresh"} → re-fetch your data */ },
+Msg::Fetch(r) => if r.ok { /* r.as_text() = {"type":"fetch","id":"refresh"} → re-fetch your data */ },
 ```
 
 See `app-core-usage.rs` for a fuller `update`-loop example.

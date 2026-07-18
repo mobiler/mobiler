@@ -6,7 +6,7 @@ mobiler plugin add biometric
 
 ```rust
 cx.plugin("biometric", "authenticate", "Unlock your account", Msg::Authed),
-Msg::Authed(resp) => { if resp.ok { /* unlocked */ } else { /* resp.output = reason */ } }
+Msg::Authed(resp) => { if resp.ok { /* unlocked */ } else { /* resp.as_text() = reason */ } }
 ```
 
 - `op` = `authenticate`; `input` = the prompt title/reason (optional). `ok:true` on success;
