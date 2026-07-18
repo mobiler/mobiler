@@ -7,6 +7,8 @@
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
+use crate::{Cx, PluginResponse};
+
 /// One HTTP header.
 ///
 /// A named struct rather than a `(String, String)` tuple: the shared types contain no
@@ -90,6 +92,80 @@ impl HttpOutcome {
         use crux_core::bridge::{BincodeFfiFormat, FfiFormat};
         BincodeFfiFormat::deserialize(bytes).map_err(|e| e.to_string())
     }
+}
+
+/// Wire shape of the HTTP request envelope, serialized into `PluginCall.input`.
+/// Unknown fields are ignored by older shells, so this can grow without an ABI bump.
+#[derive(Serialize)]
+struct HttpReq {
+    url: String,
+    headers: Vec<HttpHeader>,
+    body: Option<String>,
+}
+
+/// Builds one HTTP request. Obtained from [`Cx::request`]; finished with
+/// [`send`](Self::send).
+///
+/// A builder rather than more arguments on `http()`: it lets later additions
+/// (timeouts, query params) arrive as new links in the chain instead of bumping the
+/// arity of every existing call site.
+pub struct RequestBuilder<'a, E> {
+    cx: &'a mut Cx<E>,
+    method: String,
+    url: String,
+    headers: Vec<HttpHeader>,
+    body: Option<String>,
+}
+
+impl<'a, E> RequestBuilder<'a, E> {
+    pub(crate) fn new(cx: &'a mut Cx<E>, method: String, url: String) -> Self {
+        Self { cx, method, url, headers: Vec::new(), body: None }
+    }
+
+    /// Add a request header. Order is preserved and names may repeat.
+    #[must_use]
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push(HttpHeader { name: name.into(), value: value.into() });
+        self
+    }
+
+    /// Sugar for `header("Authorization", format!("Bearer {token}"))`.
+    #[must_use]
+    pub fn bearer(self, token: impl AsRef<str>) -> Self {
+        self.header("Authorization", format!("Bearer {}", token.as_ref()))
+    }
+
+    /// Set the request body.
+    #[must_use]
+    pub fn body(mut self, body: impl Into<String>) -> Self {
+        self.body = Some(body.into());
+        self
+    }
+
+    /// Dispatch the request. `then(outcome)` produces the typed event delivered back
+    /// to `update` once the shell replies.
+    pub fn send(self, then: impl FnOnce(HttpOutcome) -> E + Send + 'static) {
+        let input = serde_json::to_string(&HttpReq {
+            url: self.url,
+            headers: self.headers,
+            body: self.body,
+        })
+        .expect("serialize http request");
+
+        self.cx.plugin("http", self.method, input, move |r: PluginResponse| {
+            then(decode_outcome(&r))
+        });
+    }
+}
+
+/// Decode what the shell put in `PluginResponse.output`. A shell that returns
+/// something undecodable is a bug, but it must not panic the app — surface it as a
+/// transport error instead.
+fn decode_outcome(r: &PluginResponse) -> HttpOutcome {
+    HttpOutcome::decode(&r.output)
+        .unwrap_or_else(|e| HttpOutcome::TransportError {
+            message: format!("malformed http response: {e}"),
+        })
 }
 
 #[cfg(test)]
