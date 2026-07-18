@@ -895,7 +895,18 @@ enum HttpPlugin {
 }
 ```
 
-The exact generated Swift spelling of the enum cases and `bincodeSerialize()` comes from Task 4's output. Inspect the generated `HttpOutcome.swift` and adjust the case names if serde-generate spells them differently — do not guess.
+**Verified generated Swift API** (from Task 4's actual codegen output — use these exact
+spellings, they are not illustrative):
+
+```swift
+HttpOutcome.response(status: UInt16, headers: [HttpHeader], body: [UInt8])
+HttpOutcome.transportError(message: String)     // lowercase first letter
+func bincodeSerialize() throws -> [UInt8]
+// PluginResponse.output is [UInt8]
+```
+
+Note `status` is `UInt16`, so `UInt16(http.statusCode)` is the correct conversion, and
+`bincodeSerialize()` throws — hence the `(try? ...) ?? []` in `encode` above.
 
 - [ ] **Step 3: Verify it builds**
 
@@ -988,8 +999,8 @@ class HttpPlugin : MobilerPlugin {
             client.newCall(request).execute().use { resp ->
                 val headers = resp.headers.map { (name, value) -> HttpHeader(name, value) }
                 val bytes = resp.body?.bytes() ?: ByteArray(0)
-                val outcome = HttpOutcome.Response(resp.code.toUShort(), headers, bytes.toList())
-                PluginResponse(resp.isSuccessful, outcome.bincodeSerialize().toList())
+                val outcome = HttpOutcome.Response(resp.code.toUShort(), headers, bytes.toUByteList())
+                PluginResponse(resp.isSuccessful, outcome.bincodeSerialize().toUByteList())
             }
         } catch (e: IOException) {
             // IOException means no response was obtained.
@@ -1000,11 +1011,25 @@ class HttpPlugin : MobilerPlugin {
     }
 
     private fun transportError(message: String): PluginResponse =
-        PluginResponse(false, HttpOutcome.TransportError(message).bincodeSerialize().toList())
+        PluginResponse(false, HttpOutcome.TransportError(message).bincodeSerialize().toUByteList())
 }
+
+/// The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
+/// the wrong element type and will not compile.
+private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
 ```
 
-Add `import java.io.IOException` if absent. As with iOS, confirm the generated Kotlin spelling of the enum cases and `bincodeSerialize()` before finalising — inspect the generated file, do not guess.
+Add `import java.io.IOException` if absent.
+
+**Verified generated Kotlin API** (from Task 4's actual codegen output — use these exact
+spellings, they are not illustrative):
+
+```kotlin
+HttpOutcome.Response(status: UShort, headers: List<HttpHeader>, body: List<UByte>)
+HttpOutcome.TransportError(message: String)     // capitalized; nested data classes
+fun bincodeSerialize(): ByteArray               // NOT throwing
+// PluginResponse.output is List<UByte>
+```
 
 - [ ] **Step 3: Verify it builds**
 
