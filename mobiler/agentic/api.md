@@ -9,7 +9,7 @@ in Rust once and every client agrees.
 ```
 domain/    serde types + business rules — the single source of truth (used by all of the below)
 server/    Axum + SQLx (SQLite in dev → PostgreSQL in prod) JSON API over `domain`
-shared/    the Mobiler mobile core (this scaffold) — talks to the API via cx.http
+shared/    the Mobiler mobile core (this scaffold) — talks to the API via cx.get/post/request
 web/       the web client — EITHER `mobiler_web::run::<App>()` (same UI as mobile)
            OR a bespoke Leptos app (its own richer/desktop UX), sharing `domain`
 ```

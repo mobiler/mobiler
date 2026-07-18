@@ -7,7 +7,7 @@ PostgreSQL in production). A small "notes" app — list / add / delete.
 ```
 domain/     serde types shared by everyone (the wire contract)
 server/     Axum + SQLx (SQLite) JSON API: GET/POST /notes, GET/DELETE /notes/{id}
-app-core/   the Mobiler app (logic + UI in Rust) — talks to the server via cx.http
+app-core/   the Mobiler app (logic + UI in Rust) — talks to the server via cx.get/post/request
 web/        web client: `mobiler_web::run::<app_core::App>()` (renders app-core)
 ```
 
