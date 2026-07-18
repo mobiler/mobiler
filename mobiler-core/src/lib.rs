@@ -83,10 +83,30 @@ impl Operation for PluginStreamCall {
     type Output = PluginResponse;
 }
 
+/// A plugin's reply. `output` is raw bytes: the HTTP capability puts a bincode
+/// [`HttpOutcome`](crate::HttpOutcome) here, while most plugins put UTF-8 text (use
+/// [`PluginResponse::text`] to build one and [`as_text`](Self::as_text) to read it).
+///
+/// Note the asymmetry with [`PluginCall`], whose `input` stays a `String`: changing
+/// `output` affects only where a response is *constructed*, whereas changing `input`
+/// would affect where it is *parsed* — in every plugin on every shell. Large uploads
+/// pass file paths (text), so `input` stays adequate.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PluginResponse {
     pub ok: bool,
-    pub output: String,
+    pub output: Vec<u8>,
+}
+
+impl PluginResponse {
+    /// Build a response whose payload is UTF-8 text — what most plugins return.
+    pub fn text(ok: bool, s: impl Into<String>) -> Self {
+        Self { ok, output: s.into().into_bytes() }
+    }
+
+    /// The payload as text, or `None` if it is not valid UTF-8.
+    pub fn as_text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.output).ok()
+    }
 }
 
 type Continuation<E> = Box<dyn FnOnce(PluginResponse) -> E + Send>;
@@ -1191,6 +1211,19 @@ mod tests {
         Open(u32),
     }
 
+    // ---- PluginResponse ----
+
+    #[test]
+    fn plugin_response_carries_bytes_and_converts_text() {
+        let r = PluginResponse::text(true, "hello");
+        assert!(r.ok);
+        assert_eq!(r.output, b"hello".to_vec());
+        assert_eq!(r.as_text(), Some("hello"));
+
+        let binary = PluginResponse { ok: true, output: vec![0xff, 0xfe] };
+        assert_eq!(binary.as_text(), None, "invalid UTF-8 must not panic");
+    }
+
     // ---- Nav ----
 
     #[test]
@@ -1371,7 +1404,7 @@ mod tests {
         let mut cx = Cx::<Ev>::default();
         cx.capture_photo(|r| if r.ok { Ev::Open(7) } else { Ev::Tap });
         let (_, then) = cx.requests.pop().unwrap();
-        assert!(matches!(then(PluginResponse { ok: false, output: String::new() }), Ev::Tap));
+        assert!(matches!(then(PluginResponse { ok: false, output: Vec::new() }), Ev::Tap));
     }
 
     #[test]
