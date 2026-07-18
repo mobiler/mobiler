@@ -109,6 +109,7 @@ struct HttpReq {
 /// A builder rather than more arguments on `http()`: it lets later additions
 /// (timeouts, query params) arrive as new links in the chain instead of bumping the
 /// arity of every existing call site.
+#[must_use = "a RequestBuilder does nothing until you call .send()"]
 pub struct RequestBuilder<'a, E> {
     cx: &'a mut Cx<E>,
     method: String,
@@ -123,20 +124,21 @@ impl<'a, E> RequestBuilder<'a, E> {
     }
 
     /// Add a request header. Order is preserved and names may repeat.
-    #[must_use]
+    ///
+    /// No `#[must_use]` here: it would be redundant with (and, per clippy's
+    /// `double_must_use`, a warning against) the one already on `RequestBuilder`
+    /// itself, which covers every chained call returning `Self`.
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push(HttpHeader { name: name.into(), value: value.into() });
         self
     }
 
     /// Sugar for `header("Authorization", format!("Bearer {token}"))`.
-    #[must_use]
     pub fn bearer(self, token: impl AsRef<str>) -> Self {
         self.header("Authorization", format!("Bearer {}", token.as_ref()))
     }
 
     /// Set the request body.
-    #[must_use]
     pub fn body(mut self, body: impl Into<String>) -> Self {
         self.body = Some(body.into());
         self

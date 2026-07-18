@@ -1438,6 +1438,36 @@ mod tests {
     }
 
     #[test]
+    fn decode_failure_in_continuation_surfaces_as_transport_error() {
+        // Drives the actual `send()` callback path (not just `HttpOutcome::decode`
+        // directly): stores a continuation via `cx.request(...).send(...)`, then
+        // invokes it with a `PluginResponse` whose `output` is malformed bytes, the
+        // way the shell would if it returned something undecodable.
+        let mut cx = Cx::<Ev>::default();
+
+        cx.request("GET", "http://h/x").send(|outcome| {
+            match outcome {
+                HttpOutcome::TransportError { message } => {
+                    assert!(
+                        message.contains("malformed http response"),
+                        "unexpected message: {message}"
+                    );
+                }
+                HttpOutcome::Response { .. } => {
+                    panic!("garbage bytes must not decode as a Response")
+                }
+            }
+            Ev::Tap
+        });
+
+        assert_eq!(cx.requests.len(), 1);
+        let (_, continuation) = cx.requests.remove(0);
+        // Must not panic: a malformed `output` has to surface as `TransportError`,
+        // asserted inside the callback above.
+        continuation(PluginResponse { ok: true, output: vec![0xff, 0xff, 0xff] });
+    }
+
+    #[test]
     fn cx_pick_and_capture_photo_request_the_right_plugin() {
         let mut cx = Cx::<Ev>::default();
         cx.pick_photo(|_| Ev::Tap);
