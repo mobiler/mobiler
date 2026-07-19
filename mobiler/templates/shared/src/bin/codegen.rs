@@ -29,7 +29,14 @@ fn main() -> Result<()> {
     pretty_env_logger::init();
     let args = Args::parse();
 
-    let typegen_app = TypeRegistry::new().register_app::<App>()?.build()?;
+    // HttpOutcome rides inside PluginResponse.output as bincode, so register_app
+    // cannot reach it by traversal — register it explicitly or the shells have no
+    // generated encoder.
+    let typegen_app = TypeRegistry::new()
+        .register_app::<App>()?
+        .register_type::<mobiler_core::HttpOutcome>()?
+        // mobiler:codegen-types — insert above
+        .build()?;
 
     match args.language {
         Language::Kotlin => {
