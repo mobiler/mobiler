@@ -26,8 +26,10 @@ import dev.mobiler.todo.shared.types.Widget
 fun PluginResponse(ok: Boolean, output: String): PluginResponse =
     PluginResponse(ok, output.toByteArray(Charsets.UTF_8).toUByteList())
 
-/// The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
-/// the wrong element type and will not compile.
+/**
+ * The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
+ * the wrong element type and will not compile.
+ */
 private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
 
 /**

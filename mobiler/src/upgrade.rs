@@ -42,6 +42,7 @@ const ANCHORS: &[&str] = &[
     "mobiler:target-extra",
     "mobiler:spm-packages",
     "mobiler:spm-dependencies",
+    "mobiler:codegen-types",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -64,7 +65,15 @@ fn classify(rel: &Path, desired: &[u8]) -> Class {
     // the AppDelegate/PushBridge that remote push needs). Since it carries the `mobiler:app-launch`
     // anchor (launch-time plugin hooks), it is MERGE-class: a user's injected bootstrap() lines are
     // preserved across upgrades (offered as `.mobiler-new` / 3-way-merged), like any other anchored file.
-    let own = p.starts_with("shared/src/")
+    // NOTE: shared/src/bin/codegen.rs is NOT own either, despite living under shared/src/ — it's
+    // CLI-owned scaffolding (builds the `TypeRegistry` that emits the Swift/Kotlin `SharedTypes`),
+    // not the user's application code. It must stay in sync with the CLI's templates: types that
+    // ride inside an opaque payload (e.g. `HttpOutcome` inside a `Vec<u8>`) can't be reached by
+    // `register_app::<App>()`'s traversal and need an explicit `.register_type::<T>()?` call here,
+    // or the generated `SharedTypes` are missing types the shells need. It carries the
+    // `mobiler:codegen-types` anchor (a user might register their own extra types the same way), so
+    // it's MERGE-class, not Shell — an upgrade never silently overwrites a customized copy.
+    let own = (p.starts_with("shared/src/") && p != "shared/src/bin/codegen.rs")
         || name == "Cargo.toml"
         || p == "Android/settings.gradle.kts"
         || p == "Android/app/src/main/res/values/strings.xml"
@@ -572,6 +581,32 @@ mod test {
         // SHELL — generic, no anchor, not own.
         assert_eq!(classify(Path::new("iOS/Sources/Render.swift"), b"func render(){}"), Class::Shell);
         assert_eq!(classify(Path::new("rust-toolchain.toml"), b"[toolchain]"), Class::Shell);
+    }
+
+    #[test]
+    fn codegen_rs_is_carved_out_of_own_but_rest_of_shared_src_stays_own() {
+        // shared/src/bin/codegen.rs is CLI-owned scaffolding (it builds the `TypeRegistry` that
+        // emits the Swift/Kotlin `SharedTypes`), not the user's application code — despite living
+        // under shared/src/, it must NOT be OWN, or `upgrade` can never deliver framework changes
+        // to it (e.g. a new `.register_type::<T>()?` call a plugin's payload type needs). It carries
+        // the `mobiler:codegen-types` anchor, so it's MERGE-class: a user's own extra registered
+        // types are preserved, never silently overwritten.
+        assert_eq!(
+            classify(
+                Path::new("shared/src/bin/codegen.rs"),
+                b"TypeRegistry::new()\n    .register_app::<App>()?\n    .register_type::<mobiler_core::HttpOutcome>()?\n    // mobiler:codegen-types - insert above\n    .build()?;\n"
+            ),
+            Class::Merge,
+            "codegen.rs is carved out of Own and classified via its anchor, like Core.kt/App.swift"
+        );
+        // The rest of shared/src/ — the user's actual app code — must remain untouched by upgrade.
+        assert_eq!(classify(Path::new("shared/src/app.rs"), b"fn main(){}"), Class::Own);
+        assert_eq!(classify(Path::new("shared/src/lib.rs"), b"pub mod app;"), Class::Own);
+        assert_eq!(
+            classify(Path::new("shared/src/bin/other_tool.rs"), b"fn main(){}"),
+            Class::Own,
+            "only codegen.rs is carved out — sibling bin/ tools the user might add stay Own"
+        );
     }
 
     #[test]

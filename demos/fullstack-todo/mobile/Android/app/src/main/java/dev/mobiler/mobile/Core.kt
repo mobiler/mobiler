@@ -195,8 +195,10 @@ class HttpPlugin : MobilerPlugin {
         PluginResponse(false, HttpOutcome.TransportError(message).bincodeSerialize().toUByteList())
 }
 
-/// The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
-/// the wrong element type and will not compile.
+/**
+ * The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
+ * the wrong element type and will not compile.
+ */
 private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
 
 // Bridge between the (generic) shell and the Rust core. Speaks ONLY the fixed
