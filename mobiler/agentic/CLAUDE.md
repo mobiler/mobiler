@@ -84,7 +84,7 @@ ABI change in the framework, not app work).
    `iOS/` (they're the generic shells) and never hand-write native UI.
 2. Keep the `Model` serde-serializable (so `cx.save`/`restore` and the wire ABI work).
 3. Design within the widget vocabulary above.
-4. Data comes from a backend over `cx.http` (JSON), or from local `cx.save`/`restore`.
+4. Data comes from a backend over `cx.get`/`cx.post`/`cx.request` (JSON), or from local `cx.save`/`restore`.
 5. Prefer small, typed `Msg` variants; put real logic in `update`, not in `view`.
 
 ## Build & run

@@ -13,8 +13,8 @@ mobiler plugin add scanner
 Msg::ScanPressed => cx.plugin("scanner", "scan", "", Msg::Scanned),
 Msg::Scanned(resp) => {
     if resp.ok {
-        // resp.output == "<format>:<value>" — e.g. "qr:https://…", "ean13:9781234567897"
-        if let Some((format, value)) = resp.output.split_once(':') { /* … */ }
+        // resp.as_text() == "<format>:<value>" — e.g. "qr:https://…", "ean13:9781234567897"
+        if let Some((format, value)) = resp.as_text().unwrap_or_default().split_once(':') { /* … */ }
     } else {
         // "cancelled" / "camera not available" (e.g. simulator) / permission denied
     }

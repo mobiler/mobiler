@@ -9,8 +9,10 @@ use std::marker::PhantomData;
 
 pub mod bunny;
 pub mod format;
+pub mod http;
 pub mod i18n;
 pub use format::{Currency, Locale};
+pub use http::{HttpHeader, HttpOutcome};
 pub use i18n::{Catalog, negotiate};
 
 use crux_core::{
@@ -81,10 +83,30 @@ impl Operation for PluginStreamCall {
     type Output = PluginResponse;
 }
 
+/// A plugin's reply. `output` is raw bytes: the HTTP capability puts a bincode
+/// [`HttpOutcome`](crate::HttpOutcome) here, while most plugins put UTF-8 text (use
+/// [`PluginResponse::text`] to build one and [`as_text`](Self::as_text) to read it).
+///
+/// Note the asymmetry with [`PluginCall`], whose `input` stays a `String`: changing
+/// `output` affects only where a response is *constructed*, whereas changing `input`
+/// would affect where it is *parsed* — in every plugin on every shell. Large uploads
+/// pass file paths (text), so `input` stays adequate.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PluginResponse {
     pub ok: bool,
-    pub output: String,
+    pub output: Vec<u8>,
+}
+
+impl PluginResponse {
+    /// Build a response whose payload is UTF-8 text — what most plugins return.
+    pub fn text(ok: bool, s: impl Into<String>) -> Self {
+        Self { ok, output: s.into().into_bytes() }
+    }
+
+    /// The payload as text, or `None` if it is not valid UTF-8.
+    pub fn as_text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.output).ok()
+    }
 }
 
 type Continuation<E> = Box<dyn FnOnce(PluginResponse) -> E + Send>;
@@ -184,42 +206,47 @@ impl<E> Cx<E> {
         self.notify("haptics", style, "");
     }
 
-    /// Perform an HTTP request via the shell's built-in `http` capability. When it
-    /// completes, `then(response)` produces the typed event delivered back to
-    /// `update` — `response.output` is the body, `response.ok` is success (2xx).
-    /// Rides the request/response plugin mechanism, so it resolves asynchronously.
-    pub fn http(
+    /// Start an HTTP request with full control — headers, and later timeouts and
+    /// query params — finished with [`RequestBuilder::send`].
+    ///
+    /// ```ignore
+    /// cx.request("PUT", url)
+    ///     .bearer(&token)
+    ///     .body(json)
+    ///     .send(|outcome| match outcome.status() {
+    ///         Some(409) => Event::NeedsRebase,
+    ///         Some(s) if outcome.is_success() => Event::Saved,
+    ///         Some(s) => Event::ServerError(s),
+    ///         None => Event::Offline,
+    ///     });
+    /// ```
+    pub fn request(
         &mut self,
         method: impl Into<String>,
         url: impl Into<String>,
-        body: Option<String>,
-        then: impl FnOnce(PluginResponse) -> E + Send + 'static,
-    ) {
-        #[derive(Serialize)]
-        struct HttpReq {
-            url: String,
-            body: Option<String>,
-        }
-        let input = serde_json::to_string(&HttpReq { url: url.into(), body })
-            .expect("serialize http request");
-        self.plugin("http", method, input, then);
+    ) -> crate::http::RequestBuilder<'_, E> {
+        crate::http::RequestBuilder::new(self, method.into(), url.into())
     }
 
-    /// `GET url`, delivering the response to `then`.
-    pub fn get(&mut self, url: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
-        self.http("GET", url, None, then);
+    /// `GET url`, delivering the outcome to `then`.
+    pub fn get(&mut self, url: impl Into<String>, then: impl FnOnce(HttpOutcome) -> E + Send + 'static) {
+        self.request("GET", url).send(then);
     }
-    /// `POST url` with a JSON `body`, delivering the response to `then`.
-    pub fn post(&mut self, url: impl Into<String>, body: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
-        self.http("POST", url, Some(body.into()), then);
+    /// `POST url` with `body`, delivering the outcome to `then`.
+    pub fn post(&mut self, url: impl Into<String>, body: impl Into<String>, then: impl FnOnce(HttpOutcome) -> E + Send + 'static) {
+        self.request("POST", url).body(body).send(then);
     }
-    /// `PATCH url` with a JSON `body`, delivering the response to `then`.
-    pub fn patch(&mut self, url: impl Into<String>, body: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
-        self.http("PATCH", url, Some(body.into()), then);
+    /// `PUT url` with `body`, delivering the outcome to `then`.
+    pub fn put(&mut self, url: impl Into<String>, body: impl Into<String>, then: impl FnOnce(HttpOutcome) -> E + Send + 'static) {
+        self.request("PUT", url).body(body).send(then);
     }
-    /// `DELETE url`, delivering the response to `then`.
-    pub fn delete(&mut self, url: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
-        self.http("DELETE", url, None, then);
+    /// `PATCH url` with `body`, delivering the outcome to `then`.
+    pub fn patch(&mut self, url: impl Into<String>, body: impl Into<String>, then: impl FnOnce(HttpOutcome) -> E + Send + 'static) {
+        self.request("PATCH", url).body(body).send(then);
+    }
+    /// `DELETE url`, delivering the outcome to `then`.
+    pub fn delete(&mut self, url: impl Into<String>, then: impl FnOnce(HttpOutcome) -> E + Send + 'static) {
+        self.request("DELETE", url).send(then);
     }
 
     /// Query the device model/name via the built-in `device` capability; the result
@@ -758,7 +785,7 @@ fn days_in_month(year: u32, month: u8) -> u8 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
-        2 => if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 29 } else { 28 },
+        2 => if (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400) { 29 } else { 28 },
         _ => 30,
     }
 }
@@ -1189,6 +1216,19 @@ mod tests {
         Open(u32),
     }
 
+    // ---- PluginResponse ----
+
+    #[test]
+    fn plugin_response_carries_bytes_and_converts_text() {
+        let r = PluginResponse::text(true, "hello");
+        assert!(r.ok);
+        assert_eq!(r.output, b"hello".to_vec());
+        assert_eq!(r.as_text(), Some("hello"));
+
+        let binary = PluginResponse { ok: true, output: vec![0xff, 0xfe] };
+        assert_eq!(binary.as_text(), None, "invalid UTF-8 must not panic");
+    }
+
     // ---- Nav ----
 
     #[test]
@@ -1329,20 +1369,102 @@ mod tests {
         let mut cx = Cx::<Ev>::default();
         cx.get("http://h/x", |_| Ev::Tap);
         cx.post("http://h/y", "hello", |_| Ev::Tap);
+        cx.put("http://h/p", "putbody", |_| Ev::Tap);
         cx.patch("http://h/z", "patch", |_| Ev::Tap);
         cx.delete("http://h/d", |_| Ev::Tap);
 
         let methods: Vec<&str> = cx.requests.iter().map(|(c, _)| c.op.as_str()).collect();
-        assert_eq!(methods, ["GET", "POST", "PATCH", "DELETE"]);
+        assert_eq!(methods, ["GET", "POST", "PUT", "PATCH", "DELETE"]);
         assert!(cx.requests.iter().all(|(c, _)| c.plugin == "http"));
 
         let get_input: serde_json::Value = serde_json::from_str(&cx.requests[0].0.input).unwrap();
         assert_eq!(get_input["url"], "http://h/x");
         assert!(get_input["body"].is_null());
 
-        let post_input: serde_json::Value = serde_json::from_str(&cx.requests[1].0.input).unwrap();
-        assert_eq!(post_input["url"], "http://h/y");
-        assert_eq!(post_input["body"], "hello");
+        let put_input: serde_json::Value = serde_json::from_str(&cx.requests[2].0.input).unwrap();
+        assert_eq!(put_input["url"], "http://h/p");
+        assert_eq!(put_input["body"], "putbody");
+    }
+
+    #[test]
+    fn request_builder_emits_headers_in_order() {
+        let mut cx = Cx::<Ev>::default();
+        cx.request("PUT", "http://h/access-key")
+            .bearer("tok123")
+            .header("X-Trace-Id", "abc")
+            .body("{}")
+            .send(|_| Ev::Tap);
+
+        assert_eq!(cx.requests.len(), 1);
+        let (call, _) = &cx.requests[0];
+        assert_eq!(call.plugin, "http");
+        assert_eq!(call.op, "PUT");
+
+        let input: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(input["url"], "http://h/access-key");
+        assert_eq!(input["body"], "{}");
+        assert_eq!(input["headers"][0]["name"], "Authorization");
+        assert_eq!(input["headers"][0]["value"], "Bearer tok123");
+        assert_eq!(input["headers"][1]["name"], "X-Trace-Id");
+        assert_eq!(input["headers"][1]["value"], "abc");
+    }
+
+    #[test]
+    fn helpers_emit_no_headers_field_content() {
+        let mut cx = Cx::<Ev>::default();
+        cx.get("http://h/x", |_| Ev::Tap);
+        let input: serde_json::Value = serde_json::from_str(&cx.requests[0].0.input).unwrap();
+        assert_eq!(input["headers"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn continuation_receives_decoded_outcome() {
+        #[derive(Debug, PartialEq)]
+        enum Got { Conflict, Offline, Other }
+
+        let classify = |r: PluginResponse| -> Got {
+            match HttpOutcome::decode(&r.output).unwrap() {
+                HttpOutcome::Response { status: 409, .. } => Got::Conflict,
+                HttpOutcome::TransportError { .. } => Got::Offline,
+                _ => Got::Other,
+            }
+        };
+
+        let conflict = HttpOutcome::Response { status: 409, headers: vec![], body: b"c".to_vec() };
+        assert_eq!(classify(PluginResponse { ok: false, output: conflict.encode() }), Got::Conflict);
+
+        let offline = HttpOutcome::TransportError { message: "refused".into() };
+        assert_eq!(classify(PluginResponse { ok: false, output: offline.encode() }), Got::Offline);
+    }
+
+    #[test]
+    fn decode_failure_in_continuation_surfaces_as_transport_error() {
+        // Drives the actual `send()` callback path (not just `HttpOutcome::decode`
+        // directly): stores a continuation via `cx.request(...).send(...)`, then
+        // invokes it with a `PluginResponse` whose `output` is malformed bytes, the
+        // way the shell would if it returned something undecodable.
+        let mut cx = Cx::<Ev>::default();
+
+        cx.request("GET", "http://h/x").send(|outcome| {
+            match outcome {
+                HttpOutcome::TransportError { message } => {
+                    assert!(
+                        message.contains("malformed http response"),
+                        "unexpected message: {message}"
+                    );
+                }
+                HttpOutcome::Response { .. } => {
+                    panic!("garbage bytes must not decode as a Response")
+                }
+            }
+            Ev::Tap
+        });
+
+        assert_eq!(cx.requests.len(), 1);
+        let (_, continuation) = cx.requests.remove(0);
+        // Must not panic: a malformed `output` has to surface as `TransportError`,
+        // asserted inside the callback above.
+        continuation(PluginResponse { ok: true, output: vec![0xff, 0xff, 0xff] });
     }
 
     #[test]
@@ -1369,7 +1491,7 @@ mod tests {
         let mut cx = Cx::<Ev>::default();
         cx.capture_photo(|r| if r.ok { Ev::Open(7) } else { Ev::Tap });
         let (_, then) = cx.requests.pop().unwrap();
-        assert!(matches!(then(PluginResponse { ok: false, output: String::new() }), Ev::Tap));
+        assert!(matches!(then(PluginResponse { ok: false, output: Vec::new() }), Ev::Tap));
     }
 
     #[test]

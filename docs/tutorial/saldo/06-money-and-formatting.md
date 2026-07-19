@@ -53,7 +53,7 @@ startup with the built-in `cx.device_locale` capability and map it with `Locale:
 ```rust
 fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
     // …schema + cx.now…
-    cx.device_locale(|r| Msg::GotLocale(r.output)); // r.output is a BCP-47 tag, e.g. "uk-UA"
+    cx.device_locale(|r| Msg::GotLocale(r.as_text().unwrap_or_default().to_string())); // a BCP-47 tag, e.g. "uk-UA"
 }
 
 Msg::GotLocale(tag) => {

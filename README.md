@@ -143,7 +143,7 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 <!-- capabilities:start format=table (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
 | Capability | Rust API | Notes |
 |---|---|---|
-| HTTP | `cx.get / cx.post / cx.patch / cx.delete` | request/response (JSON) |
+| HTTP | `cx.get / cx.post / cx.put / cx.patch / cx.delete / cx.request (builder)` | headers + byte body/response |
 | Storage | `cx.save (+ restore on launch)` | persist the model |
 | Clipboard | `cx.copy(text)` | copy text |
 | Share | `cx.share(text)` | system share sheet |

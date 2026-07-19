@@ -7,9 +7,9 @@
 
 use domain::{NewTodo, Todo, TodoPatch, TODOS_PATH, active_count};
 use mobiler_core::{
-    ButtonStyle, CardStyle, Cx, Icon, InputValue, MobilerApp, MobilerShell, PluginResponse,
-    Spacing, Tone, Widget, badge, button, caption, card, checkbox, column, icon_button, row,
-    scaffold, spacer, text, text_field, title,
+    ButtonStyle, CardStyle, Cx, HttpOutcome, Icon, InputValue, MobilerApp, MobilerShell, Spacing,
+    Tone, Widget, badge, button, caption, card, checkbox, column, icon_button, row, scaffold,
+    spacer, text, text_field, title,
 };
 use serde::{Deserialize, Serialize};
 
@@ -56,22 +56,35 @@ fn load(cx: &mut Cx<Msg>) {
 }
 
 /// Continuation for mutations (POST/PATCH/DELETE): on success, refetch the list.
-fn after_mutation(resp: PluginResponse) -> Msg {
-    if resp.ok { Msg::Reload } else { Msg::Failed(err_of(&resp)) }
+fn after_mutation(resp: HttpOutcome) -> Msg {
+    if resp.is_success() { Msg::Reload } else { Msg::Failed(err_of(&resp)) }
 }
 
-fn parse_list(resp: &PluginResponse) -> Msg {
-    if !resp.ok {
+fn parse_list(resp: &HttpOutcome) -> Msg {
+    if !resp.is_success() {
         return Msg::Failed(err_of(resp));
     }
-    match serde_json::from_str::<Vec<Todo>>(&resp.output) {
+    match serde_json::from_str::<Vec<Todo>>(resp.text().unwrap_or_default()) {
         Ok(todos) => Msg::Loaded(todos),
         Err(e) => Msg::Failed(format!("parse error: {e}")),
     }
 }
 
-fn err_of(resp: &PluginResponse) -> String {
-    if resp.output.is_empty() { "request failed".to_string() } else { resp.output.clone() }
+/// A meaningful message for a non-success outcome: branches on the variant so a real
+/// transport failure ("connection refused") is never rendered as the generic "request
+/// failed" a plain `.text()` call would produce (transport errors have no body).
+fn err_of(resp: &HttpOutcome) -> String {
+    match resp {
+        HttpOutcome::TransportError { message } => format!("network error: {message}"),
+        HttpOutcome::Response { status, .. } => {
+            let body = resp.text().unwrap_or_default();
+            if body.is_empty() {
+                format!("server returned {status}")
+            } else {
+                format!("server returned {status}: {body}")
+            }
+        }
+    }
 }
 
 impl MobilerApp for TodoApp {
@@ -202,5 +215,14 @@ mod test {
         let mut m = Model::default();
         app.input("new", InputValue::Text("milk".into()), &mut m, &mut Cx::default());
         assert_eq!(m.input, "milk");
+    }
+
+    #[test]
+    fn err_of_distinguishes_transport_failure_from_bad_status() {
+        let transport = HttpOutcome::TransportError { message: "connection refused".into() };
+        assert_eq!(err_of(&transport), "network error: connection refused");
+
+        let not_found = HttpOutcome::Response { status: 404, headers: vec![], body: b"missing".to_vec() };
+        assert_eq!(err_of(&not_found), "server returned 404: missing");
     }
 }

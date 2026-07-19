@@ -83,9 +83,9 @@ fn restore_statements(b: &Backup) -> Vec<String> {
 The three async hops are three messages:
 
 ```rust
-Msg::Restore        => cx.plugin("filepicker", "pick", "", |r| if r.ok { Msg::RestorePicked(r.output) } else { Msg::ExportDone(false) }),
+Msg::Restore        => cx.plugin("filepicker", "pick", "", |r| if r.ok { Msg::RestorePicked(r.as_text().unwrap_or_default().to_string()) } else { Msg::ExportDone(false) }),
 Msg::RestorePicked(uri) => cx.plugin("files", "read", json!({ "path": uri }).to_string(),
-                                     |r| Msg::RestoreRead(if r.ok { r.output } else { String::new() })),
+                                     |r| Msg::RestoreRead(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })),
 Msg::RestoreRead(json) => match serde_json::from_str::<Backup>(&json) {
     Ok(backup) => { for stmt in restore_statements(&backup) { cx.plugin("sqlite", "exec", stmt, |_| Msg::Posted); } load_all(cx); }
     Err(_)     => cx.notify("toast", "show", tr(model, "data.bad_backup")),

@@ -48,8 +48,10 @@ small queue one statement at a time — each `exec` completion triggers the next
 
 ```rust
 fn init(&self, _model, cx) {
-    cx.plugin("sqlite", "query", "PRAGMA user_version", |r| Msg::Schema(r.output));
-    cx.now(|r| Msg::GotToday(r.output));
+    cx.plugin("sqlite", "query", "PRAGMA user_version", |r| {
+        Msg::Schema(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
+    });
+    cx.now(|r| Msg::GotToday(r.as_text().unwrap_or_default().to_string()));
 }
 
 Msg::Schema(json) => {                                 // json = [{"user_version":"N"}]

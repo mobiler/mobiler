@@ -11,8 +11,8 @@ opens the socket and pushes one event per incoming frame into `update` — no ap
 // Open + stream: one Msg::Frame per incoming frame, until close.
 cx.subscribe("ws", "websocket", "stream", "wss://echo.websocket.org", Msg::Frame),
 Msg::Frame(r) => {
-    if r.ok { /* r.output = frame text */ }
-    else    { /* r.output == "closed" → the socket dropped */ }
+    if r.ok { /* r.as_text() = frame text */ }
+    else    { /* r.as_text() == Some("closed") → the socket dropped */ }
 }
 // Send while subscribed:           cx.plugin("websocket", "send", "hello", …)
 // Stop streaming + close:          cx.unsubscribe("ws")

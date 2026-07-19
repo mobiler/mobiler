@@ -467,14 +467,14 @@ impl MobilerApp for FadeHouse {
             Msg::Book => {
                 model.pending_date = None;
                 model.pending_time = None;
-                cx.pick_date(|r| Msg::DatePicked(if r.ok { r.output } else { String::new() }));
+                cx.pick_date(|r| Msg::DatePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
             }
             Msg::DatePicked(date) => {
                 if date.is_empty() {
                     return; // cancelled the date picker
                 }
                 model.pending_date = Some(date);
-                cx.pick_time(|r| Msg::TimePicked(if r.ok { r.output } else { String::new() }));
+                cx.pick_time(|r| Msg::TimePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
             }
             Msg::TimePicked(time) => {
                 if time.is_empty() {
@@ -497,7 +497,7 @@ impl MobilerApp for FadeHouse {
 
             // --- Native capability demos ---
             Msg::PickClient => cx.plugin("contacts", "pick", "", |r| {
-                Msg::GotClient(if r.ok { r.output } else { String::new() })
+                Msg::GotClient(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
             }),
             Msg::GotClient(c) => {
                 if !c.is_empty() {
@@ -515,14 +515,14 @@ impl MobilerApp for FadeHouse {
                     format!("Client: {}", model.client)
                 };
                 let input = serde_json::json!({ "title": title, "notes": notes }).to_string();
-                cx.plugin("calendar", "add", input, |r| Msg::CalendarDone(r.output));
+                cx.plugin("calendar", "add", input, |r| Msg::CalendarDone(r.as_text().unwrap_or_default().to_string()));
             }
             Msg::CalendarDone(s) => cx.toast(match s.as_str() {
                 "saved" | "opened" => "Added to your calendar ✓".to_string(),
                 _ => "Calendar not updated".to_string(),
             }),
             Msg::FindNearest => cx.plugin("geolocation", "get", "", |r| {
-                Msg::GotLocation(if r.ok { r.output } else { String::new() })
+                Msg::GotLocation(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
             }),
             Msg::GotLocation(loc) => {
                 if loc.is_empty() {
@@ -560,20 +560,22 @@ impl MobilerApp for FadeHouse {
             Msg::BackgroundAck(resp) => {
                 // Surface a hint when an op can't proceed (e.g. "permission requested — try again",
                 // "enable Allow all the time", or "plugin not available" on web / before plugin add).
-                if !resp.ok && !resp.output.is_empty() {
-                    cx.toast(resp.output);
+                if !resp.ok {
+                    if let Some(text) = resp.as_text().filter(|t| !t.is_empty()) {
+                        cx.toast(text.to_string());
+                    }
                 }
             }
             Msg::BackgroundEvent(resp) => {
                 // {"type":"geofence","id":..,"event":"enter"|"exit"} / {"type":"location",..} / {"type":"fetch",..}
                 if resp.ok {
-                    model.background_last = resp.output;
+                    model.background_last = resp.as_text().unwrap_or_default().to_string();
                 }
             }
-            Msg::CheckSignal => cx.plugin("connectivity", "status", "", |r| Msg::GotSignal(r.output)),
+            Msg::CheckSignal => cx.plugin("connectivity", "status", "", |r| Msg::GotSignal(r.as_text().unwrap_or_default().to_string())),
             Msg::GotSignal(s) => model.signal = s,
             Msg::ReadMotion => cx.plugin("sensors", "read", "accelerometer", |r| {
-                Msg::GotMotion(if r.ok { r.output } else { String::new() })
+                Msg::GotMotion(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
             }),
             Msg::GotMotion(m) => {
                 model.device = if m.is_empty() { "accelerometer: unavailable".into() } else { format!("accelerometer: {m}") };
@@ -581,7 +583,7 @@ impl MobilerApp for FadeHouse {
             Msg::RecordAudio => {
                 model.device = "Recording 3s…".into();
                 cx.plugin("audio", "record", "3", |r| {
-                    Msg::Recorded(if r.ok { r.output } else { String::new() })
+                    Msg::Recorded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
                 });
             }
             Msg::Recorded(uri) => {
@@ -594,7 +596,7 @@ impl MobilerApp for FadeHouse {
             }
             Msg::PlayAudio => {
                 if let Some(uri) = model.last_audio.clone() {
-                    cx.plugin("audio", "play", uri, |r| Msg::Played(r.output));
+                    cx.plugin("audio", "play", uri, |r| Msg::Played(r.as_text().unwrap_or_default().to_string()));
                 } else {
                     cx.toast("Record something first");
                 }
@@ -644,7 +646,7 @@ impl MobilerApp for FadeHouse {
             Msg::RecordVideo => {
                 model.device = "Opening camera…".into();
                 cx.plugin("video", "record", "", |r| {
-                    Msg::VideoRecorded(if r.ok { r.output } else { String::new() })
+                    Msg::VideoRecorded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
                 });
             }
             Msg::VideoRecorded(uri) => {
@@ -657,7 +659,7 @@ impl MobilerApp for FadeHouse {
             }
             Msg::ShareClip => {
                 if let Some(uri) = model.last_video.clone().or_else(|| model.last_audio.clone()) {
-                    cx.plugin("sharefile", "file", uri, |r| Msg::Shared(r.output));
+                    cx.plugin("sharefile", "file", uri, |r| Msg::Shared(r.as_text().unwrap_or_default().to_string()));
                 } else {
                     cx.toast("Record a video or audio clip first");
                 }
@@ -699,11 +701,11 @@ impl MobilerApp for FadeHouse {
                 })
                 .to_string();
                 cx.plugin("sqlite", "exec", input, |r| {
-                    Msg::Notify(if r.ok { "Note saved to SQLite ✓".into() } else { format!("Save failed: {}", r.output) })
+                    Msg::Notify(if r.ok { "Note saved to SQLite ✓".into() } else { format!("Save failed: {}", r.as_text().unwrap_or_default()) })
                 });
             }
             Msg::LoadNote => cx.plugin("sqlite", "query", "SELECT body FROM note WHERE id = 1", |r| {
-                Msg::NoteLoaded(if r.ok { r.output } else { String::new() })
+                Msg::NoteLoaded(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
             }),
             Msg::NoteLoaded(json) => {
                 // The sqlite plugin returns rows as a JSON array of {column: value} objects.
@@ -721,7 +723,7 @@ impl MobilerApp for FadeHouse {
                 }
             }
             Msg::DictateNote => cx.plugin("speech", "listen", "", |r| {
-                Msg::Dictated(if r.ok { r.output } else { String::new() })
+                Msg::Dictated(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() })
             }),
             Msg::Dictated(text) => {
                 if text.is_empty() {
@@ -735,7 +737,7 @@ impl MobilerApp for FadeHouse {
                 model.bt_status = "Scanning…".into();
                 model.bt_denied = false;
                 // Pass the plugin's output through on failure too, so the real reason shows.
-                cx.plugin("bluetooth", "scan", "", |r| Msg::BtScanned(r.output));
+                cx.plugin("bluetooth", "scan", "", |r| Msg::BtScanned(r.as_text().unwrap_or_default().to_string()));
             }
             Msg::BtScanned(out) => {
                 if let Ok(serde_json::Value::Array(devs)) = serde_json::from_str::<serde_json::Value>(&out) {
@@ -763,7 +765,7 @@ impl MobilerApp for FadeHouse {
                 model.oauth_status = "Opening sign-in…".into();
                 let url = "https://httpbin.org/redirect-to?url=dev.mobiler.barbershop%3A%2F%2Foauth%3Fcode%3Ddemo123&status_code=302";
                 let input = format!(r#"{{"url":"{url}","scheme":"dev.mobiler.barbershop"}}"#);
-                cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.output));
+                cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.as_text().unwrap_or_default().to_string()));
             }
             Msg::GotDeviceLocale(tag) => model.device_locale = tag,
             Msg::ToggleLive => {
@@ -772,7 +774,7 @@ impl MobilerApp for FadeHouse {
                     model.live_count = 0;
                     // Subscribe to the built-in `ticker` stream: one event/second, each
                     // re-entering update as Msg::Tick — the streaming primitive in action.
-                    cx.subscribe("ticker", "ticker", "start", "1000", |r| Msg::Tick(r.output));
+                    cx.subscribe("ticker", "ticker", "start", "1000", |r| Msg::Tick(r.as_text().unwrap_or_default().to_string()));
                 } else {
                     cx.unsubscribe("ticker");
                 }
@@ -794,15 +796,16 @@ impl MobilerApp for FadeHouse {
             }
             Msg::WsFrame(resp) => {
                 if resp.ok {
-                    model.ws_last = resp.output;
+                    model.ws_last = resp.as_text().unwrap_or_default().to_string();
                 } else {
                     model.ws_on = false;
                     // Surface the real close reason (the shell sends the error text) so a failure
                     // is diagnosable on-device, not just a generic "disconnected".
-                    model.ws_last = if resp.output.is_empty() || resp.output == "closed" {
+                    let text = resp.as_text().unwrap_or_default();
+                    model.ws_last = if text.is_empty() || text == "closed" {
                         "disconnected".to_string()
                     } else {
-                        format!("closed: {}", resp.output)
+                        format!("closed: {text}")
                     };
                 }
             }
@@ -828,14 +831,14 @@ impl MobilerApp for FadeHouse {
             }
             Msg::PushRegistered(resp) => {
                 model.push_token = if resp.ok {
-                    resp.output // {"token":"…","platform":"apns"|"fcm"} — POST to your backend
+                    resp.as_text().unwrap_or_default().to_string() // {"token":"…","platform":"apns"|"fcm"} — POST to your backend
                 } else {
-                    format!("unavailable: {} (run `mobiler plugin add push`)", resp.output)
+                    format!("unavailable: {} (run `mobiler plugin add push`)", resp.as_text().unwrap_or_default())
                 };
             }
             Msg::PushEvent(resp) => {
                 if resp.ok {
-                    model.push_last = resp.output;
+                    model.push_last = resp.as_text().unwrap_or_default().to_string();
                 }
             }
             // Analytics: identify the user + log a sample event. No-ops gracefully until
@@ -855,14 +858,14 @@ impl MobilerApp for FadeHouse {
                 model.analytics_status = if resp.ok {
                     "Event sent ✓".to_string()
                 } else {
-                    format!("unavailable: {} (run `mobiler plugin add analytics`)", resp.output)
+                    format!("unavailable: {} (run `mobiler plugin add analytics`)", resp.as_text().unwrap_or_default())
                 };
             }
             Msg::BuyProduct(id) => cx.plugin("iap", "purchase", &id, Msg::StoreStarted),
             Msg::RestorePurchases => cx.plugin("iap", "restore", "", Msg::StoreStarted),
             Msg::StoreProducts(resp) => {
                 if resp.ok {
-                    model.store_products = resp.output; // JSON array: [{id,title,price,type},…]
+                    model.store_products = resp.as_text().unwrap_or_default().to_string(); // JSON array: [{id,title,price,type},…]
                 }
             }
             Msg::StoreStarted(_) => {} // thin ack — the real transaction arrives on StoreTxn
@@ -870,7 +873,7 @@ impl MobilerApp for FadeHouse {
                 if resp.ok {
                     // A real app POSTs resp.output's signed `payload` to its backend, then grants +
                     // finishes. Here we just surface the transaction.
-                    model.store_last = resp.output;
+                    model.store_last = resp.as_text().unwrap_or_default().to_string();
                 }
             }
             // Drive the controllable Widget::Video (play/pause via the app-owned `playing` field;
@@ -891,7 +894,7 @@ impl MobilerApp for FadeHouse {
             Msg::PlaylistJump(i) => model.playlist_seek_index = i,
             Msg::PlaylistEnded => model.playlist_playing = false,
             Msg::SystemEvent(resp) => {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&resp.output) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(resp.as_text().unwrap_or_default()) {
                     match v.get("type").and_then(|t| t.as_str()) {
                         Some("deeplink") => {
                             if let Some(url) = v.get("url").and_then(|u| u.as_str()) {
@@ -922,10 +925,11 @@ impl MobilerApp for FadeHouse {
             Msg::FilesExport => cx.plugin("files", "export", r#"{"path":"demo/note.txt","name":"FadeHouse.txt"}"#, Msg::FilesResult),
             Msg::FilesResult(r) => {
                 model.files_status = if r.ok {
-                    let out = if r.output.len() > 80 { format!("{}…", &r.output[..80]) } else { r.output };
+                    let text = r.as_text().unwrap_or_default();
+                    let out = if text.len() > 80 { format!("{}…", &text[..80]) } else { text.to_string() };
                     format!("ok — {out}")
                 } else {
-                    format!("error — {}", r.output)
+                    format!("error — {}", r.as_text().unwrap_or_default())
                 };
             }
             Msg::OAuthDone(ok, output) => {
@@ -952,7 +956,7 @@ impl MobilerApp for FadeHouse {
         );
         // Detect the device's preferred locale (built-in `device` capability) so the
         // formatting card can show it — works on iOS, Android, and web.
-        cx.device_locale(|r| Msg::GotDeviceLocale(r.output));
+        cx.device_locale(|r| Msg::GotDeviceLocale(r.as_text().unwrap_or_default().to_string()));
         // In-app purchase (`iap` plugin): subscribe to the transactions stream at startup (the single
         // source of truth) + load product metadata for the Store card. No-ops gracefully until
         // `mobiler plugin add iap`. iOS sim-tests against demos/barbershop/iOS/Products.storekit.

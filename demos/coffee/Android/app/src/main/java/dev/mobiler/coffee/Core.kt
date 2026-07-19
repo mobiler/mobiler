@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.lang.ref.WeakReference
 import java.util.Calendar
 import okhttp3.MediaType.Companion.toMediaType
@@ -37,9 +38,17 @@ import org.json.JSONObject
 import dev.mobiler.coffee.shared.CoreFfi
 import dev.mobiler.coffee.shared.types.Action
 import dev.mobiler.coffee.shared.types.Effect
+import dev.mobiler.coffee.shared.types.HttpHeader
+import dev.mobiler.coffee.shared.types.HttpOutcome
 import dev.mobiler.coffee.shared.types.PluginResponse
 import dev.mobiler.coffee.shared.types.Requests
 import dev.mobiler.coffee.shared.types.Widget
+
+// Keeps every non-HTTP plugin compiling unchanged now that PluginResponse.output is
+// bytes. Kotlin allows a top-level function named like the type, so existing
+// `PluginResponse(true, "text")` call sites resolve here.
+fun PluginResponse(ok: Boolean, output: String): PluginResponse =
+    PluginResponse(ok, output.toByteArray(Charsets.UTF_8).toUByteList())
 
 /**
  * A native capability plugin. The opaque `{plugin, op, input}` envelope is
@@ -308,27 +317,64 @@ class StoragePlugin(private val context: Context) : MobilerPlugin {
 }
 
 /**
- * Official, bundled plugin: HTTP (paired with cx.http/get/post/patch/delete in
- * Rust). `op` is the method; `input` is `{"url": ..., "body": ...}`. Runs on the
- * IO dispatcher; returns the response body with `ok` = success (2xx).
+ * HTTP capability (paired with `cx.request`/`get`/`post`/`put`/... in Rust). `op` is
+ * the method; `input` is `{"url":..., "headers":[{"name":...,"value":...}], "body":...}`.
+ * Runs on the IO dispatcher; returns a bincode `HttpOutcome` with `ok` = 2xx.
  */
 class HttpPlugin : MobilerPlugin {
     private val client = OkHttpClient()
+
     override suspend fun handle(op: String, input: String): PluginResponse = withContext(Dispatchers.IO) {
         try {
             val obj = JSONObject(input)
             val url = obj.getString("url")
             val bodyStr = if (obj.has("body") && !obj.isNull("body")) obj.getString("body") else null
-            val reqBody = bodyStr?.toRequestBody("application/json".toMediaType())
-            val request = Request.Builder().url(url).method(op, reqBody).build()
-            client.newCall(request).execute().use { resp ->
-                PluginResponse(resp.isSuccessful, resp.body?.string() ?: "")
+
+            var callerSetContentType = false
+            val builder = Request.Builder().url(url)
+            if (obj.has("headers")) {
+                val headers = obj.getJSONArray("headers")
+                for (i in 0 until headers.length()) {
+                    val h = headers.getJSONObject(i)
+                    val name = h.getString("name")
+                    builder.addHeader(name, h.getString("value"))
+                    if (name.lowercase() == "content-type") callerSetContentType = true
+                }
             }
+
+            // OkHttp REQUIRES a body for these verbs — `.method("PUT", null)` throws.
+            val needsBody = op in setOf("POST", "PUT", "PATCH")
+            val mediaType = if (callerSetContentType) null else "application/json".toMediaType()
+            val reqBody = when {
+                bodyStr != null -> bodyStr.toRequestBody(mediaType)
+                // A bodyless PUT/POST/PATCH must send no Content-Type at all — matching
+                // iOS's addValue and web's fetch, which both omit it for an empty body.
+                needsBody -> "".toRequestBody(null)
+                else -> null
+            }
+
+            val request = builder.method(op, reqBody).build()
+            client.newCall(request).execute().use { resp ->
+                val headers = resp.headers.map { (name, value) -> HttpHeader(name, value) }
+                val bytes = resp.body?.bytes() ?: ByteArray(0)
+                val outcome = HttpOutcome.Response(resp.code.toUShort(), headers, bytes.toUByteList())
+                PluginResponse(resp.isSuccessful, outcome.bincodeSerialize().toUByteList())
+            }
+        } catch (e: IOException) {
+            // IOException means no response was obtained.
+            transportError(e.message ?: "network error")
         } catch (e: Exception) {
-            PluginResponse(false, e.message ?: "http error")
+            transportError(e.message ?: "http error")
         }
     }
+
+    private fun transportError(message: String): PluginResponse =
+        PluginResponse(false, HttpOutcome.TransportError(message).bincodeSerialize().toUByteList())
 }
+
+/// The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
+/// the wrong element type and will not compile.
+private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
 
 // Bridge between the (generic) shell and the Rust core. Speaks ONLY the fixed
 // Mobiler ABI: sends an `Action`, receives a `Widget` tree + capability effects.

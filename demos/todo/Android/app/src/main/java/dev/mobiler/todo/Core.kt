@@ -20,6 +20,16 @@ import dev.mobiler.todo.shared.types.PluginResponse
 import dev.mobiler.todo.shared.types.Requests
 import dev.mobiler.todo.shared.types.Widget
 
+// Keeps every non-HTTP plugin compiling unchanged now that PluginResponse.output is
+// bytes. Kotlin allows a top-level function named like the type, so existing
+// `PluginResponse(true, "text")` call sites resolve here.
+fun PluginResponse(ok: Boolean, output: String): PluginResponse =
+    PluginResponse(ok, output.toByteArray(Charsets.UTF_8).toUByteList())
+
+/// The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
+/// the wrong element type and will not compile.
+private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
+
 /**
  * A native capability plugin. The opaque `{plugin, op, input}` envelope is
  * dispatched by name to one of these — adding a plugin never touches the wire

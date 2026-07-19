@@ -23,7 +23,7 @@ use crux_core::{App, Core, Request};
 use leptos::prelude::*;
 use mobiler_core::{
     A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
-    ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, Icon,
+    ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, HttpHeader, HttpOutcome, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
     Rgb, Spacing, TextStyle, Theme, Tone, Widget,
 };
@@ -276,7 +276,7 @@ fn start_stream<A: WebApp>(
             let count = std::cell::Cell::new(0u32);
             let interval = gloo_timers::callback::Interval::new(ms, move || {
                 count.set(count.get() + 1);
-                emit(PluginResponse { ok: true, output: count.get().to_string() });
+                emit(PluginResponse::text(true, count.get().to_string()));
             });
             StreamHandle::Ticker { _interval: interval }
         }
@@ -285,11 +285,11 @@ fn start_stream<A: WebApp>(
             let onmessage = {
                 let emit = emit.clone();
                 Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |e: web_sys::MessageEvent| {
-                    emit(PluginResponse { ok: true, output: e.data().as_string().unwrap_or_default() });
+                    emit(PluginResponse::text(true, e.data().as_string().unwrap_or_default()));
                 })
             };
             let onclose = Closure::<dyn FnMut(web_sys::CloseEvent)>::new(move |_e| {
-                emit(PluginResponse { ok: false, output: "closed".into() });
+                emit(PluginResponse::text(false, "closed"));
             });
             ws.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
             ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
@@ -303,21 +303,21 @@ fn start_stream<A: WebApp>(
             let doc = win.document().expect("document");
             // Initial: the current URL as a deeplink + current visibility as lifecycle.
             if let Ok(href) = win.location().href() {
-                emit(PluginResponse { ok: true, output: system_deeplink(&href) });
+                emit(PluginResponse::text(true, system_deeplink(&href)));
             }
-            emit(PluginResponse { ok: true, output: system_lifecycle(&doc) });
+            emit(PluginResponse::text(true, system_lifecycle(&doc)));
             let onpop = {
                 let (emit, win) = (emit.clone(), win.clone());
                 Closure::<dyn FnMut(web_sys::Event)>::new(move |_e: web_sys::Event| {
                     if let Ok(href) = win.location().href() {
-                        emit(PluginResponse { ok: true, output: system_deeplink(&href) });
+                        emit(PluginResponse::text(true, system_deeplink(&href)));
                     }
                 })
             };
             let onvis = {
                 let (emit, doc) = (emit.clone(), doc.clone());
                 Closure::<dyn FnMut(web_sys::Event)>::new(move |_e: web_sys::Event| {
-                    emit(PluginResponse { ok: true, output: system_lifecycle(&doc) });
+                    emit(PluginResponse::text(true, system_lifecycle(&doc)));
                 })
             };
             let _ = win.add_event_listener_with_callback("popstate", onpop.as_ref().unchecked_ref());
@@ -388,7 +388,7 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         } else {
             nav.and_then(|n| n.user_agent().ok()).unwrap_or_default()
         };
-        return PluginResponse { ok: true, output };
+        return PluginResponse::text(true, output);
     }
     if call.plugin == "photo" && call.op == "pick" {
         return take_image(false).await;
@@ -400,7 +400,7 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         return match call.op.as_str() {
             "date" => take_datetime("date").await,
             "time" => take_datetime("time").await,
-            other => PluginResponse { ok: false, output: format!("unknown datetime op '{other}'") },
+            other => PluginResponse::text(false, format!("unknown datetime op '{other}'")),
         };
     }
     if call.plugin == "dialog" && call.op == "confirm" {
@@ -411,34 +411,96 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         let ok = web_sys::window()
             .and_then(|w| w.confirm_with_message(&prompt).ok())
             .unwrap_or(false);
-        return PluginResponse { ok, output: if ok { "ok".into() } else { "cancel".into() } };
+        return PluginResponse::text(ok, if ok { "ok" } else { "cancel" });
     }
     if call.plugin != "http" {
-        return PluginResponse { ok: false, output: format!("plugin '{}' not available", call.plugin) };
+        return PluginResponse::text(false, format!("plugin '{}' not available", call.plugin));
     }
     let v: serde_json::Value = serde_json::from_str(&call.input).unwrap_or(serde_json::Value::Null);
     let url = v.get("url").and_then(serde_json::Value::as_str).unwrap_or("");
     let body = v.get("body").and_then(serde_json::Value::as_str);
+    let req_headers: Vec<(String, String)> = v
+        .get("headers")
+        .and_then(serde_json::Value::as_array)
+        .map(|hs| {
+            hs.iter()
+                .filter_map(|h| {
+                    Some((
+                        h.get("name")?.as_str()?.to_string(),
+                        h.get("value")?.as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
-    use gloo_net::http::Request;
+    use gloo_net::http::{Method, Request};
+
+    // Exhaustive: an unknown verb is an error, never a silent GET. The previous
+    // `_ => Request::get(url)` fallthrough turned every PUT into a GET.
     let builder = match call.op.as_str() {
+        "GET" => Request::get(url),
         "POST" => Request::post(url),
+        "PUT" => Request::put(url),
         "PATCH" => Request::patch(url),
         "DELETE" => Request::delete(url),
-        _ => Request::get(url),
+        "HEAD" => Request::get(url).method(Method::HEAD),
+        "OPTIONS" => Request::get(url).method(Method::OPTIONS),
+        other => return http_transport_error(format!("unsupported HTTP method '{other}'")),
     };
+
+    // Only default Content-Type when the caller did not set one.
+    let caller_set_content_type =
+        req_headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("content-type"));
+
+    // `RequestBuilder::header` maps to `web_sys::Headers::set`, which REPLACES
+    // any existing value for that name — unlike iOS's `addValue` and Android's
+    // `addHeader`, which both APPEND. Build a `gloo_net::http::Headers` and
+    // `append` into it instead, so repeated names (Set-Cookie, Accept) survive
+    // on web the same way they do on the native shells.
+    let gloo_headers = gloo_net::http::Headers::new();
+    for (name, value) in &req_headers {
+        gloo_headers.append(name, value);
+    }
+    if body.is_some() && !caller_set_content_type {
+        gloo_headers.append("Content-Type", "application/json");
+    }
+    let builder = builder.headers(gloo_headers);
+
     let request = match body {
-        Some(b) => builder.header("Content-Type", "application/json").body(b),
+        Some(b) => builder.body(b),
         None => builder.build(),
     };
     let request = match request {
         Ok(r) => r,
-        Err(e) => return PluginResponse { ok: false, output: e.to_string() },
+        Err(e) => return http_transport_error(e.to_string()),
     };
+
     match request.send().await {
-        Ok(resp) => PluginResponse { ok: resp.ok(), output: resp.text().await.unwrap_or_default() },
-        Err(e) => PluginResponse { ok: false, output: e.to_string() },
+        Ok(resp) => {
+            let status = resp.status();
+            let headers = resp
+                .headers()
+                .entries()
+                .map(|(name, value)| HttpHeader { name, value })
+                .collect();
+            match resp.binary().await {
+                Ok(bytes) => {
+                    let outcome = HttpOutcome::Response { status, headers, body: bytes };
+                    PluginResponse { ok: (200..300).contains(&status), output: outcome.encode() }
+                }
+                // A body-read failure (truncated/aborted stream) is a transport
+                // failure, not a successful empty response — match native shells.
+                Err(e) => http_transport_error(e.to_string()),
+            }
+        }
+        Err(e) => http_transport_error(e.to_string()),
     }
+}
+
+/// A failure where no HTTP response was obtained. `ok` is false and there is no status.
+fn http_transport_error(message: String) -> PluginResponse {
+    PluginResponse { ok: false, output: HttpOutcome::TransportError { message }.encode() }
 }
 
 /// Pick or capture an image via a hidden `<input type=file accept=image/*>`, clicked
@@ -450,10 +512,10 @@ async fn perform(call: &PluginCall) -> PluginResponse {
 async fn take_image(capture: bool) -> PluginResponse {
     use wasm_bindgen::{closure::Closure, JsCast};
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return PluginResponse { ok: false, output: "no document".into() };
+        return PluginResponse::text(false, "no document");
     };
     let Some(input) = doc.create_element("input").ok().and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok()) else {
-        return PluginResponse { ok: false, output: "no input element".into() };
+        return PluginResponse::text(false, "no input element");
     };
     input.set_type("file");
     input.set_accept("image/*");
@@ -479,8 +541,8 @@ async fn take_image(capture: bool) -> PluginResponse {
     on_change.forget(); // keep the handler alive until `change` fires
 
     match rx.await {
-        Ok(Some(url)) => PluginResponse { ok: true, output: url },
-        _ => PluginResponse { ok: false, output: "cancelled".into() },
+        Ok(Some(url)) => PluginResponse::text(true, url),
+        _ => PluginResponse::text(false, "cancelled"),
     }
 }
 
@@ -491,10 +553,10 @@ async fn take_image(capture: bool) -> PluginResponse {
 async fn take_datetime(kind: &str) -> PluginResponse {
     use wasm_bindgen::{closure::Closure, JsCast};
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return PluginResponse { ok: false, output: "no document".into() };
+        return PluginResponse::text(false, "no document");
     };
     let Some(input) = doc.create_element("input").ok().and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok()) else {
-        return PluginResponse { ok: false, output: "no input element".into() };
+        return PluginResponse::text(false, "no input element");
     };
     input.set_type(kind); // "date" or "time"
     // showPicker() needs a connected element; keep it in the DOM but out of sight.
@@ -530,8 +592,8 @@ async fn take_datetime(kind: &str) -> PluginResponse {
     let result = rx.await;
     input.remove();
     match result {
-        Ok(Some(v)) => PluginResponse { ok: true, output: v },
-        _ => PluginResponse { ok: false, output: "cancelled".into() },
+        Ok(Some(v)) => PluginResponse::text(true, v),
+        _ => PluginResponse::text(false, "cancelled"),
     }
 }
 
