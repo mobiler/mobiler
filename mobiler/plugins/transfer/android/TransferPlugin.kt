@@ -65,10 +65,23 @@ class TransferPlugin(private val application: Application) : MobilerPlugin {
         }
         val url = obj.optString("url")
         val builder = Request.Builder().url(url)
+        // Content-Type is threaded through as `appContentType` instead of added as a plain header
+        // here: OkHttp's BridgeInterceptor writes the upload RequestBody's `contentType()` as the
+        // Content-Type header, REPLACING anything set via `addHeader` — so an app-supplied value
+        // added here would be silently overwritten by streamingUploadBody's fixed
+        // "application/octet-stream". Filtering it out and letting `contentType()` be the single
+        // source of truth (app value if present, else octet-stream) keeps this in sync with iOS
+        // (`request.addValue`) and web (`xhr.set_request_header`), which both honor it.
+        var appContentType: String? = null
         obj.optJSONArray("headers")?.let { hs ->
             for (i in 0 until hs.length()) {
                 val h = hs.getJSONObject(i)
-                builder.addHeader(h.optString("name"), h.optString("value"))
+                val name = h.optString("name")
+                if (op == "upload" && name.equals("Content-Type", ignoreCase = true)) {
+                    appContentType = h.optString("value")
+                } else {
+                    builder.addHeader(name, h.optString("value"))
+                }
             }
         }
 
@@ -96,7 +109,7 @@ class TransferPlugin(private val application: Application) : MobilerPlugin {
         if (op == "upload") {
             val method = obj.optString("method").ifEmpty { "PUT" }
             val source = obj.optString("source")
-            val body = streamingUploadBody(application, source, ::maybeProgress)
+            val body = streamingUploadBody(application, source, appContentType, ::maybeProgress)
             if (body == null) {
                 finish(TransferEvent.Done(HttpOutcome.TransportError("cannot open upload source '$source'"), null))
                 return@callbackFlow
@@ -185,6 +198,7 @@ class TransferPlugin(private val application: Application) : MobilerPlugin {
 private fun streamingUploadBody(
     application: Application,
     source: String,
+    contentType: String?,
     onProgress: (sent: Long, total: Long?) -> Unit,
 ): RequestBody? {
     val isContentUri = source.startsWith("content://")
@@ -200,9 +214,13 @@ private fun streamingUploadBody(
     open()?.close() ?: return null
 
     val total: Long? = if (isContentUri) null else sourceFile!!.length().takeIf { it > 0 }
+    // App-supplied Content-Type wins (needed e.g. for a presigned S3/GCS PUT signed against a
+    // specific content type); otherwise default to octet-stream. This is the single place the
+    // upload's Content-Type header is decided — see the caller in `subscribe` above.
+    val mediaType: MediaType? = (contentType ?: "application/octet-stream").toMediaTypeOrNull()
 
     return object : RequestBody() {
-        override fun contentType(): MediaType? = "application/octet-stream".toMediaTypeOrNull()
+        override fun contentType(): MediaType? = mediaType
         override fun contentLength(): Long = total ?: -1L
         override fun writeTo(sink: BufferedSink) {
             val input = open() ?: throw IOException("cannot open source '$source'")
