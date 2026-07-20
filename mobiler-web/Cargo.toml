@@ -27,10 +27,17 @@ serde_json = "1"
 gloo-timers = "0.3"
 futures-channel = "0.3"
 wasm-bindgen = "0.2"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Document", "HtmlHeadElement", "HtmlElement", "Element", "Node",
     "Window", "Storage", "Navigator", "Clipboard", "EventTarget",
     "HtmlInputElement", "FileList", "File", "Blob", "Url",
     "WebSocket", "MessageEvent", "CloseEvent", "BinaryType",
     "Location", "VisibilityState", "Event", "PointerEvent",
+    # Transfer streaming (upload/download): XHR is the only web API with upload
+    # progress (fetch has none); fetch + ReadableStream reports download progress.
+    "XmlHttpRequest", "XmlHttpRequestUpload", "XmlHttpRequestEventTarget", "ProgressEvent",
+    "AbortController", "AbortSignal",
+    "Request", "RequestInit", "Response", "Headers",
+    "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Performance",
 ] }

@@ -25,7 +25,7 @@ use mobiler_core::{
     A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, HttpHeader, HttpOutcome, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
-    Rgb, Spacing, TextStyle, Theme, Tone, Widget,
+    Rgb, Spacing, TextStyle, Theme, Tone, TransferEvent, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -324,12 +324,311 @@ fn start_stream<A: WebApp>(
             let _ = doc.add_event_listener_with_callback("visibilitychange", onvis.as_ref().unchecked_ref());
             StreamHandle::System(SystemStream { win, doc, _onpop: onpop, _onvis: onvis })
         }
+        // Streaming file transfer (`cx.upload` / `cx.download`, Release B). See
+        // `start_web_upload` / `start_web_download` for the WEB ASYMMETRY: upload uses
+        // XHR (the only web API with upload-progress events), download uses fetch +
+        // ReadableStream (progress) and hands the app back a `blob:` handle.
+        ("transfer", op @ ("upload" | "download")) => {
+            let v: serde_json::Value = serde_json::from_str(&call.input).unwrap_or(serde_json::Value::Null);
+            let url = v.get("url").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let headers: Vec<(String, String)> = v
+                .get("headers")
+                .and_then(|x| x.as_array())
+                .map(|hs| {
+                    hs.iter()
+                        .filter_map(|h| Some((h.get("name")?.as_str()?.to_string(), h.get("value")?.as_str()?.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if op == "upload" {
+                let method = v.get("method").and_then(|x| x.as_str()).unwrap_or("PUT").to_string();
+                let source = v.get("source").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                start_web_upload(url, method, headers, source, emit.clone())
+            } else {
+                start_web_download(url, headers, emit.clone())
+            }
+        }
         _ => return, // unknown / native-only source — ignore on web
     };
 
     STREAMS.with(|m| {
         m.borrow_mut().insert(call.key.clone(), handle);
     });
+}
+
+/// Monotonic milliseconds, for the ~10/sec progress throttle (`performance.now()`).
+fn js_now() -> f64 {
+    web_sys::window().and_then(|w| w.performance()).map(|p| p.now()).unwrap_or(0.0)
+}
+
+/// Start a web upload via `XMLHttpRequest`.
+///
+/// DELIBERATE WEB ASYMMETRY (see `start_web_download` for the other half): upload uses
+/// XHR because it is the *only* web API that reports upload progress
+/// (`xhr.upload().onprogress`) — `fetch()` has no upload-progress signal at all. Do not
+/// "unify" this with fetch; there is no fetch-based way to get upload progress in a
+/// browser today.
+fn start_web_upload(
+    url: String,
+    method: String,
+    headers: Vec<(String, String)>,
+    source: String,
+    emit: impl Fn(PluginResponse) + Clone + 'static,
+) -> StreamHandle {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let xhr = web_sys::XmlHttpRequest::new().expect("xhr");
+    let _ = xhr.open_with_async(&method, &url, true);
+    for (n, val) in &headers {
+        let _ = xhr.set_request_header(n, val);
+    }
+
+    // ~10/sec progress throttling: skip a tick if <100ms since the last one, but
+    // never skip the final tick (loaded == total) so 100% is always reported.
+    let last = std::rc::Rc::new(std::cell::Cell::new(0.0f64));
+    let on_prog = {
+        let (emit, last) = (emit.clone(), last.clone());
+        Closure::<dyn FnMut(web_sys::ProgressEvent)>::new(move |e: web_sys::ProgressEvent| {
+            let now = js_now();
+            if now - last.get() < 100.0 && e.loaded() < e.total() {
+                return;
+            }
+            last.set(now);
+            let total = if e.length_computable() { Some(e.total() as u64) } else { None };
+            emit(transfer_response(&TransferEvent::Progress { transferred: e.loaded() as u64, total }));
+        })
+    };
+    if let Ok(upload) = xhr.upload() {
+        upload.set_onprogress(Some(on_prog.as_ref().unchecked_ref()));
+    }
+
+    // Terminal event: a response (even non-2xx) is `Done { Response }`; only a failure
+    // to obtain a response at all is `Done { TransportError }`.
+    let on_done = {
+        let (emit, xhr_c) = (emit.clone(), xhr.clone());
+        Closure::<dyn FnMut()>::new(move || {
+            let status = xhr_c.status().unwrap_or(0);
+            let outcome = if status == 0 {
+                HttpOutcome::TransportError { message: "upload failed".into() }
+            } else {
+                HttpOutcome::Response { status, headers: vec![], body: vec![] }
+            };
+            emit(transfer_response(&TransferEvent::Done { outcome, handle: None }));
+        })
+    };
+    xhr.set_onload(Some(on_done.as_ref().unchecked_ref()));
+    let on_err = {
+        let emit = emit.clone();
+        Closure::<dyn FnMut()>::new(move || {
+            emit(transfer_response(&TransferEvent::Done {
+                outcome: HttpOutcome::TransportError { message: "upload error".into() },
+                handle: None,
+            }));
+        })
+    };
+    xhr.set_onerror(Some(on_err.as_ref().unchecked_ref()));
+    let on_abort = {
+        let emit = emit.clone();
+        Closure::<dyn FnMut()>::new(move || {
+            emit(transfer_response(&TransferEvent::Done {
+                outcome: HttpOutcome::TransportError { message: "upload aborted".into() },
+                handle: None,
+            }));
+        })
+    };
+    xhr.set_onabort(Some(on_abort.as_ref().unchecked_ref()));
+
+    // The upload `source` is itself a `blob:` URL (e.g. produced by `photo`/`camera` or
+    // `files`), so fetch it back into a `Blob` before sending — same shape a native
+    // shell would read a file handle. A missing/unreadable source sends no body.
+    let xhr_send = xhr.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Some(blob) = fetch_blob(&source).await {
+            let _ = xhr_send.send_with_opt_blob(Some(&blob));
+        } else {
+            let _ = xhr_send.send();
+        }
+    });
+
+    StreamHandle::Transfer(TransferHandle {
+        xhr: Some(xhr),
+        abort: None,
+        _keepalive: vec![on_prog.into_js_value(), on_done.into_js_value(), on_err.into_js_value(), on_abort.into_js_value()],
+    })
+}
+
+/// Fetch a `blob:` (or any) URL back into a `Blob`, for handing to
+/// `XmlHttpRequest::send_with_opt_blob`. `None` on any failure (network error, not a
+/// Blob-shaped response, …) — the caller falls back to sending no body.
+async fn fetch_blob(url: &str) -> Option<web_sys::Blob> {
+    use wasm_bindgen::JsCast;
+    let win = web_sys::window()?;
+    let resp_value = wasm_bindgen_futures::JsFuture::from(win.fetch_with_str(url)).await.ok()?;
+    let resp: web_sys::Response = resp_value.dyn_into().ok()?;
+    let blob_promise = resp.blob().ok()?;
+    let blob_value = wasm_bindgen_futures::JsFuture::from(blob_promise).await.ok()?;
+    blob_value.dyn_into().ok()
+}
+
+/// Start a web download via `fetch` + a `ReadableStream` reader.
+///
+/// DELIBERATE WEB ASYMMETRY (see `start_web_upload` for the other half): download uses
+/// `fetch`'s streaming response body to report progress as chunks arrive, then hands
+/// the app back a `blob:` handle for the assembled bytes — the same handle shape
+/// `take_image`/`photo.pick` returns via `Url::create_object_url_with_blob`. (XHR could
+/// also do a download, but fetch + ReadableStream is the standard/ergonomic way to get
+/// mid-transfer download progress on the web.)
+fn start_web_download(
+    url: String,
+    headers: Vec<(String, String)>,
+    emit: impl Fn(PluginResponse) + Clone + 'static,
+) -> StreamHandle {
+    let ctrl = web_sys::AbortController::new().expect("abortcontroller");
+    let signal = ctrl.signal();
+    let emit2 = emit.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        match fetch_stream(&url, &headers, &signal).await {
+            Ok((status, resp_headers, total, mut reader)) => {
+                let mut got: u64 = 0;
+                let mut chunks: Vec<u8> = Vec::new();
+                let mut last = js_now();
+                loop {
+                    match reader.next().await {
+                        Ok(Some(chunk)) => {
+                            got += chunk.len() as u64;
+                            chunks.extend_from_slice(&chunk);
+                            let now = js_now();
+                            // ~10/sec progress throttling (see `start_web_upload`).
+                            if now - last >= 100.0 {
+                                last = now;
+                                emit2(transfer_response(&TransferEvent::Progress { transferred: got, total }));
+                            }
+                        }
+                        Ok(None) => break, // stream finished
+                        Err(msg) => {
+                            emit2(transfer_response(&TransferEvent::Done {
+                                outcome: HttpOutcome::TransportError { message: msg },
+                                handle: None,
+                            }));
+                            return;
+                        }
+                    }
+                }
+                let handle = make_blob_url(&chunks);
+                let outcome = HttpOutcome::Response { status, headers: resp_headers, body: vec![] };
+                emit2(transfer_response(&TransferEvent::Done { outcome, handle: Some(handle) }));
+            }
+            Err(msg) => emit2(transfer_response(&TransferEvent::Done {
+                outcome: HttpOutcome::TransportError { message: msg },
+                handle: None,
+            })),
+        }
+    });
+    StreamHandle::Transfer(TransferHandle { xhr: None, abort: Some(ctrl), _keepalive: vec![] })
+}
+
+/// Begin a GET (with the given headers) via `fetch` under `signal` and return the
+/// response's status, headers, `Content-Length` (if present) and a chunk [`Reader`]
+/// over its body stream.
+async fn fetch_stream(
+    url: &str,
+    headers: &[(String, String)],
+    signal: &web_sys::AbortSignal,
+) -> Result<(u16, Vec<HttpHeader>, Option<u64>, Reader), String> {
+    use wasm_bindgen::JsCast;
+    let win = web_sys::window().ok_or_else(|| "no window".to_string())?;
+    let js_headers = web_sys::Headers::new().map_err(|e| js_err(&e))?;
+    for (n, v) in headers {
+        js_headers.append(n, v).map_err(|e| js_err(&e))?;
+    }
+    let init = web_sys::RequestInit::new();
+    init.set_method("GET");
+    init.set_headers_headers(&js_headers);
+    init.set_signal(Some(signal));
+    let request = web_sys::Request::new_with_str_and_init(url, &init).map_err(|e| js_err(&e))?;
+
+    let resp_value = wasm_bindgen_futures::JsFuture::from(win.fetch_with_request(&request))
+        .await
+        .map_err(|e| js_err(&e))?;
+    let resp: web_sys::Response = resp_value.dyn_into().map_err(|_| "fetch: not a Response".to_string())?;
+    let status = resp.status();
+    let resp_headers = response_headers(&resp.headers());
+    let total = resp_headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case("content-length"))
+        .and_then(|h| h.value.parse().ok());
+
+    let Some(stream) = resp.body() else {
+        // No body (e.g. 204/304, or a HEAD-like response) — an empty reader is correct:
+        // the caller's loop immediately sees "finished" and moves straight to Done.
+        return Ok((status, resp_headers, total, Reader::empty()));
+    };
+    let reader = web_sys::ReadableStreamDefaultReader::new(&stream).map_err(|e| js_err(&e))?;
+    Ok((status, resp_headers, total, Reader::new(reader)))
+}
+
+/// A `web_sys::Headers` iterable (Fetch's `Headers` implements `Symbol.iterator` over
+/// `[name, value]` pairs) collected into our wire [`HttpHeader`] shape.
+fn response_headers(headers: &web_sys::Headers) -> Vec<HttpHeader> {
+    use wasm_bindgen::JsCast;
+    let mut out = Vec::new();
+    if let Ok(Some(iter)) = js_sys::try_iter(headers) {
+        for entry in iter.flatten() {
+            let arr: js_sys::Array = entry.unchecked_into();
+            let name = arr.get(0).as_string().unwrap_or_default();
+            let value = arr.get(1).as_string().unwrap_or_default();
+            out.push(HttpHeader { name, value });
+        }
+    }
+    out
+}
+
+/// Best-effort stringification of a `JsValue` error (e.g. a `DOMException`) for
+/// `TransferEvent::Done { outcome: HttpOutcome::TransportError { message } }`.
+fn js_err(e: &wasm_bindgen::JsValue) -> String {
+    use wasm_bindgen::JsCast;
+    e.as_string()
+        .or_else(|| e.dyn_ref::<js_sys::Error>().map(|err| String::from(err.message())))
+        .unwrap_or_else(|| "transfer error".to_string())
+}
+
+/// A minimal async chunk reader over a `ReadableStreamDefaultReader`. `next()` resolves
+/// to `Ok(Some(bytes))` per chunk, `Ok(None)` when the stream is done, or `Err(message)`
+/// if the underlying `read()` rejects (e.g. the fetch was aborted mid-stream).
+struct Reader(Option<web_sys::ReadableStreamDefaultReader>);
+impl Reader {
+    fn new(reader: web_sys::ReadableStreamDefaultReader) -> Self {
+        Self(Some(reader))
+    }
+    /// A reader over no stream at all (e.g. a bodiless response) — always "done".
+    fn empty() -> Self {
+        Self(None)
+    }
+    async fn next(&mut self) -> Result<Option<Vec<u8>>, String> {
+        use wasm_bindgen::JsCast;
+        let Some(reader) = &self.0 else { return Ok(None) };
+        let result = wasm_bindgen_futures::JsFuture::from(reader.read()).await.map_err(|e| js_err(&e))?;
+        let result: web_sys::ReadableStreamReadResult = result.unchecked_into();
+        if result.get_done().unwrap_or(true) {
+            return Ok(None);
+        }
+        let value = result.get_value();
+        let bytes = js_sys::Uint8Array::new(&value).to_vec();
+        Ok(Some(bytes))
+    }
+}
+
+/// Assemble bytes into a `Blob` and return an object URL — the download's `handle`. The
+/// same shape [`take_image`]'s `Url::create_object_url_with_blob` returns for a picked
+/// photo, so an app can render/save a downloaded file the same way.
+fn make_blob_url(bytes: &[u8]) -> String {
+    let array = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&array);
+    web_sys::Blob::new_with_u8_array_sequence(&parts)
+        .ok()
+        .and_then(|blob| web_sys::Url::create_object_url_with_blob(&blob).ok())
+        .unwrap_or_default()
 }
 
 /// A `system` deeplink event payload (the push-style tagged JSON the app demuxes by `type`).
@@ -353,6 +652,38 @@ enum StreamHandle {
     /// unsubscribe (the handle is dropped when removed from `STREAMS`). Never pattern-matched.
     #[allow(dead_code)]
     System(SystemStream),
+    /// An in-flight transfer — held so dropping it (on unsubscribe) aborts the XHR /
+    /// cancels the fetch reader. Never pattern-matched.
+    #[allow(dead_code)]
+    Transfer(TransferHandle),
+}
+
+/// Holds a web transfer so unsubscribe can abort it. For upload we keep the
+/// `XmlHttpRequest` (call `.abort()` on drop via the Drop impl); for download we keep an
+/// `AbortController` whose `.abort()` cancels the fetch + reader.
+struct TransferHandle {
+    xhr: Option<web_sys::XmlHttpRequest>,
+    abort: Option<web_sys::AbortController>,
+    // Closures must outlive the request; parked here so they aren't dropped early.
+    _keepalive: Vec<wasm_bindgen::JsValue>,
+}
+impl Drop for TransferHandle {
+    fn drop(&mut self) {
+        if let Some(x) = &self.xhr {
+            let _ = x.abort();
+        }
+        if let Some(a) = &self.abort {
+            a.abort();
+        }
+    }
+}
+
+/// Bincode a `TransferEvent` into a stream `PluginResponse` (mirrors Release A's `http` encode).
+fn transfer_response(ev: &TransferEvent) -> PluginResponse {
+    PluginResponse {
+        ok: matches!(ev, TransferEvent::Done { outcome, .. } if outcome.is_success()),
+        output: ev.encode(),
+    }
 }
 
 /// The `system` subscription's event listeners — removed from the DOM when dropped (unsubscribe).
