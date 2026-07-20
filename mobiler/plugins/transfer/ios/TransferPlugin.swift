@@ -124,6 +124,7 @@ enum TransferPlugin {
                 // Done{TransportError} — the same terminal the guards above already use — instead
                 // of crashing the process, matching the Android twin (OkHttp throws a catchable
                 // IOException).
+                var rh: FileHandle?   // hoisted so the catch can close it on a mid-stream throw
                 do {
                     func w(_ s: String) throws {
                         if let d = s.data(using: .utf8) { try out.write(contentsOf: d) }
@@ -140,23 +141,28 @@ enum TransferPlugin {
                     // anyway). Falling through to a caller header here would be exactly the Task 5
                     // Android bug this must not repeat.
                     let filename = (mp["filename"] as? String) ?? inferFilename(source)
-                    let ctype = (mp["file_content_type"] as? String) ?? "application/octet-stream"
+                    // Sanitize `ctype` too: it lands on a header line, so an embedded CRLF would
+                    // inject a header — the same vector sanitize() closes for name/filename.
+                    let ctype = sanitize((mp["file_content_type"] as? String) ?? "application/octet-stream")
                     try w("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(sanitize(field))\"; filename=\"\(sanitize(filename))\"\r\nContent-Type: \(ctype)\r\n\r\n")
-                    guard let rh = try? FileHandle(forReadingFrom: resolved) else {
+                    guard let opened = try? FileHandle(forReadingFrom: resolved) else {
                         try? out.close()
                         try? FileManager.default.removeItem(at: tmp)
                         emit(response(for: .done(outcome: .transportError(message: "cannot open upload source '\(source)'"), handle: nil)))
                         return
                     }
+                    rh = opened
                     while true {
-                        guard let chunk = try rh.read(upToCount: 64 * 1024) else { break } // nil == EOF
+                        guard let chunk = try opened.read(upToCount: 64 * 1024) else { break } // nil == EOF
                         if chunk.isEmpty { break }
                         try out.write(contentsOf: chunk)
                     }
-                    try? rh.close()
+                    try? opened.close()
+                    rh = nil
                     try w("\r\n--\(boundary)--\r\n")
                     try out.close()
                 } catch {
+                    try? rh?.close()
                     try? out.close()
                     try? FileManager.default.removeItem(at: tmp)
                     emit(response(for: .done(outcome: .transportError(message: "failed to compose multipart body: \(error.localizedDescription)"), handle: nil)))
