@@ -123,7 +123,11 @@ partial-cleanup discipline as the download path).
   `#fragment` stripped; empty → `"file"`. Overridable via `.filename()`.
 - **File content-type:** `application/octet-stream` default (servers overwhelmingly sniff
   or accept it); overridable via `.file_content_type()`. No extension-based sniffing in v1
-  — an override is the escape hatch.
+  — an override is the escape hatch. **Documented cross-shell difference:** the override
+  is honored on iOS/Android; on **web** the browser derives the file part's `Content-Type`
+  from the `Blob`'s own MIME type (the picker/photo blob already carries one), so a
+  `.file_content_type()` override is native-only in v1. Intentional, not a bug — honoring
+  it on web means re-wrapping the Blob, deferred.
 - **Text-field order** is preserved; the file part is emitted **last** (typical multipart
   ordering, and lets a server read metadata fields before the large blob).
 - **Cancel / throttle / terminal** semantics are exactly Release B's — unchanged.
