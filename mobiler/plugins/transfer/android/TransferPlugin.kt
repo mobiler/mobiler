@@ -39,7 +39,8 @@ import java.io.InputStream
  *   cx.download(url, dest).start("dl", Msg::Xfer)    // GET url → dest
  *   cx.unsubscribe(key)                              // cancels
  * Envelope JSON (see mobiler-core::transfer::TransferReq): {"url","source"|"dest","method"?,
- * "headers":[{"name","value"}]}. `op` is "upload" or "download" (the plugin op, not the HTTP verb).
+ * "headers":[{"name","value"}],"multipart"?:{"field","filename"?,"file_content_type"?,
+ * "fields"?:[{"name","value"}]}}. `op` is "upload" or "download" (the plugin op, not the HTTP verb).
  *
  * CANCEL SEMANTICS (must match iOS — see TransferPlugin.swift): `cx.unsubscribe` cancels the
  * collecting coroutine. Whether that lands before the transfer starts or mid-flight, we emit
@@ -113,9 +114,16 @@ class TransferPlugin(private val application: Application) : MobilerPlugin {
             // Present only for a multipart upload (see mobiler-core::transfer::TransferReq); when
             // absent this is the pre-existing raw-body upload, unchanged below.
             val mp = obj.optJSONObject("multipart")
-            // The file part's Content-Type: multipart.file_content_type wins, else the app-supplied
-            // header (raw-upload precedent), else streamingUploadBody's own octet-stream default.
-            val fileContentType = mp?.optString("file_content_type")?.ifEmpty { null } ?: appContentType
+            // The file part's Content-Type: in multipart mode, ONLY multipart.file_content_type
+            // applies (else streamingUploadBody's own octet-stream default) — `appContentType` is a
+            // REQUEST-level header override and must not leak into the file part. The web shell
+            // explicitly drops an app-supplied Content-Type header once multipart is active (it
+            // would clobber the boundary; see mobiler-web/src/lib.rs), so falling through to
+            // `appContentType` here would silently diverge from web for an app that set a request
+            // Content-Type header and called `.multipart(...)` without `.file_content_type(...)`.
+            // Raw (non-multipart) uploads are unaffected: `appContentType` still applies exactly as
+            // before.
+            val fileContentType = if (mp != null) mp.optString("file_content_type").ifEmpty { null } else appContentType
             val body = streamingUploadBody(application, source, fileContentType, ::maybeProgress)
             if (body == null) {
                 finish(TransferEvent.Done(HttpOutcome.TransportError("cannot open upload source '$source'"), null))
@@ -125,14 +133,25 @@ class TransferPlugin(private val application: Application) : MobilerPlugin {
             // (`multipart/form-data; boundary=...`) — `appContentType`/`fileContentType` above is
             // scoped to the file PART's own Content-Type, not the request's. Nothing here sets a
             // request-level Content-Type header, so there's nothing to double-set.
-            val finalBody: RequestBody = if (mp != null) {
-                val field = mp.getString("field")
+            // Parsed defensively (optString, not getString) so a malformed envelope emits a
+            // graceful Done{TransportError} — like the `obj == null` guard above — instead of an
+            // uncaught JSONException escaping the callbackFlow producer.
+            val field = mp?.optString("field")?.ifEmpty { null }
+            if (mp != null && field == null) {
+                finish(TransferEvent.Done(HttpOutcome.TransportError("malformed multipart config"), null))
+                return@callbackFlow
+            }
+            val finalBody: RequestBody = if (mp != null && field != null) {
                 val filename = mp.optString("filename").ifEmpty { inferFilename(source) }
                 val mb = MultipartBody.Builder().setType(MultipartBody.FORM)
                 val fields = mp.optJSONArray("fields")
                 if (fields != null) for (i in 0 until fields.length()) {
-                    val f = fields.getJSONObject(i)
-                    mb.addFormDataPart(f.getString("name"), f.getString("value")) // text fields first
+                    val f = fields.optJSONObject(i)
+                    if (f == null || !f.has("name") || !f.has("value")) {
+                        finish(TransferEvent.Done(HttpOutcome.TransportError("malformed multipart config"), null))
+                        return@callbackFlow
+                    }
+                    mb.addFormDataPart(f.optString("name"), f.optString("value")) // text fields first
                 }
                 mb.addFormDataPart(field, filename, body) // file part LAST — streams via `body`,
                 // so `streamingUploadBody`'s counting sink (`::maybeProgress`) still drives progress.
