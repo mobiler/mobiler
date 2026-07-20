@@ -1,6 +1,6 @@
 [package]
 name = "mobiler-web"
-version = "0.32.0"
+version = "0.33.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Mobiler's web shell — renders any Mobiler app's Widget tree to the DOM (Leptos/WASM)."
@@ -17,7 +17,7 @@ categories = ["wasm", "web-programming", "gui"]
 crate-type = ["lib"]
 
 [dependencies]
-mobiler-core = { path = "../mobiler-core", version = "0.32" }
+mobiler-core = { path = "../mobiler-core", version = "0.33" }
 crux_core = "0.18"
 leptos = { version = "0.7", features = ["csr"] }
 gloo-net = "0.6"
@@ -27,10 +27,17 @@ serde_json = "1"
 gloo-timers = "0.3"
 futures-channel = "0.3"
 wasm-bindgen = "0.2"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Document", "HtmlHeadElement", "HtmlElement", "Element", "Node",
     "Window", "Storage", "Navigator", "Clipboard", "EventTarget",
     "HtmlInputElement", "FileList", "File", "Blob", "Url",
     "WebSocket", "MessageEvent", "CloseEvent", "BinaryType",
     "Location", "VisibilityState", "Event", "PointerEvent",
+    # Transfer streaming (upload/download): XHR is the only web API with upload
+    # progress (fetch has none); fetch + ReadableStream reports download progress.
+    "XmlHttpRequest", "XmlHttpRequestUpload", "XmlHttpRequestEventTarget", "ProgressEvent",
+    "AbortController", "AbortSignal",
+    "Request", "RequestInit", "Response", "Headers",
+    "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Performance",
 ] }

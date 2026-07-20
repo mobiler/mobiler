@@ -11,9 +11,11 @@ pub mod bunny;
 pub mod format;
 pub mod http;
 pub mod i18n;
+pub mod transfer;
 pub use format::{Currency, Locale};
 pub use http::{HttpHeader, HttpOutcome};
 pub use i18n::{Catalog, negotiate};
+pub use transfer::TransferEvent;
 
 use crux_core::{
     App, Command,
@@ -172,6 +174,18 @@ impl<E> Cx<E> {
     /// producing events. No-op if `key` isn't subscribed.
     pub fn unsubscribe(&mut self, key: impl Into<String>) {
         self.notify("stream", "unsubscribe", key);
+    }
+
+    /// Upload the file at `source` (a path / `content://` / `file://` / `blob:` handle)
+    /// as the raw request body. Finish with [`TransferBuilder::start`].
+    pub fn upload(&mut self, url: impl Into<String>, source: impl Into<String>) -> crate::transfer::TransferBuilder<'_, E> {
+        crate::transfer::TransferBuilder::upload(self, url.into(), source.into())
+    }
+
+    /// Download `url` to `dest` (a sandbox path on iOS/Android; a filename hint on web,
+    /// which returns a `blob:` handle). Finish with [`TransferBuilder::start`].
+    pub fn download(&mut self, url: impl Into<String>, dest: impl Into<String>) -> crate::transfer::TransferBuilder<'_, E> {
+        crate::transfer::TransferBuilder::download(self, url.into(), dest.into())
     }
 
     /// Persist `data` (handed back to [`MobilerApp::restore`] on next startup).
@@ -1828,5 +1842,78 @@ mod tests {
         // panic, model untouched (the `if let Ok(event)` guard in MobilerShell::update).
         let _ = shell.update(Action::Fired { token: "not a valid token".into() }, &mut m);
         assert_eq!(m.count, 0);
+    }
+
+    // ---- transfer builders (cx.upload / cx.download) ----
+
+    #[test]
+    fn upload_builder_emits_transfer_stream_call() {
+        let mut cx = Cx::<Ev>::default();
+        let key = cx
+            .upload("https://h/put", "file:///tmp/a.enc")
+            .bearer("tok")
+            .header("Content-Type", "application/octet-stream")
+            .start("up-1", |_ev| Ev::Tap);
+
+        assert_eq!(key, "up-1");
+        assert_eq!(cx.streams.len(), 1);
+        let (call, _) = &cx.streams[0];
+        assert_eq!(call.key, "up-1");
+        assert_eq!(call.plugin, "transfer");
+        assert_eq!(call.op, "upload");
+
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(v["url"], "https://h/put");
+        assert_eq!(v["source"], "file:///tmp/a.enc");
+        assert_eq!(v["method"], "PUT"); // default
+        assert_eq!(v["headers"][0]["name"], "Authorization");
+        assert_eq!(v["headers"][0]["value"], "Bearer tok");
+        assert_eq!(v["headers"][1]["name"], "Content-Type");
+    }
+
+    #[test]
+    fn download_builder_uses_dest_and_no_default_method() {
+        let mut cx = Cx::<Ev>::default();
+        cx.download("https://h/get", "/data/att-9.enc").start("dl-1", |_| Ev::Tap);
+        let (call, _) = &cx.streams[0];
+        assert_eq!(call.op, "download");
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(v["dest"], "/data/att-9.enc");
+        assert!(v.get("source").is_none());
+    }
+
+    #[test]
+    fn start_continuation_decodes_progress_and_done() {
+        use crate::http::HttpOutcome;
+
+        // Local to this test (not module-scope `Ev`, which isn't `PartialEq`) so the
+        // continuation's return type can be compared with `assert_eq!`.
+        #[derive(Debug, PartialEq)]
+        enum Got {
+            Prog(u64),
+            Done(u16),
+            Bad,
+        }
+        #[derive(Debug, PartialEq)]
+        struct GotEv(Got);
+
+        let mut cx = Cx::<GotEv>::default();
+        cx.download("https://h/get", "/d").start("k", |ev| match ev {
+            TransferEvent::Progress { transferred, .. } => GotEv(Got::Prog(transferred)),
+            TransferEvent::Done { outcome, .. } => GotEv(match outcome.status() {
+                Some(s) => Got::Done(s),
+                None => Got::Bad,
+            }),
+        });
+        let (_, cont) = &cx.streams[0];
+
+        let prog = TransferEvent::Progress { transferred: 512, total: Some(1024) };
+        assert_eq!(cont(PluginResponse { ok: true, output: prog.encode() }), GotEv(Got::Prog(512)));
+
+        let done = TransferEvent::Done {
+            outcome: HttpOutcome::Response { status: 201, headers: vec![], body: vec![] },
+            handle: Some("/d".into()),
+        };
+        assert_eq!(cont(PluginResponse { ok: true, output: done.encode() }), GotEv(Got::Done(201)));
     }
 }

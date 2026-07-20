@@ -1271,6 +1271,7 @@ dependencies = [
  "futures-channel",
  "gloo-net",
  "gloo-timers",
+ "js-sys",
  "leptos",
  "mobiler-core",
  "serde_json",

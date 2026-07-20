@@ -1226,7 +1226,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "mobiler-core"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "crux_core",
  "facet",
@@ -1247,13 +1247,14 @@ dependencies = [
 
 [[package]]
 name = "mobiler-web"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "console_error_panic_hook",
  "crux_core",
  "futures-channel",
  "gloo-net",
  "gloo-timers",
+ "js-sys",
  "leptos",
  "mobiler-core",
  "serde_json",
