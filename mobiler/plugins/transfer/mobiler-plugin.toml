@@ -1,0 +1,26 @@
+# Free, bundled Mobiler plugin: streaming file upload/download. Rides the streaming primitive —
+# `subscribe` moves the bytes (native-side, never crossing the FFI) and streams progress + a
+# terminal event into `update`; call from Rust:
+#   cx.upload(url, source).start("up", Msg::Xfer)      // PUT (default)/POST source → url
+#   cx.download(url, dest).start("dl", Msg::Xfer)       // GET url → dest
+#   cx.unsubscribe("up")                                 // cancels the transfer
+# Modeled on the `websocket` plugin's streaming shape (see mobiler-core::transfer for the
+# TransferEvent/TransferBuilder Rust side — that's Release B PR-A, already published).
+#
+# Install:  mobiler plugin add transfer
+# Android = a custom OkHttp RequestBody (upload) / streamed response copy (download); OkHttp is
+#           already a template dep (HttpPlugin). iOS = URLSessionUploadTask/DownloadTask (system
+#           framework — no package).
+name = "transfer"
+summary = "Streaming file upload/download — progress + cancel, by path/URI/blob handle (free)"
+
+[android]
+sources = ["android/TransferPlugin.kt"]
+register = '"transfer" to TransferPlugin(application)'
+# Streaming is the plugin's polymorphic `subscribe()` override — no separate registration.
+# OkHttp is already a template dep (HttpPlugin).
+
+[ios]
+sources = ["ios/TransferPlugin.swift"]
+register = 'case "transfer": return await TransferPlugin.handle(op: op, input: input)'
+register_stream = 'case "transfer": await TransferPlugin.subscribe(op: op, input: input, emit: emit)'
