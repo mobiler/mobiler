@@ -54,6 +54,13 @@ enum FilesPlugin {
             let json = (try? JSONSerialization.data(withJSONObject: arr)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
             return PluginResponse(ok: true, output: json)
         case "download":
+            // Simple fire-and-forget download: one await of the whole response body via
+            // URLSession.data(from:), no progress and no mid-flight cancel (a real in-flight
+            // `URLSessionTask.cancel()`/partial-file cleanup only exists on the streaming path).
+            // For progress reporting and a real cancel (`cx.unsubscribe`), use the `transfer`
+            // plugin's `cx.download(url, dest)` instead — see mobiler/plugins/transfer. The two
+            // are intentionally separate code paths: this one is the convenience op for a small
+            // file where nobody needs a progress bar.
             guard let src = (obj["url"] as? String).flatMap(URL.init(string:)),
                   let dst = (obj["path"] as? String).flatMap(resolve) else { return PluginResponse(ok: false, output: "bad path/url") }
             do {
