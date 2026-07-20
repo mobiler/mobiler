@@ -59,6 +59,14 @@ class FilesPlugin(private val application: Application) : MobilerPlugin {
                     PluginResponse(true, arr.toString())
                 }
                 "download" -> {
+                    // Simple fire-and-forget download: one blocking read of the whole body, no
+                    // progress and no mid-flight cancel (the `handle` coroutine can still be
+                    // cancelled by its caller, but there's no partial-file cleanup or throttled
+                    // progress event like the streaming path has). For progress reporting and a
+                    // real in-flight cancel (`cx.unsubscribe`), use the `transfer` plugin's
+                    // `cx.download(url, dest)` instead — see mobiler/plugins/transfer. The two are
+                    // intentionally separate code paths: this one is the convenience op for a small
+                    // file where nobody needs a progress bar.
                     val f = resolve(obj.optString("path")) ?: return@withContext PluginResponse(false, "bad path")
                     f.parentFile?.mkdirs()
                     URL(obj.optString("url")).openStream().use { ins -> f.outputStream().use { out -> ins.copyTo(out) } }
