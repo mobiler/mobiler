@@ -81,6 +81,7 @@ ABI change. Bundled free plugins:
 | 🔐 `biometric` | Face ID / fingerprint auth |
 | 🗝️ `securestore` | encrypted key/value (Keychain / Keystore) |
 | 🔌 `websocket` | persistent real-time connection (streaming, via `cx.subscribe`) |
+| ⇅ `transfer` | streaming file upload/download — progress + cancel (`cx.upload`/`cx.download`) |
 | 🔔 `notifications` | local scheduled notifications (reminders) |
 | 🔋 `battery` | device battery level (sample) |
 | 📶 `connectivity` | network status (online/wifi/cellular/offline) |
