@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler-core"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "crux_core",
  "facet",
