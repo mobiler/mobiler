@@ -37,6 +37,7 @@ web-sys = { version = "0.3", features = [
     # Transfer streaming (upload/download): XHR is the only web API with upload
     # progress (fetch has none); fetch + ReadableStream reports download progress.
     "XmlHttpRequest", "XmlHttpRequestUpload", "XmlHttpRequestEventTarget", "ProgressEvent",
+    "FormData",
     "AbortController", "AbortSignal",
     "Request", "RequestInit", "Response", "Headers",
     "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Performance",

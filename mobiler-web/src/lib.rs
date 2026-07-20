@@ -344,7 +344,20 @@ fn start_stream<A: WebApp>(
             if op == "upload" {
                 let method = v.get("method").and_then(|x| x.as_str()).unwrap_or("PUT").to_string();
                 let source = v.get("source").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                start_web_upload(url, method, headers, source, emit.clone())
+                let multipart = v.get("multipart").map(|m| WebMultipart {
+                    field: m.get("field").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    filename: m.get("filename").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    fields: m
+                        .get("fields")
+                        .and_then(|x| x.as_array())
+                        .map(|fs| {
+                            fs.iter()
+                                .filter_map(|f| Some((f.get("name")?.as_str()?.to_string(), f.get("value")?.as_str()?.to_string())))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                });
+                start_web_upload(url, method, headers, source, multipart, emit.clone())
             } else {
                 start_web_download(url, headers, emit.clone())
             }
@@ -360,6 +373,30 @@ fn start_stream<A: WebApp>(
 /// Monotonic milliseconds, for the ~10/sec progress throttle (`performance.now()`).
 fn js_now() -> f64 {
     web_sys::window().and_then(|w| w.performance()).map(|p| p.now()).unwrap_or(0.0)
+}
+
+/// Parsed `multipart` envelope config (Task 1's `cx.upload(...).multipart(...)`), threaded
+/// into `start_web_upload` the same way `headers`/`method`/`source` are. `file_content_type`
+/// is deliberately NOT carried here — it's a native-only override; on web the browser derives
+/// the file part's `Content-Type` from the `Blob` itself.
+struct WebMultipart {
+    /// The file part's field name.
+    field: String,
+    /// Override for the file part's `filename=`; `None` -> infer from the source handle.
+    filename: Option<String>,
+    /// Text fields, in order, emitted before the file part.
+    fields: Vec<(String, String)>,
+}
+
+/// Last `/`-segment of a handle, `?query`/`#fragment` stripped; empty -> "file".
+fn infer_filename(source: &str) -> String {
+    let s = source.split(['?', '#']).next().unwrap_or(source);
+    let name = s.rsplit('/').next().unwrap_or("");
+    if name.is_empty() {
+        "file".to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 /// Parse the CRLF-separated block from `XmlHttpRequest::get_all_response_headers` into
@@ -390,12 +427,20 @@ fn start_web_upload(
     method: String,
     headers: Vec<(String, String)>,
     source: String,
+    multipart: Option<WebMultipart>,
     emit: impl Fn(PluginResponse) + Clone + 'static,
 ) -> StreamHandle {
     use wasm_bindgen::{closure::Closure, JsCast};
     let xhr = web_sys::XmlHttpRequest::new().expect("xhr");
     let _ = xhr.open_with_async(&method, &url, true);
     for (n, val) in &headers {
+        // In multipart mode, the browser sets `Content-Type: multipart/form-data;
+        // boundary=...` itself when sending a `FormData` body; a caller-supplied
+        // `Content-Type` header would clobber that boundary and break the request. Other
+        // headers (Authorization, etc.) still apply.
+        if multipart.is_some() && n.eq_ignore_ascii_case("content-type") {
+            continue;
+        }
         let _ = xhr.set_request_header(n, val);
     }
 
@@ -486,10 +531,23 @@ fn start_web_upload(
         if cancelled_send.get() {
             return;
         }
-        if let Some(blob) = blob {
-            let _ = xhr_send.send_with_opt_blob(Some(&blob));
-        } else {
-            let _ = xhr_send.send();
+        match (blob, &multipart) {
+            (Some(blob), Some(mp)) => {
+                // Text fields first, file part LAST (multipart/form-data ordering).
+                let form = web_sys::FormData::new().expect("FormData");
+                for (name, value) in &mp.fields {
+                    let _ = form.append_with_str(name, value);
+                }
+                let filename = mp.filename.clone().unwrap_or_else(|| infer_filename(&source));
+                let _ = form.append_with_blob_and_filename(&mp.field, &blob, &filename);
+                let _ = xhr_send.send_with_opt_form_data(Some(&form));
+            }
+            (Some(blob), None) => {
+                let _ = xhr_send.send_with_opt_blob(Some(&blob));
+            }
+            (None, _) => {
+                let _ = xhr_send.send();
+            }
         }
     });
 
