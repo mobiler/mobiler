@@ -42,6 +42,90 @@ impl TransferEvent {
     }
 }
 
+use crate::{Cx, HttpHeader, PluginResponse};
+
+/// Wire shape of a transfer request, serialized into the stream call's `input`.
+/// Exactly one of `source` (upload) / `dest` (download) is set.
+#[derive(Serialize)]
+struct TransferReq {
+    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    method: Option<String>,
+    headers: Vec<HttpHeader>,
+}
+
+/// Builds a streaming transfer. Obtained from [`Cx::upload`] / [`Cx::download`];
+/// finished with [`start`](Self::start), which subscribes and returns the key.
+pub struct TransferBuilder<'a, E> {
+    cx: &'a mut Cx<E>,
+    op: &'static str, // "upload" | "download"
+    req: TransferReq,
+}
+
+impl<'a, E> TransferBuilder<'a, E> {
+    pub(crate) fn upload(cx: &'a mut Cx<E>, url: String, source: String) -> Self {
+        Self {
+            cx,
+            op: "upload",
+            req: TransferReq { url, source: Some(source), dest: None, method: Some("PUT".into()), headers: Vec::new() },
+        }
+    }
+
+    pub(crate) fn download(cx: &'a mut Cx<E>, url: String, dest: String) -> Self {
+        Self {
+            cx,
+            op: "download",
+            req: TransferReq { url, source: None, dest: Some(dest), method: None, headers: Vec::new() },
+        }
+    }
+
+    /// Override the upload method (default `PUT`). No effect on download.
+    #[must_use]
+    pub fn method(mut self, m: impl Into<String>) -> Self {
+        if self.op == "upload" {
+            self.req.method = Some(m.into());
+        }
+        self
+    }
+
+    /// Add a request header (order preserved, repeats allowed).
+    #[must_use]
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.req.headers.push(HttpHeader { name: name.into(), value: value.into() });
+        self
+    }
+
+    /// Sugar for `header("Authorization", format!("Bearer {token}"))`.
+    #[must_use]
+    pub fn bearer(self, token: impl AsRef<str>) -> Self {
+        self.header("Authorization", format!("Bearer {}", token.as_ref()))
+    }
+
+    /// Subscribe under `key`. `on_event` fires per progress tick and once at `Done`.
+    /// Returns `key` so the caller can [`cx.unsubscribe(key)`](crate::Cx::unsubscribe).
+    pub fn start(self, key: impl Into<String>, on_event: impl Fn(TransferEvent) -> E + Send + 'static) -> String {
+        let key = key.into();
+        let input = serde_json::to_string(&self.req).expect("serialize transfer request");
+        self.cx.subscribe(key.clone(), "transfer", self.op, input, move |r: PluginResponse| {
+            on_event(decode_event(&r))
+        });
+        key
+    }
+}
+
+/// Decode a stream payload. A shell that emits something undecodable is a bug, but it
+/// must not panic the app — surface it as a completed transport error.
+fn decode_event(r: &PluginResponse) -> TransferEvent {
+    TransferEvent::decode(&r.output).unwrap_or_else(|e| TransferEvent::Done {
+        outcome: HttpOutcome::TransportError { message: format!("malformed transfer event: {e}") },
+        handle: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
