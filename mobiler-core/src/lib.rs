@@ -11,9 +11,11 @@ pub mod bunny;
 pub mod format;
 pub mod http;
 pub mod i18n;
+pub mod transfer;
 pub use format::{Currency, Locale};
 pub use http::{HttpHeader, HttpOutcome};
 pub use i18n::{Catalog, negotiate};
+pub use transfer::TransferEvent;
 
 use crux_core::{
     App, Command,
