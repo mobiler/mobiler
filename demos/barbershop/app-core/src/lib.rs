@@ -17,11 +17,20 @@ use mobiler_core::{
     spacer, split, stack, video_player, video_playlist, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_captions, with_error,
     with_fab, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
+    TransferEvent,
 };
 use mobiler_core::format::{self, Currency, Locale};
 use serde::{Deserialize, Serialize};
 
 const HERO: &str = "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=1200&q=80";
+
+// --- "Send a file" card: streaming upload/download demo endpoints (Release B, cx.upload/download).
+// httpbin.org is a public, dependency-free echo service — no server of our own to stand up.
+/// Accepts any PUT body and echoes metadata back; used as the upload target.
+const UPLOAD_URL: &str = "https://httpbin.org/put";
+/// A fixed 64KB byte stream — large enough to show a handful of progress ticks on a normal
+/// connection; used as the "download it back" leg of the round trip.
+const DOWNLOAD_URL: &str = "https://httpbin.org/bytes/65536";
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
@@ -206,6 +215,21 @@ pub enum Msg {
     FilesDownload,
     FilesExport,
     FilesResult(PluginResponse),
+
+    /// --- Home "Send a file" card: streaming upload+download (`cx.upload`/`cx.download`, the
+    /// Release B streaming-transfer primitive) ---
+    /// Pick a photo to send (the bundled `photo` plugin — a real file/blob handle on every shell).
+    PickForUpload,
+    /// The picked source handle (empty string = the user cancelled the picker).
+    Picked(String),
+    /// An upload progress tick (`cx.upload(..).start(..)`).
+    UpProgress { transferred: u64, total: Option<u64> },
+    /// The upload finished — the HTTP status (0 = transport error).
+    UpDone(u16),
+    /// A download progress tick for the "fetch it back" leg (`cx.download(..).start(..)`).
+    DlProgress { transferred: u64, total: Option<u64> },
+    /// The download finished — the destination handle (sandbox path / `blob:` URL) + HTTP status.
+    DlDone { handle: Option<String>, status: u16 },
 }
 
 #[derive(Clone)]
@@ -328,6 +352,11 @@ pub struct Model {
     /// owns the items; load-more appends a page (up to 60), refresh resets to page 1.
     feed: Vec<String>,
     feed_refreshing: bool,
+    /// "Send a file" card — streaming upload+download (`cx.upload`/`cx.download`). Percent complete
+    /// of whichever leg is in flight; `None` when idle (hides the progress bar).
+    transfer_pct: Option<u8>,
+    /// Status line for the "Send a file" card.
+    transfer_note: String,
 }
 
 /// One page (10 items) of synthetic feed rows starting at item `start` (1-based).
@@ -416,6 +445,8 @@ impl Default for Model {
             files_status: String::new(),
             feed: feed_page(1),
             feed_refreshing: false,
+            transfer_pct: None,
+            transfer_note: String::new(),
         }
     }
 }
@@ -423,6 +454,20 @@ impl Default for Model {
 /// Parse a "4.8"-style rating into tenths (48) for the `rating` widget.
 fn tenths(s: &str) -> u32 {
     (s.parse::<f32>().unwrap_or(0.0) * 10.0).round() as u32
+}
+
+/// Percent complete for a transfer tick — `None` when the total size is unknown (hides the
+/// progress bar rather than showing a misleading/indeterminate one for this demo).
+fn transfer_pct(transferred: u64, total: Option<u64>) -> Option<u8> {
+    total.map(|t| transferred.saturating_mul(100).checked_div(t).map_or(100, |p| (p as u8).min(100)))
+}
+
+/// Status line for an in-flight transfer tick.
+fn transfer_note(verb: &str, transferred: u64, total: Option<u64>) -> String {
+    match total {
+        Some(t) => format!("{verb}… {transferred}/{t} bytes"),
+        None => format!("{verb}… {transferred} bytes"),
+    }
 }
 
 /// Pull a query parameter out of a redirect URL (tiny, dependency-free) — used to read the
@@ -942,6 +987,60 @@ impl MobilerApp for FadeHouse {
                     format!("Sign-in cancelled/failed: {output}")
                 };
             }
+
+            // --- "Send a file" card: streaming upload + download round trip ---
+            // Pick a photo (the bundled `photo` plugin — a real file handle on every shell: a
+            // `blob:` URL on web, a local file/content URI on iOS/Android).
+            Msg::PickForUpload => {
+                model.transfer_note = "Choose a photo…".to_string();
+                cx.pick_photo(|r| Msg::Picked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
+            }
+            Msg::Picked(handle) => {
+                if handle.is_empty() {
+                    model.transfer_note = "Cancelled.".to_string();
+                    return;
+                }
+                model.transfer_pct = Some(0);
+                model.transfer_note = "Uploading…".to_string();
+                // `cx.upload` streams progress + a final status over the `transfer` primitive; the
+                // native `transfer` plugin doesn't exist until PR-C (Task 7), so on iOS/Android this
+                // subscribes to an unknown source and quietly does nothing — expected until then.
+                cx.upload(UPLOAD_URL, handle).start("bx-up", |ev| match ev {
+                    TransferEvent::Progress { transferred, total } => Msg::UpProgress { transferred, total },
+                    TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0)),
+                });
+            }
+            Msg::UpProgress { transferred, total } => {
+                model.transfer_pct = transfer_pct(transferred, total);
+                model.transfer_note = transfer_note("Uploading", transferred, total);
+            }
+            Msg::UpDone(status) => {
+                cx.unsubscribe("bx-up");
+                if status == 200 {
+                    model.transfer_pct = Some(0);
+                    model.transfer_note = "Uploaded ✓ — fetching it back…".to_string();
+                    cx.download(DOWNLOAD_URL, "att.bin").start("bx-dl", |ev| match ev {
+                        TransferEvent::Progress { transferred, total } => Msg::DlProgress { transferred, total },
+                        TransferEvent::Done { outcome, handle } => Msg::DlDone { handle, status: outcome.status().unwrap_or(0) },
+                    });
+                } else {
+                    model.transfer_pct = None;
+                    model.transfer_note = format!("Upload failed (status {status}).");
+                }
+            }
+            Msg::DlProgress { transferred, total } => {
+                model.transfer_pct = transfer_pct(transferred, total);
+                model.transfer_note = transfer_note("Downloading it back", transferred, total);
+            }
+            Msg::DlDone { handle, status } => {
+                cx.unsubscribe("bx-dl");
+                model.transfer_pct = None;
+                model.transfer_note = if status == 200 {
+                    format!("Round trip complete ✓ — saved to {}", handle.as_deref().unwrap_or("(no handle)"))
+                } else {
+                    format!("Download failed (status {status}).")
+                };
+            }
         }
     }
 
@@ -1151,6 +1250,7 @@ fn home(model: &Model) -> Widget {
             button("Check signal", ButtonStyle::Text, Msg::CheckSignal),
         ]),
         nearby,
+        transfer_card(model),
         background_card(model),
         find_us_card(model),
         audience_segmented(model),
@@ -1160,6 +1260,30 @@ fn home(model: &Model) -> Widget {
         subtitle("Popular services"),
         services_grid(model),
     ])
+}
+
+// "Send a file" card (Home tab) — a streaming upload + download round trip proving the Release B
+// transfer primitive (`cx.upload`/`cx.download`) in a real app: pick a photo → PUT it to a public
+// echo endpoint with a live progress bar → GET a fixed payload back to prove the download leg too.
+// Web-functional today (mobiler-web's `transfer` shell source, Task 4). On iOS/Android the native
+// `transfer` plugin doesn't land until a follow-up PR — the card renders and the button is
+// tappable, but no bytes move there yet (an unsubscribed/unknown stream source is a silent no-op).
+fn transfer_card(model: &Model) -> Widget {
+    let status = if model.transfer_note.is_empty() {
+        caption("Pick a photo, upload it, then fetch it straight back — with a live progress bar.")
+    } else {
+        caption(model.transfer_note.clone())
+    };
+    let mut items = vec![
+        emphasis("Send a file"),
+        caption("Streaming upload + download (cx.upload / cx.download) — the Release B transfer primitive."),
+        button("Send a file", ButtonStyle::Filled, Msg::PickForUpload),
+    ];
+    if let Some(pct) = model.transfer_pct {
+        items.push(progress(Some(f32::from(pct) / 100.0)));
+    }
+    items.push(status);
+    card(column(items), CardStyle::Outlined)
 }
 
 // "Places & background" card (Home tab) — background location + periodic wake, both riding the
@@ -2022,6 +2146,44 @@ mod test {
         // Cancelling a later recording leaves the previous clip in place.
         app.update(Msg::VideoRecorded(String::new()), &mut model, &mut cx);
         assert_eq!(model.last_video.as_deref(), Some("file:///tmp/clip.mov"));
+    }
+
+    #[test]
+    fn transfer_flow_uploads_then_downloads_it_back() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        // Cancelling the picker (empty handle) is a no-op that just updates the note.
+        app.update(Msg::Picked(String::new()), &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, None);
+        assert_eq!(model.transfer_note, "Cancelled.");
+        // A real pick kicks off the upload leg.
+        app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, Some(0));
+        app.update(Msg::UpProgress { transferred: 50, total: Some(200) }, &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, Some(25));
+        assert_eq!(model.transfer_note, "Uploading… 50/200 bytes");
+        // A successful upload (status 200) kicks off the download-it-back leg.
+        app.update(Msg::UpDone(200), &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, Some(0));
+        assert_eq!(model.transfer_note, "Uploaded ✓ — fetching it back…");
+        app.update(Msg::DlProgress { transferred: 100, total: Some(400) }, &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, Some(25));
+        // Completion clears the progress bar and reports the destination handle.
+        app.update(Msg::DlDone { handle: Some("blob:xyz".into()), status: 200 }, &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, None);
+        assert_eq!(model.transfer_note, "Round trip complete ✓ — saved to blob:xyz");
+    }
+
+    #[test]
+    fn transfer_flow_surfaces_failures_without_starting_the_next_leg() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
+        app.update(Msg::UpDone(500), &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, None);
+        assert_eq!(model.transfer_note, "Upload failed (status 500).");
+        app.update(Msg::DlDone { handle: None, status: 0 }, &mut model, &mut cx);
+        assert_eq!(model.transfer_note, "Download failed (status 0).");
     }
 
     #[test]
