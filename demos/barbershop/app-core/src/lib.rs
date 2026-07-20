@@ -459,7 +459,7 @@ fn tenths(s: &str) -> u32 {
 /// Percent complete for a transfer tick — `None` when the total size is unknown (hides the
 /// progress bar rather than showing a misleading/indeterminate one for this demo).
 fn transfer_pct(transferred: u64, total: Option<u64>) -> Option<u8> {
-    total.map(|t| transferred.saturating_mul(100).checked_div(t).map_or(100, |p| (p as u8).min(100)))
+    total.map(|t| transferred.saturating_mul(100).checked_div(t).map_or(100, |p| p.min(100) as u8))
 }
 
 /// Status line for an in-flight transfer tick.
@@ -992,6 +992,13 @@ impl MobilerApp for FadeHouse {
             // Pick a photo (the bundled `photo` plugin — a real file handle on every shell: a
             // `blob:` URL on web, a local file/content URI on iOS/Android).
             Msg::PickForUpload => {
+                // `Cx::subscribe` must be called once per key — a transfer already in flight
+                // (`transfer_pct` is `Some` from `Picked` until the terminal `UpDone`/`DlDone`)
+                // owns "bx-up"/"bx-dl" already, so ignore a repeat tap rather than starting a
+                // second source that would abandon the live one and stomp its progress events.
+                if model.transfer_pct.is_some() {
+                    return;
+                }
                 model.transfer_note = "Choose a photo…".to_string();
                 cx.pick_photo(|r| Msg::Picked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
             }
@@ -1274,10 +1281,11 @@ fn transfer_card(model: &Model) -> Widget {
     } else {
         caption(model.transfer_note.clone())
     };
+    let button_label = if model.transfer_pct.is_some() { "Sending…" } else { "Send a file" };
     let mut items = vec![
         emphasis("Send a file"),
         caption("Streaming upload + download (cx.upload / cx.download) — the Release B transfer primitive."),
-        button("Send a file", ButtonStyle::Filled, Msg::PickForUpload),
+        button(button_label, ButtonStyle::Filled, Msg::PickForUpload),
     ];
     if let Some(pct) = model.transfer_pct {
         items.push(progress(Some(f32::from(pct) / 100.0)));
@@ -2184,6 +2192,29 @@ mod test {
         assert_eq!(model.transfer_note, "Upload failed (status 500).");
         app.update(Msg::DlDone { handle: None, status: 0 }, &mut model, &mut cx);
         assert_eq!(model.transfer_note, "Download failed (status 0).");
+    }
+
+    #[test]
+    fn pick_for_upload_ignores_a_repeat_tap_while_a_transfer_is_in_flight() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        // Start a transfer — "bx-up" is now a live subscription (transfer_pct is `Some`).
+        app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, Some(0));
+        model.transfer_note = "Uploading…".to_string();
+        // A repeat tap while it's in flight must be a no-op: no second `pick_photo` request,
+        // no note reset back to "Choose a photo…" — otherwise it'd start a second "bx-up"
+        // source that abandons the live one (Cx::subscribe is once-per-key) and its late
+        // events would stomp transfer_pct/transfer_note out from under the first transfer.
+        app.update(Msg::PickForUpload, &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, Some(0), "guard must not touch the in-flight state");
+        assert_eq!(model.transfer_note, "Uploading…", "no-op: must not reset the note as a fresh pick would");
+        // Once the flow reaches its terminal point, the guard releases and a new pick works again.
+        app.update(Msg::UpDone(200), &mut model, &mut cx);
+        app.update(Msg::DlDone { handle: Some("blob:xyz".into()), status: 200 }, &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, None);
+        app.update(Msg::PickForUpload, &mut model, &mut cx);
+        assert_eq!(model.transfer_note, "Choose a photo…", "guard released: a fresh pick is allowed again");
     }
 
     #[test]
