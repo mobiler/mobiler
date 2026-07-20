@@ -362,6 +362,22 @@ fn js_now() -> f64 {
     web_sys::window().and_then(|w| w.performance()).map(|p| p.now()).unwrap_or(0.0)
 }
 
+/// Parse the CRLF-separated block from `XmlHttpRequest::get_all_response_headers` into
+/// `HttpHeader`s. Each line is `name: value`; a value never contains CRLF (XHR spec), so
+/// splitting on `\r\n` then on the first `:` is sufficient. Blank lines are skipped.
+fn parse_header_block(raw: &str) -> Vec<HttpHeader> {
+    raw.split("\r\n")
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some(HttpHeader { name: name.to_string(), value: value.trim().to_string() })
+        })
+        .collect()
+}
+
 /// Start a web upload via `XMLHttpRequest`.
 ///
 /// DELIBERATE WEB ASYMMETRY (see `start_web_download` for the other half): upload uses
@@ -414,7 +430,17 @@ fn start_web_upload(
             let outcome = if status == 0 {
                 HttpOutcome::TransportError { message: "upload failed".into() }
             } else {
-                HttpOutcome::Response { status, headers: vec![], body: vec![] }
+                // Carry the response headers, like the download path and both native shells
+                // do — an upload caller may need ETag / Location. `getAllResponseHeaders`
+                // returns a CRLF-separated block (and, cross-origin, only the
+                // CORS-exposed headers — a browser limit the web download path shares; the
+                // native shells read the full header set).
+                let headers = xhr_c
+                    .get_all_response_headers()
+                    .ok()
+                    .map(|raw| parse_header_block(&raw))
+                    .unwrap_or_default();
+                HttpOutcome::Response { status, headers, body: vec![] }
             };
             emit(transfer_response(&TransferEvent::Done { outcome, handle: None }));
         })
