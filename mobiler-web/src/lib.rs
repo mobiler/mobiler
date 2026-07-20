@@ -383,14 +383,17 @@ fn start_web_upload(
         let _ = xhr.set_request_header(n, val);
     }
 
-    // ~10/sec progress throttling: skip a tick if <100ms since the last one, but
-    // never skip the final tick (loaded == total) so 100% is always reported.
+    // ~10/sec progress throttling, purely on elapsed time (see MINOR #3 in the review:
+    // gating on `loaded < total` too is a no-op when `!length_computable`, since `total()`
+    // is then 0 and `loaded() < 0` is always false). The terminal Done is emitted by the
+    // separate onload/onerror/onabort closures below, unthrottled, so completion is always
+    // seen regardless of this gate.
     let last = std::rc::Rc::new(std::cell::Cell::new(0.0f64));
     let on_prog = {
         let (emit, last) = (emit.clone(), last.clone());
         Closure::<dyn FnMut(web_sys::ProgressEvent)>::new(move |e: web_sys::ProgressEvent| {
             let now = js_now();
-            if now - last.get() < 100.0 && e.loaded() < e.total() {
+            if now - last.get() < 100.0 {
                 return;
             }
             last.set(now);
@@ -441,9 +444,23 @@ fn start_web_upload(
     // The upload `source` is itself a `blob:` URL (e.g. produced by `photo`/`camera` or
     // `files`), so fetch it back into a `Blob` before sending — same shape a native
     // shell would read a file handle. A missing/unreadable source sends no body.
+    //
+    // Cancel race (see `TransferHandle::drop`): `open_with_async` above has already run,
+    // but `send`/`send_with_opt_blob` is deferred behind the `fetch_blob` await. Per the
+    // XHR spec, `abort()` before the send-flag is set (i.e. before `send` is called) is a
+    // no-op, so if `cx.unsubscribe` fires in this window, `xhr.abort()` alone would not
+    // stop the request from going out. `cancelled` is the second half of that guarantee:
+    // it's checked right before `send`, after the await, so a drop that lands during the
+    // fetch is still honored.
     let xhr_send = xhr.clone();
+    let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+    let cancelled_send = cancelled.clone();
     wasm_bindgen_futures::spawn_local(async move {
-        if let Some(blob) = fetch_blob(&source).await {
+        let blob = fetch_blob(&source).await;
+        if cancelled_send.get() {
+            return;
+        }
+        if let Some(blob) = blob {
             let _ = xhr_send.send_with_opt_blob(Some(&blob));
         } else {
             let _ = xhr_send.send();
@@ -453,7 +470,11 @@ fn start_web_upload(
     StreamHandle::Transfer(TransferHandle {
         xhr: Some(xhr),
         abort: None,
-        _keepalive: vec![on_prog.into_js_value(), on_done.into_js_value(), on_err.into_js_value(), on_abort.into_js_value()],
+        cancelled: Some(cancelled),
+        _on_prog: Some(on_prog),
+        _on_done: Some(on_done),
+        _on_err: Some(on_err),
+        _on_abort: Some(on_abort),
     })
 }
 
@@ -524,7 +545,15 @@ fn start_web_download(
             })),
         }
     });
-    StreamHandle::Transfer(TransferHandle { xhr: None, abort: Some(ctrl), _keepalive: vec![] })
+    StreamHandle::Transfer(TransferHandle {
+        xhr: None,
+        abort: Some(ctrl),
+        cancelled: None,
+        _on_prog: None,
+        _on_done: None,
+        _on_err: None,
+        _on_abort: None,
+    })
 }
 
 /// Begin a GET (with the given headers) via `fetch` under `signal` and return the
@@ -664,11 +693,25 @@ enum StreamHandle {
 struct TransferHandle {
     xhr: Option<web_sys::XmlHttpRequest>,
     abort: Option<web_sys::AbortController>,
-    // Closures must outlive the request; parked here so they aren't dropped early.
-    _keepalive: Vec<wasm_bindgen::JsValue>,
+    // Upload-cancel race guard (see the comment at `start_web_upload`'s `spawn_local`):
+    // `xhr.abort()` before `send()` has been called is a spec no-op, so this flag is the
+    // half that actually stops a not-yet-sent upload. `None` for download, which has no
+    // such window (its `AbortController` is wired into the fetch before any async work).
+    cancelled: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+    // Typed closure fields (not `Closure::into_js_value`, which leaks permanently — see
+    // `WsStream`/`SystemStream` above for the same pattern): held here so they free when
+    // the handle drops, on unsubscribe or transfer completion. Download wires no XHR
+    // event closures, so its fields are `None`.
+    _on_prog: Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::ProgressEvent)>>,
+    _on_done: Option<wasm_bindgen::closure::Closure<dyn FnMut()>>,
+    _on_err: Option<wasm_bindgen::closure::Closure<dyn FnMut()>>,
+    _on_abort: Option<wasm_bindgen::closure::Closure<dyn FnMut()>>,
 }
 impl Drop for TransferHandle {
     fn drop(&mut self) {
+        if let Some(c) = &self.cancelled {
+            c.set(true);
+        }
         if let Some(x) = &self.xhr {
             let _ = x.abort();
         }
