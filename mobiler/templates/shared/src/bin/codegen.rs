@@ -35,6 +35,7 @@ fn main() -> Result<()> {
     let typegen_app = TypeRegistry::new()
         .register_app::<App>()?
         .register_type::<mobiler_core::HttpOutcome>()?
+        .register_type::<mobiler_core::TransferEvent>()?
         // mobiler:codegen-types — insert above
         .build()?;
 
