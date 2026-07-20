@@ -100,39 +100,68 @@ enum TransferPlugin {
                     emit(response(for: .done(outcome: .transportError(message: "cannot create multipart temp file"), handle: nil)))
                     return
                 }
-                func w(_ s: String) {
-                    if let d = s.data(using: .utf8) { out.write(d) }
+                // Sanitizes a field name / filename destined for a `Content-Disposition` header
+                // line: `"` would prematurely close the quoted value, and a raw CR/LF would inject
+                // a header line. Not applied to field VALUES — those sit in the body after a blank
+                // line, framed by the random UUID boundary, so they can't collide with it. v1:
+                // quotes/CRLF only — full RFC 7578 percent/quoted-string escaping is deferred (the
+                // Android twin does the same escaping via OkHttp's MultipartBody, not raw
+                // interpolation, so this brings iOS to parity, not "matches Android" as the header
+                // comment used to (incorrectly) claim).
+                func sanitize(_ s: String) -> String {
+                    s.replacingOccurrences(of: "\"", with: "%22")
+                        .replacingOccurrences(of: "\r", with: "")
+                        .replacingOccurrences(of: "\n", with: "")
                 }
-                // Text fields first, in order (v1: emitted as-is — RFC 7578 quoting/escaping of
-                // field names or values containing `"`/CRLF is out of scope here, matching the
-                // Android twin).
-                for f in fields {
-                    w("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(f.0)\"\r\n\r\n\(f.1)\r\n")
-                }
-                // File part LAST, streamed from disk in 64KB chunks — never loaded fully into
-                // memory. Content-Type here is `multipart.file_content_type` if present, else
-                // "application/octet-stream" — deliberately NOT the caller's request-level
-                // Content-Type header (that header is a different thing: the *request's*
-                // Content-Type, which multipart mode overrides below to the boundary type
-                // anyway). Falling through to a caller header here would be exactly the Task 5
-                // Android bug this must not repeat.
-                let filename = (mp["filename"] as? String) ?? inferFilename(source)
-                let ctype = (mp["file_content_type"] as? String) ?? "application/octet-stream"
-                w("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field)\"; filename=\"\(filename)\"\r\nContent-Type: \(ctype)\r\n\r\n")
-                guard let rh = try? FileHandle(forReadingFrom: resolved) else {
+                // All FileHandle I/O below uses the THROWING modern APIs
+                // (`write(contentsOf:)`/`read(upToCount:)`, iOS 13.4+ — this template targets iOS
+                // 16) inside this do/catch. The legacy `write(_:)`/`readData(ofLength:)` raise an
+                // uncatchable Objective-C NSException on an I/O failure (disk full, permission
+                // revoked mid-write) that is PROCESS-FATAL — Swift `try`/`catch` cannot intercept
+                // it, and composing this temp file temporarily doubles disk usage (source + copy),
+                // so a large upload on a near-full device is a plausible trigger. Any thrown error
+                // here closes both handles, deletes the temp file, and emits a graceful
+                // Done{TransportError} — the same terminal the guards above already use — instead
+                // of crashing the process, matching the Android twin (OkHttp throws a catchable
+                // IOException).
+                do {
+                    func w(_ s: String) throws {
+                        if let d = s.data(using: .utf8) { try out.write(contentsOf: d) }
+                    }
+                    // Text fields first, in order.
+                    for f in fields {
+                        try w("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(sanitize(f.0))\"\r\n\r\n\(f.1)\r\n")
+                    }
+                    // File part LAST, streamed from disk in 64KB chunks — never loaded fully into
+                    // memory. Content-Type here is `multipart.file_content_type` if present, else
+                    // "application/octet-stream" — deliberately NOT the caller's request-level
+                    // Content-Type header (that header is a different thing: the *request's*
+                    // Content-Type, which multipart mode overrides below to the boundary type
+                    // anyway). Falling through to a caller header here would be exactly the Task 5
+                    // Android bug this must not repeat.
+                    let filename = (mp["filename"] as? String) ?? inferFilename(source)
+                    let ctype = (mp["file_content_type"] as? String) ?? "application/octet-stream"
+                    try w("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(sanitize(field))\"; filename=\"\(sanitize(filename))\"\r\nContent-Type: \(ctype)\r\n\r\n")
+                    guard let rh = try? FileHandle(forReadingFrom: resolved) else {
+                        try? out.close()
+                        try? FileManager.default.removeItem(at: tmp)
+                        emit(response(for: .done(outcome: .transportError(message: "cannot open upload source '\(source)'"), handle: nil)))
+                        return
+                    }
+                    while true {
+                        guard let chunk = try rh.read(upToCount: 64 * 1024) else { break } // nil == EOF
+                        if chunk.isEmpty { break }
+                        try out.write(contentsOf: chunk)
+                    }
+                    try? rh.close()
+                    try w("\r\n--\(boundary)--\r\n")
+                    try out.close()
+                } catch {
                     try? out.close()
                     try? FileManager.default.removeItem(at: tmp)
-                    emit(response(for: .done(outcome: .transportError(message: "cannot open upload source '\(source)'"), handle: nil)))
+                    emit(response(for: .done(outcome: .transportError(message: "failed to compose multipart body: \(error.localizedDescription)"), handle: nil)))
                     return
                 }
-                while true {
-                    let chunk = rh.readData(ofLength: 64 * 1024)
-                    if chunk.isEmpty { break }
-                    out.write(chunk)
-                }
-                try? rh.close()
-                w("\r\n--\(boundary)--\r\n")
-                try? out.close()
                 // Authoritative: replaces (not appends — `setValue`, not `addValue`) any
                 // caller-supplied Content-Type header added by the loop above, so the boundary
                 // actually on the wire always matches the body we just wrote.
