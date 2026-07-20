@@ -26,8 +26,9 @@ const HERO: &str = "https://images.unsplash.com/photo-1503951914875-452162b0f3f1
 
 // --- "Send a file" card: streaming upload/download demo endpoints (Release B, cx.upload/download).
 // httpbin.org is a public, dependency-free echo service — no server of our own to stand up.
-/// Accepts any PUT body and echoes metadata back; used as the upload target.
-const UPLOAD_URL: &str = "https://httpbin.org/put";
+/// Parses a `multipart/form-data` POST and echoes the parsed parts back as JSON (`files`/`form`
+/// keys) — a real endpoint to prove the multipart wire (Task 3), not just a byte sink.
+const UPLOAD_URL: &str = "https://httpbin.org/post";
 /// A fixed 64KB byte stream — large enough to show a handful of progress ticks on a normal
 /// connection; used as the "download it back" leg of the round trip.
 const DOWNLOAD_URL: &str = "https://httpbin.org/bytes/65536";
@@ -1012,7 +1013,12 @@ impl MobilerApp for FadeHouse {
                 // `cx.upload` streams progress + a final status over the `transfer` primitive; the
                 // native `transfer` plugin doesn't exist until PR-C (Task 7), so on iOS/Android this
                 // subscribes to an unknown source and quietly does nothing — expected until then.
-                cx.upload(UPLOAD_URL, handle).start("bx-up", |ev| match ev {
+                // `.multipart("file")` sends this as `multipart/form-data` (flips the default PUT to
+                // POST) with a "source" text field — proves the multipart envelope end to end on web
+                // today; the installed native `transfer` plugin (Release B) doesn't understand the
+                // `multipart` config yet either, so iOS/Android ignore it and would send raw once
+                // PR-C lands the plugin skeleton — full native multipart support is PR-C's job.
+                cx.upload(UPLOAD_URL, handle).multipart("file").field("source", "barbershop").start("bx-up", |ev| match ev {
                     TransferEvent::Progress { transferred, total } => Msg::UpProgress { transferred, total },
                     TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0)),
                 });
@@ -1270,11 +1276,13 @@ fn home(model: &Model) -> Widget {
 }
 
 // "Send a file" card (Home tab) — a streaming upload + download round trip proving the Release B
-// transfer primitive (`cx.upload`/`cx.download`) in a real app: pick a photo → PUT it to a public
-// echo endpoint with a live progress bar → GET a fixed payload back to prove the download leg too.
-// Web-functional today (mobiler-web's `transfer` shell source, Task 4). On iOS/Android the native
-// `transfer` plugin doesn't land until a follow-up PR — the card renders and the button is
-// tappable, but no bytes move there yet (an unsubscribed/unknown stream source is a silent no-op).
+// transfer primitive (`cx.upload`/`cx.download`) in a real app: pick a photo → POST it as
+// `multipart/form-data` (a "file" part + a "source" text field) to a public echo endpoint with a
+// live progress bar → GET a fixed payload back to prove the download leg too.
+// Web-functional today (mobiler-web's `transfer` shell source builds the multipart body). On
+// iOS/Android the native `transfer` plugin doesn't land until a follow-up PR — the card renders
+// and the button is tappable, but no bytes move there yet (an unsubscribed/unknown stream source
+// is a silent no-op).
 fn transfer_card(model: &Model) -> Widget {
     let status = if model.transfer_note.is_empty() {
         caption("Pick a photo, upload it, then fetch it straight back — with a live progress bar.")
