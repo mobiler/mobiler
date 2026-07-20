@@ -44,6 +44,22 @@ impl TransferEvent {
 
 use crate::{Cx, HttpHeader, PluginResponse};
 
+/// Multipart/form-data config for an upload. When present, the shell builds a
+/// `multipart/form-data` body: the text `fields` (in order) then the file part LAST.
+#[derive(Serialize)]
+struct Multipart {
+    /// Form field name for the file part.
+    field: String,
+    /// Override the file part's `filename=`; else the shell infers it from the source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filename: Option<String>,
+    /// Override the file part's `Content-Type`; else `application/octet-stream`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_content_type: Option<String>,
+    /// Text fields (reuse HttpHeader's name/value).
+    fields: Vec<HttpHeader>,
+}
+
 /// Wire shape of a transfer request, serialized into the stream call's `input`.
 /// Exactly one of `source` (upload) / `dest` (download) is set.
 #[derive(Serialize)]
@@ -55,6 +71,8 @@ struct TransferReq {
     dest: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    multipart: Option<Multipart>,
     headers: Vec<HttpHeader>,
 }
 
@@ -64,6 +82,7 @@ pub struct TransferBuilder<'a, E> {
     cx: &'a mut Cx<E>,
     op: &'static str, // "upload" | "download"
     req: TransferReq,
+    method_set_by_caller: bool,
 }
 
 impl<'a, E> TransferBuilder<'a, E> {
@@ -71,7 +90,15 @@ impl<'a, E> TransferBuilder<'a, E> {
         Self {
             cx,
             op: "upload",
-            req: TransferReq { url, source: Some(source), dest: None, method: Some("PUT".into()), headers: Vec::new() },
+            req: TransferReq {
+                url,
+                source: Some(source),
+                dest: None,
+                method: Some("PUT".into()),
+                multipart: None,
+                headers: Vec::new(),
+            },
+            method_set_by_caller: false,
         }
     }
 
@@ -79,7 +106,15 @@ impl<'a, E> TransferBuilder<'a, E> {
         Self {
             cx,
             op: "download",
-            req: TransferReq { url, source: None, dest: Some(dest), method: None, headers: Vec::new() },
+            req: TransferReq {
+                url,
+                source: None,
+                dest: Some(dest),
+                method: None,
+                multipart: None,
+                headers: Vec::new(),
+            },
+            method_set_by_caller: false,
         }
     }
 
@@ -88,6 +123,59 @@ impl<'a, E> TransferBuilder<'a, E> {
     pub fn method(mut self, m: impl Into<String>) -> Self {
         if self.op == "upload" {
             self.req.method = Some(m.into());
+            self.method_set_by_caller = true;
+        }
+        self
+    }
+
+    /// Send as `multipart/form-data`: the file becomes a part named `field`, emitted after
+    /// any text `field()`s. Flips the default method to POST (an explicit `method()` wins).
+    /// Upload-only.
+    #[must_use]
+    pub fn multipart(mut self, field: impl Into<String>) -> Self {
+        if self.op == "upload" {
+            if !self.method_set_by_caller {
+                self.req.method = Some("POST".into());
+            }
+            match &mut self.req.multipart {
+                Some(m) => m.field = field.into(),
+                None => {
+                    self.req.multipart = Some(Multipart {
+                        field: field.into(),
+                        filename: None,
+                        file_content_type: None,
+                        fields: Vec::new(),
+                    })
+                }
+            }
+        }
+        self
+    }
+
+    /// Add a text field to the multipart body (order preserved). No effect unless
+    /// `multipart()` was called; no effect on download.
+    #[must_use]
+    pub fn field(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        if let Some(m) = &mut self.req.multipart {
+            m.fields.push(HttpHeader { name: name.into(), value: value.into() });
+        }
+        self
+    }
+
+    /// Override the multipart file part's `filename=` (default: inferred from the source).
+    #[must_use]
+    pub fn filename(mut self, name: impl Into<String>) -> Self {
+        if let Some(m) = &mut self.req.multipart {
+            m.filename = Some(name.into());
+        }
+        self
+    }
+
+    /// Override the multipart file part's `Content-Type` (default: `application/octet-stream`).
+    #[must_use]
+    pub fn file_content_type(mut self, ct: impl Into<String>) -> Self {
+        if let Some(m) = &mut self.req.multipart {
+            m.file_content_type = Some(ct.into());
         }
         self
     }
@@ -130,6 +218,12 @@ fn decode_event(r: &PluginResponse) -> TransferEvent {
 mod tests {
     use super::*;
     use crate::http::{HttpHeader, HttpOutcome};
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    enum Ev {
+        Tap,
+    }
 
     #[test]
     fn round_trips_progress_with_and_without_total() {
@@ -163,5 +257,62 @@ mod tests {
     #[test]
     fn decode_rejects_garbage_without_panicking() {
         assert!(TransferEvent::decode(&[0xff, 0xff, 0xff]).is_err());
+    }
+
+    #[test]
+    fn multipart_sets_config_and_flips_method_to_post() {
+        let mut cx = Cx::<Ev>::default();
+        cx.upload("https://h/up", "file:///tmp/a.jpg")
+            .multipart("file")
+            .field("title", "My Photo")
+            .field("album", "vac")
+            .start("m-1", |_| Ev::Tap);
+
+        let (call, _) = &cx.streams[0];
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(v["method"], "POST", "multipart flips default PUT -> POST");
+        assert_eq!(v["multipart"]["field"], "file");
+        assert_eq!(v["multipart"]["fields"][0]["name"], "title");
+        assert_eq!(v["multipart"]["fields"][0]["value"], "My Photo");
+        assert_eq!(v["multipart"]["fields"][1]["name"], "album");
+        // filename / file_content_type omitted when not overridden
+        assert!(v["multipart"].get("filename").is_none());
+        assert!(v["multipart"].get("file_content_type").is_none());
+    }
+
+    #[test]
+    fn explicit_method_survives_multipart() {
+        let mut cx = Cx::<Ev>::default();
+        cx.upload("https://h/up", "file:///tmp/a.jpg")
+            .method("PUT")
+            .multipart("file")
+            .start("m-2", |_| Ev::Tap);
+        let (call, _) = &cx.streams[0];
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(v["method"], "PUT", "an explicit .method() is not overridden by .multipart()");
+    }
+
+    #[test]
+    fn multipart_overrides_land_in_config() {
+        let mut cx = Cx::<Ev>::default();
+        cx.upload("https://h/up", "file:///tmp/a.bin")
+            .multipart("f")
+            .filename("photo.jpg")
+            .file_content_type("image/jpeg")
+            .start("m-3", |_| Ev::Tap);
+        let (call, _) = &cx.streams[0];
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(v["multipart"]["filename"], "photo.jpg");
+        assert_eq!(v["multipart"]["file_content_type"], "image/jpeg");
+    }
+
+    #[test]
+    fn multipart_is_a_noop_on_download() {
+        let mut cx = Cx::<Ev>::default();
+        cx.download("https://h/get", "/d").multipart("f").field("k", "v").start("d-1", |_| Ev::Tap);
+        let (call, _) = &cx.streams[0];
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert!(v.get("multipart").is_none(), "download ignores multipart");
+        assert!(v.get("method").is_none(), "download has no method");
     }
 }
