@@ -172,6 +172,9 @@ impl<'a, E> TransferBuilder<'a, E> {
     }
 
     /// Override the multipart file part's `Content-Type` (default: `application/octet-stream`).
+    ///
+    /// Honored on iOS and Android. On the **web** shell the browser derives the part's
+    /// content type from the `Blob`'s own MIME type, so this override is native-only in v1.
     #[must_use]
     pub fn file_content_type(mut self, ct: impl Into<String>) -> Self {
         if let Some(m) = &mut self.req.multipart {

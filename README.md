@@ -143,7 +143,7 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 <!-- capabilities:start format=table (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
 | Capability | Rust API | Notes |
 |---|---|---|
-| HTTP | `cx.get / cx.post / cx.put / cx.patch / cx.delete / cx.request (builder) / cx.upload / cx.download (streaming)` | headers + byte body/response; streaming upload/download with progress + cancel (native shells land in CLI 0.49); multipart upload via cx.upload().multipart() |
+| HTTP | `cx.get / cx.post / cx.put / cx.patch / cx.delete / cx.request (builder) / cx.upload / cx.download (streaming)` | headers + byte body/response; streaming upload/download with progress + cancel (native shells land in CLI 0.49); multipart upload via cx.upload().multipart() (web today; native in CLI 0.50) |
 | Storage | `cx.save (+ restore on launch)` | persist the model |
 | Clipboard | `cx.copy(text)` | copy text |
 | Share | `cx.share(text)` | system share sheet |
