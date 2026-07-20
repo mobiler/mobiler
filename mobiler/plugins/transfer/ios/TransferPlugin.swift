@@ -40,29 +40,38 @@ enum TransferPlugin {
             }
         }
 
-        // Resolves a sandbox-relative path, an absolute path, or a `file://` URI to a URL. iOS has
-        // no `content://` scheme (that's Android-only), so this is simpler than the Android twin.
-        func resolve(_ path: String) -> URL {
-            path.hasPrefix("file://") ? (URL(string: path) ?? URL(fileURLWithPath: path)) : URL(fileURLWithPath: path)
+        let docs = (try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+            ?? FileManager.default.temporaryDirectory
+
+        // Resolves a `file://` URI, an absolute path, or a path relative to the app's Documents dir
+        // (rejecting `..` escapes) to a URL — exactly FilesPlugin's `resolve`, so a relative path
+        // here and in `files` land in the same place (e.g. a `transfer` download to "x.bin" is
+        // where `files`'s "read" of "x.bin" looks). iOS has no `content://` scheme (Android-only),
+        // so this is simpler than the Android twin.
+        func resolve(_ path: String) -> URL? {
+            if path.hasPrefix("file://") { return URL(string: path) }
+            if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+            let u = docs.appendingPathComponent(path)
+            return u.standardizedFileURL.path.hasPrefix(docs.standardizedFileURL.path) ? u : nil
         }
 
         let uploadSource: URL?
         let downloadDest: URL?
         if op == "upload" {
             request.httpMethod = (obj["method"] as? String) ?? "PUT"
-            guard let source = obj["source"] as? String else {
-                emit(response(for: .done(outcome: .transportError(message: "missing upload source"), handle: nil)))
+            guard let source = obj["source"] as? String, let resolved = resolve(source) else {
+                emit(response(for: .done(outcome: .transportError(message: "missing or invalid upload source"), handle: nil)))
                 return
             }
-            uploadSource = resolve(source)
+            uploadSource = resolved
             downloadDest = nil
         } else {
-            guard let dest = obj["dest"] as? String else {
-                emit(response(for: .done(outcome: .transportError(message: "missing download dest"), handle: nil)))
+            guard let dest = obj["dest"] as? String, let resolved = resolve(dest) else {
+                emit(response(for: .done(outcome: .transportError(message: "missing or invalid download dest"), handle: nil)))
                 return
             }
             uploadSource = nil
-            downloadDest = resolve(dest)
+            downloadDest = resolved
         }
 
         let delegate = TransferDelegate(emit: emit, dest: downloadDest)
