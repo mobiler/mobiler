@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 🛰️ geolocation-fused (Play Services) · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing) · 🗺️ geofence (background geofencing, experimental) · ⏰ background-fetch (periodic wake, experimental) · 📊 analytics (Firebase Analytics + Crashlytics, experimental)
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · ⇅ transfer (streaming upload/download) · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 🛰️ geolocation-fused (Play Services) · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing) · 🗺️ geofence (background geofencing, experimental) · ⏰ background-fetch (periodic wake, experimental) · 📊 analytics (Firebase Analytics + Crashlytics, experimental)
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -173,6 +173,7 @@ free plugins:
 | 🔐 **biometric** | Face ID / fingerprint auth | `mobiler plugin add biometric` |
 | 🗝️ **securestore** | encrypted key/value (Keychain / Keystore) | `mobiler plugin add securestore` |
 | 🔌 **websocket** | persistent real-time connection (streaming, via `cx.subscribe`) | `mobiler plugin add websocket` |
+| ⇅ **transfer** | streaming file upload/download — progress + cancel (`cx.upload`/`cx.download`) | `mobiler plugin add transfer` |
 | 🔔 **notifications** | local scheduled notifications (reminders) | `mobiler plugin add notifications` |
 | 🔋 **battery** | device battery level (sample) | `mobiler plugin add battery` |
 | 📶 **connectivity** | network status (online/wifi/cellular/offline) | `mobiler plugin add connectivity` |
