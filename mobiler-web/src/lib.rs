@@ -383,9 +383,9 @@ fn start_web_upload(
         let _ = xhr.set_request_header(n, val);
     }
 
-    // ~10/sec progress throttling, purely on elapsed time (see MINOR #3 in the review:
-    // gating on `loaded < total` too is a no-op when `!length_computable`, since `total()`
-    // is then 0 and `loaded() < 0` is always false). The terminal Done is emitted by the
+    // ~10/sec progress throttling, purely on elapsed time. (Gating on `loaded < total`
+    // as well would be a no-op when `!length_computable`, since `total()` is then 0 and
+    // `loaded() < 0` is always false.) The terminal Done is emitted by the
     // separate onload/onerror/onabort closures below, unthrottled, so completion is always
     // seen regardless of this gate.
     let last = std::rc::Rc::new(std::cell::Cell::new(0.0f64));
