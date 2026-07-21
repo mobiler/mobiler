@@ -1,7 +1,9 @@
-# Free, bundled Mobiler plugin: streaming file upload/download. Rides the streaming primitive —
-# `subscribe` moves the bytes (native-side, never crossing the FFI) and streams progress + a
-# terminal event into `update`; call from Rust:
+# Free, bundled Mobiler plugin: streaming file upload/download, including multipart/form-data.
+# Rides the streaming primitive — `subscribe` moves the bytes (native-side, never crossing the
+# FFI) and streams progress + a terminal event into `update`; call from Rust:
 #   cx.upload(url, source).start("up", Msg::Xfer)      // PUT (default)/POST source → url
+#   cx.upload(url, source).multipart("file").field("k", "v").start("up", Msg::Xfer)
+#                                                        // multipart/form-data POST instead
 #   cx.download(url, dest).start("dl", Msg::Xfer)       // GET url → dest
 #   cx.unsubscribe("up")                                 // cancels the transfer
 # Modeled on the `websocket` plugin's streaming shape (see mobiler-core::transfer for the
@@ -12,7 +14,7 @@
 #           already a template dep (HttpPlugin). iOS = URLSessionUploadTask/DownloadTask (system
 #           framework — no package).
 name = "transfer"
-summary = "Streaming file upload/download — progress + cancel, by path/URI/blob handle (free)"
+summary = "Streaming file upload/download — progress + cancel, multipart/form-data (free)"
 
 [android]
 sources = ["android/TransferPlugin.kt"]

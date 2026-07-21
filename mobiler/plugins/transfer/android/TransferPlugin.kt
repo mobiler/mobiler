@@ -18,6 +18,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -38,7 +39,8 @@ import java.io.InputStream
  *   cx.download(url, dest).start("dl", Msg::Xfer)    // GET url → dest
  *   cx.unsubscribe(key)                              // cancels
  * Envelope JSON (see mobiler-core::transfer::TransferReq): {"url","source"|"dest","method"?,
- * "headers":[{"name","value"}]}. `op` is "upload" or "download" (the plugin op, not the HTTP verb).
+ * "headers":[{"name","value"}],"multipart"?:{"field","filename"?,"file_content_type"?,
+ * "fields"?:[{"name","value"}]}}. `op` is "upload" or "download" (the plugin op, not the HTTP verb).
  *
  * CANCEL SEMANTICS (must match iOS — see TransferPlugin.swift): `cx.unsubscribe` cancels the
  * collecting coroutine. Whether that lands before the transfer starts or mid-flight, we emit
@@ -109,12 +111,53 @@ class TransferPlugin(private val application: Application) : MobilerPlugin {
         if (op == "upload") {
             val method = obj.optString("method").ifEmpty { "PUT" }
             val source = obj.optString("source")
-            val body = streamingUploadBody(application, source, appContentType, ::maybeProgress)
+            // Present only for a multipart upload (see mobiler-core::transfer::TransferReq); when
+            // absent this is the pre-existing raw-body upload, unchanged below.
+            val mp = obj.optJSONObject("multipart")
+            // The file part's Content-Type: in multipart mode, ONLY multipart.file_content_type
+            // applies (else streamingUploadBody's own octet-stream default) — `appContentType` is a
+            // REQUEST-level header override and must not leak into the file part. The web shell
+            // explicitly drops an app-supplied Content-Type header once multipart is active (it
+            // would clobber the boundary; see mobiler-web/src/lib.rs), so falling through to
+            // `appContentType` here would silently diverge from web for an app that set a request
+            // Content-Type header and called `.multipart(...)` without `.file_content_type(...)`.
+            // Raw (non-multipart) uploads are unaffected: `appContentType` still applies exactly as
+            // before.
+            val fileContentType = if (mp != null) mp.optString("file_content_type").ifEmpty { null } else appContentType
+            val body = streamingUploadBody(application, source, fileContentType, ::maybeProgress)
             if (body == null) {
                 finish(TransferEvent.Done(HttpOutcome.TransportError("cannot open upload source '$source'"), null))
                 return@callbackFlow
             }
-            val request = builder.method(method, body).build()
+            // In multipart mode the whole-request Content-Type must come ONLY from MultipartBody
+            // (`multipart/form-data; boundary=...`) — `appContentType`/`fileContentType` above is
+            // scoped to the file PART's own Content-Type, not the request's. Nothing here sets a
+            // request-level Content-Type header, so there's nothing to double-set.
+            // Parsed defensively (optString, not getString) so a malformed envelope emits a
+            // graceful Done{TransportError} — like the `obj == null` guard above — instead of an
+            // uncaught JSONException escaping the callbackFlow producer.
+            val field = mp?.optString("field")?.ifEmpty { null }
+            if (mp != null && field == null) {
+                finish(TransferEvent.Done(HttpOutcome.TransportError("malformed multipart config"), null))
+                return@callbackFlow
+            }
+            val finalBody: RequestBody = if (mp != null && field != null) {
+                val filename = mp.optString("filename").ifEmpty { inferFilename(source) }
+                val mb = MultipartBody.Builder().setType(MultipartBody.FORM)
+                val fields = mp.optJSONArray("fields")
+                if (fields != null) for (i in 0 until fields.length()) {
+                    val f = fields.optJSONObject(i)
+                    if (f == null || !f.has("name") || !f.has("value")) {
+                        finish(TransferEvent.Done(HttpOutcome.TransportError("malformed multipart config"), null))
+                        return@callbackFlow
+                    }
+                    mb.addFormDataPart(f.optString("name"), f.optString("value")) // text fields first
+                }
+                mb.addFormDataPart(field, filename, body) // file part LAST — streams via `body`,
+                // so `streamingUploadBody`'s counting sink (`::maybeProgress`) still drives progress.
+                mb.build()
+            } else body
+            val request = builder.method(method, finalBody).build()
             val c = client.newCall(request)
             call = c
             c.enqueue(object : Callback {
@@ -213,7 +256,22 @@ private fun streamingUploadBody(
     // (which OkHttp calls later, off this thread, where a null-body error is harder to report).
     open()?.close() ?: return null
 
-    val total: Long? = if (isContentUri) null else sourceFile!!.length().takeIf { it > 0 }
+    // `content://` sources have no filesystem length, but the ContentResolver can usually report
+    // one via OpenableColumns.SIZE (the same value the system picker/provider used to build the
+    // handle) — querying it lets an OkHttp RequestBody advertise a real Content-Length instead of
+    // falling back to `Transfer-Encoding: chunked`, which (a) some multipart endpoints reject and
+    // (b) leaves progress with no denominator. `null` here (missing column, cursor failure, or a
+    // provider that genuinely doesn't know) legitimately falls through to chunked, same as before.
+    val total: Long? = if (isContentUri) {
+        application.contentResolver.query(
+            Uri.parse(source), arrayOf(android.provider.OpenableColumns.SIZE), null, null, null,
+        )?.use { c ->
+            if (c.moveToFirst()) {
+                val i = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (i >= 0 && !c.isNull(i)) c.getLong(i) else null
+            } else null
+        }
+    } else sourceFile!!.length().takeIf { it > 0 }
     // App-supplied Content-Type wins (needed e.g. for a presigned S3/GCS PUT signed against a
     // specific content type); otherwise default to octet-stream. This is the single place the
     // upload's Content-Type header is decided — see the caller in `subscribe` above.
@@ -237,6 +295,16 @@ private fun streamingUploadBody(
             }
         }
     }
+}
+
+/** Last `/`-segment of a handle, `?query`/`#fragment` stripped; empty -> "file". Mirrors
+ *  mobiler-web's `infer_filename` (mobiler-web/src/lib.rs) so a multipart upload with no explicit
+ *  `filename` override picks the same name on Android as on web. */
+private fun inferFilename(source: String): String {
+    val cut = source.indexOfFirst { it == '?' || it == '#' }
+    val truncated = if (cut >= 0) source.substring(0, cut) else source
+    val name = truncated.substringAfterLast('/', truncated)
+    return name.ifEmpty { "file" }
 }
 
 /** Resolve a sandbox-relative path (or an absolute/`file://` path) to a File; reject `..` escapes

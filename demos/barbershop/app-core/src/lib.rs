@@ -1010,15 +1010,13 @@ impl MobilerApp for FadeHouse {
                 }
                 model.transfer_pct = Some(0);
                 model.transfer_note = "Uploading…".to_string();
-                // `cx.upload` streams progress + a final status over the `transfer` primitive; the
-                // native `transfer` plugin doesn't exist until PR-C (Task 7), so on iOS/Android this
-                // subscribes to an unknown source and quietly does nothing — expected until then.
-                // `.multipart("file")` sends this as `multipart/form-data` (flips the default PUT to
-                // POST) with a "source" text field — proves the multipart envelope end to end on web
-                // today; the installed native `transfer` plugin (Release B) doesn't understand the
-                // `multipart` config yet either, so iOS/Android ignore it and would send raw once
-                // PR-C lands the plugin skeleton — full native multipart support is PR-C's job.
-                cx.upload(UPLOAD_URL, handle).multipart("file").field("source", "barbershop").start("bx-up", |ev| match ev {
+                // `cx.upload` streams progress + a final status over the `transfer` primitive via the
+                // native `transfer` plugin on iOS/Android and `FormData` on web. `.multipart("file")`
+                // sends this as `multipart/form-data` (flips the default PUT to POST) with a
+                // "source" text field — a real filename (`.filename(...)`) is set explicitly because
+                // the inferred default is useless in practice on every shell (a picker media id on
+                // Android, a `blob:` UUID on web, a temp name on iOS).
+                cx.upload(UPLOAD_URL, handle).multipart("file").filename("photo.jpg").field("source", "barbershop").start("bx-up", |ev| match ev {
                     TransferEvent::Progress { transferred, total } => Msg::UpProgress { transferred, total },
                     TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0)),
                 });
@@ -1279,10 +1277,8 @@ fn home(model: &Model) -> Widget {
 // transfer primitive (`cx.upload`/`cx.download`) in a real app: pick a photo → POST it as
 // `multipart/form-data` (a "file" part + a "source" text field) to a public echo endpoint with a
 // live progress bar → GET a fixed payload back to prove the download leg too.
-// Web-functional today (mobiler-web's `transfer` shell source builds the multipart body). On
-// iOS/Android the native `transfer` plugin doesn't land until a follow-up PR — the card renders
-// and the button is tappable, but no bytes move there yet (an unsubscribed/unknown stream source
-// is a silent no-op).
+// Native multipart on every shell: iOS/Android move the bytes via the bundled `transfer` plugin
+// (CLI 0.50), web builds the multipart body with `FormData`.
 fn transfer_card(model: &Model) -> Widget {
     let status = if model.transfer_note.is_empty() {
         caption("Pick a photo, upload it, then fetch it straight back — with a live progress bar.")
