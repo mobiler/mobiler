@@ -173,7 +173,7 @@ free plugins:
 | 🔐 **biometric** | Face ID / fingerprint auth | `mobiler plugin add biometric` |
 | 🗝️ **securestore** | encrypted key/value (Keychain / Keystore) | `mobiler plugin add securestore` |
 | 🔌 **websocket** | persistent real-time connection (streaming, via `cx.subscribe`) | `mobiler plugin add websocket` |
-| ⇅ **transfer** | streaming file upload/download — progress + cancel (`cx.upload`/`cx.download`) | `mobiler plugin add transfer` |
+| ⇅ **transfer** | streaming file upload/download — progress + cancel, multipart/form-data (`cx.upload`/`cx.download`) | `mobiler plugin add transfer` |
 | 🔔 **notifications** | local scheduled notifications (reminders) | `mobiler plugin add notifications` |
 | 🔋 **battery** | device battery level (sample) | `mobiler plugin add battery` |
 | 📶 **connectivity** | network status (online/wifi/cellular/offline) | `mobiler plugin add connectivity` |
