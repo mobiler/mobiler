@@ -289,6 +289,72 @@ fn fmt_summary(s: &str) -> String {
     if s.is_empty() { String::new() } else { format!(" — {s}") }
 }
 
+// ---------------- drift detection (for `mobiler upgrade`) ----------------
+
+/// Where `add_at` copies a plugin source: Android sources land in the app's package dir,
+/// iOS sources in `iOS/Sources`, both under the source file's basename.
+fn installed_paths(root: &Path, subs: &Subs, m: &Manifest) -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
+    let mut push = |rel: &str, dir: PathBuf| {
+        if let Some(name) = Path::new(rel).file_name() {
+            out.push((rel.to_string(), dir.join(name)));
+        }
+    };
+    if let Some(a) = &m.android {
+        let dir = root.join("Android/app/src/main/java").join(&subs.package_path);
+        for rel in &a.sources {
+            push(rel, dir.clone());
+        }
+    }
+    if let Some(i) = &m.ios {
+        let dir = root.join("iOS/Sources");
+        for rel in &i.sources {
+            push(rel, dir.clone());
+        }
+    }
+    out
+}
+
+/// Bundled plugins that are installed in this app but whose on-disk shell sources differ from
+/// the versions this CLI ships.
+///
+/// `upgrade` syncs template files and bumps the `mobiler-core` pin, but it deliberately never
+/// touches plugin bodies — they were copied in by `plugin add` and may carry user edits. That
+/// leaves a gap: a release can ship a new core API whose shell half lives only in a plugin
+/// body, so the app compiles against the new core while the stale plugin silently ignores the
+/// new request fields. Reporting the drift turns that silent mismatch into an instruction.
+///
+/// Best-effort: an unreadable manifest or source is skipped rather than failing the upgrade.
+pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
+    let mut drifted = Vec::new();
+    for name in bundled_names() {
+        let Ok(src) = resolve_source(&name) else { continue };
+        let Ok(manifest) = src
+            .read_text("mobiler-plugin.toml")
+            .and_then(|t| toml::from_str::<Manifest>(&t).context("parsing mobiler-plugin.toml"))
+        else {
+            continue;
+        };
+        let paths = installed_paths(root, subs, &manifest);
+        // "Installed" = at least one of its sources is present; absent files mean not installed
+        // (or a partial install, which `plugin add` is also the fix for).
+        if paths.is_empty() || !paths.iter().any(|(_, dst)| dst.is_file()) {
+            continue;
+        }
+        let stale = paths.iter().any(|(rel, dst)| match (src.read_text(rel), fs::read_to_string(dst)) {
+            (Ok(shipped), Ok(on_disk)) => substitute(&shipped, subs) != on_disk,
+            // A source this CLI ships that is missing from the app is itself drift (a release
+            // that adds a second file to an existing plugin).
+            (Ok(_), Err(_)) => true,
+            _ => false,
+        });
+        if stale {
+            drifted.push(name);
+        }
+    }
+    drifted
+}
+
 fn report(res: Insert, what: &str) {
     match res {
         Insert::Inserted => println!("  + {what}"),
@@ -593,6 +659,41 @@ mod test {
         assert!(core_kt.contains("\"battery\" to BatteryPlugin(application),"));
         let core_swift = read(&root, "iOS/Sources/Core.swift");
         assert!(core_swift.contains("case \"battery\": return await BatteryPlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `drifted` is what stops an upgrade from silently leaving a plugin's shell half behind:
+    /// not-installed → quiet, freshly installed → clean, edited/stale → reported.
+    #[test]
+    fn drifted_reports_only_installed_and_stale_plugins() {
+        let root = skeleton();
+        let subs = Subs::from_app_root(&root).unwrap();
+
+        // Nothing installed yet: no plugin may be reported.
+        assert!(drifted(&root, &subs).is_empty(), "no plugins installed → nothing drifted");
+
+        add_at(&root, "battery").unwrap();
+        assert!(
+            !drifted(&root, &subs).contains(&"battery".to_string()),
+            "a just-installed plugin matches what the CLI ships"
+        );
+
+        // Simulate the real case: the app carries an older copy of the plugin's shell source
+        // (what a 0.49 project looks like after upgrading to a CLI whose plugin body moved on).
+        let kt = root.join("Android/app/src/main/java/dev/mobiler/demo/BatteryPlugin.kt");
+        let stale = fs::read_to_string(&kt).unwrap().replace("package dev.mobiler.demo", "package dev.mobiler.demo\n// older version");
+        fs::write(&kt, stale).unwrap();
+        assert!(
+            drifted(&root, &subs).contains(&"battery".to_string()),
+            "a stale plugin body is reported so the mismatch is not silent"
+        );
+
+        // Re-adding is the documented fix — it must clear the report.
+        add_at(&root, "battery").unwrap();
+        assert!(
+            !drifted(&root, &subs).contains(&"battery".to_string()),
+            "`plugin add` refreshes the body and clears the drift"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -103,6 +103,9 @@ struct Report {
     merge: Vec<String>,
     /// 3-way merges with overlapping edits — written with conflict markers for manual resolution.
     conflict: Vec<String>,
+    /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
+    /// automatically (they may carry user edits) — reported so the mismatch is not silent.
+    plugins: Vec<String>,
     stamp: Option<(Option<String>, String)>,
 }
 
@@ -121,6 +124,7 @@ fn upgrade_at(root: &Path, apply: bool) -> Result<Report> {
     let mut report = Report::default();
     bump_core_dep(root, &mut report)?;
     sync_dir(&TEMPLATES, root, &subs, apply, &mut report)?;
+    report.plugins = crate::plugin::drifted(root, &subs);
     write_stamp(root, &mut report)?;
     Ok(report)
 }
@@ -503,6 +507,9 @@ impl Report {
         for c in &self.conflict {
             println!("  ‼ conflict {c}  (overlapping edits) -> {c}.mobiler-new");
         }
+        for p in &self.plugins {
+            println!("  ! plugin  {p}  has shell updates in this release");
+        }
         println!("  = {} file(s) up to date", self.up_to_date);
         if let Some((prev, cur)) = &self.stamp {
             match prev {
@@ -512,9 +519,27 @@ impl Report {
         }
 
         println!();
+        // A drifted plugin is pending work too: its Rust-side API arrives with the core bump
+        // while its shell half stays behind, so "Up to date. ✓" would be a lie.
+        if !self.plugins.is_empty() {
+            println!(
+                "{} installed plugin(s) ship updated shell code in this release. Their Rust API \
+                 comes with the core bump, but the native half is only updated by re-adding:",
+                self.plugins.len()
+            );
+            for p in &self.plugins {
+                println!("    mobiler plugin add {p}");
+            }
+            println!(
+                "  This overwrites your copy of those plugins' shell sources — back up any local \
+                 edits first (registrations and other files are left alone)."
+            );
+        }
         let pending = self.changed.len() + self.merge.len() + self.conflict.len();
         if pending == 0 && self.updated.is_empty() {
-            println!("Up to date. ✓");
+            if self.plugins.is_empty() {
+                println!("Up to date. ✓");
+            }
             return;
         }
         if !self.conflict.is_empty() {
