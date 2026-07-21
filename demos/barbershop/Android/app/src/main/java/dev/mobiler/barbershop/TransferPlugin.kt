@@ -256,7 +256,22 @@ private fun streamingUploadBody(
     // (which OkHttp calls later, off this thread, where a null-body error is harder to report).
     open()?.close() ?: return null
 
-    val total: Long? = if (isContentUri) null else sourceFile!!.length().takeIf { it > 0 }
+    // `content://` sources have no filesystem length, but the ContentResolver can usually report
+    // one via OpenableColumns.SIZE (the same value the system picker/provider used to build the
+    // handle) — querying it lets an OkHttp RequestBody advertise a real Content-Length instead of
+    // falling back to `Transfer-Encoding: chunked`, which (a) some multipart endpoints reject and
+    // (b) leaves progress with no denominator. `null` here (missing column, cursor failure, or a
+    // provider that genuinely doesn't know) legitimately falls through to chunked, same as before.
+    val total: Long? = if (isContentUri) {
+        application.contentResolver.query(
+            Uri.parse(source), arrayOf(android.provider.OpenableColumns.SIZE), null, null, null,
+        )?.use { c ->
+            if (c.moveToFirst()) {
+                val i = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (i >= 0 && !c.isNull(i)) c.getLong(i) else null
+            } else null
+        }
+    } else sourceFile!!.length().takeIf { it > 0 }
     // App-supplied Content-Type wins (needed e.g. for a presigned S3/GCS PUT signed against a
     // specific content type); otherwise default to octet-stream. This is the single place the
     // upload's Content-Type header is decided — see the caller in `subscribe` above.
