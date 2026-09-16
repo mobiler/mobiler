@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 mod build;
 mod dev;
+mod display_name;
 mod doctor;
 mod new;
 mod plugin;
@@ -32,6 +33,10 @@ enum Command {
         /// `shared-ui` (same UI on mobile + web) or `api` (reusable core + JSON API).
         #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "generic")]
         agentic: Option<new::AgenticGuide>,
+        /// The name users see (launcher label, system dialogs), e.g. "Appointments Admin".
+        /// Defaults to the PascalCase project name. Change it later with `mobiler display-name`.
+        #[arg(long)]
+        display_name: Option<String>,
     },
     /// Build the Mobiler project, install, and launch (default: all three).
     Dev {
@@ -62,6 +67,12 @@ enum Command {
         #[command(subcommand)]
         cmd: plugin::PluginCmd,
     },
+    /// Show or set the user-visible app name (Android app_name + iOS CFBundleDisplayName).
+    /// Project identifiers (Gradle root, Xcode target, theme) are left unchanged.
+    DisplayName {
+        /// The new display name. Omit to print the current one.
+        name: Option<String>,
+    },
     /// Update this app's generic native shells + `mobiler-core` dep to the CLI's templates.
     /// Non-destructive by default (writes `<file>.mobiler-new`); `--apply` overwrites in place
     /// (saving `<file>.mobiler-bak`). Never touches your Rust app code or plugin-patched files.
@@ -77,7 +88,7 @@ fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Doctor => doctor::run(),
-        Command::New { name, package, agentic } => match new::run(&name, package.as_deref(), agentic) {
+        Command::New { name, package, agentic, display_name } => match new::run(&name, package.as_deref(), agentic, display_name.as_deref()) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");
@@ -106,6 +117,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Plugin { cmd } => match plugin::run(cmd) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::DisplayName { name } => match display_name::run(name.as_deref()) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

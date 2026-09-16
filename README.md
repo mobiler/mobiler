@@ -308,6 +308,22 @@ On a Mac, the scaffold also includes an iOS shell — `bash iOS/build-ios.sh` bu
 it for the simulator (needs Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen);
 no Apple account or signing required).
 
+## App display name — `mobiler display-name`
+
+The project name you pass to `mobiler new` becomes an identifier (Gradle root project, Xcode target,
+theme) and, by default, the name users see. To set the visible name without touching identifiers:
+
+```bash
+mobiler new mobile-scaffold --display-name "Appointments Admin"   # at scaffold time
+mobiler display-name "Appointments Admin"                         # or later, from the app root
+mobiler display-name                                              # print the current value
+```
+
+It writes Android `app_name` (launcher label, and the name in system dialogs such as *"Allow … to
+send you notifications?"*) and iOS `CFBundleDisplayName` (under `info.properties` in
+`iOS/project.yml`; XcodeGen regenerates Info.plist from there). Special characters are escaped for
+each platform, and `mobiler upgrade` preserves the value.
+
 ## Upgrading an app — `mobiler upgrade`
 
 The generic native shells (the `Widget`-tree interpreter on each platform) are scaffolded

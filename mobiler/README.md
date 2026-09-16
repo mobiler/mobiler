@@ -45,7 +45,15 @@ mobiler build ios       # build the iOS app (on a Mac)
 mobiler plugin list     # list the bundled capability plugins
 mobiler plugin add scanner   # install a plugin into the app
 mobiler upgrade         # pull the latest generic shells + mobiler-core into an existing app
+mobiler display-name "Appointments Admin"   # set the name users see (omit the name to print it)
 ```
+
+**App display name.** `mobiler new myapp` derives the identifier `Myapp` (Gradle root, Xcode target,
+theme) and uses it as the visible name too. `mobiler new myapp --display-name "My App"` or, later,
+`mobiler display-name "My App"` sets only what users see: Android `app_name` (the launcher label and
+system dialogs such as the notification-permission prompt) and iOS `CFBundleDisplayName` (in
+`iOS/project.yml`, which XcodeGen turns into the Info.plist). Identifiers stay unchanged, and
+`mobiler upgrade` keeps the value.
 
 ## Upgrading an existing app
 

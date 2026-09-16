@@ -38,7 +38,12 @@ fn agentic_guide(flavor: AgenticGuide) -> String {
 /// Fallback NDK version pin when none is detectable. Update when bumping the framework's target NDK.
 const FALLBACK_NDK_VERSION: &str = "30.0.14904198";
 
-pub fn run(raw_name: &str, package: Option<&str>, agentic: Option<AgenticGuide>) -> Result<()> {
+pub fn run(
+    raw_name: &str,
+    package: Option<&str>,
+    agentic: Option<AgenticGuide>,
+    user_display_name: Option<&str>,
+) -> Result<()> {
     let name = sanitize_project_name(raw_name)?;
     let display_name = display_name_from(&name);
     let package = package
@@ -68,6 +73,10 @@ pub fn run(raw_name: &str, package: Option<&str>, agentic: Option<AgenticGuide>)
     written += 1;
     // Snapshot the pristine shell files so `mobiler upgrade` can do a true 3-way merge later.
     crate::upgrade::seed_baseline(&out_dir, &subs).context("seeding upgrade baseline")?;
+    // After the baseline: a chosen display name is an ordinary app edit that upgrades preserve.
+    if let Some(dn) = user_display_name {
+        crate::display_name::set(&out_dir, dn).context("setting the display name")?;
+    }
     if let Some(sdk_dir) = android_home.as_deref() {
         write_local_properties(&out_dir, sdk_dir)?;
         written += 1;
