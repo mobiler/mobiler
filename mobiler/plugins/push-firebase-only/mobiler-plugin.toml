@@ -3,7 +3,7 @@
 # `register` returns an FCM token on both platforms and your backend speaks ONE FCM API. The cx API is
 # identical to `push` (registers under the same name "push"), so app code is unchanged:
 #   cx.plugin("push", "register", "", |r| Msg::PushToken(r))          // → {"token":"…","platform":"fcm"}
-#   cx.subscribe("push", "push", "events", "", |r| Msg::PushEvent(r)) // received/tapped payloads + refresh
+#   cx.subscribe("push", "push", "events", "", |r| Msg::PushEvent(r)) // "mobiler_push":"received"|"opened" payloads + refresh
 #
 # Install `push` OR `push-firebase-only` — NOT both (they both register `case "push"`, which collides at
 # build). On iOS FCM still delivers via APNs → the shell's AppDelegate/PushBridge feed the events stream
@@ -15,6 +15,7 @@ name = "push-firebase-only"
 summary = "Remote push, Firebase-only (FCM on iOS + Android via the Firebase iOS SDK) — free, bundled (EXPERIMENTAL)"
 notes = [
   "EXPERIMENTAL: like `push`, the real FCM token round-trip isn't device-tested. Needs a Firebase project + a physical device.",
+  "Events: each notification carries \"mobiler_push\": \"opened\" (user tapped it; buffered until you subscribe) or \"received\" (arrived in the foreground; live only). Navigate only on opened. See the plugin README.",
   "MUTUALLY EXCLUSIVE with the `push` plugin — install ONE or the other (both inject `case \"push\"`, which collides loudly at build).",
   "iOS: drop GoogleService-Info.plist into iOS/Sources/ (Firebase reads it at FirebaseApp.configure()). It carries your keys; can't be bundled.",
   "Android: drop google-services.json into Android/app/ — the build FAILS without it.",

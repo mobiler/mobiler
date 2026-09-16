@@ -315,6 +315,17 @@ fn installed_paths(root: &Path, subs: &Subs, m: &Manifest) -> Vec<(String, PathB
     out
 }
 
+/// Whether `plugin add` registered this plugin: its `register` line is present in Core.kt / Core.swift
+/// for every platform the manifest declares.
+fn registered(root: &Path, subs: &Subs, m: &Manifest) -> bool {
+    let has = |path: PathBuf, line: &str| fs::read_to_string(path).is_ok_and(|t| t.contains(line));
+    let android = m.android.as_ref().is_none_or(|a| {
+        has(root.join("Android/app/src/main/java").join(&subs.package_path).join("Core.kt"), &a.register)
+    });
+    let ios = m.ios.as_ref().is_none_or(|i| has(root.join("iOS/Sources/Core.swift"), &i.register));
+    (m.android.is_some() || m.ios.is_some()) && android && ios
+}
+
 /// Bundled plugins that are installed in this app but whose on-disk shell sources differ from
 /// the versions this CLI ships.
 ///
@@ -336,9 +347,11 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
             continue;
         };
         let paths = installed_paths(root, subs, &manifest);
-        // "Installed" = at least one of its sources is present; absent files mean not installed
-        // (or a partial install, which `plugin add` is also the fix for).
-        if paths.is_empty() || !paths.iter().any(|(_, dst)| dst.is_file()) {
+        // "Installed" = registered on every platform it declares. Source files alone can't tell:
+        // alternative plugins share file names (`push` and `push-firebase-only` both ship
+        // PushPlugin.kt), so file presence would report the one that isn't installed — and
+        // re-adding it would collide with the one that is.
+        if paths.is_empty() || !registered(root, subs, &manifest) {
             continue;
         }
         let stale = paths.iter().any(|(rel, dst)| match (src.read_text(rel), fs::read_to_string(dst)) {
@@ -694,6 +707,24 @@ mod test {
             !drifted(&root, &subs).contains(&"battery".to_string()),
             "`plugin add` refreshes the body and clears the drift"
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `push` and `push-firebase-only` are mutually exclusive but share Android file names. A stale
+    /// `push` must not also report `push-firebase-only`: re-adding it would collide at build.
+    #[test]
+    fn drifted_does_not_report_an_alternative_plugin_sharing_file_names() {
+        let root = skeleton();
+        let subs = Subs::from_app_root(&root).unwrap();
+        add_at(&root, "push").unwrap();
+
+        let kt = root.join("Android/app/src/main/java/dev/mobiler/demo/PushPlugin.kt");
+        let stale = fs::read_to_string(&kt).unwrap().replace("package dev.mobiler.demo", "package dev.mobiler.demo\n// older version");
+        fs::write(&kt, stale).unwrap();
+
+        let report = drifted(&root, &subs);
+        assert!(report.contains(&"push".to_string()), "the installed plugin is reported: {report:?}");
+        assert!(!report.contains(&"push-firebase-only".to_string()), "the alternative is not: {report:?}");
         let _ = fs::remove_dir_all(&root);
     }
 
