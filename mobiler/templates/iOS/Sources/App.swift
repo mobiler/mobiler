@@ -75,33 +75,36 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         PushBridge.shared.didFail(error: error)
     }
 
-    // Foreground receipt — show the banner AND forward the payload to the events stream.
+    // Foreground receipt — show the banner AND forward the payload to the events stream as "received".
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        PushBridge.shared.didReceive(userInfo: notification.request.content.userInfo)
+        PushBridge.shared.didReceive(userInfo: notification.request.content.userInfo, kind: .received)
         completionHandler([.banner, .sound])
     }
 
-    // Tap — forward the payload. Also fires when a tap LAUNCHES the app; PushBridge buffers it until
-    // the core subscribes.
+    // Tap — forward the payload as "opened". Also fires when a tap LAUNCHES the app; PushBridge buffers
+    // it until the core subscribes. Only the default action (the tap itself) counts as opening it.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        PushBridge.shared.didReceive(userInfo: response.notification.request.content.userInfo)
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            PushBridge.shared.didReceive(userInfo: response.notification.request.content.userInfo, kind: .opened)
+        }
         completionHandler()
     }
 }
 
 // Always-present, plugin-agnostic forwarder between the AppDelegate and the optional `push` plugin.
-// The plugin attaches a token-waiter (register op) + an event sink (events stream); until a sink is
-// attached, inbound payloads buffer and flush on attach — so a notification that launched a dead
-// process still reaches the app. App.swift references nothing from the plugin, so this compiles and
-// stays dormant in push-less apps.
+// The plugin attaches a token-waiter (register op) + an event sink (events stream). Each notification
+// event is its payload plus a reserved "mobiler_push" key: "received" (arrived in the foreground —
+// live only, dropped if nothing is subscribed) or "opened" (the user tapped it — buffered until a sink
+// attaches, so a tap that launched a dead process still reaches the app). App.swift references nothing
+// from the plugin, so this compiles and stays dormant in push-less apps.
 @MainActor
 final class PushBridge {
     static let shared = PushBridge()
@@ -109,6 +112,10 @@ final class PushBridge {
     private var tokenWaiters: [(Result<String, Error>) -> Void] = []
     private var sink: (@Sendable (String) -> Void)?
     private var buffer: [String] = []
+    // Taps are user actions, so a handful is plenty; the bound only guards against a runaway backlog.
+    private let maxBuffered = 32
+
+    enum Kind: String { case received, opened }
 
     /// The raw APNs device token (set by the AppDelegate). The Firebase-only push plugin reads this to
     /// hand to `Messaging.messaging().apnsToken`; the native-APNs plugin uses the hex string instead.
@@ -151,23 +158,33 @@ final class PushBridge {
         for resume in waiters { resume(.failure(error)) }
     }
 
-    func didReceive(userInfo: [AnyHashable: Any]) {
-        emit(Self.jsonString(from: userInfo))
+    func didReceive(userInfo: [AnyHashable: Any], kind: Kind) {
+        let payload = Self.jsonString(from: userInfo, kind: kind)
+        switch kind {
+        case .received: sink?(payload)  // live only — the notification itself is the record otherwise
+        case .opened: emit(payload)
+        }
     }
 
     private func emit(_ payload: String) {
-        if let sink { sink(payload) } else { buffer.append(payload) }
+        if let sink {
+            sink(payload)
+        } else {
+            if buffer.count >= maxBuffered { buffer.removeFirst() }
+            buffer.append(payload)
+        }
     }
 
-    private static func jsonString(from userInfo: [AnyHashable: Any]) -> String {
-        let stringKeyed = Dictionary(uniqueKeysWithValues: userInfo.compactMap { key, value in
+    private static func jsonString(from userInfo: [AnyHashable: Any], kind: Kind) -> String {
+        var stringKeyed = Dictionary(uniqueKeysWithValues: userInfo.compactMap { key, value in
             (key as? String).map { ($0, value) }
         })
+        stringKeyed["mobiler_push"] = kind.rawValue
         if let data = try? JSONSerialization.data(withJSONObject: stringKeyed),
            let json = String(data: data, encoding: .utf8) {
             return json
         }
-        return "{}"
+        return "{\"mobiler_push\":\"\(kind.rawValue)\"}"
     }
 }
 

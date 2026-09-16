@@ -25,8 +25,10 @@ cx.subscribe("push", "push", "events", "", Msg::PushEvent),
 - **iOS** = Firebase iOS SDK (via Swift Package Manager) instead of raw APNs. The shell's AppDelegate
   forwards the raw APNs token to `Messaging.apnsToken` (FCM relays to iOS through APNs under the hood),
   and `register` returns the **FCM registration token**. Inbound notifications still arrive via APNs →
-  the AppDelegate/`PushBridge`, so the events stream is **unchanged** from `push`.
-- **Android** = identical to `push` (FCM).
+  the AppDelegate/`PushBridge`, so the events stream is **unchanged** from `push`: the same
+  `"mobiler_push": "opened" | "received"` tagging and buffering rules
+  ([details](../push/README.md#event-kinds-opened-vs-received)). Navigate only on `opened`.
+- **Android** = identical to `push` (FCM), including the tray icon/channel-name resources.
 - **Backend** = one FCM HTTP v1 endpoint, one token type. (With plain `push` you'd send APNs for iOS +
   FCM for Android.)
 

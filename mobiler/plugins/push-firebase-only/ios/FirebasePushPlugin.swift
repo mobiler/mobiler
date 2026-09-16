@@ -20,7 +20,7 @@ enum FirebasePushPlugin {
     }
 
     // Same as the native-APNs plugin's subscribe: attach an emit sink to PushBridge (the AppDelegate
-    // forwards received/tapped notifications there) + register it with FCMDelegate so token rotations
+    // forwards "received"/"opened" notifications there) + register it with FCMDelegate so token rotations
     // also reach the stream. Park until cancelled, then detach.
     static func subscribe(op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }

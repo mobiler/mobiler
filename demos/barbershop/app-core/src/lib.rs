@@ -168,7 +168,7 @@ pub enum Msg {
     EnablePush,
     /// The device token (or error) returned by `push` register.
     PushRegistered(PluginResponse),
-    /// An inbound push payload (received/tapped) or a `{"type":"token_refresh",…}` event.
+    /// An inbound push payload (tagged `"mobiler_push":"received"|"opened"`) or a `{"type":"token_refresh",…}` event.
     PushEvent(PluginResponse),
 
     /// --- Profile "Analytics" card: product analytics + crash reporting (`analytics` plugin) ---

@@ -3,12 +3,12 @@ import SharedTypes
 import UIKit
 import UserNotifications
 
-/// App entry â the generic Mobiler shell. `Core` drives the Rust core; `render`
+/// App entry — the generic Mobiler shell. `Core` drives the Rust core; `render`
 /// turns its `Widget` tree into SwiftUI. The whole UI is decided in Rust.
 @main
 struct FullstackTodoApp: App {
     // Bridges UIKit app-lifecycle + APNs/notification callbacks (which only arrive on a
-    // UIApplicationDelegate) into the SwiftUI app â see AppDelegate + PushBridge below.
+    // UIApplicationDelegate) into the SwiftUI app — see AppDelegate + PushBridge below.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var core = Core()
     // Tracks foreground/background for the `system` lifecycle events (see SystemBridge).
@@ -17,7 +17,7 @@ struct FullstackTodoApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(core: core)
-                // Inbound system events â SystemBridge â the `system` stream. `.onOpenURL` delivers
+                // Inbound system events → SystemBridge → the `system` stream. `.onOpenURL` delivers
                 // deep links (custom scheme / universal link) at launch and while running; scenePhase
                 // reports foreground/background.
                 .onOpenURL { SystemBridge.shared.didOpen(url: $0) }
@@ -48,7 +48,7 @@ private struct RootView: View {
     }
 }
 
-// UIKit app-delegate adaptor â the ONLY place APNs token + remote-notification callbacks arrive in a
+// UIKit app-delegate adaptor — the ONLY place APNs token + remote-notification callbacks arrive in a
 // SwiftUI app. It forwards them to `PushBridge` (below). Inert unless the `push` plugin's `register`
 // op runs: a push-less app never calls registerForRemoteNotifications, so it costs nothing.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -75,33 +75,36 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         PushBridge.shared.didFail(error: error)
     }
 
-    // Foreground receipt â show the banner AND forward the payload to the events stream.
+    // Foreground receipt — show the banner AND forward the payload to the events stream as "received".
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        PushBridge.shared.didReceive(userInfo: notification.request.content.userInfo)
+        PushBridge.shared.didReceive(userInfo: notification.request.content.userInfo, kind: .received)
         completionHandler([.banner, .sound])
     }
 
-    // Tap â forward the payload. Also fires when a tap LAUNCHES the app; PushBridge buffers it until
-    // the core subscribes.
+    // Tap — forward the payload as "opened". Also fires when a tap LAUNCHES the app; PushBridge buffers
+    // it until the core subscribes. Only the default action (the tap itself) counts as opening it.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        PushBridge.shared.didReceive(userInfo: response.notification.request.content.userInfo)
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            PushBridge.shared.didReceive(userInfo: response.notification.request.content.userInfo, kind: .opened)
+        }
         completionHandler()
     }
 }
 
 // Always-present, plugin-agnostic forwarder between the AppDelegate and the optional `push` plugin.
-// The plugin attaches a token-waiter (register op) + an event sink (events stream); until a sink is
-// attached, inbound payloads buffer and flush on attach â so a notification that launched a dead
-// process still reaches the app. App.swift references nothing from the plugin, so this compiles and
-// stays dormant in push-less apps.
+// The plugin attaches a token-waiter (register op) + an event sink (events stream). Each notification
+// event is its payload plus a reserved "mobiler_push" key: "received" (arrived in the foreground —
+// live only, dropped if nothing is subscribed) or "opened" (the user tapped it — buffered until a sink
+// attaches, so a tap that launched a dead process still reaches the app). App.swift references nothing
+// from the plugin, so this compiles and stays dormant in push-less apps.
 @MainActor
 final class PushBridge {
     static let shared = PushBridge()
@@ -109,6 +112,10 @@ final class PushBridge {
     private var tokenWaiters: [(Result<String, Error>) -> Void] = []
     private var sink: (@Sendable (String) -> Void)?
     private var buffer: [String] = []
+    // Taps are user actions, so a handful is plenty; the bound only guards against a runaway backlog.
+    private let maxBuffered = 32
+
+    enum Kind: String { case received, opened }
 
     /// The raw APNs device token (set by the AppDelegate). The Firebase-only push plugin reads this to
     /// hand to `Messaging.messaging().apnsToken`; the native-APNs plugin uses the hex string instead.
@@ -136,7 +143,7 @@ final class PushBridge {
     func didRegister(token: String, raw: Data) {
         rawAPNsToken = raw
         if tokenWaiters.isEmpty {
-            // An out-of-band rotation (no register call in flight) â notify the app via the stream.
+            // An out-of-band rotation (no register call in flight) → notify the app via the stream.
             emit("{\"type\":\"token_refresh\",\"token\":\"\(token)\"}")
         } else {
             let waiters = tokenWaiters
@@ -151,28 +158,38 @@ final class PushBridge {
         for resume in waiters { resume(.failure(error)) }
     }
 
-    func didReceive(userInfo: [AnyHashable: Any]) {
-        emit(Self.jsonString(from: userInfo))
+    func didReceive(userInfo: [AnyHashable: Any], kind: Kind) {
+        let payload = Self.jsonString(from: userInfo, kind: kind)
+        switch kind {
+        case .received: sink?(payload)  // live only — the notification itself is the record otherwise
+        case .opened: emit(payload)
+        }
     }
 
     private func emit(_ payload: String) {
-        if let sink { sink(payload) } else { buffer.append(payload) }
+        if let sink {
+            sink(payload)
+        } else {
+            if buffer.count >= maxBuffered { buffer.removeFirst() }
+            buffer.append(payload)
+        }
     }
 
-    private static func jsonString(from userInfo: [AnyHashable: Any]) -> String {
-        let stringKeyed = Dictionary(uniqueKeysWithValues: userInfo.compactMap { key, value in
+    private static func jsonString(from userInfo: [AnyHashable: Any], kind: Kind) -> String {
+        var stringKeyed = Dictionary(uniqueKeysWithValues: userInfo.compactMap { key, value in
             (key as? String).map { ($0, value) }
         })
+        stringKeyed["mobiler_push"] = kind.rawValue
         if let data = try? JSONSerialization.data(withJSONObject: stringKeyed),
            let json = String(data: data, encoding: .utf8) {
             return json
         }
-        return "{}"
+        return "{\"mobiler_push\":\"\(kind.rawValue)\"}"
     }
 }
 
-// Always-present, plugin-agnostic forwarder for inbound *system* events â deep-link URLs (`.onOpenURL`)
-// and app lifecycle (scenePhase) â into the built-in `system` stream (cx.subscribe). Deep links arriving
+// Always-present, plugin-agnostic forwarder for inbound *system* events — deep-link URLs (`.onOpenURL`)
+// and app lifecycle (scenePhase) — into the built-in `system` stream (cx.subscribe). Deep links arriving
 // before the core subscribes BUFFER and flush on attach (launch-from-dead), exactly like PushBridge;
 // lifecycle changes emit live, and the current state is sent on attach. Dormant until something
 // subscribes to "system".
@@ -202,12 +219,12 @@ final class SystemBridge {
         switch phase {
         case .active: emitLifecycle("active")
         case .background: emitLifecycle("background")
-        default: break  // .inactive is a transient app-switcher state â ignore
+        default: break  // .inactive is a transient app-switcher state — ignore
         }
     }
 
     private func emitLifecycle(_ state: String) {
-        // Lifecycle is live-only (not buffered) â a fresh subscriber gets the current state on attach.
+        // Lifecycle is live-only (not buffered) — a fresh subscriber gets the current state on attach.
         sink?("{\"type\":\"lifecycle\",\"state\":\"\(state)\"}")
     }
 
