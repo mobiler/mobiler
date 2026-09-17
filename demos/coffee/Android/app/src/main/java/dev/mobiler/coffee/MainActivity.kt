@@ -18,6 +18,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -88,11 +90,13 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.StarHalf
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -978,11 +982,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
         }
 
-        is Widget.Button -> when (widget.style) {
-            ButtonStyle.FILLED -> Button(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
-            ButtonStyle.OUTLINED -> OutlinedButton(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
-            ButtonStyle.TEXT -> TextButton(onClick = { send(Action.Fired(widget.onPress)) }) { Text(widget.label) }
-        }
+        is Widget.Button -> MobilerButton(widget, send)
 
         is Widget.IconButton -> IconButton(onClick = { send(Action.Fired(widget.onPress)) }) {
             Icon(imageVector = iconFor(widget.icon), contentDescription = widget.icon.name.lowercase(), tint = iconTintFor(widget.icon))
@@ -1302,6 +1302,69 @@ private fun toneColors(tone: Tone): Pair<Color, Color> {
         Tone.WARNING -> Color(0xFFE65100).copy(alpha = 0.15f) to Color(0xFFE65100)
         Tone.DANGER -> cs.errorContainer to cs.onErrorContainer
         Tone.INFO -> cs.tertiaryContainer to cs.onTertiaryContainer
+    }
+}
+
+// Strong (filled) color pair for a toned button.
+@Composable
+private fun toneStrong(tone: Tone): Pair<Color, Color> {
+    val cs = MaterialTheme.colorScheme
+    return when (tone) {
+        Tone.NEUTRAL -> cs.primary to cs.onPrimary
+        Tone.SUCCESS -> Color(0xFF2E7D32) to Color.White
+        Tone.WARNING -> Color(0xFFE65100) to Color.White
+        Tone.DANGER -> cs.error to cs.onError
+        Tone.INFO -> cs.tertiary to cs.onTertiary
+    }
+}
+
+// Widget.Button. A NEUTRAL tone keeps each M3 button's default colors (an un-toned button renders
+// exactly as before); other tones recolor FILLED/OUTLINED/TEXT from the strong tone color and TONAL
+// from the tone's container pair. `icon` is a leading glyph; `wide` fills the width.
+@Composable
+private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
+    val onClick = { send(Action.Fired(widget.onPress)) }
+    val modifier = if (widget.wide) Modifier.fillMaxWidth() else Modifier
+    val neutral = widget.tone == Tone.NEUTRAL
+    val (strong, onStrong) = toneStrong(widget.tone)
+    val (soft, onSoft) = toneColors(widget.tone)
+    val content: @Composable RowScope.() -> Unit = {
+        widget.icon?.let {
+            Icon(iconFor(it), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+        }
+        Text(widget.label)
+    }
+    when (widget.style) {
+        ButtonStyle.FILLED -> Button(
+            onClick = onClick,
+            modifier = modifier,
+            colors = if (neutral) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = strong, contentColor = onStrong),
+            content = content,
+        )
+        ButtonStyle.TONAL -> FilledTonalButton(
+            onClick = onClick,
+            modifier = modifier,
+            colors = if (neutral) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.filledTonalButtonColors(containerColor = soft, contentColor = onSoft),
+            content = content,
+        )
+        ButtonStyle.OUTLINED -> if (neutral) {
+            OutlinedButton(onClick = onClick, modifier = modifier, content = content)
+        } else {
+            OutlinedButton(
+                onClick = onClick,
+                modifier = modifier,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = strong),
+                border = BorderStroke(1.dp, strong),
+                content = content,
+            )
+        }
+        ButtonStyle.TEXT -> TextButton(
+            onClick = onClick,
+            modifier = modifier,
+            colors = if (neutral) ButtonDefaults.textButtonColors() else ButtonDefaults.textButtonColors(contentColor = strong),
+            content = content,
+        )
     }
 }
 

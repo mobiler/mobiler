@@ -1522,11 +1522,21 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- input / actions ----
-        Widget::Button { label, style, on_press } => {
+        Widget::Button { label, style, on_press, tone, icon, wide } => {
             let (send, token, label) = (send.clone(), on_press.clone(), label.clone());
-            let class = format!("btn {}", button_class(*style));
+            // Neutral + not wide keeps the exact original class string.
+            let mut class = format!("btn {}", button_class(*style));
+            if *tone != Tone::Neutral {
+                class.push(' ');
+                class.push_str(button_tone_class(*tone));
+            }
+            if *wide {
+                class.push_str(" btn-wide");
+            }
+            let glyph = icon.map(|i| view! { <span class="btn-icon">{icon_glyph(i)}</span> });
             view! {
                 <button class=class on:click=move |_| send(Action::Fired { token: token.clone() })>
+                    {glyph}
                     {label}
                 </button>
             }
@@ -1883,6 +1893,17 @@ fn button_class(s: ButtonStyle) -> &'static str {
         ButtonStyle::Filled => "btn-filled",
         ButtonStyle::Outlined => "btn-outlined",
         ButtonStyle::Text => "btn-text",
+        ButtonStyle::Tonal => "btn-tonal",
+    }
+}
+
+fn button_tone_class(t: Tone) -> &'static str {
+    match t {
+        Tone::Neutral => "",
+        Tone::Success => "btn-success",
+        Tone::Warning => "btn-warning",
+        Tone::Danger => "btn-danger",
+        Tone::Info => "btn-info",
     }
 }
 

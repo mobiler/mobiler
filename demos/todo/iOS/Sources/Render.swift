@@ -187,8 +187,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         ))
 
     // MARK: input / actions
-    case .button(let label, let style, let onPress):
-        return AnyView(Button(label) { send(.fired(token: onPress)) }.modifier(ButtonStyleMod(style)))
+    case .button(let label, let style, let onPress, let tone, let icon, let wide):
+        return AnyView(MobilerButton(label: label, style: style, tone: tone, icon: icon, wide: wide) { send(.fired(token: onPress)) })
 
     case .iconButton(let icon, let onPress):
         return AnyView(
@@ -1201,15 +1201,65 @@ private struct TextStyleMod: ViewModifier {
     }
 }
 
+// Widget::Button. A neutral tone with no icon and not wide renders exactly the original
+// `Button(label).modifier(ButtonStyleMod(style))`; a tone tints it, `icon` adds a leading SF Symbol,
+// `wide` stretches the label to the available width.
+private struct MobilerButton: View {
+    let label: String
+    let style: SharedTypes.ButtonStyle
+    let tone: Tone
+    let icon: Icon?
+    let wide: Bool
+    let action: () -> Void
+
+    private var neutral: Bool { if case .neutral = tone { return true }; return false }
+    private var tint: Color { neutral ? .accentColor : toneColors(tone).1 }
+
+    var body: some View {
+        let button = Button(action: action) { labelView }
+        if neutral {
+            button.modifier(ButtonStyleMod(style))
+        } else {
+            button.modifier(ButtonStyleMod(style, tint: tint)).tint(tint)
+        }
+    }
+
+    @ViewBuilder private var labelView: some View {
+        if let icon {
+            if wide { Label(label, systemImage: sfSymbol(icon)).frame(maxWidth: .infinity) } else { Label(label, systemImage: sfSymbol(icon)) }
+        } else if wide {
+            Text(label).frame(maxWidth: .infinity)
+        } else {
+            Text(label)
+        }
+    }
+}
+
 private struct ButtonStyleMod: ViewModifier {
     let style: SharedTypes.ButtonStyle
-    init(_ s: SharedTypes.ButtonStyle) { style = s }
+    let tint: Color
+    init(_ s: SharedTypes.ButtonStyle, tint: Color = .accentColor) { style = s; self.tint = tint }
     func body(content: Content) -> some View {
         switch style {
         case .filled: return AnyView(content.buttonStyle(.borderedProminent))
         case .outlined: return AnyView(content.buttonStyle(.bordered))
         case .text: return AnyView(content.buttonStyle(.borderless))
+        case .tonal: return AnyView(content.buttonStyle(TonalButtonStyle(color: tint)))
         }
+    }
+}
+
+// M3-style filled-tonal: tinted label on a soft tint capsule (the quieter secondary action).
+private struct TonalButtonStyle: SwiftUI.ButtonStyle {
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .foregroundColor(color)
+            .background(color.opacity(0.18))
+            .clipShape(Capsule())
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 

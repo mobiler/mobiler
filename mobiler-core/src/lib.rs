@@ -932,9 +932,56 @@ pub fn rating_input<E: Serialize>(value: u32, max: u8, on_rate: Vec<E>) -> Widge
     Widget::Rating { value, max, on_rate: Some(on_rate.into_iter().map(tok).collect()) }
 }
 
+/// Extra options for [`button_with`]; `ButtonOpts::default()` is a plain [`button`].
+///
+/// ```
+/// use mobiler_core::{ButtonOpts, Icon, Tone};
+/// let danger_wide = ButtonOpts::default().tone(Tone::Danger).icon(Icon::Close).wide();
+/// assert!(danger_wide.wide);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ButtonOpts {
+    pub tone: Tone,
+    pub icon: Option<Icon>,
+    pub wide: bool,
+}
+
+impl Default for ButtonOpts {
+    fn default() -> Self {
+        Self { tone: Tone::Neutral, icon: None, wide: false }
+    }
+}
+
+impl ButtonOpts {
+    /// Recolor the button (`Tone::Danger` for destructive actions).
+    #[must_use]
+    pub const fn tone(mut self, tone: Tone) -> Self {
+        self.tone = tone;
+        self
+    }
+    /// A leading icon.
+    #[must_use]
+    pub const fn icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+    /// Stretch to the available width (a screen's main action).
+    #[must_use]
+    pub const fn wide(mut self) -> Self {
+        self.wide = true;
+        self
+    }
+}
+
 #[must_use]
 pub fn button<E: Serialize>(label: impl Into<String>, style: ButtonStyle, on_press: E) -> Widget {
-    Widget::Button { label: label.into(), style, on_press: tok(on_press) }
+    button_with(label, style, on_press, ButtonOpts::default())
+}
+
+/// A button with a [`ButtonOpts`] tone, leading icon, and/or full width.
+#[must_use]
+pub fn button_with<E: Serialize>(label: impl Into<String>, style: ButtonStyle, on_press: E, opts: ButtonOpts) -> Widget {
+    Widget::Button { label: label.into(), style, on_press: tok(on_press), tone: opts.tone, icon: opts.icon, wide: opts.wide }
 }
 #[must_use]
 pub fn icon_button<E: Serialize>(icon: Icon, on_press: E) -> Widget {
@@ -1360,6 +1407,18 @@ mod tests {
             }
             other => panic!("expected Scaffold, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn button_with_carries_tone_icon_and_width() {
+        assert!(matches!(
+            button("Go", ButtonStyle::Filled, Ev::Tap),
+            Widget::Button { style: ButtonStyle::Filled, tone: Tone::Neutral, icon: None, wide: false, .. }
+        ));
+        assert!(matches!(
+            button_with("Cancel", ButtonStyle::Tonal, Ev::Tap, ButtonOpts::default().tone(Tone::Danger).icon(Icon::Close).wide()),
+            Widget::Button { style: ButtonStyle::Tonal, tone: Tone::Danger, icon: Some(Icon::Close), wide: true, .. }
+        ));
     }
 
     #[test]
