@@ -312,10 +312,13 @@ impl Rgb {
 #[repr(C)]
 pub enum Corner { None, Small, Medium, Large }
 
-/// Global spacing scale. `Comfortable` ≈ the current (un-themed) spacing.
+/// Global density. `Comfortable` ≈ the current (un-themed) look; `Compact` tightens spacing.
+/// `Large` is for hurried / wet / gloved hands: bigger controls (56 buttons & segmented, 48 chips
+/// & calendar days, 56 icon-button targets), 16 control labels, ≥ 12 between adjacent tappables.
+/// Body text stays on the platform's font-scale setting.
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum Density { Compact, Comfortable }
+pub enum Density { Compact, Comfortable, Large }
 
 /// A finite, cross-platform font family (maps to each platform's nearest system
 /// font design — no bundled font files). `System` ≈ the current look.
@@ -737,6 +740,27 @@ mod tests {
                 accent: Some(Rgb::new(0xE0, 0x6A, 0x2C)),
                 corner: Corner::Large,
                 density: Density::Compact,
+                font: FontFamily::Rounded,
+            }),
+            fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
+            sheet: Some(Sheet { title: "S".to_string(), child: Box::new(Widget::Divider), on_dismiss: "d".to_string() }),
+            on_refresh: Some("r".to_string()),
+            refreshing: true,
+            route: "r".to_string(),
+            depth: 1,
+        });
+        // Themed scaffold with Density::Large — the big-touch-target density must round-trip.
+        round_trips(&Widget::Scaffold {
+            title: "T".to_string(),
+            body: Box::new(Widget::Divider),
+            tabs: vec![],
+            back: None,
+            dark_mode: false,
+            theme: Some(Theme {
+                seed: Rgb::new(0xC8, 0x5A, 0x3C),
+                accent: Some(Rgb::new(0xE0, 0x6A, 0x2C)),
+                corner: Corner::Large,
+                density: Density::Large,
                 font: FontFamily::Rounded,
             }),
             fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
