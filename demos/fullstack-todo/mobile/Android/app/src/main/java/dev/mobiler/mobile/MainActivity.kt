@@ -148,6 +148,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -686,6 +688,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Calendar -> {
             // Title, weekday header and leading blanks are pre-localized by the core — just draw.
             val cells = ArrayList<Int?>()
+            val cellH = if (isLarge) 52.dp else 40.dp
             repeat(widget.leadingBlanks.toInt()) { cells.add(null) }
             for (d in 1..widget.onDay.size) cells.add(d)
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -697,13 +700,13 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     Row(modifier = Modifier.fillMaxWidth()) {
                         week.forEach { day ->
                             if (day == null) {
-                                Box(modifier = Modifier.weight(1f).height(40.dp))
+                                Box(modifier = Modifier.weight(1f).height(cellH))
                             } else {
                                 val isSel = widget.selected?.toInt() == day
                                 val token = widget.onDay[day - 1]
                                 val level = (widget.markers.getOrNull(day - 1)?.toInt() ?: 0).coerceIn(0, 3)
                                 Box(
-                                    modifier = Modifier.weight(1f).height(40.dp).padding(2.dp)
+                                    modifier = Modifier.weight(1f).height(cellH).padding(2.dp)
                                         .clip(CircleShape)
                                         .background(if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent)
                                         .clickable { send(Action.Fired(token)) },
@@ -760,7 +763,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 
         is Widget.Row -> Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isLarge) 12.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Let greedy inputs (which fill width) share the row with trailing
@@ -776,7 +779,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 
         is Widget.Column -> Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isLarge) 12.dp else 6.dp),
         ) { widget.children.forEach { Render(it, send) } }
 
         is Widget.Card -> {
@@ -962,14 +965,15 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 
         is Widget.Button -> MobilerButton(widget, send)
 
-        is Widget.IconButton -> IconButton(onClick = { send(Action.Fired(widget.onPress)) }) {
+        is Widget.IconButton -> IconButton(onClick = { send(Action.Fired(widget.onPress)) }, modifier = if (isLarge) Modifier.size(56.dp) else Modifier) {
             Icon(imageVector = iconFor(widget.icon), contentDescription = widget.icon.name.lowercase(), tint = iconTintFor(widget.icon))
         }
 
         is Widget.Chip -> FilterChip(
             selected = widget.selected,
             onClick = { send(Action.Fired(widget.onPress)) },
-            label = { Text(widget.label) },
+            label = { Text(widget.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) },
+            modifier = if (isLarge) Modifier.height(48.dp) else Modifier,
         )
 
         is Widget.TextField -> {
@@ -1013,7 +1017,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     selected = seg.selected,
                     onClick = { send(Action.Fired(seg.onSelect)) },
                     shape = SegmentedButtonDefaults.itemShape(index = i, count = widget.segments.size),
-                ) { Text(seg.label) }
+                    modifier = if (isLarge) Modifier.height(56.dp) else Modifier,
+                ) { Text(seg.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) }
             }
         }
 
@@ -1074,7 +1079,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 NavigationRailItem(
                                     selected = t.selected,
                                     onClick = { send(Action.Fired(t.onSelect)) },
-                                    label = { Text(t.label) },
+                                    label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
                                     icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
                                 )
                             }
@@ -1102,7 +1107,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         NavigationBarItem(
                                             selected = t.selected,
                                             onClick = { send(Action.Fired(t.onSelect)) },
-                                            label = { Text(t.label) },
+                                            label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
                                             icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
                                         )
                                     }
@@ -1202,12 +1207,22 @@ private fun colorFor(style: ModelTextStyle): Color = when (style) {
 // shell's `ActiveTheme.current` twin.
 private var activeTheme: ModelTheme? = null
 
-// Spacing multiplier from the theme's density. Comfortable (or un-themed) = 1.0; Compact tightens.
+// Spacing multiplier from the theme's density. Comfortable (or un-themed) = 1.0; Compact tightens;
+// Large loosens.
 private val densityScale: Float
     get() = when (activeTheme?.density) {
         Density.COMPACT -> 0.75f
         Density.COMFORTABLE, null -> 1.0f
+        Density.LARGE -> 1.25f
     }
+
+// Density.LARGE also enlarges controls (56.dp buttons/segmented, 48.dp chips, 48.dp day-cell tap
+// targets, 16.sp control labels, 14.sp nav labels). Every use is `if (isLarge) <large> else <the
+// original value>` so other densities stay pixel-identical.
+private val isLarge: Boolean
+    get() = activeTheme?.density == Density.LARGE
+
+private val LargeButtonPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)
 
 // Image corner radius (dp) from the theme's corner; 16 when un-themed (the original look).
 private val imageCornerDp: Int
@@ -1301,7 +1316,10 @@ private fun toneStrong(tone: Tone): Pair<Color, Color> {
 @Composable
 private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
     val onClick = { send(Action.Fired(widget.onPress)) }
-    val modifier = if (widget.wide) Modifier.fillMaxWidth() else Modifier
+    val large = isLarge
+    val modifier = Modifier
+        .then(if (widget.wide) Modifier.fillMaxWidth() else Modifier)
+        .then(if (large) Modifier.heightIn(min = 56.dp) else Modifier)
     val neutral = widget.tone == Tone.NEUTRAL
     val (strong, onStrong) = toneStrong(widget.tone)
     val (soft, onSoft) = toneColors(widget.tone)
@@ -1310,27 +1328,30 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
             Icon(iconFor(it), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.width(ButtonDefaults.IconSpacing))
         }
-        Text(widget.label)
+        Text(widget.label, fontSize = if (large) 16.sp else TextUnit.Unspecified)
     }
     when (widget.style) {
         ButtonStyle.FILLED -> Button(
             onClick = onClick,
             modifier = modifier,
+            contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
             colors = if (neutral) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = strong, contentColor = onStrong),
             content = content,
         )
         ButtonStyle.TONAL -> FilledTonalButton(
             onClick = onClick,
             modifier = modifier,
+            contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
             colors = if (neutral) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.filledTonalButtonColors(containerColor = soft, contentColor = onSoft),
             content = content,
         )
         ButtonStyle.OUTLINED -> if (neutral) {
-            OutlinedButton(onClick = onClick, modifier = modifier, content = content)
+            OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding, content = content)
         } else {
             OutlinedButton(
                 onClick = onClick,
                 modifier = modifier,
+                contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = strong),
                 border = BorderStroke(1.dp, strong),
                 content = content,
@@ -1339,6 +1360,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.TEXT -> TextButton(
             onClick = onClick,
             modifier = modifier,
+            contentPadding = if (large) LargeButtonPadding else ButtonDefaults.TextButtonContentPadding,
             colors = if (neutral) ButtonDefaults.textButtonColors() else ButtonDefaults.textButtonColors(contentColor = strong),
             content = content,
         )

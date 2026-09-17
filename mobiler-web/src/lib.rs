@@ -1770,7 +1770,9 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             });
             // `theme-dark` flips the CSS variables for the whole shell — theme-as-data,
             // the web twin of the native shells' `preferredColorScheme`/Material theme.
-            let class = if *dark_mode { "scaffold theme-dark" } else { "scaffold" };
+            // `density-large` scopes the Density::Large control sizes in mobiler.css.
+            let large = theme.as_ref().is_some_and(|t| t.density == Density::Large);
+            let class = format!("scaffold{}{}", if *dark_mode { " theme-dark" } else { "" }, if large { " density-large" } else { "" });
             // Pull-to-refresh — web has no pull gesture, so expose a top-bar refresh button +
             // an indeterminate bar at the top of the body while `refreshing`.
             let refresh_btn = on_refresh.clone().map(|token| {
@@ -1838,6 +1840,7 @@ fn theme_css(t: &Theme) -> String {
     let (gap, pad) = match t.density {
         Density::Compact => ("8px", "10px"),
         Density::Comfortable => ("12px", "14px"),
+        Density::Large => ("16px", "18px"),
     };
     let font = match t.font {
         FontFamily::System => "system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif",

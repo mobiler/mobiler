@@ -522,3 +522,12 @@ textarea.field { resize: vertical; font-family: inherit; }
   }
   .scaffold:has(.tabbar) > .tabbar .tab.selected { background: var(--accent-soft); }
 }
+
+/* ---- Density::Large — bigger controls for busy hands (control sizes only; text follows the browser). ---- */
+.density-large .row, .density-large .col { gap: 12px; }
+.density-large .btn { min-height: 56px; padding: 0 24px; font-size: 16px; }
+.density-large .chip { min-height: 48px; padding: 0 18px; font-size: 16px; }
+.density-large .segment { min-height: 48px; font-size: 16px; }
+.density-large .iconbtn { min-width: 56px; min-height: 56px; font-size: 24px; }
+.density-large .cal-day { min-height: 48px; font-size: 16px; }
+.density-large .tab-label { font-size: 14px; }
