@@ -9,9 +9,13 @@ tree, no per-platform UI code.
 |:---:|:---:|:---:|:---:|
 | <img src="screenshots/home.png" width="200" alt="Fade House home on web"> | <img src="screenshots/ios-home.png" width="200" alt="Fade House home on iOS"> | <img src="screenshots/booking-sheet.png" width="200" alt="Fade House booking sheet"> | <img src="screenshots/profile.png" width="200" alt="Fade House profile — Progress bar, capability plugins, Skeleton placeholders"> |
 
-| Bookings — multi-series Charts (stacked bar · donut · gauge · rings) · Calendar · SwipeAction · pull-to-refresh |
+| Bookings — multi-series Charts (stacked bar · donut · gauge · rings) · Calendar with busy-dots · SwipeAction · toned / tonal / wide buttons · pull-to-refresh |
 |:---:|
 | <img src="screenshots/bookings.png" width="240" alt="Fade House bookings — a stacked-bar chart with y-axis + legend, a service-mix donut, a today's-target gauge, weekly-goal rings, inline calendar, swipe-to-cancel rows, pull-to-refresh"> |
+
+| Bookings with **Large controls** on (`Density::Large`) | Localized calendar — `calendar_in(Locale::SrLatn, …)` with busy-dots |
+|:---:|:---:|
+| <img src="screenshots/large-controls.png" width="240" alt="Fade House bookings with Density::Large — taller buttons, larger chips and calendar cells, a wide Book now button with an icon, a tonal Reschedule, an outlined danger No-show and a wide filled danger Cancel next booking"> | <img src="screenshots/calendar-sr.png" width="260" alt="Serbian Monday-first calendar: Septembar 2026, header P U S Č P S N, 1 September under U, and 0–3 dots under each day showing how busy it is"> |
 
 | Profile → Coverage — a `RegionChart` (variable-width stacked-region / coverage-gap chart) |
 |:---:|
