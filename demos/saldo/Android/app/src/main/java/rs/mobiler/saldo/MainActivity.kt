@@ -145,6 +145,10 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
@@ -896,11 +900,36 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
         }
 
-        is Widget.Scroller -> Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { widget.children.forEach { Render(it, send) } }
+        is Widget.Scroller -> if (!widget.edgeFade) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) { widget.children.forEach { Render(it, send) } }
+        } else {
+            // Fade the viewport's trailing 32.dp (DstIn over an offscreen layer, so it works on any
+            // background) + 32.dp of trailing room so the last item clears the fade at scroll-end.
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        val fade = 32.dp.toPx()
+                        drawRect(
+                            brush = Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = size.width - fade, endX = size.width),
+                            topLeft = Offset(size.width - fade, 0f),
+                            size = Size(fade, size.height),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    }
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                widget.children.forEach { Render(it, send) }
+                Spacer(Modifier.width(32.dp))
+            }
+        }
 
         // Two-pane master-detail (Widget.Split). Wide (≥600.dp — the Scaffold-rail threshold) →
         // primary + detail side-by-side; narrow → one pane: primary, or detail + a back row when

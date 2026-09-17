@@ -80,6 +80,8 @@ body {
 .scroller { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .scroller::-webkit-scrollbar { display: none; }
 .scroller > * { flex: 0 0 auto; }
+.scroller-fade { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+.scroller > .scroller-end { flex: 0 0 32px; }
 
 /* Search field — leading magnifier + pill input. */
 .searchfield { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; }

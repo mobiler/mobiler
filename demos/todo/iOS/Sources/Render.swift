@@ -162,10 +162,27 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // Column count adapts to width: 2 on a phone (compact), more on iPad.
         return AnyView(GridView(children: children, send: send))
 
-    case .scroller(let children):
+    case .scroller(let children, let edgeFade):
+        if !edgeFade {
+            return AnyView(
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) { childViews(children, send) }
+                }
+            )
+        }
+        // Trailing 32pt fade + 32pt of trailing room so the last item clears it at scroll-end.
         return AnyView(
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) { childViews(children, send) }
+                HStack(spacing: 12) {
+                    childViews(children, send)
+                    Color.clear.frame(width: 32)
+                }
+            }
+            .mask {
+                HStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 32)
+                }
             }
         )
 

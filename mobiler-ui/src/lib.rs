@@ -584,8 +584,9 @@ pub enum Widget {
     Box { children: Vec<Widget>, align: BoxAlign, scrim: bool },
     /// Fixed 2-column grid; children flow left-to-right, top-to-bottom.
     Grid { children: Vec<Widget> },
-    /// Horizontally scrolling row of children (a carousel / chip rail).
-    Scroller { children: Vec<Widget> },
+    /// Horizontally scrolling row. `edge_fade` fades the trailing edge (plus trailing room so the
+    /// last item clears the fade at scroll-end) to hint there is more to scroll.
+    Scroller { children: Vec<Widget>, edge_fade: bool },
     /// Two-pane master-detail. On a **wide** screen (tablet / landscape — the shell's regular size
     /// class) `primary` and `detail` render side-by-side; on a **compact** screen (phone) it shows
     /// ONE pane: `primary` until `show_detail` is set (the app sets it when a row is selected), then
@@ -707,6 +708,7 @@ mod tests {
         round_trips(&Widget::Button { label: "Otkaži".to_string(), style: ButtonStyle::Tonal, on_press: "x".to_string(), tone: Tone::Danger, icon: Some(Icon::Close), wide: true });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: true, on_back: Some("back".to_string()) });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: false, on_back: None });
+        round_trips(&Widget::Scroller { children: vec![Widget::Divider], edge_fade: true });
         round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
