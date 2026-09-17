@@ -50,9 +50,10 @@ pub enum Action {
 #[repr(C)]
 pub enum TextStyle { Body, Title, Subtitle, Caption, Emphasis }
 
+/// Button emphasis. `Tonal` is the quieter filled secondary (M3 filled-tonal).
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum ButtonStyle { Filled, Outlined, Text }
+pub enum ButtonStyle { Filled, Outlined, Text, Tonal }
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
@@ -598,7 +599,10 @@ pub enum Widget {
     /// iOS accessibilityLabel/Hint/Traits, Android contentDescription/role/heading, web aria-label/role.
     A11y { child: Box<Widget>, label: String, hint: Option<String>, role: Option<A11yRole> },
     // Input
-    Button { label: String, style: ButtonStyle, on_press: ActionToken },
+    /// A tappable button. `tone` recolors it (`Neutral` = the brand/primary look; `Danger` = the
+    /// error color pair for destructive actions). `icon` draws a leading glyph; `wide` stretches it
+    /// to the available width.
+    Button { label: String, style: ButtonStyle, on_press: ActionToken, tone: Tone, icon: Option<Icon>, wide: bool },
     IconButton { icon: Icon, on_press: ActionToken },
     Chip { label: String, selected: bool, on_press: ActionToken },
     /// A text input. `kind` selects keyboard / secure entry / multiline
@@ -700,6 +704,7 @@ mod tests {
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
         round_trips(&Widget::Calendar { year: 2026, month: 9, title: "Septembar 2026".to_string(), weekday_labels: ["P", "U", "S", "Č", "P", "S", "N"].map(String::from).to_vec(), leading_blanks: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()], markers: vec![0, 3] });
         round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });
+        round_trips(&Widget::Button { label: "Otkaži".to_string(), style: ButtonStyle::Tonal, on_press: "x".to_string(), tone: Tone::Danger, icon: Some(Icon::Close), wide: true });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: true, on_back: Some("back".to_string()) });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: false, on_back: None });
         round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false });
