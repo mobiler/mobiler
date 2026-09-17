@@ -1314,24 +1314,26 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         Widget::RegionChart { regions, ticks, x_max, y_max, ref_lines, bracket, legend } => {
             region_chart_view(regions, ticks, *x_max, *y_max, ref_lines, bracket, legend)
         }
-        Widget::Calendar { year, month, first_weekday, selected, on_day } => {
-            const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June",
-                "July", "August", "September", "October", "November", "December"];
-            let head_label = format!("{} {year}", MONTHS.get((*month as usize).saturating_sub(1)).copied().unwrap_or(""));
-            let weekdays = ["S", "M", "T", "W", "T", "F", "S"];
-            let heads: Vec<_> = weekdays.iter().map(|w| view! { <div class="cal-head">{*w}</div> }).collect();
-            let blanks: Vec<_> = (0..*first_weekday).map(|_| view! { <div class="cal-blank"></div> }).collect();
+        Widget::Calendar { title, weekday_labels, leading_blanks, selected, on_day, markers, .. } => {
+            let heads: Vec<_> = weekday_labels.iter().map(|w| view! { <div class="cal-head">{w.clone()}</div> }).collect();
+            let blanks: Vec<_> = (0..*leading_blanks).map(|_| view! { <div class="cal-blank"></div> }).collect();
             let selected = *selected;
             let days: Vec<_> = on_day.iter().enumerate().map(|(i, token)| {
                 let day = (i + 1) as u8;
                 let token = token.clone();
                 let send = send.clone();
                 let cls = if selected == Some(day) { "cal-day cal-sel" } else { "cal-day" };
-                view! { <button class=cls on:click=move |_| send(Action::Fired { token: token.clone() })>{day.to_string()}</button> }
+                // 0–3 busy-dots under the number; nothing at all for level 0 / no markers.
+                let level = markers.get(i).copied().unwrap_or(0).min(3);
+                let dots = (level > 0).then(|| {
+                    let d: Vec<_> = (0..level).map(|_| view! { <span class="cal-dot"></span> }).collect();
+                    view! { <span class="cal-dots">{d}</span> }
+                });
+                view! { <button class=cls on:click=move |_| send(Action::Fired { token: token.clone() })>{day.to_string()}{dots}</button> }
             }).collect();
             view! {
                 <div class="calendar">
-                    <div class="cal-title">{head_label}</div>
+                    <div class="cal-title">{title.clone()}</div>
                     <div class="cal-grid">{heads}{blanks}{days}</div>
                 </div>
             }.into_any()

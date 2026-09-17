@@ -263,6 +263,10 @@ body {
 .cal-day:hover { background: var(--line); }
 .cal-sel { background: var(--accent, #5C6BC0); color: #fff; }
 .cal-sel:hover { background: var(--accent, #5C6BC0); }
+.cal-day { position: relative; }
+.cal-dots { position: absolute; left: 0; right: 0; bottom: 12%; display: flex; justify-content: center; gap: 2px; pointer-events: none; }
+.cal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
+.cal-sel .cal-dot { background: var(--primary-ink); }
 
 /* Pull-to-refresh — web fallback: a top-bar refresh button (the indeterminate bar reuses .progress). */
 .refresh-btn { margin-left: auto; border: none; background: transparent; cursor: pointer;

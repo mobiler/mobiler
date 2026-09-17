@@ -53,6 +53,26 @@ pub enum Currency {
     Rsd,
 }
 
+/// A day of the week — the first column of a localized calendar ([`Locale::week_start`]).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Weekday {
+    Sunday,
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+}
+
+impl Weekday {
+    /// 0 = Sunday … 6 = Saturday (the index `weekday_short` and the calendar layout use).
+    #[must_use]
+    pub const fn sun0(self) -> u8 {
+        self as u8
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Lang {
     En,
@@ -252,6 +272,52 @@ pub fn month_name(month: u32, locale: Locale) -> &'static str {
     }
 }
 
+impl Locale {
+    /// The first day of the week: Sunday for US English, Monday for every other supported locale.
+    #[must_use]
+    pub const fn week_start(self) -> Weekday {
+        match self {
+            Locale::EnUs => Weekday::Sunday,
+            _ => Weekday::Monday,
+        }
+    }
+}
+
+// Narrow weekday labels for a calendar header, Sunday-first (index = `Weekday::sun0`).
+const WEEKDAYS_EN: [&str; 7] = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAYS_DE: [&str; 7] = ["S", "M", "D", "M", "D", "F", "S"];
+const WEEKDAYS_FR: [&str; 7] = ["D", "L", "M", "M", "J", "V", "S"];
+const WEEKDAYS_IT: [&str; 7] = ["D", "L", "M", "M", "G", "V", "S"];
+// Ukrainian calendars use the two-letter forms (single letters are ambiguous).
+const WEEKDAYS_UK: [&str; 7] = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+const WEEKDAYS_SR_LATN: [&str; 7] = ["N", "P", "U", "S", "Č", "P", "S"];
+const WEEKDAYS_SR_CYRL: [&str; 7] = ["Н", "П", "У", "С", "Ч", "П", "С"];
+
+/// The localized narrow weekday label for a calendar header. `sun0` is 0 = Sunday … 6 = Saturday
+/// and wraps, so `weekday_short(start + i, …)` walks a week from any start day.
+#[must_use]
+pub fn weekday_short(sun0: u8, locale: Locale) -> &'static str {
+    let idx = usize::from(sun0 % 7);
+    match locale.lang() {
+        Lang::En => WEEKDAYS_EN[idx],
+        Lang::De => WEEKDAYS_DE[idx],
+        Lang::Fr => WEEKDAYS_FR[idx],
+        Lang::It => WEEKDAYS_IT[idx],
+        Lang::Uk => WEEKDAYS_UK[idx],
+        Lang::SrLatn => WEEKDAYS_SR_LATN[idx],
+        Lang::SrCyrl => WEEKDAYS_SR_CYRL[idx],
+    }
+}
+
+/// A calendar title: the localized month name, capitalized, then the year (`"Septembar 2026"`).
+#[must_use]
+pub fn month_year(year: u32, month: u32, locale: Locale) -> String {
+    let name = month_name(month, locale);
+    let mut chars = name.chars();
+    let capitalized: String = chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
+    format!("{capitalized} {year}")
+}
+
 /// Numeric date in the locale's conventional order/separator.
 ///
 /// ```
@@ -383,5 +449,28 @@ mod tests {
         assert_eq!(Locale::from_tag("sr"), Some(Locale::SrCyrl));
         assert_eq!(Locale::from_tag("sr-RS"), Some(Locale::SrCyrl));
         assert_eq!(Locale::from_tag("ja-JP"), None);
+    }
+
+    #[test]
+    fn week_start_and_weekday_labels() {
+        assert_eq!(Locale::EnUs.week_start(), Weekday::Sunday);
+        assert_eq!(Locale::EnGb.week_start(), Weekday::Monday);
+        assert_eq!(Locale::SrLatn.week_start(), Weekday::Monday);
+        assert_eq!(Weekday::Tuesday.sun0(), 2);
+        let sr: Vec<&str> = (1..8).map(|i| weekday_short(i, Locale::SrLatn)).collect();
+        assert_eq!(sr, ["P", "U", "S", "Č", "P", "S", "N"], "Monday-first Serbian, wraps past Saturday");
+        let en: Vec<&str> = (0..7).map(|i| weekday_short(i, Locale::EnUs)).collect();
+        assert_eq!(en, ["S", "M", "T", "W", "T", "F", "S"]);
+        assert_eq!(weekday_short(1, Locale::SrCyrl), "П");
+        assert_eq!(weekday_short(1, Locale::UkUa), "Пн");
+        assert_eq!(weekday_short(4, Locale::ItIt), "G");
+    }
+
+    #[test]
+    fn month_year_capitalizes() {
+        assert_eq!(month_year(2026, 6, Locale::EnUs), "June 2026");
+        assert_eq!(month_year(2026, 9, Locale::SrLatn), "Septembar 2026");
+        assert_eq!(month_year(2026, 9, Locale::SrCyrl), "Септембар 2026");
+        assert_eq!(month_year(2026, 6, Locale::UkUa), "Червень 2026");
     }
 }
