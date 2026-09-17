@@ -532,10 +532,21 @@ pub enum Widget {
         bracket: Option<ChartBracket>,
         legend: Vec<ChartLegendItem>,
     },
-    /// An inline month calendar. `first_weekday` is the weekday of day 1 (0=Sun..6=Sat) so the
-    /// shells render leading blanks without date math; `on_day[d-1]` fires when day `d` is tapped
-    /// (length = days in the month). `selected` highlights a day.
-    Calendar { year: u32, month: u8, first_weekday: u8, selected: Option<u8>, on_day: Vec<ActionToken> },
+    /// An inline month calendar. The core pre-computes everything locale-dependent so shells only
+    /// draw: `title` (e.g. "Septembar 2026"), the 7 `weekday_labels` in column order (week start
+    /// first), and `leading_blanks` (empty cells before day 1). `on_day[d-1]` fires when day `d` is
+    /// tapped (length = days in the month); `selected` highlights a day. `markers` is empty (no
+    /// markers) or one level per day, `0..=3`, drawn as that many small dots under the day number.
+    Calendar {
+        year: u32,
+        month: u8,
+        title: String,
+        weekday_labels: Vec<String>,
+        leading_blanks: u8,
+        selected: Option<u8>,
+        on_day: Vec<ActionToken>,
+        markers: Vec<u8>,
+    },
     /// A list row that reveals trailing `actions` on horizontal swipe (each tappable). On web the
     /// actions render inline as a trailing button row (no gesture).
     SwipeAction { child: Box<Widget>, actions: Vec<SwipeButton> },
@@ -687,7 +698,7 @@ mod tests {
         round_trips(&Widget::Map { id: "m2".to_string(), center_lat: 0.0, center_lng: 0.0, zoom: 2.0, markers: vec![], style_url: None, interactive: false });
         round_trips(&Widget::TextField { id: "email".to_string(), placeholder: "you@co".to_string(), value: "".to_string(), kind: FieldKind::Email, error: None });
         round_trips(&Widget::TextField { id: "pw".to_string(), placeholder: "Password".to_string(), value: "x".to_string(), kind: FieldKind::Secure, error: Some("Too short".to_string()) });
-        round_trips(&Widget::Calendar { year: 2026, month: 6, first_weekday: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()] });
+        round_trips(&Widget::Calendar { year: 2026, month: 9, title: "Septembar 2026".to_string(), weekday_labels: ["P", "U", "S", "Č", "P", "S", "N"].map(String::from).to_vec(), leading_blanks: 1, selected: Some(15), on_day: vec!["d1".to_string(), "d2".to_string()], markers: vec![0, 3] });
         round_trips(&Widget::SwipeAction { child: Box::new(Widget::Divider), actions: vec![SwipeButton { label: "Del".to_string(), tone: Tone::Danger, on_tap: "t".to_string() }] });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: true, on_back: Some("back".to_string()) });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: false, on_back: None });

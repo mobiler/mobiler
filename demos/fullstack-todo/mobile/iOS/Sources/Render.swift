@@ -107,8 +107,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .regionChart(let regions, let ticks, let xMax, let yMax, let refLines, let bracket, let legend):
         return AnyView(RegionChartView(regions: regions, ticks: ticks, xMax: xMax, yMax: yMax, refLines: refLines, bracket: bracket, legend: legend))
 
-    case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
-        return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
+    case .calendar(_, _, let title, let weekdayLabels, let leadingBlanks, let selected, let onDay, let markers):
+        return AnyView(CalendarView(title: title, weekdayLabels: weekdayLabels, leadingBlanks: leadingBlanks, selected: selected, onDay: onDay, markers: markers, send: send))
 
     case .swipeAction(let child, let actions):
         return AnyView(SwipeActionView(content: child, actions: actions, send: send))
@@ -891,34 +891,44 @@ private struct SwipeActionView: View {
     }
 }
 
-// Inline month calendar — weekday header, leading blanks from `firstWeekday`, tappable days.
+// Inline month calendar — title, weekday header and leading blanks come pre-localized from the
+// core; tappable days with 0–3 busy-dots under the number.
 private struct CalendarView: View {
-    let year: UInt32
-    let month: UInt8
-    let firstWeekday: UInt8
+    let title: String
+    let weekdayLabels: [String]
+    let leadingBlanks: UInt8
     let selected: UInt8?
     let onDay: [String]
+    let markers: [UInt8]
     let send: (Action) -> Void
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
-    private let weekdays = ["S", "M", "T", "W", "T", "F", "S"]
-    private let months = ["January", "February", "March", "April", "May", "June",
-                          "July", "August", "September", "October", "November", "December"]
     var body: some View {
         VStack(spacing: 6) {
-            Text("\(months[Int(month) - 1]) \(String(year))").font(.headline)
+            Text(title).font(.headline)
             LazyVGrid(columns: cols, spacing: 4) {
-                ForEach(Array(weekdays.enumerated()), id: \.offset) { _, w in
+                ForEach(Array(weekdayLabels.enumerated()), id: \.offset) { _, w in
                     Text(w).font(.caption2).foregroundColor(.secondary)
                 }
-                ForEach(0..<Int(firstWeekday), id: \.self) { _ in Color.clear.frame(height: 32) }
+                ForEach(0..<Int(leadingBlanks), id: \.self) { _ in Color.clear.frame(height: 32) }
                 ForEach(Array(onDay.enumerated()), id: \.offset) { idx, token in
                     let day = idx + 1
                     let isSel = selected.map { Int($0) == day } ?? false
+                    let level = idx < markers.count ? min(Int(markers[idx]), 3) : 0
                     Button(action: { send(.fired(token: token)) }) {
                         Text("\(day)").frame(maxWidth: .infinity, minHeight: 32)
                             .background(isSel ? Color.accentColor : Color.clear)
                             .foregroundColor(isSel ? .white : .primary)
                             .clipShape(Circle())
+                            .overlay(alignment: .bottom) {
+                                if level > 0 {
+                                    HStack(spacing: 2) {
+                                        ForEach(0..<level, id: \.self) { _ in
+                                            Circle().fill(isSel ? Color.white : Color.accentColor).frame(width: 4, height: 4)
+                                        }
+                                    }
+                                    .padding(.bottom, 3)
+                                }
+                            }
                     }.buttonStyle(.plain)
                 }
             }

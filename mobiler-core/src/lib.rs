@@ -12,7 +12,7 @@ pub mod format;
 pub mod http;
 pub mod i18n;
 pub mod transfer;
-pub use format::{Currency, Locale};
+pub use format::{Currency, Locale, Weekday};
 pub use http::{HttpHeader, HttpOutcome};
 pub use i18n::{Catalog, negotiate};
 pub use transfer::TransferEvent;
@@ -812,14 +812,46 @@ fn weekday(year: u32, month: u8, day: u8) -> u8 {
     ((y + y / 4 - y / 100 + y / 400 + T[m] + u32::from(day)) % 7) as u8
 }
 
-/// An inline month calendar for `year`/`month` (1–12). `on_day(d)` builds the tap event for each
-/// day `d` in the month; `selected` highlights a day. Leading blanks + weekday header are handled
-/// by the shells from the computed `first_weekday`.
+/// An inline month calendar for `year`/`month` (1–12), US English (Sunday-first). `on_day(d)`
+/// builds the tap event for each day `d`; `selected` highlights a day. See [`calendar_in`] for a
+/// localized calendar with per-day markers.
 #[must_use]
 pub fn calendar<E: Serialize>(year: u32, month: u8, selected: Option<u8>, on_day: impl Fn(u8) -> E) -> Widget {
+    calendar_in(Locale::EnUs, year, month, selected, &[], on_day)
+}
+
+/// A localized inline month calendar: the title, weekday header and week start follow `locale`
+/// (e.g. [`Locale::SrLatn`] → "Septembar 2026", Monday-first `P U S Č P S N`). `markers` is one
+/// busy-level per day (`markers[d-1]`, `0..=3`, drawn as that many dots; `0` = none) — pass `&[]`
+/// for no markers. Shorter slices pad with `0`; levels above 3 clamp to 3.
+#[must_use]
+pub fn calendar_in<E: Serialize>(
+    locale: Locale,
+    year: u32,
+    month: u8,
+    selected: Option<u8>,
+    markers: &[u8],
+    on_day: impl Fn(u8) -> E,
+) -> Widget {
     let n = days_in_month(year, month);
-    let on_day = (1..=n).map(|d| tok(on_day(d))).collect();
-    Widget::Calendar { year, month, first_weekday: weekday(year, month, 1), selected, on_day }
+    let start = locale.week_start().sun0();
+    let weekday_labels = (0..7).map(|i| format::weekday_short(start + i, locale).to_string()).collect();
+    let leading_blanks = (weekday(year, month, 1) + 7 - start) % 7;
+    let markers = if markers.is_empty() {
+        Vec::new()
+    } else {
+        (0..usize::from(n)).map(|i| markers.get(i).copied().unwrap_or(0).min(3)).collect()
+    };
+    Widget::Calendar {
+        year,
+        month,
+        title: format::month_year(year, u32::from(month), locale),
+        weekday_labels,
+        leading_blanks,
+        selected,
+        on_day: (1..=n).map(|d| tok(on_day(d))).collect(),
+        markers,
+    }
 }
 
 /// A list row that reveals trailing `actions` (label, tone, event) on horizontal swipe; each is
@@ -1640,10 +1672,11 @@ mod tests {
             ChartBracket::new(60.0, 80.0, "Ceiling").with_info(),
         );
         assert!(matches!(rc, Widget::RegionChart { bracket: Some(b), regions, ref_lines, .. } if regions[0].vertical && ref_lines[1].dashed && b.info));
-        // June 2026 has 30 days and starts on a Monday (weekday 1).
+        // June 2026 has 30 days and starts on a Monday; US English is Sunday-first → 1 blank.
         assert!(matches!(
             calendar(2026, 6, Some(3), |d| Ev::Open(u32::from(d))),
-            Widget::Calendar { first_weekday: 1, selected: Some(3), on_day, .. } if on_day.len() == 30
+            Widget::Calendar { leading_blanks: 1, selected: Some(3), ref on_day, ref title, ref markers, .. }
+                if on_day.len() == 30 && title == "June 2026" && markers.is_empty()
         ));
         assert!(matches!(
             swipe_action(text("row"), vec![("Delete", Tone::Danger, Ev::Tap)]),
@@ -1915,5 +1948,23 @@ mod tests {
             handle: Some("/d".into()),
         };
         assert_eq!(cont(PluginResponse { ok: true, output: done.encode() }), GotEv(Got::Done(201)));
+    }
+
+    #[test]
+    fn calendar_in_localizes_layout_and_clamps_markers() {
+        // 1 September 2026 is a Tuesday; Serbian weeks start Monday → 1 leading blank, "U" 2nd column.
+        let w = calendar_in(Locale::SrLatn, 2026, 9, None, &[1, 2, 3, 9], |d| Ev::Open(u32::from(d)));
+        let Widget::Calendar { title, weekday_labels, leading_blanks, on_day, markers, .. } = w else { panic!("not a calendar") };
+        assert_eq!(title, "Septembar 2026");
+        assert_eq!(weekday_labels, ["P", "U", "S", "Č", "P", "S", "N"]);
+        assert_eq!(leading_blanks, 1);
+        assert_eq!(on_day.len(), 30);
+        assert_eq!(markers.len(), 30, "padded to one level per day");
+        assert_eq!(&markers[..5], &[1, 2, 3, 3, 0], "clamped to 3, missing days = 0");
+        // Same month, US English (Sunday-first) → 2 leading blanks.
+        assert!(matches!(
+            calendar_in(Locale::EnUs, 2026, 9, None, &[], |_| Ev::Tap),
+            Widget::Calendar { leading_blanks: 2, ref markers, .. } if markers.is_empty()
+        ));
     }
 }

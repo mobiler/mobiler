@@ -676,15 +676,14 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         }
 
         is Widget.Calendar -> {
-            val weekdays = listOf("S", "M", "T", "W", "T", "F", "S")
-            val months = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+            // Title, weekday header and leading blanks are pre-localized by the core — just draw.
             val cells = ArrayList<Int?>()
-            repeat(widget.firstWeekday.toInt()) { cells.add(null) }
+            repeat(widget.leadingBlanks.toInt()) { cells.add(null) }
             for (d in 1..widget.onDay.size) cells.add(d)
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text("${months[widget.month.toInt() - 1]} ${widget.year}", style = MaterialTheme.typography.titleMedium)
+                Text(widget.title, style = MaterialTheme.typography.titleMedium)
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    weekdays.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center) }
+                    widget.weekdayLabels.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center) }
                 }
                 cells.chunked(7).forEach { week ->
                     Row(modifier = Modifier.fillMaxWidth()) {
@@ -694,6 +693,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             } else {
                                 val isSel = widget.selected?.toInt() == day
                                 val token = widget.onDay[day - 1]
+                                val level = (widget.markers.getOrNull(day - 1)?.toInt() ?: 0).coerceIn(0, 3)
                                 Box(
                                     modifier = Modifier.weight(1f).height(40.dp).padding(2.dp)
                                         .clip(CircleShape)
@@ -702,6 +702,17 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text("$day", color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                                    // 0–3 busy-dots under the number, in the theme primary (onPrimary when selected).
+                                    if (level > 0) {
+                                        Row(
+                                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        ) {
+                                            repeat(level) {
+                                                Box(Modifier.size(4.dp).clip(CircleShape).background(if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
