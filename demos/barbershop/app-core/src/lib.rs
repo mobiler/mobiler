@@ -6,16 +6,16 @@
 use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role,
     map, marker_titled, with_markers,
-    BoxAlign, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
+    BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
-    badge, button, calendar, caption, card, card_button, chip, column, divider, donut_chart,
+    badge, button, button_with, calendar_in, caption, card, card_button, chip, column, divider, donut_chart,
     email_field, emphasis,
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
-    pdf_view, row, scaffold, scroller, search_field, secure_field, segment, segmented, skeleton,
+    pdf_view, row, scaffold, scroller, scroller_hinted, search_field, secure_field, segment, segmented, skeleton,
     spacer, split, stack, video_player, video_playlist, web_view,
-    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, with_captions, with_error,
+    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, toggle, with_captions, with_error,
     with_fab, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
     TransferEvent,
 };
@@ -292,6 +292,10 @@ pub struct Model {
     bookings: Vec<String>,
     /// Day tapped in the inline calendar.
     picked_day: Option<u8>,
+    /// Profile "Large controls" toggle → `Theme.density = Density::Large`.
+    large_controls: bool,
+    /// Bookings "Serbian calendar" toggle → `calendar_in(Locale::SrLatn, …)`, Monday-first September 2026.
+    serbian_calendar: bool,
     /// Note text (edited in Profile; saved/loaded via SQLite, dictated via speech).
     note: String,
     /// Last note loaded back from SQLite.
@@ -407,6 +411,8 @@ impl Default for Model {
                 "Hot Towel Shave · Mon 09:15".to_string(),
             ],
             picked_day: None,
+            large_controls: false,
+            serbian_calendar: false,
             note: String::new(),
             saved_note: String::new(),
             bt_status: String::new(),
@@ -1107,6 +1113,11 @@ impl MobilerApp for FadeHouse {
                 model.playlist_index = i;
                 if model.playlist_seek_index >= 0 { model.playlist_seek_index = -1; }
             }
+            InputValue::Bool(on) => match id {
+                "large_controls" => model.large_controls = on,
+                "serbian_calendar" => model.serbian_calendar = on,
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -1117,7 +1128,7 @@ impl MobilerApp for FadeHouse {
             seed: Rgb::new(0xC8, 0x8A, 0x3C),
             accent: Some(Rgb::new(0xE0, 0x6A, 0x2C)), // warm orange — for the brand gradient
             corner: Corner::Medium,
-            density: Density::Comfortable,
+            density: if model.large_controls { Density::Large } else { Density::Comfortable },
             font: FontFamily::System,
         };
         let tabs = vec![
@@ -1194,7 +1205,7 @@ fn barbers_scroller(model: &Model) -> Widget {
 fn category_carousel(model: &Model) -> Widget {
     // A horizontally-scrolling chip rail (Scroller) — more categories than fit on one row.
     let categories = ["All", "Hair", "Beard", "Combo", "Shave", "Kids", "Color"];
-    scroller(
+    scroller_hinted(
         categories
             .iter()
             .map(|c| chip((*c).to_string(), model.category.as_str() == *c, Msg::SelectCategory((*c).to_string())))
@@ -1439,8 +1450,14 @@ fn bookings_screen(model: &Model) -> Widget {
         ChartSeries::new("Bookings", vec![34.0]).with_goal(40.0),
         ChartSeries::new("New clients", vec![6.0]).with_goal(8.0),
     ]);
-    // Inline month Calendar — tap a day to pick it (June 2026).
-    let month = calendar(2026, 6, model.picked_day, Msg::PickDay);
+    // Localized month Calendar with 0–3 busy-dots per day. The toggle flips to Serbian
+    // (Monday-first) September 2026 — 1 Sept is a Tuesday, so it sits under "U".
+    let busy: Vec<u8> = (1..=31u8).map(|d| d % 4).collect();
+    let month = if model.serbian_calendar {
+        calendar_in(Locale::SrLatn, 2026, 9, model.picked_day, &busy, Msg::PickDay)
+    } else {
+        calendar_in(Locale::EnUs, 2026, 6, model.picked_day, &busy, Msg::PickDay)
+    };
     // Upcoming bookings — swipe a row to reveal "Cancel" (SwipeAction).
     let rows: Vec<Widget> = if model.bookings.is_empty() {
         vec![caption("No upcoming bookings — pull to refresh or book a cut.")]
@@ -1468,10 +1485,17 @@ fn bookings_screen(model: &Model) -> Widget {
         subtitle("Weekly goals"),
         card(goals, CardStyle::Outlined),
         subtitle("Pick a date"),
+        toggle("serbian_calendar", "Serbian calendar (Monday first)", model.serbian_calendar),
         card(month, CardStyle::Outlined),
         subtitle("Upcoming"),
         column(rows),
-        button("Book now", ButtonStyle::Filled, Msg::Book),
+        // Main action: wide + icon. Secondary: tonal. Destructive: danger tone (outlined + filled).
+        button_with("Book now", ButtonStyle::Filled, Msg::Book, ButtonOpts::default().icon(Icon::Calendar).wide()),
+        row(vec![
+            button("Reschedule", ButtonStyle::Tonal, Msg::Book),
+            button_with("No-show", ButtonStyle::Outlined, Msg::CancelBooking(0), ButtonOpts::default().tone(Tone::Danger)),
+        ]),
+        button_with("Cancel next booking", ButtonStyle::Filled, Msg::CancelBooking(0), ButtonOpts::default().tone(Tone::Danger).icon(Icon::Close).wide()),
     ])
 }
 
@@ -1896,6 +1920,8 @@ fn profile_screen(model: &Model) -> Widget {
         // Determinate Progress bar — "profile completeness" grows as capabilities are tried.
         caption(format!("Profile {pct}% complete")),
         progress(Some(completeness(model))),
+        // Theme-level switch: Density::Large enlarges every control on every screen.
+        toggle("large_controls", "Large controls", model.large_controls),
         divider(),
         row(vec![icon_button(Icon::Person, Msg::SelectTab(Tab::Profile)), text("Account")]),
         row(vec![icon_button(Icon::Bell, Msg::Notifications), text("Notifications")]),
@@ -2229,5 +2255,18 @@ mod test {
         assert_eq!(model.search, "beard");
         app.update(Msg::SelectAudience(Audience::Kids), &mut model, &mut cx);
         assert_eq!(model.audience, Audience::Kids);
+    }
+
+    #[test]
+    fn large_controls_and_serbian_calendar_toggles() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.input("large_controls", InputValue::Bool(true), &mut model, &mut cx);
+        app.input("serbian_calendar", InputValue::Bool(true), &mut model, &mut cx);
+        assert!(model.large_controls && model.serbian_calendar);
+        assert!(matches!(
+            app.view(&model),
+            Widget::Scaffold { theme: Some(Theme { density: Density::Large, .. }), .. }
+        ));
     }
 }
