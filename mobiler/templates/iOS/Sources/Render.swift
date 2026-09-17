@@ -107,8 +107,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .regionChart(let regions, let ticks, let xMax, let yMax, let refLines, let bracket, let legend):
         return AnyView(RegionChartView(regions: regions, ticks: ticks, xMax: xMax, yMax: yMax, refLines: refLines, bracket: bracket, legend: legend))
 
-    case .calendar(let year, let month, let firstWeekday, let selected, let onDay):
-        return AnyView(CalendarView(year: year, month: month, firstWeekday: firstWeekday, selected: selected, onDay: onDay, send: send))
+    case .calendar(_, _, let title, let weekdayLabels, let leadingBlanks, let selected, let onDay, let markers):
+        return AnyView(CalendarView(title: title, weekdayLabels: weekdayLabels, leadingBlanks: leadingBlanks, selected: selected, onDay: onDay, markers: markers, send: send))
 
     case .swipeAction(let child, let actions):
         return AnyView(SwipeActionView(content: child, actions: actions, send: send))
@@ -118,10 +118,10 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 
     // MARK: layout
     case .row(let children):
-        return AnyView(HStack(spacing: 8) { childViews(children, send) })
+        return AnyView(HStack(spacing: isLargeDensity() ? 12 : 8) { childViews(children, send) })
 
     case .column(let children):
-        return AnyView(VStack(alignment: .leading, spacing: 6) { childViews(children, send) })
+        return AnyView(VStack(alignment: .leading, spacing: isLargeDensity() ? 12 : 6) { childViews(children, send) })
 
     case .card(let child, let style, let onPress, let onLongPress):
         let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)))
@@ -162,10 +162,27 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // Column count adapts to width: 2 on a phone (compact), more on iPad.
         return AnyView(GridView(children: children, send: send))
 
-    case .scroller(let children):
+    case .scroller(let children, let edgeFade):
+        if !edgeFade {
+            return AnyView(
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) { childViews(children, send) }
+                }
+            )
+        }
+        // Trailing 32pt fade + 32pt of trailing room so the last item clears it at scroll-end.
         return AnyView(
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) { childViews(children, send) }
+                HStack(spacing: 12) {
+                    childViews(children, send)
+                    Color.clear.frame(width: 32)
+                }
+            }
+            .mask {
+                HStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 32)
+                }
             }
         )
 
@@ -187,25 +204,37 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         ))
 
     // MARK: input / actions
-    case .button(let label, let style, let onPress):
-        return AnyView(Button(label) { send(.fired(token: onPress)) }.modifier(ButtonStyleMod(style)))
+    case .button(let label, let style, let onPress, let tone, let icon, let wide):
+        return AnyView(MobilerButton(label: label, style: style, tone: tone, icon: icon, wide: wide) { send(.fired(token: onPress)) })
 
     case .iconButton(let icon, let onPress):
+        let large = isLargeDensity()
         return AnyView(
             Button(action: { send(.fired(token: onPress)) }) {
-                Image(systemName: sfSymbol(icon)).foregroundColor(iconTint(icon))
+                if large {
+                    Image(systemName: sfSymbol(icon)).foregroundColor(iconTint(icon))
+                        .font(.system(size: 24)).frame(minWidth: 56, minHeight: 56).contentShape(Rectangle())
+                } else {
+                    Image(systemName: sfSymbol(icon)).foregroundColor(iconTint(icon))
+                }
             }.buttonStyle(.plain)
         )
 
     case .chip(let label, let selected, let onPress):
+        let large = isLargeDensity()
         return AnyView(
             Button(action: { send(.fired(token: onPress)) }) {
-                Text(label).font(.subheadline)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(selected ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
-                    .foregroundColor(selected ? Color.accentColor : .primary)
-                    .overlay(Capsule().stroke(selected ? Color.accentColor : .clear))
-                    .clipShape(Capsule())
+                Group {
+                    if large {
+                        Text(label).font(.body).padding(.horizontal, 16).frame(minHeight: 48)
+                    } else {
+                        Text(label).font(.subheadline).padding(.horizontal, 12).padding(.vertical, 6)
+                    }
+                }
+                .background(selected ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
+                .foregroundColor(selected ? Color.accentColor : .primary)
+                .overlay(Capsule().stroke(selected ? Color.accentColor : .clear))
+                .clipShape(Capsule())
             }.buttonStyle(.plain)
         )
 
@@ -262,16 +291,18 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         )
 
     case .segmented(let segments):
+        let large = isLargeDensity()
         return AnyView(
             HStack(spacing: 4) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
                     Button(action: { send(.fired(token: seg.onSelect)) }) {
-                        Text(seg.label).font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
+                        Text(seg.label).font(large ? Font.body.weight(.semibold) : Font.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: large ? 48 : nil)
+                            .padding(.vertical, large ? 0 : 8)
                             .background(seg.selected ? Color.accentColor : Color.clear)
                             .foregroundColor(seg.selected ? .white : .secondary)
                             .clipShape(Capsule())
+                            .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
             }
@@ -349,8 +380,15 @@ extension Theme {
     var accentColor: Color { accent.map { Color(red: Double($0.r) / 255, green: Double($0.g) / 255, blue: Double($0.b) / 255) } ?? brandColor }
     var cardRadius: CGFloat { switch corner { case .none: 0; case .small: 8; case .medium: 14; case .large: 22 } }
     var imageRadius: CGFloat { switch corner { case .none: 0; case .small: 10; case .medium: 16; case .large: 24 } }
-    var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0 } }
+    var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0; case .large: 1.25 } }
     var fontDesign: Font.Design { switch font { case .system: .default; case .rounded: .rounded; case .serif: .serif; case .monospace: .monospaced } }
+}
+
+/// `Density.large` enlarges controls (56pt buttons, 48pt chips/day cells, larger labels). Every use is
+/// `large ? <large> : <the original value>` so the other densities stay pixel-identical.
+private func isLargeDensity() -> Bool {
+    if case .large? = ActiveTheme.current?.density { return true }
+    return false
 }
 
 /// Renders a `[Widget]` as sibling views (children of a stack/grid).
@@ -891,34 +929,46 @@ private struct SwipeActionView: View {
     }
 }
 
-// Inline month calendar — weekday header, leading blanks from `firstWeekday`, tappable days.
+// Inline month calendar — title, weekday header and leading blanks come pre-localized from the
+// core; tappable days with 0–3 busy-dots under the number.
 private struct CalendarView: View {
-    let year: UInt32
-    let month: UInt8
-    let firstWeekday: UInt8
+    let title: String
+    let weekdayLabels: [String]
+    let leadingBlanks: UInt8
     let selected: UInt8?
     let onDay: [String]
+    let markers: [UInt8]
     let send: (Action) -> Void
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
-    private let weekdays = ["S", "M", "T", "W", "T", "F", "S"]
-    private let months = ["January", "February", "March", "April", "May", "June",
-                          "July", "August", "September", "October", "November", "December"]
     var body: some View {
+        let cell: CGFloat = isLargeDensity() ? 48 : 32
         VStack(spacing: 6) {
-            Text("\(months[Int(month) - 1]) \(String(year))").font(.headline)
+            Text(title).font(.headline)
             LazyVGrid(columns: cols, spacing: 4) {
-                ForEach(Array(weekdays.enumerated()), id: \.offset) { _, w in
+                ForEach(Array(weekdayLabels.enumerated()), id: \.offset) { _, w in
                     Text(w).font(.caption2).foregroundColor(.secondary)
                 }
-                ForEach(0..<Int(firstWeekday), id: \.self) { _ in Color.clear.frame(height: 32) }
+                ForEach(0..<Int(leadingBlanks), id: \.self) { _ in Color.clear.frame(height: cell) }
                 ForEach(Array(onDay.enumerated()), id: \.offset) { idx, token in
                     let day = idx + 1
                     let isSel = selected.map { Int($0) == day } ?? false
+                    let level = idx < markers.count ? min(Int(markers[idx]), 3) : 0
                     Button(action: { send(.fired(token: token)) }) {
-                        Text("\(day)").frame(maxWidth: .infinity, minHeight: 32)
+                        Text("\(day)").frame(maxWidth: .infinity, minHeight: cell)
                             .background(isSel ? Color.accentColor : Color.clear)
                             .foregroundColor(isSel ? .white : .primary)
                             .clipShape(Circle())
+                            .overlay(alignment: .bottom) {
+                                if level > 0 {
+                                    HStack(spacing: 2) {
+                                        ForEach(0..<level, id: \.self) { _ in
+                                            Circle().fill(isSel ? Color.white : Color.accentColor).frame(width: 4, height: 4)
+                                        }
+                                    }
+                                    .padding(.bottom, 3)
+                                }
+                            }
+                            .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
             }
@@ -1122,7 +1172,7 @@ private struct ScaffoldView: View {
                                 if let icon = tab.icon {
                                     Image(systemName: sfSymbol(icon)).font(.system(size: 20))
                                 }
-                                Text(tab.label).font(.caption)
+                                Text(tab.label).font(isLargeDensity() ? .subheadline : .caption)
                             }
                             .fontWeight(tab.selected ? .semibold : .regular)
                             .foregroundColor(tab.selected ? .accentColor : .secondary)
@@ -1191,15 +1241,94 @@ private struct TextStyleMod: ViewModifier {
     }
 }
 
+// Widget::Button. A neutral tone with no icon and not wide renders exactly the original
+// `Button(label).modifier(ButtonStyleMod(style))`; a tone tints it, `icon` adds a leading SF Symbol,
+// `wide` stretches the label to the available width.
+private struct MobilerButton: View {
+    let label: String
+    let style: SharedTypes.ButtonStyle
+    let tone: Tone
+    let icon: Icon?
+    let wide: Bool
+    let action: () -> Void
+
+    private var neutral: Bool { if case .neutral = tone { return true }; return false }
+    private var tint: Color { neutral ? .accentColor : toneColors(tone).1 }
+
+    var body: some View {
+        let button = Button(action: action) { labelView }
+        if isLargeDensity() {
+            button.buttonStyle(LargeButtonStyle(style: style, color: tint))
+        } else if neutral {
+            button.modifier(ButtonStyleMod(style))
+        } else {
+            button.modifier(ButtonStyleMod(style, tint: tint)).tint(tint)
+        }
+    }
+
+    @ViewBuilder private var labelView: some View {
+        if let icon {
+            if wide { Label(label, systemImage: sfSymbol(icon)).frame(maxWidth: .infinity) } else { Label(label, systemImage: sfSymbol(icon)) }
+        } else if wide {
+            Text(label).frame(maxWidth: .infinity)
+        } else {
+            Text(label)
+        }
+    }
+}
+
 private struct ButtonStyleMod: ViewModifier {
     let style: SharedTypes.ButtonStyle
-    init(_ s: SharedTypes.ButtonStyle) { style = s }
+    let tint: Color
+    init(_ s: SharedTypes.ButtonStyle, tint: Color = .accentColor) { style = s; self.tint = tint }
     func body(content: Content) -> some View {
         switch style {
         case .filled: return AnyView(content.buttonStyle(.borderedProminent))
         case .outlined: return AnyView(content.buttonStyle(.bordered))
         case .text: return AnyView(content.buttonStyle(.borderless))
+        case .tonal: return AnyView(content.buttonStyle(TonalButtonStyle(color: tint)))
         }
+    }
+}
+
+// M3-style filled-tonal: tinted label on a soft tint capsule (the quieter secondary action).
+private struct TonalButtonStyle: SwiftUI.ButtonStyle {
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .foregroundColor(color)
+            .background(color.opacity(0.18))
+            .clipShape(Capsule())
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// Density.large button: 56pt min height, 24pt side padding, body-semibold label (scales with Dynamic
+// Type), capsule — one style for all four ButtonStyles so every large button is the same height.
+private struct LargeButtonStyle: SwiftUI.ButtonStyle {
+    let style: SharedTypes.ButtonStyle
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        let (fill, fg, stroke): (Color, Color, Color) = {
+            switch style {
+            case .filled: return (color, .white, .clear)
+            case .tonal: return (color.opacity(0.18), color, .clear)
+            case .outlined: return (.clear, color, color)
+            case .text: return (.clear, color, .clear)
+            }
+        }()
+        return configuration.label
+            .font(.body.weight(.semibold))
+            .padding(.horizontal, 24)
+            .frame(minHeight: 56)
+            .foregroundColor(fg)
+            .background(fill)
+            .overlay(Capsule().stroke(stroke, lineWidth: 1))
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 

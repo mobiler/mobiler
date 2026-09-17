@@ -168,7 +168,14 @@ HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm
 Navigation is a core-owned `Nav` stack; dark mode and theming are data in
 the `Widget` tree. A `Scaffold` can carry a `Theme` — brand color, corner
 radius, density, and font — that every native shell (iOS, Android, web)
-applies; `theme: None` keeps the default look. The widget vocabulary and runtime live in the
+applies; `theme: None` keeps the default look. `Density::Large` gives busy hands bigger controls
+(56-unit buttons and segmented controls, 48-unit chips and calendar day cells, larger control labels)
+while body text follows the system font scale. Buttons take a `Tonal` style, a `tone` (e.g.
+`Tone::Danger`), a leading icon, and full width via `button_with(label, style, on_press, ButtonOpts)`.
+`calendar_in(locale, …, markers)` localizes the month title, weekday header and week start and draws
+0–3 busy dots per day, and `scroller_hinted(children)` fades a horizontal scroller's trailing edge to
+hint there is more. These need the updated shells: in an existing app, run `mobiler upgrade`.
+The widget vocabulary and runtime live in the
 [`mobiler-ui`](https://crates.io/crates/mobiler-ui) and
 [`mobiler-core`](https://crates.io/crates/mobiler-core) crates.
 
@@ -177,7 +184,8 @@ applies; `theme: None` keeps the default look. The widget vocabulary and runtime
 Mobiler is production-bound. Beyond today's capabilities + plugins, **planned** (order is
 demand-driven): animations / view transitions, and on-device hardening of the experimental plugins.
 The full list lives on
-[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: **card long-press**
+[GitHub](https://github.com/mobiler/mobiler#roadmap). _Recently shipped: **`Density::Large`** (bigger touch targets), toned/tonal/icon/wide buttons, a
+localized calendar with busy-dot markers, and a hinted (edge-fade) scroller; **card long-press**
 (`with_long_press(card, E)` — press-and-hold for a secondary action, alongside a card's tap),
 **FusedLocation** (`geolocation-fused` plugin — higher-accuracy location via Play Services) and
 **BLE write/notify** (the `bluetooth` plugin gained a write op + a characteristic-change notify
