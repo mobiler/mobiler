@@ -7,7 +7,7 @@ Rust core and its native shell:
 
 - an app-agnostic **`Widget`** tree (the ViewModel the core emits),
 - an **`Action`** protocol (events the shell sends back),
-- `InputValue` and **style-token** enums (`TextStyle`, `Tone`, `Spacing`, …).
+- `InputValue` and **style-token** enums (`TextStyle`, `Tone`, `Spacing`, `Density`, …).
 
 Because these types never change per app, a single native shell is built **once** and
 renders *any* Mobiler app — it only ever knows these types, never an app's domain
@@ -18,7 +18,9 @@ The `Widget` vocabulary covers layout (rows/columns/grids/cards/scrollers, paged
 (scaffold + tabs + FAB + sheets, and a two-pane **master-detail** split), media (images,
 avatars, a controllable **video player**, an embedded **web view**, an in-app **PDF viewer**,
 and an interactive **map**), gestures (tappable cards with **tap + long-press**, swipe actions),
-feedback (progress, skeleton), an inline calendar,
+feedback (progress, skeleton), an inline calendar (localized title/weekday header/week
+start, busy-dot markers), a **`Density`** (Compact/Comfortable/Large) that scales control
+sizing app-wide for touch,
 **data-viz charts** — `Chart` in eight styles (bar, line, stacked, 100%-stacked, pie, donut,
 fitness-style progress rings, and a radial gauge) plus a variable-width stacked-region /
 coverage-gap `RegionChart` — and an **accessibility** wrapper (a screen-reader label / hint /

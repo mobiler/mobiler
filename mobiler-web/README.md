@@ -32,7 +32,8 @@ fn main() {
   on mount, so `run::<App>()` renders a fully-styled app. It's injected at the front
   of `<head>`, so your own stylesheet (if you add one) overrides any widget class.
 - **Theme-as-data.** `Scaffold.dark_mode` flips the whole theme — the web twin of
-  the native shells' `preferredColorScheme` / Material theme.
+  the native shells' `preferredColorScheme` / Material theme. `Density::Large` scales up
+  control sizing and spacing the same way.
 - **Complete widget coverage.** Every [`mobiler-ui`](https://crates.io/crates/mobiler-ui)
   `Widget` variant renders (the `match` is exhaustive, like the native shells), so a
   core that runs on Android/iOS renders identically on the web — including the **charts**

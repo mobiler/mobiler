@@ -94,20 +94,25 @@ your app's types.
 - **Navigation** — a core-owned `Nav` stack drives animated push/pop and the system
   back button.
 - **Theme-as-data** — e.g. dark mode is a value in the `Widget` tree; the shell themes
-  the whole app from it.
+  the whole app from it. Density (Compact/Comfortable/Large) is theme-level too — `Large`
+  scales up control sizing and spacing app-wide for busy hands, no per-widget opt-in.
 
 ## Widgets
 
 The `Widget` vocabulary renders identically on Android, iOS, and web:
 
-- **Layout** — rows, columns, grids, cards, scrollers, **paged lists** (`LazyList` — infinite
+- **Layout** — rows, columns, grids, cards, scrollers (`scroller_hinted` adds an opt-in
+  trailing-edge fade, a hint that it scrolls), **paged lists** (`LazyList` — infinite
   scroll + pull-to-refresh), boxes, spacers, dividers.
-- **Inputs** — buttons, text fields, toggles, segmented controls, search fields, rating.
+- **Inputs** — buttons (`ButtonStyle::Filled/Outlined/Text/Tonal`; `button_with` +
+  `ButtonOpts` add a `tone`, a leading icon, and full-width), text fields, toggles,
+  segmented controls, search fields, rating.
 - **Navigation** — `Scaffold` with a top bar, bottom **tabs**, a **FAB**, and bottom **sheets**
   (it goes adaptive on tablets: a side rail + capped width).
 - **Media & feedback** — images, avatars, progress bars, shimmer skeletons, swipe actions,
   **long-press** on cards (press-and-hold for a secondary action),
-  an inline month **calendar**, an in-app **PDF viewer** (`PdfView` — display a
+  an inline month **calendar** (`calendar_in` localizes the title, weekday header, and
+  week start, and takes 0–3 busy-dot **markers** per day), an in-app **PDF viewer** (`PdfView` — display a
   backend-generated report), a controllable **video player** (`Video` — AVPlayer / Media3 /
   `<video>`; HLS + MP4; app-driven play/seek + position/ended, plus poster, start-offset,
   captions, playback rate/volume, full transport state, a playlist/queue, Picture-in-Picture,
