@@ -1457,9 +1457,13 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let kids = render_all(children, send);
             view! { <div class="grid">{kids}</div> }.into_any()
         }
-        Widget::Scroller { children } => {
+        Widget::Scroller { children, edge_fade } => {
             let kids = render_all(children, send);
-            view! { <div class="scroller">{kids}</div> }.into_any()
+            if *edge_fade {
+                view! { <div class="scroller scroller-fade">{kids}<div class="scroller-end"></div></div> }.into_any()
+            } else {
+                view! { <div class="scroller">{kids}</div> }.into_any()
+            }
         }
         // Two-pane master-detail. CSS does the adapting: wide (`@media min-width:768px`) shows both
         // panes side-by-side (back hidden); narrow shows one — primary by default, or detail (+ a

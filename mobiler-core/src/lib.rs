@@ -914,7 +914,10 @@ pub fn split<E: Serialize>(primary: Widget, detail: Widget, show_detail: bool, o
 }
 /// Horizontally scrolling row of children (a carousel / chip rail).
 #[must_use]
-pub fn scroller(children: Vec<Widget>) -> Widget { Widget::Scroller { children } }
+pub fn scroller(children: Vec<Widget>) -> Widget { Widget::Scroller { children, edge_fade: false } }
+/// A [`scroller`] whose trailing edge fades out — a hint that it scrolls.
+#[must_use]
+pub fn scroller_hinted(children: Vec<Widget>) -> Widget { Widget::Scroller { children, edge_fade: true } }
 /// A circular avatar image.
 #[must_use]
 pub fn avatar(source: impl Into<String>) -> Widget { Widget::Avatar { source: source.into(), status: None } }
@@ -2025,5 +2028,11 @@ mod tests {
             calendar_in(Locale::EnUs, 2026, 9, None, &[], |_| Ev::Tap),
             Widget::Calendar { leading_blanks: 2, ref markers, .. } if markers.is_empty()
         ));
+    }
+
+    #[test]
+    fn scroller_hint_is_opt_in() {
+        assert!(matches!(scroller(vec![text("a")]), Widget::Scroller { edge_fade: false, .. }));
+        assert!(matches!(scroller_hinted(vec![text("a")]), Widget::Scroller { edge_fade: true, ref children } if children.len() == 1));
     }
 }
