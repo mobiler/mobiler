@@ -330,7 +330,7 @@ enum ToastPlugin {
 
 /// Confirm dialog — request/response. Presents a UIAlertController and awaits the
 /// user's choice (`ok` = confirmed) via a continuation, so the core resolves only
-/// once they tap. Input is JSON `{title, message}`.
+/// once they tap. Input is JSON {title, message, confirm_label?, cancel_label?, destructive?}; system alerts keep their own size.
 @MainActor
 enum DialogPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
@@ -338,16 +338,20 @@ enum DialogPlugin {
         let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
         let title = obj?["title"] as? String ?? ""
         let message = obj?["message"] as? String ?? ""
+        // Optional app labels; a plain `cx.confirm` sends none and keeps OK / Cancel.
+        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "OK"
+        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel"
+        let destructive = obj?["destructive"] as? Bool ?? false
         guard let presenter = topViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
             let alert = UIAlertController(
                 title: title.isEmpty ? nil : title, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            alert.addAction(UIAlertAction(title: cancelLabel, style: .cancel) { _ in
                 cont.resume(returning: PluginResponse(ok: false, output: "cancel"))
             })
-            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+            alert.addAction(UIAlertAction(title: confirmLabel, style: destructive ? .destructive : .default) { _ in
                 cont.resume(returning: PluginResponse(ok: true, output: "ok"))
             })
             presenter.present(alert, animated: true)
@@ -367,6 +371,11 @@ enum DateTimePlugin {
         case "time": mode = .time
         default: return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
+        // Optional app labels ({title?, confirm_label?, cancel_label?}); "" (plain pick_date) → defaults.
+        let labels = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        func label(_ key: String, _ fallback: String) -> String {
+            (labels?[key] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? fallback
+        }
         guard let presenter = topViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
@@ -378,7 +387,7 @@ enum DateTimePlugin {
 
             // An action sheet with blank message lines reserves room for the wheel picker.
             let alert = UIAlertController(
-                title: op == "date" ? "Pick a date" : "Pick a time",
+                title: label("title", op == "date" ? "Pick a date" : "Pick a time"),
                 message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .actionSheet)
             alert.view.addSubview(picker)
             NSLayoutConstraint.activate([
@@ -393,10 +402,10 @@ enum DateTimePlugin {
 
             var resumed = false
             func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            alert.addAction(UIAlertAction(title: label("cancel_label", "Cancel"), style: .cancel) { _ in
                 done(PluginResponse(ok: false, output: "cancel"))
             })
-            alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
+            alert.addAction(UIAlertAction(title: label("confirm_label", "Done"), style: .default) { _ in
                 done(PluginResponse(ok: true, output: fmt.string(from: picker.date)))
             })
             // iPad presents action sheets in a popover, which needs a source.
