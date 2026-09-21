@@ -1496,8 +1496,9 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         // A long/paged feed. Web has no pull gesture or reliable infinite-scroll on a sub-container,
         // so (like Scaffold pull-to-refresh) the gestures degrade to controls: a top "↻ Refresh"
         // button (while `on_refresh`), and a bottom "Load more" button (while `has_more && !loading`)
-        // / loading bar / "end" caption. iOS/Android do true pull + scroll-near-end detection.
-        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing } => {
+        // / loading bar / the app's end caption (if set). iOS/Android do true pull + scroll-near-end
+        // detection.
+        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label } => {
             let kids = render_all(children, send);
             let refresh_btn = on_refresh.clone().map(|token| {
                 let send = send.clone();
@@ -1512,7 +1513,11 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                     let send = send.clone();
                     view! { <button class="btn btn-outlined lazylist-more" on:click=move |_| send(Action::Fired { token: token.clone() })>"Load more"</button> }
                 });
-            let end_cap = (!*has_more && on_load_more.is_some()).then(|| view! { <div class="lazylist-end">"End of list"</div> });
+            // The app's own end text (e.g. "Kraj liste"); nothing when it didn't set one.
+            let end_cap = (!*has_more && on_load_more.is_some())
+                .then(|| end_label.clone())
+                .flatten()
+                .map(|label| view! { <div class="lazylist-end">{label}</div> });
             view! {
                 <div class="lazylist">
                     {refresh_btn}

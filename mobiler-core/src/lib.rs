@@ -1264,13 +1264,14 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
         },
         // Pull-to-refresh on a LazyList's top — same API as on a Scaffold. Leaves the load-more
         // fields intact.
-        Widget::LazyList { children, on_load_more, loading, has_more, .. } => Widget::LazyList {
+        Widget::LazyList { children, on_load_more, loading, has_more, end_label, .. } => Widget::LazyList {
             children,
             on_load_more,
             loading,
             has_more,
             on_refresh: Some(tok(on_refresh)),
             refreshing,
+            end_label,
         },
         other => other,
     }
@@ -1290,13 +1291,27 @@ pub fn lazy_list<E: Serialize>(children: Vec<Widget>, loading: bool, has_more: b
         has_more,
         on_refresh: None,
         refreshing: false,
+        end_label: None,
     }
 }
 
 /// A scrollable list with no load-more and no refresh — a plain virtualized list of `children`.
 #[must_use]
 pub fn lazy_list_static(children: Vec<Widget>) -> Widget {
-    Widget::LazyList { children, on_load_more: None, loading: false, has_more: false, on_refresh: None, refreshing: false }
+    Widget::LazyList { children, on_load_more: None, loading: false, has_more: false, on_refresh: None, refreshing: false, end_label: None }
+}
+
+/// Text shown at the end of an exhausted paged list (a [`lazy_list`] whose `has_more` is false) —
+/// e.g. "You're all caught up", in the app's language. Without it nothing is shown there. Combines
+/// with [`with_refresh`] in either order. No-op on other widgets.
+#[must_use]
+pub fn with_end_label(widget: Widget, label: impl Into<String>) -> Widget {
+    match widget {
+        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, .. } => {
+            Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label: Some(label.into()) }
+        }
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -1751,7 +1766,7 @@ mod tests {
         // lazy_list carries the load-more token + app-owned flags; no refresh by default.
         assert!(matches!(
             lazy_list(vec![text("a"), text("b")], false, true, Ev::Tap),
-            Widget::LazyList { children, on_load_more: Some(t), loading: false, has_more: true, on_refresh: None, refreshing: false }
+            Widget::LazyList { children, on_load_more: Some(t), loading: false, has_more: true, on_refresh: None, refreshing: false, end_label: None }
                 if children.len() == 2 && t == serde_json::to_string(&Ev::Tap).unwrap()
         ));
         assert!(matches!(lazy_list_static(vec![text("a")]), Widget::LazyList { on_load_more: None, on_refresh: None, .. }));
@@ -1761,6 +1776,23 @@ mod tests {
             Widget::LazyList { on_load_more: Some(_), loading: true, has_more: false, on_refresh: Some(r), refreshing: true, .. }
                 if r == serde_json::to_string(&Ev::Open(9)).unwrap()
         ));
+        // with_end_label sets the end text; nothing else changes. Default is None (render nothing).
+        assert!(matches!(lazy_list_static(vec![text("a")]), Widget::LazyList { end_label: None, .. }));
+        assert!(matches!(
+            with_end_label(lazy_list(vec![text("a")], false, false, Ev::Tap), "Kraj liste"),
+            Widget::LazyList { on_load_more: Some(_), has_more: false, end_label: Some(l), .. } if l == "Kraj liste"
+        ));
+        // with_refresh keeps an end label set before it, and with_end_label keeps refresh.
+        assert!(matches!(
+            with_refresh(with_end_label(lazy_list(vec![], false, false, Ev::Tap), "End"), false, Ev::Open(1)),
+            Widget::LazyList { on_refresh: Some(_), end_label: Some(l), .. } if l == "End"
+        ));
+        assert!(matches!(
+            with_end_label(with_refresh(lazy_list(vec![], false, false, Ev::Tap), false, Ev::Open(1)), "End"),
+            Widget::LazyList { on_refresh: Some(_), end_label: Some(l), .. } if l == "End"
+        ));
+        // No-op on other widgets.
+        assert!(matches!(with_end_label(text("x"), "End"), Widget::Text { .. }));
         assert!(matches!(spacer(Spacing::Lg), Widget::Spacer { .. }));
         assert!(matches!(image("u", ImageShape::Circle, ImageRatio::Square), Widget::Image { .. }));
         assert!(matches!(badge("new", Tone::Success), Widget::Badge { .. }));
