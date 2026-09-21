@@ -71,7 +71,9 @@ impl Picker {
         Self::default()
     }
 
-    /// The picker's title (iOS action sheet title, Android dialog title).
+    /// The picker's title — shown as the iOS action sheet title. Android sets it as the dialog
+    /// title, but the Material date/time picker on current API levels doesn't display it; the web
+    /// picker ignores it.
     #[must_use]
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
