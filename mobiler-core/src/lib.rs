@@ -399,7 +399,12 @@ impl<A: MobilerApp> App for MobilerShell<A> {
             Action::Restore { data } => app.restore(&data, model),
             Action::Start => app.init(model, &mut cx),
         }
-        let mut commands: Vec<Command<Effect, Action>> = Vec::new();
+        // Render first: the model is final once the app's handler returns, so the first frame
+        // must show it. A shell that awaits a request before looking at later effects (the
+        // Android shell once did) would otherwise show the change a full round trip late —
+        // a controlled text field then reverts keystrokes. Replies re-render via their own
+        // `Fired` update.
+        let mut commands: Vec<Command<Effect, Action>> = vec![render()];
         for op in cx.notifications {
             commands.push(Command::notify_shell(op).build());
         }
@@ -415,7 +420,6 @@ impl<A: MobilerApp> App for MobilerShell<A> {
                 Action::Fired { token: serde_json::to_string(&then(response)).expect("serialize event") }
             }));
         }
-        commands.push(render());
         Command::all(commands)
     }
 
@@ -1937,6 +1941,46 @@ mod tests {
         // panic, model untouched (the `if let Ok(event)` guard in MobilerShell::update).
         let _ = shell.update(Action::Fired { token: "not a valid token".into() }, &mut m);
         assert_eq!(m.count, 0);
+    }
+
+    // An app whose one event makes a notify, a request and a subscription, in that
+    // call order — used to pin the effect order `MobilerShell::update` emits.
+    #[derive(Default)]
+    struct EffectsApp;
+
+    impl MobilerApp for EffectsApp {
+        type Event = CounterEv;
+        type Model = CounterModel;
+        fn update(&self, _ev: CounterEv, model: &mut CounterModel, cx: &mut Cx<CounterEv>) {
+            model.count += 1;
+            cx.plugin("http", "get", "{}", |_r| CounterEv::Inc);
+            cx.notify("toast", "show", "hi");
+            cx.subscribe("tick", "ticker", "start", "", |_r| CounterEv::Inc);
+            cx.plugin("device", "model", "", |_r| CounterEv::Inc);
+        }
+        fn view(&self, model: &CounterModel) -> Widget {
+            text(format!("{}", model.count))
+        }
+    }
+
+    #[test]
+    fn shell_renders_before_requests_notifications_and_streams() {
+        use crux_core::App as _;
+        let shell = MobilerShell::<EffectsApp>::default();
+        let mut m = CounterModel::default();
+        let mut cmd = shell.update(Action::Fired { token: serde_json::to_string(&CounterEv::Inc).unwrap() }, &mut m);
+        let kinds: Vec<String> = cmd
+            .effects()
+            .map(|e| match e {
+                Effect::Render(_) => "render".to_string(),
+                Effect::PluginNotify(r) => format!("notify:{}", r.operation.plugin),
+                Effect::Plugin(r) => format!("plugin:{}", r.operation.plugin),
+                Effect::PluginStream(r) => format!("stream:{}", r.operation.plugin),
+            })
+            .collect();
+        // Render first (the model is final when update returns, so the first frame shows it);
+        // then notifications, requests (in call order), streams — the order shells already rely on.
+        assert_eq!(kinds, ["render", "notify:toast", "plugin:http", "plugin:device", "stream:ticker"]);
     }
 
     // ---- transfer builders (cx.upload / cx.download) ----
