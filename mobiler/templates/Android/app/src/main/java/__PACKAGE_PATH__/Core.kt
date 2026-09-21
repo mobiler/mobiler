@@ -445,9 +445,9 @@ class Core(application: Application) : AndroidViewModel(application) {
                 }
                 // Request/response: launch it, so later effects in this batch (a Render, other
                 // requests) apply at once instead of waiting a network round trip. It resolves
-                // the core with the response and processes the effects that produces. On
-                // Main.immediate the launch runs up to dispatch's first suspension, so requests
-                // still start in batch order; core calls stay on the main thread.
+                // the core with the response and processes the effects that produces. Launches
+                // run FIFO on the main dispatcher, so requests still start in batch order, and
+                // core calls stay on the main thread.
                 is Effect.Plugin -> {
                     val call = effect.value
                     val id = request.id
