@@ -442,11 +442,18 @@ class Core(application: Application) : AndroidViewModel(application) {
                     if (n.plugin == "stream" && n.op == "unsubscribe") streamJobs.remove(n.input)?.cancel()
                     else dispatch(n.plugin, n.op, n.input)
                 }
-                // Request/response: dispatch (awaiting any async work), resolve the
-                // core with the response, then process the effects that produces.
+                // Request/response: launch it, so later effects in this batch (a Render, other
+                // requests) apply at once instead of waiting a network round trip. It resolves
+                // the core with the response and processes the effects that produces. On
+                // Main.immediate the launch runs up to dispatch's first suspension, so requests
+                // still start in batch order; core calls stay on the main thread.
                 is Effect.Plugin -> {
-                    val resp = dispatch(effect.value.plugin, effect.value.op, effect.value.input)
-                    process(core.resolve(request.id, resp.bincodeSerialize()))
+                    val call = effect.value
+                    val id = request.id
+                    viewModelScope.launch {
+                        val resp = dispatch(call.plugin, call.op, call.input)
+                        process(core.resolve(id, resp.bincodeSerialize()))
+                    }
                 }
                 // Streaming subscription: a native source (Flow) resolves the SAME
                 // request id once per event until the Job is cancelled (unsubscribe).
