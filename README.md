@@ -159,8 +159,8 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 | Confirm | `cx.confirm(title, message, then) · cx.confirm_with(Confirm::new(t, m).confirm_label(…).cancel_label(…).destructive(), then)` | native dialog; app labels + destructive style |
 | Photo | `cx.pick_photo(then)` | system photo picker → local image URI (no permission) |
 | Camera | `cx.capture_photo(then)` | system camera → local image URI |
-| Date picker | `cx.pick_date(then) · cx.pick_date_with(Picker::new().title(…).confirm_label(…).cancel_label(…), then)` | native date picker → ISO YYYY-MM-DD string; labels on iOS/Android buttons, web uses the browser picker |
-| Time picker | `cx.pick_time(then) · cx.pick_time_with(Picker::new().title(…).confirm_label(…).cancel_label(…), then)` | native time picker → 24-hour HH:MM string; labels on iOS/Android buttons, web uses the browser picker |
+| Date picker | `cx.pick_date(then) · cx.pick_date_with(Picker::new().title(…).confirm_label(…).cancel_label(…), then)` | native date picker → ISO YYYY-MM-DD string; title shown on iOS only, button labels on iOS/Android, web uses the browser picker |
+| Time picker | `cx.pick_time(then) · cx.pick_time_with(Picker::new().title(…).confirm_label(…).cancel_label(…), then)` | native time picker → 24-hour HH:MM string; title shown on iOS only, button labels on iOS/Android, web uses the browser picker |
 <!-- capabilities:end -->
 
 Each maps to an opaque `{plugin, op, input}` effect, so **adding a capability is a

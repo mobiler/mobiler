@@ -235,8 +235,9 @@ class DialogPlugin : MobilerPlugin {
                     if (cont.isActive) cont.resumeWith(Result.success(PluginResponse(ok, if (ok) "ok" else "cancel")))
                 }
                 // One dialog at a time: a still-open one is answered "cancel" before the new one shows.
-                ConfirmHost.pending?.answer?.invoke(false)
+                ConfirmHost.pending?.answer(false)
                 ConfirmHost.pending = request
+                // Cancellation comes from viewModelScope (main thread); the snapshot-state write is safe either way.
                 cont.invokeOnCancellation { if (ConfirmHost.pending === request) ConfirmHost.pending = null }
             }
         }

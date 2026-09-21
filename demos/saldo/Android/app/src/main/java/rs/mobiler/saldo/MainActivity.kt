@@ -341,7 +341,7 @@ private fun ConfirmDialog(req: ConfirmRequest) {
     AlertDialog(
         onDismissRequest = { req.answer(false) },
         title = if (req.title.isNotEmpty()) { { Text(req.title) } } else null,
-        text = { Text(req.message) },
+        text = if (req.message.isNotEmpty()) { { Text(req.message) } } else null,
         confirmButton = {
             TextButton(
                 onClick = { req.answer(true) },
