@@ -567,6 +567,10 @@ pub enum Widget {
         has_more: bool,
         on_refresh: Option<ActionToken>,
         refreshing: bool,
+        /// Text shown under an exhausted paged list (`has_more == false` with `on_load_more` set),
+        /// e.g. "You're all caught up" in the app's language. `None` shows nothing. Set with
+        /// `with_end_label`.
+        end_label: Option<String>,
     },
     Spacer { size: Spacing },
     // Layout
@@ -712,7 +716,8 @@ mod tests {
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: true, on_back: Some("back".to_string()) });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: false, on_back: None });
         round_trips(&Widget::Scroller { children: vec![Widget::Divider], edge_fade: true });
-        round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false });
+        round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false, end_label: None });
+        round_trips(&Widget::LazyList { children: vec![], on_load_more: Some("more".to_string()), loading: false, has_more: false, on_refresh: None, refreshing: false, end_label: Some("Kraj liste".to_string()) });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),
