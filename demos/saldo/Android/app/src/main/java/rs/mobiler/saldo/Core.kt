@@ -1,13 +1,13 @@
 package rs.mobiler.saldo
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Application
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.DialogInterface
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -197,26 +197,47 @@ object MobilerActivity {
     var current: WeakReference<Activity>? = null
 }
 
+/** A confirm dialog waiting for the user. DialogPlugin sets it; MainActivity's composition draws it
+ *  as a Material 3 AlertDialog (so it gets the theme's error colour and Density.LARGE sizes) and
+ *  calls [answer] with the choice. */
+class ConfirmRequest(
+    val title: String,
+    val message: String,
+    val confirmLabel: String,
+    val cancelLabel: String,
+    val destructive: Boolean,
+    val answer: (Boolean) -> Unit,
+)
+
+object ConfirmHost {
+    var pending by mutableStateOf<ConfirmRequest?>(null)
+}
+
 /** Official, bundled plugin: confirm dialog (request/response). Input is JSON
- *  {title, message}; resolves ok=true when confirmed. Suspends until the user taps. */
+ *  {title, message, confirm_label?, cancel_label?, destructive?}; missing labels keep OK / Cancel.
+ *  Resolves ok=true when confirmed; cancel, back or a tap outside resolve ok=false. */
 class DialogPlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         if (op != "confirm") return PluginResponse(false, "unknown op '$op'")
-        val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
-        val obj = JSONObject(input)
-        val title = obj.optString("title")
-        val message = obj.optString("message")
+        if (MobilerActivity.current?.get() == null) return PluginResponse(false, "no activity")
+        val obj = runCatching { JSONObject(input) }.getOrElse { JSONObject() }
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
-                val dialog = AlertDialog.Builder(activity)
-                    .setTitle(title.ifEmpty { null })
-                    .setMessage(message)
-                    .setPositiveButton("OK") { _, _ -> cont.resumeWith(Result.success(PluginResponse(true, "ok"))) }
-                    .setNegativeButton("Cancel") { _, _ -> cont.resumeWith(Result.success(PluginResponse(false, "cancel"))) }
-                    .setOnCancelListener { cont.resumeWith(Result.success(PluginResponse(false, "cancel"))) }
-                    .create()
-                cont.invokeOnCancellation { dialog.dismiss() }
-                dialog.show()
+                lateinit var request: ConfirmRequest
+                request = ConfirmRequest(
+                    title = obj.optString("title"),
+                    message = obj.optString("message"),
+                    confirmLabel = obj.optString("confirm_label").ifEmpty { "OK" },
+                    cancelLabel = obj.optString("cancel_label").ifEmpty { "Cancel" },
+                    destructive = obj.optBoolean("destructive", false),
+                ) { ok ->
+                    if (ConfirmHost.pending === request) ConfirmHost.pending = null
+                    if (cont.isActive) cont.resumeWith(Result.success(PluginResponse(ok, if (ok) "ok" else "cancel")))
+                }
+                // One dialog at a time: a still-open one is answered "cancel" before the new one shows.
+                ConfirmHost.pending?.answer?.invoke(false)
+                ConfirmHost.pending = request
+                cont.invokeOnCancellation { if (ConfirmHost.pending === request) ConfirmHost.pending = null }
             }
         }
     }
@@ -235,6 +256,11 @@ class DateTimePlugin : MobilerPlugin {
         }
         val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
         val now = Calendar.getInstance()
+        // Optional app labels ({title?, confirm_label?, cancel_label?}); "" (plain pick_date) → defaults.
+        val labels = runCatching { JSONObject(input) }.getOrNull()
+        val title = labels?.optString("title").orEmpty()
+        val confirmLabel = labels?.optString("confirm_label").orEmpty()
+        val cancelLabel = labels?.optString("cancel_label").orEmpty()
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
                 var resumed = false
@@ -250,6 +276,10 @@ class DateTimePlugin : MobilerPlugin {
                         )
                         dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }
                         cont.invokeOnCancellation { dlg.dismiss() }
+                        if (title.isNotEmpty()) dlg.setTitle(title)
+                        // The dialog is its own click listener: POSITIVE delivers the value, NEGATIVE cancels.
+                        if (confirmLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_POSITIVE, confirmLabel, dlg)
+                        if (cancelLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_NEGATIVE, cancelLabel, dlg)
                         dlg.show()
                     }
                     "time" -> {
@@ -260,6 +290,10 @@ class DateTimePlugin : MobilerPlugin {
                         )
                         dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }
                         cont.invokeOnCancellation { dlg.dismiss() }
+                        if (title.isNotEmpty()) dlg.setTitle(title)
+                        // The dialog is its own click listener: POSITIVE delivers the value, NEGATIVE cancels.
+                        if (confirmLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_POSITIVE, confirmLabel, dlg)
+                        if (cancelLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_NEGATIVE, cancelLabel, dlg)
                         dlg.show()
                     }
                     else -> done(PluginResponse(false, "unknown op '$op'"))
