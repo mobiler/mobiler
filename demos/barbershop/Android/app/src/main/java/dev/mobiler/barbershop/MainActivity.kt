@@ -1019,6 +1019,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val onLoadMore = widget.onLoadMore
             val loading = widget.loading
             val hasMore = widget.hasMore
+            val endLabel = widget.endLabel
             val list: @Composable () -> Unit = {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
@@ -1033,10 +1034,10 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     }
                     if (loading) {
                         item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(8.dp)) }
-                    } else if (!hasMore && onLoadMore != null) {
+                    } else if (!hasMore && onLoadMore != null && endLabel != null) {
                         item {
                             Text(
-                                "End of list",
+                                endLabel,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(8.dp),
