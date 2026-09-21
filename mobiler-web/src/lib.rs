@@ -1144,24 +1144,31 @@ impl ConfirmAsk {
     }
 }
 
+/// Per-call counter so the title/message get unique DOM ids for `aria-labelledby` /
+/// `aria-describedby` to point at, even if a dialog somehow opens while another is still closing.
+static CONFIRM_DIALOG_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 /// The web confirm dialog: a modal card on `<body>` that resolves `true` on the confirm button and
-/// `false` on the cancel button, Escape or a click on the backdrop. Enter activates the focused
-/// button (focus starts on cancel for a destructive dialog, else on confirm). Replaces
-/// `window.confirm`, which can't be relabelled or styled.
+/// `false` on the cancel button, Escape, or a press-and-release on the backdrop itself (a drag
+/// that starts on the card and releases over the backdrop does not count). Enter activates the
+/// focused button (focus starts on cancel for a destructive dialog, else on confirm); whatever had
+/// focus before the dialog opened gets it back afterwards. Labelled for assistive tech via
+/// `aria-labelledby`/`aria-describedby` when a title/message is present. Replaces
+/// `window.confirm`, which can't be relabelled, styled or made accessible this way.
 async fn confirm_modal(ask: ConfirmAsk) -> bool {
     use wasm_bindgen::{closure::Closure, JsCast};
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return false };
     let Some(body) = doc.body() else { return false };
+    let previously_focused = doc.active_element();
     let el = |tag: &str, class: &str| -> Option<web_sys::HtmlElement> {
         let e = doc.create_element(tag).ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
         e.set_class_name(class);
         Some(e)
     };
     let confirm_class = if ask.destructive { "btn btn-filled btn-danger" } else { "btn btn-filled" };
-    let (Some(scrim), Some(card), Some(message), Some(actions), Some(cancel), Some(confirm)) = (
+    let (Some(scrim), Some(card), Some(actions), Some(cancel), Some(confirm)) = (
         el("div", "confirm-scrim"),
         el("div", "confirm-card"),
-        el("p", "confirm-message"),
         el("div", "confirm-actions"),
         el("button", "btn btn-text"),
         el("button", confirm_class),
@@ -1184,18 +1191,31 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
 
     let _ = card.set_attribute("role", "alertdialog");
     let _ = card.set_attribute("aria-modal", "true");
+    let call_id = CONFIRM_DIALOG_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if !ask.title.is_empty() {
         if let Some(title) = el("div", "confirm-title") {
+            let title_id = format!("mobiler-confirm-title-{call_id}");
             title.set_text_content(Some(&ask.title));
+            let _ = title.set_attribute("id", &title_id);
             let _ = card.append_child(&title);
+            let _ = card.set_attribute("aria-labelledby", &title_id);
         }
     }
-    message.set_text_content(Some(&ask.message));
+    // No message element at all when there's nothing to say — an empty <p> would still get read
+    // out by a screen reader and wired up as the description.
+    if !ask.message.is_empty() {
+        if let Some(message) = el("p", "confirm-message") {
+            let msg_id = format!("mobiler-confirm-msg-{call_id}");
+            message.set_text_content(Some(&ask.message));
+            let _ = message.set_attribute("id", &msg_id);
+            let _ = card.append_child(&message);
+            let _ = card.set_attribute("aria-describedby", &msg_id);
+        }
+    }
     cancel.set_text_content(Some(&ask.cancel_label));
     confirm.set_text_content(Some(&ask.confirm_label));
     let _ = actions.append_child(&cancel);
     let _ = actions.append_child(&confirm);
-    let _ = card.append_child(&message);
     let _ = card.append_child(&actions);
     let _ = scrim.append_child(&card);
     let _ = body.append_child(&scrim);
@@ -1211,10 +1231,21 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
     let (t1, t2, t3, t4) = (tx.clone(), tx.clone(), tx.clone(), tx.clone());
     let on_cancel = Closure::wrap(Box::new(move || answer(&t1, false)) as Box<dyn FnMut()>);
     let on_confirm = Closure::wrap(Box::new(move || answer(&t2, true)) as Box<dyn FnMut()>);
+
+    // A drag that starts inside the card and releases over the backdrop (e.g. overshooting while
+    // selecting the message text) must not read as a backdrop dismiss. `pointerdown` records
+    // whether the press itself landed on the scrim; `click` (which fires on release, and bubbles
+    // from whatever was under the pointer) only cancels when both the press and the click target
+    // were the scrim itself, never a bubbled child.
+    let press_started_on_scrim = std::rc::Rc::new(std::cell::Cell::new(false));
     let scrim_node: web_sys::EventTarget = scrim.clone().into();
+    let press_flag = press_started_on_scrim.clone();
+    let pointerdown_target = scrim_node.clone();
+    let on_pointerdown = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        press_flag.set(e.target().as_ref() == Some(&pointerdown_target));
+    }) as Box<dyn FnMut(web_sys::Event)>);
     let on_backdrop = Closure::wrap(Box::new(move |e: web_sys::Event| {
-        // Only a click on the backdrop itself, not one that bubbled up from the card.
-        if e.target().as_ref() == Some(&scrim_node) {
+        if press_started_on_scrim.get() && e.target().as_ref() == Some(&scrim_node) {
             answer(&t3, false);
         }
     }) as Box<dyn FnMut(web_sys::Event)>);
@@ -1225,12 +1256,26 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
     cancel.set_onclick(Some(on_cancel.as_ref().unchecked_ref()));
     confirm.set_onclick(Some(on_confirm.as_ref().unchecked_ref()));
+    let _ = scrim.add_event_listener_with_callback("pointerdown", on_pointerdown.as_ref().unchecked_ref());
     let _ = scrim.add_event_listener_with_callback("click", on_backdrop.as_ref().unchecked_ref());
     let _ = doc.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
 
     let ok = rx.await.unwrap_or(false);
+    // A real click sends on `tx` and `confirm_modal` resumes through a microtask while the click
+    // is still bubbling toward the scrim — the spec runs a microtask checkpoint between listeners
+    // during a user-initiated dispatch. A listener removed during dispatch is not invoked, so
+    // detach every one of them (and null out the onclick handlers) before their closures drop
+    // below; otherwise a click still in flight calls into an already-dropped closure and
+    // wasm-bindgen throws "closure invoked recursively or after being dropped".
     let _ = doc.remove_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+    let _ = scrim.remove_event_listener_with_callback("click", on_backdrop.as_ref().unchecked_ref());
+    let _ = scrim.remove_event_listener_with_callback("pointerdown", on_pointerdown.as_ref().unchecked_ref());
+    cancel.set_onclick(None);
+    confirm.set_onclick(None);
     scrim.remove();
+    if let Some(focus_target) = previously_focused.and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
+        let _ = focus_target.focus();
+    }
     ok
 }
 
