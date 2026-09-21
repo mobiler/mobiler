@@ -197,10 +197,10 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         if let role { v = AnyView(v.accessibilityAddTraits(a11yTraits(role))) }
         return v
 
-    case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing):
+    case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing, let endLabel):
         return AnyView(LazyListView(
             children: children, onLoadMore: onLoadMore, loading: loading,
-            hasMore: hasMore, onRefresh: onRefresh, refreshing: refreshing, send: send
+            hasMore: hasMore, onRefresh: onRefresh, refreshing: refreshing, endLabel: endLabel, send: send
         ))
 
     // MARK: input / actions
@@ -862,6 +862,7 @@ private struct LazyListView: View {
     let hasMore: Bool
     let onRefresh: String?
     let refreshing: Bool
+    let endLabel: String?
     let send: (Action) -> Void
 
     var body: some View {
@@ -880,8 +881,8 @@ private struct LazyListView: View {
                 }
                 if loading {
                     ProgressView().frame(maxWidth: .infinity).padding(8)
-                } else if !hasMore && onLoadMore != nil {
-                    Text("End of list").font(.footnote).foregroundColor(.secondary)
+                } else if !hasMore && onLoadMore != nil, let endLabel {
+                    Text(endLabel).font(.footnote).foregroundColor(.secondary)
                         .frame(maxWidth: .infinity).padding(8)
                 }
             }
