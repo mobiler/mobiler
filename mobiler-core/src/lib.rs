@@ -8,10 +8,12 @@
 use std::marker::PhantomData;
 
 pub mod bunny;
+pub mod dialog;
 pub mod format;
 pub mod http;
 pub mod i18n;
 pub mod transfer;
+pub use dialog::{Confirm, Picker};
 pub use format::{Currency, Locale, Weekday};
 pub use http::{HttpHeader, HttpOutcome};
 pub use i18n::{Catalog, negotiate};
@@ -305,14 +307,14 @@ impl<E> Cx<E> {
         message: impl Into<String>,
         then: impl FnOnce(PluginResponse) -> E + Send + 'static,
     ) {
-        #[derive(Serialize)]
-        struct Confirm {
-            title: String,
-            message: String,
-        }
-        let input = serde_json::to_string(&Confirm { title: title.into(), message: message.into() })
-            .expect("serialize confirm");
-        self.plugin("dialog", "confirm", input, then);
+        self.confirm_with(Confirm::new(title, message), then);
+    }
+
+    /// As [`confirm`](Self::confirm), with the app's own button labels and an optional destructive
+    /// style — e.g. `Confirm::new("Cancel booking?", msg).confirm_label("Cancel booking")
+    /// .cancel_label("Keep it").destructive()`. Same response: `ok` is `true` only if confirmed.
+    pub fn confirm_with(&mut self, dialog: Confirm, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("dialog", "confirm", dialog.to_input(), then);
     }
 
     /// Let the user pick a date via the native date picker (built-in `datetime`
@@ -329,6 +331,16 @@ impl<E> Cx<E> {
     /// Resolves asynchronously (the user replies whenever).
     pub fn pick_time(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("datetime", "time", "", then);
+    }
+
+    /// As [`pick_date`](Self::pick_date), with the app's own title and button labels.
+    pub fn pick_date_with(&mut self, picker: Picker, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("datetime", "date", picker.to_input(), then);
+    }
+
+    /// As [`pick_time`](Self::pick_time), with the app's own title and button labels.
+    pub fn pick_time_with(&mut self, picker: Picker, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("datetime", "time", picker.to_input(), then);
     }
 
     /// Read the current local date-time (built-in `datetime` capability). The core is a
@@ -1719,6 +1731,58 @@ mod tests {
         assert_eq!(v["message"], "This cannot be undone.");
         // ok=true → confirmed branch; ok=false would take the else branch.
         assert!(matches!(then(PluginResponse { ok: true, output: "ok".into() }), Ev::Tap));
+    }
+
+    #[test]
+    fn cx_confirm_stays_byte_identical_on_the_wire() {
+        let mut cx = Cx::<Ev>::default();
+        cx.confirm("Delete?", "This cannot be undone.", |_| Ev::Tap);
+        let (call, _) = cx.requests.pop().unwrap();
+        assert_eq!(call.input, r#"{"title":"Delete?","message":"This cannot be undone."}"#);
+    }
+
+    #[test]
+    fn cx_confirm_with_sends_labels_and_destructive() {
+        let mut cx = Cx::<Ev>::default();
+        cx.confirm_with(
+            Confirm::new("Otkazati termin?", "Klijent dobija obaveštenje.")
+                .confirm_label("Otkaži termin")
+                .cancel_label("Ne, vrati se")
+                .destructive(),
+            |r| if r.ok { Ev::Tap } else { Ev::Open(0) },
+        );
+        let (call, then) = cx.requests.pop().unwrap();
+        assert_eq!((call.plugin.as_str(), call.op.as_str()), ("dialog", "confirm"));
+        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap();
+        assert_eq!(v["title"], "Otkazati termin?");
+        assert_eq!(v["message"], "Klijent dobija obaveštenje.");
+        assert_eq!(v["confirm_label"], "Otkaži termin");
+        assert_eq!(v["cancel_label"], "Ne, vrati se");
+        assert_eq!(v["destructive"], true);
+        assert!(matches!(then(PluginResponse::text(true, "ok")), Ev::Tap));
+        // Unset labels are omitted, not sent as null.
+        let mut cx = Cx::<Ev>::default();
+        cx.confirm_with(Confirm::new("T", "M").confirm_label("Go"), |_| Ev::Tap);
+        let v: serde_json::Value = serde_json::from_str(&cx.requests.pop().unwrap().0.input).unwrap();
+        assert!(v.get("cancel_label").is_none() && v.get("destructive").is_none());
+    }
+
+    #[test]
+    fn cx_pickers_keep_empty_input_and_with_variants_send_labels() {
+        let mut cx = Cx::<Ev>::default();
+        cx.pick_date(|_| Ev::Tap);
+        cx.pick_time(|_| Ev::Tap);
+        assert!(cx.requests.iter().all(|(c, _)| c.input.is_empty()));
+
+        let mut cx = Cx::<Ev>::default();
+        cx.pick_date_with(Picker::new().title("Izaberi datum").confirm_label("Izaberi").cancel_label("Otkaži"), |_| Ev::Tap);
+        cx.pick_time_with(Picker::new(), |_| Ev::Tap);
+        let (date, _) = &cx.requests[0];
+        assert_eq!((date.plugin.as_str(), date.op.as_str()), ("datetime", "date"));
+        let v: serde_json::Value = serde_json::from_str(&date.input).unwrap();
+        assert_eq!((v["title"].as_str(), v["confirm_label"].as_str(), v["cancel_label"].as_str()), (Some("Izaberi datum"), Some("Izaberi"), Some("Otkaži")));
+        let (time, _) = &cx.requests[1];
+        assert_eq!((time.op.as_str(), time.input.as_str()), ("time", "{}"));
     }
 
     // ---- widget builders ----
