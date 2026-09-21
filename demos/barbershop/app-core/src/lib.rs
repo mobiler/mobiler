@@ -7,15 +7,15 @@ use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role,
     map, marker_titled, with_markers,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
-    ChartSeries, ChartTick, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, MobilerApp, MobilerShell, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
+    ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
+    ImageShape, InputValue, MobilerApp, MobilerShell, Picker, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, button_with, calendar_in, caption, card, card_button, chip, column, divider, donut_chart,
     email_field, emphasis,
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
     rating_input, region_chart, rings_chart,
     pdf_view, row, scaffold, scroller, scroller_hinted, search_field, secure_field, segment, segmented, skeleton,
     spacer, split, stack, video_player, video_playlist, web_view,
-    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, toggle, with_captions, with_error,
+    stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, toggle, with_captions, with_end_label, with_error,
     with_fab, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
     TransferEvent,
 };
@@ -126,6 +126,10 @@ pub enum Msg {
     PickDay(u8),
     /// Swipe a booking row and tap "Cancel" (`SwipeAction`).
     CancelBooking(u32),
+    /// The destructive "Cancel next booking" button — asks first (`cx.confirm_with`).
+    AskCancelNext,
+    /// The result of the "Cancel next booking" confirm (`true` = confirmed).
+    CancelNextAnswered(bool),
 
     // --- Profile "Notes & devices": sqlite / speech / bluetooth ---
     /// Persist the note to on-device SQLite (`sqlite` plugin).
@@ -519,14 +523,20 @@ impl MobilerApp for FadeHouse {
             Msg::Book => {
                 model.pending_date = None;
                 model.pending_time = None;
-                cx.pick_date(|r| Msg::DatePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
+                cx.pick_date_with(
+                    Picker::new().title("Pick a day").confirm_label("Next").cancel_label("Not now"),
+                    |r| Msg::DatePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }),
+                );
             }
             Msg::DatePicked(date) => {
                 if date.is_empty() {
                     return; // cancelled the date picker
                 }
                 model.pending_date = Some(date);
-                cx.pick_time(|r| Msg::TimePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
+                cx.pick_time_with(
+                    Picker::new().title("Pick a time").confirm_label("Next").cancel_label("Back"),
+                    |r| Msg::TimePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }),
+                );
             }
             Msg::TimePicked(time) => {
                 if time.is_empty() {
@@ -535,7 +545,12 @@ impl MobilerApp for FadeHouse {
                 }
                 model.pending_time = Some(time.clone());
                 let date = model.pending_date.clone().unwrap_or_default();
-                cx.confirm("Confirm booking", format!("Book your visit for {date} at {time}?"), |r| Msg::BookingDone(r.ok));
+                cx.confirm_with(
+                    Confirm::new("Confirm booking", format!("Book your visit for {date} at {time}?"))
+                        .confirm_label("Book it")
+                        .cancel_label("Not yet"),
+                    |r| Msg::BookingDone(r.ok),
+                );
             }
             Msg::BookingDone(ok) => {
                 if ok {
@@ -741,6 +756,21 @@ impl MobilerApp for FadeHouse {
                 let i = i as usize;
                 if i < model.bookings.len() {
                     let b = model.bookings.remove(i);
+                    cx.toast(format!("Cancelled {b}"));
+                }
+            }
+            // The destructive "Cancel next booking" button asks first, naming the action on the
+            // confirm button (cx.confirm_with) instead of a generic OK / Cancel.
+            Msg::AskCancelNext => cx.confirm_with(
+                Confirm::new("Cancel your next booking?", "Your barber will be notified.")
+                    .confirm_label("Cancel booking")
+                    .cancel_label("Keep it")
+                    .destructive(),
+                |r| Msg::CancelNextAnswered(r.ok),
+            ),
+            Msg::CancelNextAnswered(ok) => {
+                if ok && !model.bookings.is_empty() {
+                    let b = model.bookings.remove(0);
                     cx.toast(format!("Cancelled {b}"));
                 }
             }
@@ -1495,7 +1525,7 @@ fn bookings_screen(model: &Model) -> Widget {
             button("Reschedule", ButtonStyle::Tonal, Msg::Book),
             button_with("No-show", ButtonStyle::Outlined, Msg::CancelBooking(0), ButtonOpts::default().tone(Tone::Danger)),
         ]),
-        button_with("Cancel next booking", ButtonStyle::Filled, Msg::CancelBooking(0), ButtonOpts::default().tone(Tone::Danger).icon(Icon::Close).wide()),
+        button_with("Cancel next booking", ButtonStyle::Filled, Msg::AskCancelNext, ButtonOpts::default().tone(Tone::Danger).icon(Icon::Close).wide()),
     ])
 }
 
@@ -1818,10 +1848,13 @@ fn feed_card(model: &Model) -> Widget {
         .iter()
         .map(|row| card(text(row.clone()), CardStyle::Filled))
         .collect();
-    let list = with_refresh(
-        lazy_list(items, false, model.feed.len() < 60, Msg::FeedLoadMore),
-        model.feed_refreshing,
-        Msg::FeedRefresh,
+    let list = with_end_label(
+        with_refresh(
+            lazy_list(items, false, model.feed.len() < 60, Msg::FeedLoadMore),
+            model.feed_refreshing,
+            Msg::FeedRefresh,
+        ),
+        "You're all caught up",
     );
     card(
         column(vec![
@@ -2268,5 +2301,53 @@ mod test {
             app.view(&model),
             Widget::Scaffold { theme: Some(Theme { density: Density::Large, .. }), .. }
         ));
+    }
+
+    // Drives the full shell so the test sees the plugin requests the update emits.
+    fn dialog_inputs(msg: Msg) -> Vec<(String, String, serde_json::Value)> {
+        use crux_core::App as _;
+        let shell = App::default();
+        let mut model = Model::default();
+        let mut cmd = shell.update(mobiler_core::Action::Fired { token: serde_json::to_string(&msg).unwrap() }, &mut model);
+        cmd.effects()
+            .filter_map(|e| match e {
+                mobiler_core::Effect::Plugin(r) => Some((
+                    r.operation.plugin.clone(),
+                    r.operation.op.clone(),
+                    serde_json::from_str(&r.operation.input).unwrap_or(serde_json::Value::Null),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cancel_next_asks_with_destructive_labels() {
+        let calls = dialog_inputs(Msg::AskCancelNext);
+        assert_eq!(calls.len(), 1);
+        let (plugin, op, v) = &calls[0];
+        assert_eq!((plugin.as_str(), op.as_str()), ("dialog", "confirm"));
+        assert_eq!(v["confirm_label"], "Cancel booking");
+        assert_eq!(v["cancel_label"], "Keep it");
+        assert_eq!(v["destructive"], true);
+    }
+
+    #[test]
+    fn cancel_next_answer_removes_only_when_confirmed() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        let before = model.bookings.len();
+        app.update(Msg::CancelNextAnswered(false), &mut model, &mut cx);
+        assert_eq!(model.bookings.len(), before);
+        app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
+        assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn booking_flow_pickers_carry_labels() {
+        let calls = dialog_inputs(Msg::Book);
+        let (plugin, op, v) = &calls[0];
+        assert_eq!((plugin.as_str(), op.as_str()), ("datetime", "date"));
+        assert_eq!(v["title"], "Pick a day");
     }
 }
