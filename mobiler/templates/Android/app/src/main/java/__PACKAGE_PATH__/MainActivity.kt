@@ -169,6 +169,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.CircularProgressIndicator
@@ -317,6 +320,37 @@ fun App(core: Core = viewModel()) {
                 }
             }
         }
+    }
+}
+
+/** Local editing state for a controlled text field. The field owns its text, cursor and
+ *  selection; the app's rendered `value` is adopted only when it isn't an echo of an edit the
+ *  field itself sent (a current or a late one), so a delayed render can never rewind the text
+ *  or move the cursor. An app-side change (clear, formatting) is adopted, cursor at the end. */
+private class FieldSync(initial: String) {
+    var field by mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
+    private val pending = ArrayDeque<String>()
+    private var lastApp = initial
+
+    fun onEdit(next: TextFieldValue, send: (String) -> Unit) {
+        val changed = next.text != field.text
+        field = next
+        if (changed) {
+            pending.addLast(next.text)
+            send(next.text)
+        }
+    }
+
+    fun onAppValue(v: String) {
+        if (v == lastApp) return
+        lastApp = v
+        val echo = pending.lastIndexOf(v)
+        if (echo >= 0) {
+            repeat(echo + 1) { pending.removeFirst() }
+            return
+        }
+        pending.clear()
+        if (v != field.text) field = TextFieldValue(v, TextRange(v.length))
     }
 }
 
@@ -1038,9 +1072,11 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 FieldKind.SECURE -> KeyboardType.Password
                 else -> KeyboardType.Text
             }
+            val sync = remember(widget.id) { FieldSync(widget.value) }
+            SideEffect { sync.onAppValue(widget.value) }
             OutlinedTextField(
-                value = widget.value,
-                onValueChange = { send(Action.Input(widget.id, InputValue.Text(it))) },
+                value = sync.field,
+                onValueChange = { sync.onEdit(it) { t -> send(Action.Input(widget.id, InputValue.Text(t))) } },
                 placeholder = { Text(widget.placeholder) },
                 singleLine = !multiline,
                 minLines = if (multiline) 3 else 1,
@@ -1052,15 +1088,19 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             )
         }
 
-        is Widget.SearchField -> OutlinedTextField(
-            value = widget.value,
-            onValueChange = { send(Action.Input(widget.id, InputValue.Text(it))) },
-            placeholder = { Text(widget.placeholder) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            singleLine = true,
-            shape = RoundedCornerShape(50),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        is Widget.SearchField -> {
+            val sync = remember(widget.id) { FieldSync(widget.value) }
+            SideEffect { sync.onAppValue(widget.value) }
+            OutlinedTextField(
+                value = sync.field,
+                onValueChange = { sync.onEdit(it) { t -> send(Action.Input(widget.id, InputValue.Text(t))) } },
+                placeholder = { Text(widget.placeholder) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                shape = RoundedCornerShape(50),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         is Widget.Segmented -> SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             widget.segments.forEachIndexed { i, seg ->
