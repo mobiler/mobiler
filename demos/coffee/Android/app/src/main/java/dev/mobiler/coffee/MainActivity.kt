@@ -326,16 +326,20 @@ fun App(core: Core = viewModel()) {
 /** Local editing state for a controlled text field. The field owns its text, cursor and
  *  selection; the app's rendered `value` is adopted only when it isn't an echo of an edit the
  *  field itself sent (a current or a late one), so a delayed render can never rewind the text
- *  or move the cursor. An app-side change (clear, formatting) is adopted, cursor at the end. */
+ *  or move the cursor. An app-side change — clear, formatting, or rejecting/reformatting an
+ *  edit (e.g. max length, digits only) — is adopted, cursor at the end. */
 private class FieldSync(initial: String) {
     var field by mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
     private val pending = ArrayDeque<String>()
-    private var lastApp = initial
+    private var lastApp: String? = initial
 
     fun onEdit(next: TextFieldValue, send: (String) -> Unit) {
         val changed = next.text != field.text
         field = next
         if (changed) {
+            // The first render after an edit is always examined, so a rejected keystroke
+            // (an app value that isn't pending) is adopted — i.e. reverted.
+            lastApp = null
             pending.addLast(next.text)
             send(next.text)
         }
@@ -344,6 +348,9 @@ private class FieldSync(initial: String) {
     fun onAppValue(v: String) {
         if (v == lastApp) return
         lastApp = v
+        // lastIndexOf drops every older entry on a match; a repeated text (a, "", a) can
+        // make a later late render look like an app change for one frame, while indexOf
+        // would let coalesced renders leave stale entries that swallow a later app clear.
         val echo = pending.lastIndexOf(v)
         if (echo >= 0) {
             repeat(echo + 1) { pending.removeFirst() }
