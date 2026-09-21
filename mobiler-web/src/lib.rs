@@ -862,13 +862,7 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         };
     }
     if call.plugin == "dialog" && call.op == "confirm" {
-        let v: serde_json::Value = serde_json::from_str(&call.input).unwrap_or(serde_json::Value::Null);
-        let title = v.get("title").and_then(serde_json::Value::as_str).unwrap_or("");
-        let message = v.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
-        let prompt = if title.is_empty() { message.to_string() } else { format!("{title}\n\n{message}") };
-        let ok = web_sys::window()
-            .and_then(|w| w.confirm_with_message(&prompt).ok())
-            .unwrap_or(false);
+        let ok = confirm_modal(ConfirmAsk::parse(&call.input)).await;
         return PluginResponse::text(ok, if ok { "ok" } else { "cancel" });
     }
     if call.plugin != "http" {
@@ -1124,6 +1118,120 @@ fn show_toast(text: &str) {
     el.set_text_content(Some(text));
     let _ = body.append_child(&el);
     gloo_timers::callback::Timeout::new(2600, move || el.remove()).forget();
+}
+
+/// What the `dialog`/`confirm` request asks for (see `mobiler_core::Confirm`); missing fields keep
+/// the defaults, so a plain `cx.confirm` shows OK / Cancel.
+struct ConfirmAsk {
+    title: String,
+    message: String,
+    confirm_label: String,
+    cancel_label: String,
+    destructive: bool,
+}
+
+impl ConfirmAsk {
+    fn parse(input: &str) -> Self {
+        let v: serde_json::Value = serde_json::from_str(input).unwrap_or(serde_json::Value::Null);
+        let s = |k: &str, d: &str| v.get(k).and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).unwrap_or(d).to_string();
+        Self {
+            title: s("title", ""),
+            message: s("message", ""),
+            confirm_label: s("confirm_label", "OK"),
+            cancel_label: s("cancel_label", "Cancel"),
+            destructive: v.get("destructive").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        }
+    }
+}
+
+/// The web confirm dialog: a modal card on `<body>` that resolves `true` on the confirm button and
+/// `false` on the cancel button, Escape or a click on the backdrop. Enter activates the focused
+/// button (focus starts on cancel for a destructive dialog, else on confirm). Replaces
+/// `window.confirm`, which can't be relabelled or styled.
+async fn confirm_modal(ask: ConfirmAsk) -> bool {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return false };
+    let Some(body) = doc.body() else { return false };
+    let el = |tag: &str, class: &str| -> Option<web_sys::HtmlElement> {
+        let e = doc.create_element(tag).ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
+        e.set_class_name(class);
+        Some(e)
+    };
+    let confirm_class = if ask.destructive { "btn btn-filled btn-danger" } else { "btn btn-filled" };
+    let (Some(scrim), Some(card), Some(message), Some(actions), Some(cancel), Some(confirm)) = (
+        el("div", "confirm-scrim"),
+        el("div", "confirm-card"),
+        el("p", "confirm-message"),
+        el("div", "confirm-actions"),
+        el("button", "btn btn-text"),
+        el("button", confirm_class),
+    ) else {
+        return false;
+    };
+
+    // Inherit the scaffold's theme: brand vars (inline style) + dark / Large-density classes.
+    if let Some(scaffold) = doc.query_selector(".scaffold").ok().flatten() {
+        if let Some(style) = scaffold.get_attribute("style") {
+            let _ = scrim.set_attribute("style", &style);
+        }
+        let classes = scaffold.class_list();
+        for c in ["theme-dark", "density-large"] {
+            if classes.contains(c) {
+                let _ = scrim.class_list().add_1(c);
+            }
+        }
+    }
+
+    let _ = card.set_attribute("role", "alertdialog");
+    let _ = card.set_attribute("aria-modal", "true");
+    if !ask.title.is_empty() {
+        if let Some(title) = el("div", "confirm-title") {
+            title.set_text_content(Some(&ask.title));
+            let _ = card.append_child(&title);
+        }
+    }
+    message.set_text_content(Some(&ask.message));
+    cancel.set_text_content(Some(&ask.cancel_label));
+    confirm.set_text_content(Some(&ask.confirm_label));
+    let _ = actions.append_child(&cancel);
+    let _ = actions.append_child(&confirm);
+    let _ = card.append_child(&message);
+    let _ = card.append_child(&actions);
+    let _ = scrim.append_child(&card);
+    let _ = body.append_child(&scrim);
+    let _ = if ask.destructive { cancel.focus() } else { confirm.focus() };
+
+    let (tx, rx) = futures_channel::oneshot::channel::<bool>();
+    let tx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
+    let answer = move |tx: &std::rc::Rc<std::cell::RefCell<Option<futures_channel::oneshot::Sender<bool>>>>, ok: bool| {
+        if let Some(tx) = tx.borrow_mut().take() {
+            let _ = tx.send(ok);
+        }
+    };
+    let (t1, t2, t3, t4) = (tx.clone(), tx.clone(), tx.clone(), tx.clone());
+    let on_cancel = Closure::wrap(Box::new(move || answer(&t1, false)) as Box<dyn FnMut()>);
+    let on_confirm = Closure::wrap(Box::new(move || answer(&t2, true)) as Box<dyn FnMut()>);
+    let scrim_node: web_sys::EventTarget = scrim.clone().into();
+    let on_backdrop = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        // Only a click on the backdrop itself, not one that bubbled up from the card.
+        if e.target().as_ref() == Some(&scrim_node) {
+            answer(&t3, false);
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    let on_key = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+        if e.key() == "Escape" {
+            answer(&t4, false);
+        }
+    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+    cancel.set_onclick(Some(on_cancel.as_ref().unchecked_ref()));
+    confirm.set_onclick(Some(on_confirm.as_ref().unchecked_ref()));
+    let _ = scrim.add_event_listener_with_callback("click", on_backdrop.as_ref().unchecked_ref());
+    let _ = doc.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+
+    let ok = rx.await.unwrap_or(false);
+    let _ = doc.remove_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+    scrim.remove();
+    ok
 }
 
 // ---------------- Widget → DOM ----------------

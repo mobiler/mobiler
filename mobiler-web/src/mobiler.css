@@ -115,6 +115,14 @@ body {
 .sheet-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
 @keyframes sheet-rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
+/* Confirm dialog (cx.confirm / cx.confirm_with) — the web twin of the native alert. Mounted on
+   <body>; the scrim carries the scaffold's theme vars + theme-dark/density-large classes. */
+.confirm-scrim { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,0.45); }
+.confirm-card { width: 100%; max-width: 360px; background: var(--surface); color: var(--ink); border-radius: var(--radius); padding: 20px 20px 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.3); font-family: var(--font); }
+.confirm-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+.confirm-message { margin: 0 0 16px; color: var(--muted); }
+.confirm-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
 .card {
   border-radius: var(--radius);
   padding: 14px;
