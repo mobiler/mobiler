@@ -227,8 +227,8 @@ class DialogPlugin : MobilerPlugin {
                 request = ConfirmRequest(
                     title = obj.optString("title"),
                     message = obj.optString("message"),
-                    confirmLabel = obj.optString("confirm_label").ifEmpty { ActiveLabels.current?.ok ?: "OK" },
-                    cancelLabel = obj.optString("cancel_label").ifEmpty { ActiveLabels.current?.cancel ?: "Cancel" },
+                    confirmLabel = obj.optString("confirm_label").ifEmpty { ActiveLabels.current?.ok?.takeIf { it.isNotEmpty() } ?: "OK" },
+                    cancelLabel = obj.optString("cancel_label").ifEmpty { ActiveLabels.current?.cancel?.takeIf { it.isNotEmpty() } ?: "Cancel" },
                     destructive = obj.optBoolean("destructive", false),
                 ) { ok ->
                     if (ConfirmHost.pending === request) ConfirmHost.pending = null

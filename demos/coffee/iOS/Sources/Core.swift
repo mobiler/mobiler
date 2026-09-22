@@ -36,6 +36,7 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
+        if case let .scaffold(_, _, _, _, _, _, _, _, _, _, _, _, labels) = view { ActiveLabels.current = labels } else { ActiveLabels.current = nil }
         // Restore persisted state, then fire Start so the app can load initial data.
         let saved = StoragePlugin.load()
         if !saved.isEmpty { update(.restore(data: saved)) }
@@ -52,6 +53,7 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
+                if case let .scaffold(_, _, _, _, _, _, _, _, _, _, _, _, labels) = view { ActiveLabels.current = labels } else { ActiveLabels.current = nil }
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.
@@ -362,21 +364,28 @@ enum DialogPlugin {
         let message = obj?["message"] as? String ?? ""
         // Optional app labels; a plain `cx.confirm` sends none and falls back to the scaffold's
         // ShellLabels, then OK / Cancel.
-        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (ActiveLabels.current?.ok ?? "OK")
-        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (ActiveLabels.current?.cancel ?? "Cancel")
+        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ((ActiveLabels.current?.ok).flatMap { $0.isEmpty ? nil : $0 } ?? "OK")
+        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ((ActiveLabels.current?.cancel).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel")
         let destructive = obj?["destructive"] as? Bool ?? false
 
         // One confirm at a time: a new confirm dismisses the open one and answers it ok:false
         // before we even look for a view controller to present the new one from — unless it's
         // already being dismissed (the user just tapped it), in which case its own handler is
         // about to answer it, so we leave it alone.
+        //
+        // Capture the outgoing alert's own presenter BEFORE dismissing it: UIKit doesn't clear
+        // `presentedViewController` synchronously, so a `topViewController()` taken right after
+        // `dismiss(animated:false)` can still resolve to the alert that's on its way out. Present
+        // the new alert from this captured hint instead of trusting that race.
+        var presenterHint: UIViewController?
         if let prev = openConfirm, !prev.alert.isBeingDismissed {
+            presenterHint = prev.alert.presentingViewController
             openConfirm = nil
-            prev.alert.presentingViewController?.dismiss(animated: false)
+            presenterHint?.dismiss(animated: false)
             prev.answer(PluginResponse(ok: false, output: "cancel"))
         }
 
-        guard let presenter = topViewControllerForConfirm() else {
+        guard let presenter = presenterHint ?? topViewControllerForConfirm() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
@@ -449,10 +458,10 @@ enum DateTimePlugin {
 
             var resumed = false
             func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
-            alert.addAction(UIAlertAction(title: label("cancel_label", ActiveLabels.current?.cancel ?? "Cancel"), style: .cancel) { _ in
+            alert.addAction(UIAlertAction(title: label("cancel_label", (ActiveLabels.current?.cancel).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel"), style: .cancel) { _ in
                 done(PluginResponse(ok: false, output: "cancel"))
             })
-            alert.addAction(UIAlertAction(title: label("confirm_label", ActiveLabels.current?.done ?? "Done"), style: .default) { _ in
+            alert.addAction(UIAlertAction(title: label("confirm_label", (ActiveLabels.current?.done).flatMap { $0.isEmpty ? nil : $0 } ?? "Done"), style: .default) { _ in
                 done(PluginResponse(ok: true, output: fmt.string(from: picker.date)))
             })
             // iPad presents action sheets in a popover, which needs a source.
