@@ -70,7 +70,7 @@ The same precedence applies as in Release 3: the scaffold label, then the defaul
   - The feed card moves off Profile.
   - Barbershop also sets `.pdf_error(…)`, `.pdf_title(…)` and `.web_title(…)` in its `ShellLabels`.
 - **Web (CDP):**
-  - On the Feed tab, the list's bottom is within 2px of the top of the tab bar or the viewport bottom.
+  - On the Feed tab, the list's bottom reaches the top of the tab bar, or the viewport bottom minus the scaffold body's standard content padding (web `--pad`, 14px; iOS 16pt; Android 0) — that inset was accepted.
   - The page itself doesn't scroll (`scrollHeight == clientHeight` on the document).
   - The list scrolls, and "Show more" loads more rows.
   - Profile's iframes have the app's `title`s.

@@ -282,7 +282,7 @@ fn body_fill_index(body: &Widget) -> Option<Option<usize>> {
 ### Task 7: Runtime acceptance (no commit)
 
 - [ ] **Web (barbershop, CDP):**
-  1. Feed tab: `document.scrollingElement.scrollHeight <= clientHeight + 1`, so the page doesn't scroll. The `.lazylist-fill` bottom is within 2px of the `.tabbar` top, or of the viewport bottom on the wide layout. Check at 412×915 **and** at 1200×900 for the rail layout.
+  1. Feed tab: `document.scrollingElement.scrollHeight <= clientHeight + 1`, so the page doesn't scroll. The `.lazylist-fill` bottom reaches the `.tabbar` top, or the viewport bottom minus the scaffold body's standard content padding (web `--pad`, 14px; iOS 16pt; Android 0) on the wide layout — that inset was accepted. Check at 412×915 **and** at 1200×900 for the rail layout.
   2. Scroll the list to the end and click "Show more" repeatedly. Rows load, and "You're all caught up" appears.
   3. Profile: the PDF iframe `title` is "Shop price list", and the web iframe title is "Shop website".
   4. Home and Bookings: the page still scrolls as before (`scrollHeight > clientHeight`) and no element has `lazylist-fill`.

@@ -1233,7 +1233,7 @@ private struct ScaffoldView: View {
             // itself. Every other scaffold renders exactly as before.
             Group {
                 if let fillIndex = bodyFillIndex(content) {
-                    VStack(alignment: .leading, spacing: isLargeDensity() ? 12 : 6) {
+                    VStack(alignment: .leading, spacing: (fillIndex >= 0 && isLargeDensity()) ? 12 : 6) {
                         if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
                         if fillIndex == -1 {
                             render(self.content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
