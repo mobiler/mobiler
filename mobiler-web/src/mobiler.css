@@ -529,7 +529,19 @@ textarea.field { resize: vertical; font-family: inherit; }
     padding: 12px 14px;
   }
   .scaffold:has(.tabbar) > .tabbar .tab.selected { background: var(--accent-soft); }
+
+  /* Fill mode in the rail layout: `.scaffold.scaffold-fill` below already bounds the grid to
+     100dvh (that rule isn't media-scoped), but a grid item's automatic minimum size would
+     otherwise keep the body row from shrinking below its content — same fix as the flex case. */
+  .scaffold:has(.tabbar) > .scaffold-body { min-height: 0; }
 }
+
+/* LazyList fill — the scaffold body stops page-scrolling and the chosen list takes the rest. */
+.scaffold.scaffold-fill { height: 100dvh; min-height: 0; }
+.scaffold-fill > .scaffold-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.scaffold-fill > .scaffold-body > .col { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.scaffold-fill > .scaffold-body > .lazylist-fill,
+.scaffold-fill > .scaffold-body > .col > .lazylist-fill { flex: 1; min-height: 0; max-height: none; }
 
 /* ---- Density::Large — bigger controls for busy hands (control sizes only; text follows the browser). ---- */
 .density-large .row, .density-large .col { gap: 12px; }
