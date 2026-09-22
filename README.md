@@ -302,6 +302,7 @@ mobiler doctor               # check your host has everything
 mobiler new myapp            # scaffold an app (Rust core + generic native shells)
 cd myapp
 mobiler dev                  # build core → generate types → build APK → install + launch
+#   mobiler dev --device <serial>   # pick one when several devices are connected (or ANDROID_SERIAL)
 #   mobiler watch            # …and rebuild on every change
 ```
 
