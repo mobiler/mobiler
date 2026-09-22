@@ -337,9 +337,9 @@ enum ToastPlugin {
 enum DialogPlugin {
     /// The confirm alert currently on screen and how to answer it. A new confirm answers it
     /// `ok: false` and dismisses it first — one confirm at a time on every shell.
-    /// `nonisolated(unsafe)` (like `ActiveTheme`/`ActiveLabels`): it's also touched from the
-    /// `withCheckedContinuation` body and the alert-action handlers, which the compiler treats as
-    /// nonisolated but which always run synchronously on the main thread.
+    /// `nonisolated(unsafe)` (like `ActiveTheme`/`ActiveLabels`): it's touched from the nested
+    /// `func done` below (called from the alert-action handlers), which the compiler treats as
+    /// nonisolated — though it always runs on the main thread.
     nonisolated(unsafe) private static var openConfirm: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
 
     /// `topViewController()`, but walking past any `UIAlertController` that's already

@@ -2063,20 +2063,16 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // even if other `fill: true` lists exist elsewhere. `render` is a plain function, so
             // the whole subtree below builds synchronously within this call — the marker is only
             // ever visible during it.
-            if let Some(idx) = fill_index {
-                let target: *const Widget = match idx {
-                    None => &**body as *const Widget,
-                    Some(i) => match &**body {
-                        Widget::Column { children } => &children[i] as *const Widget,
-                        _ => unreachable!("body_fill_index only returns Some(Some(_)) for a Column body"),
-                    },
-                };
-                FILL_TARGET.with(|t| *t.borrow_mut() = Some(target));
-            }
+            let target = fill_index.map(|idx| match idx {
+                None => &**body as *const Widget,
+                Some(i) => match &**body {
+                    Widget::Column { children } => &children[i] as *const Widget,
+                    _ => unreachable!("body_fill_index only returns Some(Some(_)) for a Column body"),
+                },
+            });
+            let prev = FILL_TARGET.with(|t| t.replace(target));
             let (title, body) = (title.clone(), render(body, send));
-            if fill_index.is_some() {
-                FILL_TARGET.with(|t| *t.borrow_mut() = None);
-            }
+            FILL_TARGET.with(|t| *t.borrow_mut() = prev);
             view! {
                 <div class=class style=theme_style>
                     <div class="topbar">
@@ -2118,9 +2114,10 @@ thread_local! {
     static ACTIVE_LABELS: std::cell::RefCell<Option<ShellLabels>> = const { std::cell::RefCell::new(None) };
 
     /// The address of the scaffold body's fill `LazyList` (see [`body_fill_index`]), set around the
-    /// synchronous `render(body, ...)` call in the Scaffold arm and cleared right after. `render` is
-    /// a plain function — the whole tree is built eagerly within that call — so the LazyList arm
-    /// sees this set only while rendering the marked widget's subtree.
+    /// synchronous `render(body, ...)` call in the Scaffold arm and restored to its previous value
+    /// right after — so a nested fill Scaffold doesn't wipe an outer marker. `render` is a plain
+    /// function — the whole tree is built eagerly within that call — so the LazyList arm sees this
+    /// set only while rendering the marked widget's subtree.
     static FILL_TARGET: std::cell::RefCell<Option<*const Widget>> = const { std::cell::RefCell::new(None) };
 }
 
