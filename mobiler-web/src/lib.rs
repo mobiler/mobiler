@@ -211,13 +211,16 @@ where
         <div class="app">
             {move || {
                 let widget = view.get();
-                // The Scaffold arm sets ACTIVE_LABELS from its own `labels`; when the root isn't a
-                // Scaffold there's no arm to do that, so clear the stash here (else a previous
-                // screen's labels would leak into this one's un-scaffolded output, e.g. a bare
-                // confirm shown while navigating).
-                if !matches!(widget, Widget::Scaffold { .. }) {
-                    ACTIVE_LABELS.with(|l| *l.borrow_mut() = None);
-                }
+                // Stash labels from the root Scaffold only. A Scaffold nested inside a sheet,
+                // body or Split (rendered by the Scaffold arm below) must not overwrite the
+                // root's labels — only the root scaffold owns the shell chrome. Code that never
+                // sees the view (the confirm modal) reads this stash.
+                ACTIVE_LABELS.with(|l| {
+                    *l.borrow_mut() = match &widget {
+                        Widget::Scaffold { labels, .. } => labels.clone(),
+                        _ => None,
+                    };
+                });
                 render(&widget, &send_for_view)
             }}
         </div>
@@ -1188,16 +1191,6 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
     use wasm_bindgen::{closure::Closure, JsCast};
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return false };
     let Some(body) = doc.body() else { return false };
-    // Supersede any confirm that's still open: it resolves `false`, its teardown won't restore
-    // focus (see below), and this dialog inherits its focus-return target — so the target always
-    // traces back to wherever focus was before the first dialog in the chain opened.
-    let previously_focused = OPEN_CONFIRM.with(|c| c.borrow_mut().take()).map(|old| {
-        old.superseded.set(true);
-        if let Some(tx) = old.tx.borrow_mut().take() {
-            let _ = tx.send(false);
-        }
-        old.restore_to
-    }).unwrap_or_else(|| doc.active_element());
     let el = |tag: &str, class: &str| -> Option<web_sys::HtmlElement> {
         let e = doc.create_element(tag).ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
         e.set_class_name(class);
@@ -1256,6 +1249,20 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
     let _ = actions.append_child(&confirm);
     let _ = card.append_child(&actions);
     let _ = scrim.append_child(&card);
+
+    // Supersede any confirm that's still open, now that this one's elements exist and are about
+    // to mount: it resolves `false`, its teardown won't restore focus (see below), and this
+    // dialog inherits its focus-return target — so the target always traces back to wherever
+    // focus was before the first dialog in the chain opened. Doing this only here (not before
+    // element creation) means an early return above leaves the old dialog untouched.
+    let previously_focused = OPEN_CONFIRM.with(|c| c.borrow_mut().take()).map(|old| {
+        old.superseded.set(true);
+        if let Some(tx) = old.tx.borrow_mut().take() {
+            let _ = tx.send(false);
+        }
+        old.restore_to
+    }).unwrap_or_else(|| doc.active_element());
+
     let _ = body.append_child(&scrim);
     let _ = if ask.destructive { cancel.focus() } else { confirm.focus() };
 
@@ -1947,9 +1954,11 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels } => {
-            // Stash the scaffold's labels for code that never sees the view (the confirm modal).
-            ACTIVE_LABELS.with(|l| *l.borrow_mut() = labels.clone());
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _ } => {
+            // ACTIVE_LABELS is stashed once at the root render closure (from the root widget's
+            // own `labels`), not here — a Scaffold nested in a sheet, body or Split must not
+            // overwrite the root's labels. This arm's own aria-label reads below still see the
+            // root labels, since the stash is set before render() is called.
             let back_aria = shell_label(|l| l.back.clone(), "Back");
             let back_btn = back.clone().map(|token| {
                 let send = send.clone();
