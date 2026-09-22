@@ -1728,7 +1728,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         // button (while `on_refresh`), and a bottom "Load more" button (while `has_more && !loading`)
         // / loading bar / the app's end caption (if set). iOS/Android do true pull + scroll-near-end
         // detection.
-        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label } => {
+        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label, fill: _ } => {
             let kids = render_all(children, send);
             let refresh_text = format!("↻ {}", shell_label(|l| l.refresh.clone(), "Refresh"));
             let refresh_btn = on_refresh.clone().map(|token| {
