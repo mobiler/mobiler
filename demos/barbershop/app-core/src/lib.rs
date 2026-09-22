@@ -8,7 +8,7 @@ use mobiler_core::{
     map, marker_titled, with_markers,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, MobilerApp, MobilerShell, Picker, PluginResponse, Rgb, Spacing, Theme, Tone, Widget, avatar_status,
+    ImageShape, InputValue, MobilerApp, MobilerShell, Picker, PluginResponse, Rgb, ShellLabels, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, button_with, calendar_in, caption, card, card_button, chip, column, divider, donut_chart,
     email_field, emphasis,
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
@@ -16,7 +16,7 @@ use mobiler_core::{
     pdf_view, row, scaffold, scroller, scroller_hinted, search_field, secure_field, segment, segmented, skeleton,
     spacer, split, stack, video_player, video_playlist, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, toggle, with_captions, with_end_label, with_error,
-    with_fab, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
+    with_fab, with_labels, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
     TransferEvent,
 };
 use mobiler_core::format::{self, Currency, Locale};
@@ -68,6 +68,11 @@ pub enum Msg {
     TimePicked(String),
     /// The result of the final confirm dialog (`true` = confirmed).
     BookingDone(bool),
+    /// The "Reschedule" button on Bookings — a plain `cx.confirm` (no per-call labels), so the
+    /// scaffold's `ShellLabels.ok`/`cancel` show up on the dialog buttons.
+    AskReschedule,
+    /// The result of the reschedule confirm (`true` = confirmed; behaves like `Msg::Book`).
+    RescheduleAnswered(bool),
 
     // --- Native capability demos (free bundled plugins via `mobiler plugin add`) ---
     /// Pick a client for the booking from the system contact picker (`contacts` plugin).
@@ -523,6 +528,8 @@ impl MobilerApp for FadeHouse {
             Msg::Book => {
                 model.pending_date = None;
                 model.pending_time = None;
+                // Keeps its own per-call "Next" (overriding the scaffold's `done`) to show
+                // precedence: a label on the specific call always wins over `ShellLabels`.
                 cx.pick_date_with(
                     Picker::new().title("Pick a day").confirm_label("Next").cancel_label("Not now"),
                     |r| Msg::DatePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }),
@@ -533,8 +540,10 @@ impl MobilerApp for FadeHouse {
                     return; // cancelled the date picker
                 }
                 model.pending_date = Some(date);
+                // No per-call confirm_label here: the scaffold's `ShellLabels.done` ("Pick")
+                // shows on the accept button instead.
                 cx.pick_time_with(
-                    Picker::new().title("Pick a time").confirm_label("Next").cancel_label("Back"),
+                    Picker::new().title("Pick a time").cancel_label("Back"),
                     |r| Msg::TimePicked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }),
                 );
             }
@@ -560,6 +569,14 @@ impl MobilerApp for FadeHouse {
                 }
                 model.pending_date = None;
                 model.pending_time = None;
+            }
+            // A plain cx.confirm — no per-call labels, so the buttons come from the scaffold's
+            // ShellLabels ("Sure" / "No thanks") in the shell.
+            Msg::AskReschedule => cx.confirm("Reschedule?", "We'll open the booking flow.", |r| Msg::RescheduleAnswered(r.ok)),
+            Msg::RescheduleAnswered(ok) => {
+                if ok {
+                    self.update(Msg::Book, model, cx);
+                }
             }
 
             // --- Native capability demos ---
@@ -1183,7 +1200,16 @@ impl MobilerApp for FadeHouse {
         if let Some(s) = model.open_service.and_then(|i| model.services.get(i)) {
             root = with_sheet(root, format!("Book {}", s.name), booking_sheet(s, model.user_rating, &model.client), Msg::CloseSheet);
         }
-        with_theme(root, theme)
+        // App-wide shell text: Fade House's own wording for text the shells draw themselves
+        // (back buttons, web list controls, and the confirm/picker defaults below), in place
+        // of the shells' English defaults.
+        with_theme(
+            with_labels(
+                root,
+                ShellLabels::new().back("Back to shop").load_more("Show more").refresh("Reload").ok("Sure").cancel("No thanks").done("Pick"),
+            ),
+            theme,
+        )
     }
 }
 
@@ -1522,7 +1548,7 @@ fn bookings_screen(model: &Model) -> Widget {
         // Main action: wide + icon. Secondary: tonal. Destructive: danger tone (outlined + filled).
         button_with("Book now", ButtonStyle::Filled, Msg::Book, ButtonOpts::default().icon(Icon::Calendar).wide()),
         row(vec![
-            button("Reschedule", ButtonStyle::Tonal, Msg::Book),
+            button("Reschedule", ButtonStyle::Tonal, Msg::AskReschedule),
             button_with("No-show", ButtonStyle::Outlined, Msg::CancelBooking(0), ButtonOpts::default().tone(Tone::Danger)),
         ]),
         button_with("Cancel next booking", ButtonStyle::Filled, Msg::AskCancelNext, ButtonOpts::default().tone(Tone::Danger).icon(Icon::Close).wide()),
@@ -2349,5 +2375,39 @@ mod test {
         let (plugin, op, v) = &calls[0];
         assert_eq!((plugin.as_str(), op.as_str()), ("datetime", "date"));
         assert_eq!(v["title"], "Pick a day");
+    }
+
+    #[test]
+    fn root_scaffold_carries_the_app_labels() {
+        let (app, model) = app();
+        match app.view(&model) {
+            Widget::Scaffold { labels: Some(l), .. } => {
+                assert_eq!(l.back.as_deref(), Some("Back to shop"));
+                assert_eq!(l.load_more.as_deref(), Some("Show more"));
+                assert_eq!(l.refresh.as_deref(), Some("Reload"));
+                assert_eq!(l.ok.as_deref(), Some("Sure"));
+                assert_eq!(l.cancel.as_deref(), Some("No thanks"));
+                assert_eq!(l.done.as_deref(), Some("Pick"));
+            }
+            other => panic!("expected a labelled scaffold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reschedule_asks_with_a_plain_confirm() {
+        let calls = dialog_inputs(Msg::AskReschedule);
+        let (plugin, op, v) = &calls[0];
+        assert_eq!((plugin.as_str(), op.as_str()), ("dialog", "confirm"));
+        // Plain cx.confirm: no per-call labels, so the scaffold's ok/cancel apply in the shell.
+        assert!(v.get("confirm_label").is_none() && v.get("cancel_label").is_none());
+    }
+
+    #[test]
+    fn time_picker_leaves_accept_to_the_scaffold_default() {
+        let calls = dialog_inputs(Msg::DatePicked("2026-09-30".into()));
+        let (_, op, v) = &calls[0];
+        assert_eq!(op, "time");
+        assert!(v.get("confirm_label").is_none(), "accept button comes from ShellLabels.done");
+        assert_eq!(v["cancel_label"], "Back");
     }
 }
