@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Instant;
 
-pub fn run(no_install: bool, no_run: bool) -> Result<()> {
+pub fn run(no_install: bool, no_run: bool, device: Option<&str>) -> Result<()> {
     let project = Project::detect()?;
     let java_home = resolve_java_home();
 
@@ -20,7 +20,7 @@ pub fn run(no_install: bool, no_run: bool) -> Result<()> {
     }
     println!();
 
-    pipeline(&project, java_home.as_deref(), no_install, no_run)
+    pipeline(&project, java_home.as_deref(), no_install, no_run, device)
 }
 
 /// Run the full build pipeline. Reusable by `watch` between rebuilds.
@@ -29,6 +29,7 @@ pub fn pipeline(
     java_home: Option<&str>,
     no_install: bool,
     no_run: bool,
+    device: Option<&str>,
 ) -> Result<()> {
     stage("Building Rust core (shared, uniffi)", || {
         run_capture(
@@ -87,24 +88,19 @@ pub fn pipeline(
     }
 
     let adb = locate_adb()?;
-    let devices = adb_devices(&adb)?;
-    match devices.len() {
-        0 => {
-            println!();
-            println!(
-                "No Android device connected. Skipping install + launch.\n  \
-                 Boot the emulator first: emulator -avd <name>"
-            );
-            return Ok(());
-        }
-        1 => {}
-        n => bail!(
-            "{n} devices connected; pick one with `adb -s` (not yet supported by `mobiler dev`)"
-        ),
-    }
+    let env_serial = env::var("ANDROID_SERIAL").ok();
+    let Some(serial) = select_device(device, env_serial.as_deref(), &adb_devices(&adb)?)? else {
+        println!();
+        println!(
+            "No Android device connected. Skipping install + launch.\n  \
+             Boot the emulator first: emulator -avd <name>"
+        );
+        return Ok(());
+    };
+    println!("  Device:    {serial}");
 
     stage("Installing APK on device", || {
-        run_capture(Command::new(&adb).args(["install", "-r"]).arg(&apk))
+        run_capture(Command::new(&adb).args(["-s", &serial, "install", "-r"]).arg(&apk))
     })?;
 
     if no_run {
@@ -113,6 +109,8 @@ pub fn pipeline(
 
     stage("Launching MainActivity", || {
         run_capture(Command::new(&adb).args([
+            "-s",
+            &serial,
             "shell",
             "am",
             "start",
@@ -224,6 +222,35 @@ fn locate_adb() -> Result<PathBuf> {
     which::which("adb").context("`adb` not found (set ANDROID_HOME or put platform-tools on PATH)")
 }
 
+/// Which connected device to install on: an explicit `--device`, else `ANDROID_SERIAL`, else the
+/// only one connected. With several connected and no choice made, the error lists the serials so
+/// you can pick one. `Ok(None)` means nothing is connected (the caller skips install + launch).
+fn select_device(
+    explicit: Option<&str>,
+    env_serial: Option<&str>,
+    connected: &[String],
+) -> Result<Option<String>> {
+    if let Some(want) = explicit.or(env_serial) {
+        if connected.iter().any(|d| d == want) {
+            return Ok(Some(want.to_string()));
+        }
+        let source = if explicit.is_some() { "--device" } else { "ANDROID_SERIAL" };
+        bail!(
+            "{source} is `{want}`, which isn't connected. Connected: {}",
+            if connected.is_empty() { "none".to_string() } else { connected.join(", ") }
+        );
+    }
+    match connected {
+        [] => Ok(None),
+        [only] => Ok(Some(only.clone())),
+        many => bail!(
+            "{} devices connected: {}. Pick one with `--device <serial>` or ANDROID_SERIAL.",
+            many.len(),
+            many.join(", ")
+        ),
+    }
+}
+
 fn adb_devices(adb: &Path) -> Result<Vec<String>> {
     let out = Command::new(adb).arg("devices").output()?;
     if !out.status.success() {
@@ -290,4 +317,50 @@ fn tail(s: &str, n: usize) -> String {
     let lines: Vec<&str> = s.lines().collect();
     let start = lines.len().saturating_sub(n);
     lines[start..].join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_device;
+
+    fn devices(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn no_devices_means_nothing_to_install_on() {
+        assert_eq!(select_device(None, None, &[]).unwrap(), None);
+        // Even an explicit choice can't help when nothing is connected.
+        assert!(select_device(Some("emulator-5554"), None, &[]).is_err());
+    }
+
+    #[test]
+    fn a_single_connected_device_is_used_without_asking() {
+        let d = devices(&["emulator-5554"]);
+        assert_eq!(select_device(None, None, &d).unwrap().as_deref(), Some("emulator-5554"));
+    }
+
+    #[test]
+    fn several_devices_need_a_choice_and_the_error_lists_them() {
+        let d = devices(&["emulator-5554", "emulator-5556"]);
+        let err = select_device(None, None, &d).unwrap_err().to_string();
+        assert!(err.contains("emulator-5554") && err.contains("emulator-5556"), "{err}");
+        assert!(err.contains("--device"), "{err}");
+    }
+
+    #[test]
+    fn the_flag_wins_over_the_environment_and_both_beat_the_single_device_rule() {
+        let d = devices(&["emulator-5554", "emulator-5556"]);
+        assert_eq!(select_device(Some("emulator-5556"), Some("emulator-5554"), &d).unwrap().as_deref(), Some("emulator-5556"));
+        assert_eq!(select_device(None, Some("emulator-5554"), &d).unwrap().as_deref(), Some("emulator-5554"));
+    }
+
+    #[test]
+    fn an_unknown_serial_is_an_error_that_names_what_is_connected() {
+        let d = devices(&["emulator-5554"]);
+        let err = select_device(Some("emulator-9999"), None, &d).unwrap_err().to_string();
+        assert!(err.contains("emulator-9999") && err.contains("emulator-5554"), "{err}");
+        // An ANDROID_SERIAL pointing at a device that went away is the same kind of mistake.
+        assert!(select_device(None, Some("emulator-9999"), &d).is_err());
+    }
 }

@@ -40,6 +40,7 @@ mobiler doctor          # check the host has everything needed
 mobiler new myapp       # scaffold a new app (Rust core + generic Android & iOS shells)
 cd myapp
 mobiler dev             # build core → generate types → build APK → install + launch
+mobiler dev --device <serial>   # pick a device when several are connected (or set ANDROID_SERIAL)
 mobiler watch           # …same, re-running on every change
 mobiler build ios       # build the iOS app (on a Mac)
 mobiler plugin list     # list the bundled capability plugins

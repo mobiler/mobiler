@@ -46,6 +46,10 @@ enum Command {
         /// Build (and install if applicable) but don't launch the activity.
         #[arg(long)]
         no_run: bool,
+        /// Which connected device to install on (adb serial). Defaults to ANDROID_SERIAL, then the
+        /// only connected device; with several connected, the error lists them.
+        #[arg(long, value_name = "SERIAL")]
+        device: Option<String>,
     },
     /// Watch shared/ and Android/ for changes; rebuild + reinstall + relaunch on each change.
     Watch {
@@ -55,6 +59,10 @@ enum Command {
         /// Build (and install if applicable) but don't launch the activity.
         #[arg(long)]
         no_run: bool,
+        /// Which connected device to install on (adb serial). Defaults to ANDROID_SERIAL, then the
+        /// only connected device; with several connected, the error lists them.
+        #[arg(long, value_name = "SERIAL")]
+        device: Option<String>,
     },
     /// Build the native artifact only (no install/launch) — the cloud-buildable unit.
     Build {
@@ -95,14 +103,14 @@ fn main() -> std::process::ExitCode {
                 std::process::ExitCode::FAILURE
             }
         },
-        Command::Dev { no_install, no_run } => match dev::run(no_install, no_run) {
+        Command::Dev { no_install, no_run, device } => match dev::run(no_install, no_run, device.as_deref()) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");
                 std::process::ExitCode::FAILURE
             }
         },
-        Command::Watch { no_install, no_run } => match watch::run(no_install, no_run) {
+        Command::Watch { no_install, no_run, device } => match watch::run(no_install, no_run, device.as_deref()) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

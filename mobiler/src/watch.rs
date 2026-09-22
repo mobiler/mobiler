@@ -14,7 +14,7 @@ const DEBOUNCE: Duration = Duration::from_millis(500);
 /// which fire spurious notify events; we discard those rather than rebuild twice.
 const SETTLE_AFTER_REBUILD: Duration = Duration::from_millis(800);
 
-pub fn run(no_install: bool, no_run: bool) -> Result<()> {
+pub fn run(no_install: bool, no_run: bool, device: Option<&str>) -> Result<()> {
     let project = Project::detect()?;
     let java_home = dev::resolve_java_home();
 
@@ -33,7 +33,7 @@ pub fn run(no_install: bool, no_run: bool) -> Result<()> {
 
     // Initial build.
     println!("--- initial build ---");
-    if let Err(e) = dev::pipeline(&project, java_home.as_deref(), no_install, no_run) {
+    if let Err(e) = dev::pipeline(&project, java_home.as_deref(), no_install, no_run, device) {
         eprintln!("initial build failed: {e:#}");
         // Continue into watch loop anyway — user can edit and we'll retry.
     }
@@ -108,7 +108,7 @@ pub fn run(no_install: bool, no_run: bool) -> Result<()> {
         }
 
         let started = Instant::now();
-        match dev::pipeline(&project, java_home.as_deref(), no_install, no_run) {
+        match dev::pipeline(&project, java_home.as_deref(), no_install, no_run, device) {
             Ok(()) => println!(
                 "--- rebuild ok in {:.1}s ---",
                 started.elapsed().as_secs_f64()

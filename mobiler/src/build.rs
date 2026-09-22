@@ -26,7 +26,7 @@ pub fn run(platform: Platform) -> Result<()> {
             println!();
             // `no_install = true` makes the pipeline stop right after the APK is
             // produced (and printed) — exactly a build, no device needed.
-            pipeline(&project, java_home.as_deref(), true, true)
+            pipeline(&project, java_home.as_deref(), true, true, None)
         }
         Platform::Ios => {
             // iOS builds run the reproducible script (macOS only). The CLI doesn't
