@@ -103,7 +103,8 @@ The `Widget` vocabulary renders identically on Android, iOS, and web:
 
 - **Layout** — rows, columns, grids, cards, scrollers (`scroller_hinted` adds an opt-in
   trailing-edge fade, a hint that it scrolls), **paged lists** (`LazyList` — infinite
-  scroll + pull-to-refresh), boxes, spacers, dividers.
+  scroll + pull-to-refresh; `with_fill` lets it fill the scaffold body's remaining
+  height instead of capping at a fixed height), boxes, spacers, dividers.
 - **Inputs** — buttons (`ButtonStyle::Filled/Outlined/Text/Tonal`; `button_with` +
   `ButtonOpts` add a `tone`, a leading icon, and full-width), text fields, toggles,
   segmented controls, search fields, rating.
