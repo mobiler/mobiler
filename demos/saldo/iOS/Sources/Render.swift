@@ -199,10 +199,10 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         if let role { v = AnyView(v.accessibilityAddTraits(a11yTraits(role))) }
         return v
 
-    case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing, let endLabel):
+    case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing, let endLabel, let fill):
         return AnyView(LazyListView(
             children: children, onLoadMore: onLoadMore, loading: loading,
-            hasMore: hasMore, onRefresh: onRefresh, refreshing: refreshing, endLabel: endLabel, send: send
+            hasMore: hasMore, onRefresh: onRefresh, refreshing: refreshing, endLabel: endLabel, fill: fill, send: send
         ))
 
     // MARK: input / actions
@@ -355,10 +355,11 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         )
 
     case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _):
-        // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
-        // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
+        // Theme-as-data: `theme` flows into ScaffoldView for the (non-View) mapper helpers —
+        // spacing(), imageShape(), CardMod, TextStyleMod — to pick up corner/density/font, and
         // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
-        ActiveTheme.current = theme
+        // `ActiveTheme.current` itself is stashed from the root view in Core.swift (see
+        // `ActiveTheme` below), not here.
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
             darkMode: darkMode, theme: theme, fab: fab, sheet: sheet,
@@ -367,10 +368,10 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     }
 }
 
-/// The active app [`Theme`] (set when a Scaffold renders), read by the non-View mapper helpers
-/// for corner/density/font. `nil` ⇒ framework defaults (no visual change). Render is
-/// single-threaded on the main actor, so `nonisolated(unsafe)` is sound here — it lets the
-/// nonisolated mapper helpers (spacing/imageShape/TextStyleMod) read it; the theme is
+/// The active app [`Theme`] (set from the root view in Core.swift, alongside `ActiveLabels`), read
+/// by the non-View mapper helpers for corner/density/font. `nil` ⇒ framework defaults (no visual
+/// change). Render is single-threaded on the main actor, so `nonisolated(unsafe)` is sound here —
+/// it lets the nonisolated mapper helpers (spacing/imageShape/TextStyleMod) read it; the theme is
 /// app-global, like dark mode.
 enum ActiveTheme {
     nonisolated(unsafe) static var current: Theme?
@@ -868,6 +869,34 @@ private struct RegionChartView: View {
     }
 }
 
+/// Set true only around the Scaffold body's designated fill `LazyList` (see `bodyFillIndex`) — the
+/// `.lazyList` case reads it (together with `fill`) to switch from the 420pt cap to filling its
+/// parent, and resets it to false around its own children so a nested or second `fill: true` list
+/// keeps the cap.
+private struct FillListKey: EnvironmentKey {
+    static let defaultValue = false
+}
+private extension EnvironmentValues {
+    var fillList: Bool {
+        get { self[FillListKey.self] }
+        set { self[FillListKey.self] = newValue }
+    }
+}
+
+/// The scaffold body's fill list, per the shared rule: the body itself, or the first direct child of
+/// the body's column, that is a `LazyList { fill: true }`. `-1` ⇒ the body itself; `i >= 0` ⇒ child
+/// `i` of the body's column; `nil` ⇒ no fill mode (the body scrolls as a page, as today).
+private func bodyFillIndex(_ body: SharedTypes.Widget) -> Int? {
+    if case .lazyList(_, _, _, _, _, _, _, let fill) = body, fill { return -1 }
+    if case .column(let children) = body {
+        return children.firstIndex { child in
+            if case .lazyList(_, _, _, _, _, _, _, let fill) = child { return fill }
+            return false
+        }
+    }
+    return nil
+}
+
 // A list row that reveals trailing action buttons on horizontal swipe; tap an action to fire it.
 // A paged feed list: pull-to-refresh at the top (`.refreshable`) + load-more when the last row
 // appears (`.onAppear`, guarded by hasMore && !loading so it fires once per page). App-owned
@@ -880,16 +909,21 @@ private struct LazyListView: View {
     let onRefresh: String?
     let refreshing: Bool
     let endLabel: String?
+    let fill: Bool
     let send: (Action) -> Void
+    // Set by the Scaffold body arm around its designated fill list (see `bodyFillIndex`); reset to
+    // false below around this list's own children so a nested/second fill list keeps the 420pt cap.
+    @Environment(\.fillList) private var fillList
 
     var body: some View {
-        ScrollView {
+        let list = ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
                 if refreshing {
                     ProgressView().frame(maxWidth: .infinity).padding(.bottom, 4)
                 }
                 ForEach(Array(children.enumerated()), id: \.offset) { idx, child in
                     render(child, send)
+                        .environment(\.fillList, false)
                         .onAppear {
                             if idx == children.count - 1, hasMore, !loading, let token = onLoadMore {
                                 send(.fired(token: token))
@@ -906,8 +940,17 @@ private struct LazyListView: View {
         }
         // A bounded height makes the inner ScrollView a real scroll region: the LazyVStack
         // virtualizes (so load-more fires incrementally on scroll, not all at once) and
-        // `.refreshable` has a scroll view to attach to. Nested inside the page scroll.
-        .frame(height: 420)
+        // `.refreshable` has a scroll view to attach to. Nested inside the page scroll —
+        // unless this is the Scaffold body's designated fill list, which instead takes the
+        // remaining height of its (non-scrolling) parent. Must be pixel-identical to the old
+        // unconditional `.frame(height: 420)` when not filling.
+        Group {
+            if fillList && fill {
+                list.frame(maxHeight: .infinity)
+            } else {
+                list.frame(height: 420)
+            }
+        }
         .refreshableIf(onRefresh, send)
     }
 }
@@ -1185,16 +1228,44 @@ private struct ScaffoldView: View {
             // (with a slide+fade; lateral move crossfades); a same-route update
             // just re-renders in place. The iOS twin of Android's AnimatedContent.
             // On a regular width the column is capped + centered so it doesn't stretch.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
-                    render(self.content, send)
+            //
+            // Fill mode (`bodyFillIndex(content)` non-nil): the body stops page-scrolling — no
+            // ScrollView — and its designated LazyList takes the remaining height, scrolling
+            // itself. Every other scaffold renders exactly as before.
+            Group {
+                if let fillIndex = bodyFillIndex(content) {
+                    VStack(alignment: .leading, spacing: isLargeDensity() ? 12 : 6) {
+                        if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                        if fillIndex == -1 {
+                            render(self.content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                        } else if case .column(let children) = self.content {
+                            ForEach(Array(children.enumerated()), id: \.offset) { i, child in
+                                if i == fillIndex {
+                                    render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                                } else {
+                                    render(child, send)
+                                }
+                            }
+                        }
+                    }
+                        .padding(16)
+                        // clearance so the fill list can scroll clear of the floating glass bar
+                        .padding(.bottom, floating ? 88 : 0)
+                        .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                            render(self.content, send)
+                        }
+                            .padding(16)
+                            // clearance so the last row can scroll clear of the floating glass bar
+                            .padding(.bottom, floating ? 88 : 0)
+                            .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-                    .padding(16)
-                    // clearance so the last row can scroll clear of the floating glass bar
-                    .padding(.bottom, floating ? 88 : 0)
-                    .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
-                    .frame(maxWidth: .infinity)
             }
             .refreshableIf(onRefresh, send)
             .id(route)
