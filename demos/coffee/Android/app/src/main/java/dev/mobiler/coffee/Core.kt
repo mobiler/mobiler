@@ -227,8 +227,8 @@ class DialogPlugin : MobilerPlugin {
                 request = ConfirmRequest(
                     title = obj.optString("title"),
                     message = obj.optString("message"),
-                    confirmLabel = obj.optString("confirm_label").ifEmpty { "OK" },
-                    cancelLabel = obj.optString("cancel_label").ifEmpty { "Cancel" },
+                    confirmLabel = obj.optString("confirm_label").ifEmpty { ActiveLabels.current?.ok ?: "OK" },
+                    cancelLabel = obj.optString("cancel_label").ifEmpty { ActiveLabels.current?.cancel ?: "Cancel" },
                     destructive = obj.optBoolean("destructive", false),
                 ) { ok ->
                     if (ConfirmHost.pending === request) ConfirmHost.pending = null
@@ -254,8 +254,8 @@ class DateTimePlugin : MobilerPlugin {
         // Optional app labels ({title?, confirm_label?, cancel_label?}); "" (plain pick_date) → defaults.
         val labels = runCatching { JSONObject(input) }.getOrNull()
         val title = labels?.optString("title").orEmpty()
-        val confirmLabel = labels?.optString("confirm_label").orEmpty()
-        val cancelLabel = labels?.optString("cancel_label").orEmpty()
+        val confirmLabel = labels?.optString("confirm_label").orEmpty().ifEmpty { ActiveLabels.current?.done.orEmpty() }
+        val cancelLabel = labels?.optString("cancel_label").orEmpty().ifEmpty { ActiveLabels.current?.cancel.orEmpty() }
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
                 var resumed = false
