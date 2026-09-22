@@ -25,7 +25,7 @@ use mobiler_core::{
     A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, HttpHeader, HttpOutcome, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
-    Rgb, Spacing, TextStyle, Theme, Tone, TransferEvent, Widget,
+    Rgb, ShellLabels, Spacing, TextStyle, Theme, Tone, TransferEvent, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -209,7 +209,17 @@ where
     let send_for_view = send.clone();
     view! {
         <div class="app">
-            {move || render(&view.get(), &send_for_view)}
+            {move || {
+                let widget = view.get();
+                // The Scaffold arm sets ACTIVE_LABELS from its own `labels`; when the root isn't a
+                // Scaffold there's no arm to do that, so clear the stash here (else a previous
+                // screen's labels would leak into this one's un-scaffolded output, e.g. a bare
+                // confirm shown while navigating).
+                if !matches!(widget, Widget::Scaffold { .. }) {
+                    ACTIVE_LABELS.with(|l| *l.borrow_mut() = None);
+                }
+                render(&widget, &send_for_view)
+            }}
         </div>
     }
 }
@@ -1134,11 +1144,15 @@ impl ConfirmAsk {
     fn parse(input: &str) -> Self {
         let v: serde_json::Value = serde_json::from_str(input).unwrap_or(serde_json::Value::Null);
         let s = |k: &str, d: &str| v.get(k).and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).unwrap_or(d).to_string();
+        // The scaffold's ShellLabels supply the default when the call itself gives no label; a
+        // per-call non-empty label still wins (that's what `s` above already does).
+        let ok_default = shell_label(|l| l.ok.clone(), "OK");
+        let cancel_default = shell_label(|l| l.cancel.clone(), "Cancel");
         Self {
             title: s("title", ""),
             message: s("message", ""),
-            confirm_label: s("confirm_label", "OK"),
-            cancel_label: s("cancel_label", "Cancel"),
+            confirm_label: s("confirm_label", &ok_default),
+            cancel_label: s("cancel_label", &cancel_default),
             destructive: v.get("destructive").and_then(serde_json::Value::as_bool).unwrap_or(false),
         }
     }
@@ -1148,18 +1162,42 @@ impl ConfirmAsk {
 /// `aria-describedby` to point at, even if a dialog somehow opens while another is still closing.
 static CONFIRM_DIALOG_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// The open confirm modal: its answer sender, whether a newer confirm replaced it, and where focus
+/// should return when the (last) dialog closes. One confirm at a time — a new one answers the
+/// open one `false` and takes over its focus-return target.
+struct OpenConfirm {
+    tx: std::rc::Rc<std::cell::RefCell<Option<futures_channel::oneshot::Sender<bool>>>>,
+    superseded: std::rc::Rc<std::cell::Cell<bool>>,
+    restore_to: Option<web_sys::Element>,
+}
+thread_local! {
+    static OPEN_CONFIRM: std::cell::RefCell<Option<OpenConfirm>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The web confirm dialog: a modal card on `<body>` that resolves `true` on the confirm button and
 /// `false` on the cancel button, Escape, or a press-and-release on the backdrop itself (a drag
 /// that starts on the card and releases over the backdrop does not count). Enter activates the
 /// focused button (focus starts on cancel for a destructive dialog, else on confirm); whatever had
 /// focus before the dialog opened gets it back afterwards. Labelled for assistive tech via
 /// `aria-labelledby`/`aria-describedby` when a title/message is present. Replaces
-/// `window.confirm`, which can't be relabelled, styled or made accessible this way.
+/// `window.confirm`, which can't be relabelled, styled or made accessible this way. Only one
+/// confirm is ever open: a new call answers the open one `false` (superseding it, so its teardown
+/// won't steal focus) and reuses its focus-return target, so focus ultimately returns to wherever
+/// it was before the *first* dialog in the chain opened. The Tab key is trapped inside the card.
 async fn confirm_modal(ask: ConfirmAsk) -> bool {
     use wasm_bindgen::{closure::Closure, JsCast};
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return false };
     let Some(body) = doc.body() else { return false };
-    let previously_focused = doc.active_element();
+    // Supersede any confirm that's still open: it resolves `false`, its teardown won't restore
+    // focus (see below), and this dialog inherits its focus-return target — so the target always
+    // traces back to wherever focus was before the first dialog in the chain opened.
+    let previously_focused = OPEN_CONFIRM.with(|c| c.borrow_mut().take()).map(|old| {
+        old.superseded.set(true);
+        if let Some(tx) = old.tx.borrow_mut().take() {
+            let _ = tx.send(false);
+        }
+        old.restore_to
+    }).unwrap_or_else(|| doc.active_element());
     let el = |tag: &str, class: &str| -> Option<web_sys::HtmlElement> {
         let e = doc.create_element(tag).ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
         e.set_class_name(class);
@@ -1223,6 +1261,10 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
 
     let (tx, rx) = futures_channel::oneshot::channel::<bool>();
     let tx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
+    let superseded = std::rc::Rc::new(std::cell::Cell::new(false));
+    OPEN_CONFIRM.with(|c| {
+        *c.borrow_mut() = Some(OpenConfirm { tx: tx.clone(), superseded: superseded.clone(), restore_to: previously_focused.clone() });
+    });
     let answer = move |tx: &std::rc::Rc<std::cell::RefCell<Option<futures_channel::oneshot::Sender<bool>>>>, ok: bool| {
         if let Some(tx) = tx.borrow_mut().take() {
             let _ = tx.send(ok);
@@ -1249,9 +1291,24 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
             answer(&t3, false);
         }
     }) as Box<dyn FnMut(web_sys::Event)>);
+    // Trap Tab inside the card: Shift+Tab off the first focusable (or from outside the card)
+    // wraps to the last; Tab off the last (or from outside) wraps to the first.
+    let (doc_for_key, card_for_key, cancel_for_key, confirm_for_key) = (doc.clone(), card.clone(), cancel.clone(), confirm.clone());
     let on_key = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
         if e.key() == "Escape" {
             answer(&t4, false);
+        } else if e.key() == "Tab" {
+            let first: web_sys::Element = cancel_for_key.clone().into();
+            let last: web_sys::Element = confirm_for_key.clone().into();
+            let active = doc_for_key.active_element();
+            let inside = active.as_ref().is_some_and(|a| card_for_key.contains(a.dyn_ref::<web_sys::Node>()));
+            let (at_first, at_last) = (active.as_ref() == Some(&first), active.as_ref() == Some(&last));
+            if e.shift_key() {
+                if at_first || !inside { e.prevent_default(); let _ = confirm_for_key.focus(); }
+            } else if at_last || !inside {
+                e.prevent_default();
+                let _ = cancel_for_key.focus();
+            }
         }
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
     cancel.set_onclick(Some(on_cancel.as_ref().unchecked_ref()));
@@ -1273,8 +1330,20 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
     cancel.set_onclick(None);
     confirm.set_onclick(None);
     scrim.remove();
-    if let Some(focus_target) = previously_focused.and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
-        let _ = focus_target.focus();
+    // Only clear OPEN_CONFIRM if it's still ours — a newer confirm may already have superseded us
+    // and installed its own entry, which this teardown must not touch.
+    OPEN_CONFIRM.with(|c| {
+        let mut open = c.borrow_mut();
+        if open.as_ref().is_some_and(|o| std::rc::Rc::ptr_eq(&o.tx, &tx)) {
+            *open = None;
+        }
+    });
+    // A superseded dialog's teardown must not steal focus back from whatever the newer dialog (or
+    // its own teardown) is doing with it.
+    if !superseded.get() {
+        if let Some(focus_target) = previously_focused.and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
+            let _ = focus_target.focus();
+        }
     }
     ok
 }
@@ -1624,9 +1693,10 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         Widget::Split { primary, detail, show_detail, on_back } => {
             let p = render(primary, send);
             let d = render(detail, send);
+            let back_text = format!("‹ {}", shell_label(|l| l.back.clone(), "Back"));
             let back_btn = on_back.clone().map(|t| {
                 let send = send.clone();
-                view! { <button class="split-back" on:click=move |_| send(Action::Fired { token: t.clone() })>"‹ Back"</button> }
+                view! { <button class="split-back" on:click=move |_| send(Action::Fired { token: t.clone() })>{back_text}</button> }
             });
             view! {
                 <div class="split" data-detail=show_detail.then_some("1")>
@@ -1653,18 +1723,20 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         // detection.
         Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label } => {
             let kids = render_all(children, send);
+            let refresh_text = format!("↻ {}", shell_label(|l| l.refresh.clone(), "Refresh"));
             let refresh_btn = on_refresh.clone().map(|token| {
                 let send = send.clone();
-                view! { <button class="refresh-btn" on:click=move |_| send(Action::Fired { token: token.clone() })>"↻ Refresh"</button> }
+                view! { <button class="refresh-btn" on:click=move |_| send(Action::Fired { token: token.clone() })>{refresh_text}</button> }
             });
             let refresh_bar = refreshing.then(|| view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> });
             let loading_bar = loading.then(|| view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> });
+            let load_more_text = shell_label(|l| l.load_more.clone(), "Load more");
             let load_more_btn = (!*loading && *has_more)
                 .then(|| on_load_more.clone())
                 .flatten()
                 .map(|token| {
                     let send = send.clone();
-                    view! { <button class="btn btn-outlined lazylist-more" on:click=move |_| send(Action::Fired { token: token.clone() })>"Load more"</button> }
+                    view! { <button class="btn btn-outlined lazylist-more" on:click=move |_| send(Action::Fired { token: token.clone() })>{load_more_text}</button> }
                 });
             // The app's own end text (e.g. "Kraj liste"); nothing when it didn't set one.
             let end_cap = (!*has_more && on_load_more.is_some())
@@ -1875,11 +1947,14 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _ } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels } => {
+            // Stash the scaffold's labels for code that never sees the view (the confirm modal).
+            ACTIVE_LABELS.with(|l| *l.borrow_mut() = labels.clone());
+            let back_aria = shell_label(|l| l.back.clone(), "Back");
             let back_btn = back.clone().map(|token| {
                 let send = send.clone();
                 view! {
-                    <button class="back" on:click=move |_| send(Action::Fired { token: token.clone() })>
+                    <button class="back" aria-label=back_aria on:click=move |_| send(Action::Fired { token: token.clone() })>
                         "‹"
                     </button>
                 }
@@ -1933,10 +2008,11 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let class = format!("scaffold{}{}", if *dark_mode { " theme-dark" } else { "" }, if large { " density-large" } else { "" });
             // Pull-to-refresh — web has no pull gesture, so expose a top-bar refresh button +
             // an indeterminate bar at the top of the body while `refreshing`.
+            let refresh_aria = shell_label(|l| l.refresh.clone(), "Refresh");
             let refresh_btn = on_refresh.clone().map(|token| {
                 let send = send.clone();
                 view! {
-                    <button class="refresh-btn" on:click=move |_| send(Action::Fired { token: token.clone() })>"↻"</button>
+                    <button class="refresh-btn" aria-label=refresh_aria on:click=move |_| send(Action::Fired { token: token.clone() })>"↻"</button>
                 }
             });
             let refresh_bar = refreshing.then(|| {
@@ -1981,6 +2057,15 @@ thread_local! {
     /// threaded). Each [`Effect::PluginStream`] parks its source here so
     /// `cx.unsubscribe(key)` can stop it; dropping the entry stops the source.
     static STREAMS: RefCell<HashMap<String, StreamHandle>> = RefCell::new(HashMap::new());
+
+    /// The current scaffold's app-wide shell text, set when the Scaffold renders and read by code
+    /// that never sees the view (the confirm modal). `None` ⇒ English defaults.
+    static ACTIVE_LABELS: std::cell::RefCell<Option<ShellLabels>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The app's label for a piece of shell text, or `default`.
+fn shell_label(pick: impl Fn(&ShellLabels) -> Option<String>, default: &str) -> String {
+    ACTIVE_LABELS.with(|l| l.borrow().as_ref().and_then(pick).unwrap_or_else(|| default.to_string()))
 }
 
 /// Render an app [`Theme`] as inline CSS custom properties on the scaffold root — the web
