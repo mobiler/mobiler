@@ -340,27 +340,50 @@ enum ToastPlugin {
 /// once they tap. Input is JSON {title, message, confirm_label?, cancel_label?, destructive?}; system alerts keep their own size.
 @MainActor
 enum DialogPlugin {
+    /// The confirm alert currently on screen and how to answer it. A new confirm answers it
+    /// `ok: false` and dismisses it first — one confirm at a time on every shell.
+    private static var open: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
+
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "confirm" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
         let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
         let title = obj?["title"] as? String ?? ""
         let message = obj?["message"] as? String ?? ""
-        // Optional app labels; a plain `cx.confirm` sends none and keeps OK / Cancel.
-        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "OK"
-        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel"
+        // Optional app labels; a plain `cx.confirm` sends none and falls back to the scaffold's
+        // ShellLabels, then OK / Cancel.
+        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (ActiveLabels.current?.ok ?? "OK")
+        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (ActiveLabels.current?.cancel ?? "Cancel")
         let destructive = obj?["destructive"] as? Bool ?? false
+
+        // One confirm at a time: a new confirm dismisses the open one and answers it ok:false
+        // before we even look for a view controller to present the new one from.
+        if let prev = open {
+            open = nil
+            prev.alert.dismiss(animated: false)
+            prev.answer(PluginResponse(ok: false, output: "cancel"))
+        }
+
         guard let presenter = topViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
             let alert = UIAlertController(
                 title: title.isEmpty ? nil : title, message: message, preferredStyle: .alert)
+            var resumed = false
+            func done(_ r: PluginResponse) {
+                if !resumed {
+                    resumed = true
+                    if open?.alert === alert { open = nil }
+                    cont.resume(returning: r)
+                }
+            }
             alert.addAction(UIAlertAction(title: cancelLabel, style: .cancel) { _ in
-                cont.resume(returning: PluginResponse(ok: false, output: "cancel"))
+                done(PluginResponse(ok: false, output: "cancel"))
             })
             alert.addAction(UIAlertAction(title: confirmLabel, style: destructive ? .destructive : .default) { _ in
-                cont.resume(returning: PluginResponse(ok: true, output: "ok"))
+                done(PluginResponse(ok: true, output: "ok"))
             })
+            open = (alert, done)
             presenter.present(alert, animated: true)
         }
     }
@@ -417,10 +440,10 @@ enum DateTimePlugin {
 
             var resumed = false
             func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
-            alert.addAction(UIAlertAction(title: label("cancel_label", "Cancel"), style: .cancel) { _ in
+            alert.addAction(UIAlertAction(title: label("cancel_label", ActiveLabels.current?.cancel ?? "Cancel"), style: .cancel) { _ in
                 done(PluginResponse(ok: false, output: "cancel"))
             })
-            alert.addAction(UIAlertAction(title: label("confirm_label", "Done"), style: .default) { _ in
+            alert.addAction(UIAlertAction(title: label("confirm_label", ActiveLabels.current?.done ?? "Done"), style: .default) { _ in
                 done(PluginResponse(ok: true, output: fmt.string(from: picker.date)))
             })
             // iPad presents action sheets in a popover, which needs a source.
