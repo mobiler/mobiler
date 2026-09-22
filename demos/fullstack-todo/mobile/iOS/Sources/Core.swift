@@ -434,12 +434,14 @@ enum DialogPlugin {
     /// accept a presentation at all — either way, presenting would silently do nothing and leave
     /// the caller's continuation hanging forever.
     ///
-    /// `nonisolated` — it's called directly from the `withCheckedContinuation` body in `handle`
-    /// above, which the compiler treats as nonisolated (see `openConfirm`). Its one genuinely
-    /// `@MainActor` dependency, `topViewController()`, is bridged with `MainActor.assumeIsolated`
-    /// rather than making the caller hop, since — like everything else here — this always actually
-    /// runs on the main thread.
-    nonisolated private static func presentWhenReady(_ alert: UIAlertController, from presenter: UIViewController, afterDismissing prevToDismiss: UIAlertController?) {
+    /// `@MainActor`, the default for a member of this enum: the `withCheckedContinuation` body in
+    /// `handle` that calls this, and the UIKit completion closures inside it (`dismiss`'s
+    /// completion, a transition coordinator's `animate(alongsideTransition:)` completion,
+    /// `DispatchQueue.main.async`), all run main-actor-isolated — unlike the nested `func done`
+    /// above, which the compiler treats as nonisolated and which is why `openConfirm` itself needs
+    /// `nonisolated(unsafe)`.
+    @MainActor
+    private static func presentWhenReady(_ alert: UIAlertController, from presenter: UIViewController, afterDismissing prevToDismiss: UIAlertController?) {
         if let prevToDismiss {
             let prevPresenter = prevToDismiss.presentingViewController ?? presenter
             prevPresenter.dismiss(animated: false) {
@@ -447,7 +449,7 @@ enum DialogPlugin {
             }
             return
         }
-        let top = MainActor.assumeIsolated { topViewController() }
+        let top = topViewController()
         if let dismissing = top as? UIAlertController, dismissing.isBeingDismissed {
             let scheduled = dismissing.transitionCoordinator?.animate(alongsideTransition: nil) { _ in
                 presentIfStillCurrent(alert, on: presenter)
@@ -468,12 +470,13 @@ enum DialogPlugin {
     /// deferred present that can never happen still resolves the waiting continuation exactly once,
     /// the same way `done` itself would.
     ///
-    /// `nonisolated`, like `openConfirm` itself (which this touches): it's called from the same
-    /// kind of deferred UIKit completion closure — `dismiss`'s completion, a transition
-    /// coordinator's `animate(alongsideTransition:)` completion, `DispatchQueue.main.async` — that
-    /// the compiler treats as nonisolated, the same category as the `withCheckedContinuation` body
-    /// and the alert-action handlers above, even though all of them always run on the main thread.
-    nonisolated private static func presentIfStillCurrent(_ alert: UIAlertController, on presenter: UIViewController) {
+    /// `@MainActor`, like `presentWhenReady` above: the deferred UIKit completion closures that
+    /// call this — `dismiss`'s completion, a transition coordinator's
+    /// `animate(alongsideTransition:)` completion, `DispatchQueue.main.async` — all run
+    /// main-actor-isolated, so this needs no isolation override of its own; only `openConfirm`
+    /// (touched from the genuinely nonisolated nested `func done`) does.
+    @MainActor
+    private static func presentIfStillCurrent(_ alert: UIAlertController, on presenter: UIViewController) {
         let alertID = ObjectIdentifier(alert)
         guard openConfirm.map({ ObjectIdentifier($0.alert) }) == alertID else { return }
         guard presenter.view.window != nil, presenter.presentedViewController == nil else {
