@@ -1357,6 +1357,18 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
 
 // ---------------- Widget → DOM ----------------
 
+/// The scaffold body's fill list, per the shared rule: the body itself, or the first direct child
+/// of the body's column, that is a `LazyList { fill: true }`. `None` ⇒ the body scrolls as a page.
+fn body_fill_index(body: &Widget) -> Option<Option<usize>> {
+    match body {
+        Widget::LazyList { fill: true, .. } => Some(None),
+        Widget::Column { children } => {
+            children.iter().position(|c| matches!(c, Widget::LazyList { fill: true, .. })).map(Some)
+        }
+        _ => None,
+    }
+}
+
 /// `Widget` → DOM. **Exhaustive** by construction — the `match` has no catch-all,
 /// so (like the Compose/SwiftUI shells) it won't compile until every `Widget`
 /// variant is handled. Style *intent* (TextStyle, Tone, …) becomes a CSS class;
@@ -1391,16 +1403,18 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
         Widget::PdfView { url } => {
             // Browsers render PDFs natively in an iframe (remote URL or local blob/file URL).
-            view! { <iframe class="pdfview" src=url.clone() title="PDF"></iframe> }.into_any()
+            let pdf_title = shell_label(|l| l.pdf_title.clone(), "PDF");
+            view! { <iframe class="pdfview" src=url.clone() title=pdf_title></iframe> }.into_any()
         }
         Widget::WebView { url } => {
             // General embedded web content (incl. hosted player embeds like Bunny.net). `allow`
             // permits autoplay / fullscreen / PiP / encrypted-media so hosted players work.
+            let web_title = shell_label(|l| l.web_title.clone(), "Web");
             view! {
                 <iframe
                     class="webview"
                     src=url.clone()
-                    title="Web"
+                    title=web_title
                     allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                     allowfullscreen=true
                 ></iframe>
@@ -1728,8 +1742,13 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         // button (while `on_refresh`), and a bottom "Load more" button (while `has_more && !loading`)
         // / loading bar / the app's end caption (if set). iOS/Android do true pull + scroll-near-end
         // detection.
-        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label, fill: _ } => {
+        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label, fill } => {
             let kids = render_all(children, send);
+            // Only the one `LazyList` the Scaffold arm marked by address gets `lazylist-fill` —
+            // another `fill: true` list elsewhere (nested, or a second one) keeps the 60vh cap.
+            let is_fill_target =
+                *fill && FILL_TARGET.with(|t| t.borrow().is_some_and(|p| std::ptr::eq(p, widget)));
+            let list_class = if is_fill_target { "lazylist lazylist-fill" } else { "lazylist" };
             let refresh_text = format!("↻ {}", shell_label(|l| l.refresh.clone(), "Refresh"));
             let refresh_btn = on_refresh.clone().map(|token| {
                 let send = send.clone();
@@ -1751,7 +1770,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 .flatten()
                 .map(|label| view! { <div class="lazylist-end">{label}</div> });
             view! {
-                <div class="lazylist">
+                <div class=list_class>
                     {refresh_btn}
                     {refresh_bar}
                     {kids}
@@ -2014,7 +2033,16 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // the web twin of the native shells' `preferredColorScheme`/Material theme.
             // `density-large` scopes the Density::Large control sizes in mobiler.css.
             let large = theme.as_ref().is_some_and(|t| t.density == Density::Large);
-            let class = format!("scaffold{}{}", if *dark_mode { " theme-dark" } else { "" }, if large { " density-large" } else { "" });
+            // Fill mode: the body itself, or the first direct child of the body's column, is a
+            // `LazyList { fill: true }` (`body_fill_index`). Stops page-scroll; that list takes
+            // the rest of the height and scrolls itself.
+            let fill_index = body_fill_index(body);
+            let class = format!(
+                "scaffold{}{}{}",
+                if *dark_mode { " theme-dark" } else { "" },
+                if large { " density-large" } else { "" },
+                if fill_index.is_some() { " scaffold-fill" } else { "" },
+            );
             // Pull-to-refresh — web has no pull gesture, so expose a top-bar refresh button +
             // an indeterminate bar at the top of the body while `refreshing`.
             let refresh_aria = shell_label(|l| l.refresh.clone(), "Refresh");
@@ -2031,7 +2059,24 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
             // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
             let theme_style = theme.as_ref().map(theme_css).unwrap_or_default();
+            // Mark the fill target by address so the LazyList arm can pick out exactly that one,
+            // even if other `fill: true` lists exist elsewhere. `render` is a plain function, so
+            // the whole subtree below builds synchronously within this call — the marker is only
+            // ever visible during it.
+            if let Some(idx) = fill_index {
+                let target: *const Widget = match idx {
+                    None => &**body as *const Widget,
+                    Some(i) => match &**body {
+                        Widget::Column { children } => &children[i] as *const Widget,
+                        _ => unreachable!("body_fill_index only returns Some(Some(_)) for a Column body"),
+                    },
+                };
+                FILL_TARGET.with(|t| *t.borrow_mut() = Some(target));
+            }
             let (title, body) = (title.clone(), render(body, send));
+            if fill_index.is_some() {
+                FILL_TARGET.with(|t| *t.borrow_mut() = None);
+            }
             view! {
                 <div class=class style=theme_style>
                     <div class="topbar">
@@ -2071,6 +2116,12 @@ thread_local! {
     /// root widget and read by code that never sees the view (the confirm modal). `None` ⇒
     /// English defaults.
     static ACTIVE_LABELS: std::cell::RefCell<Option<ShellLabels>> = const { std::cell::RefCell::new(None) };
+
+    /// The address of the scaffold body's fill `LazyList` (see [`body_fill_index`]), set around the
+    /// synchronous `render(body, ...)` call in the Scaffold arm and cleared right after. `render` is
+    /// a plain function — the whole tree is built eagerly within that call — so the LazyList arm
+    /// sees this set only while rendering the marked widget's subtree.
+    static FILL_TARGET: std::cell::RefCell<Option<*const Widget>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The app's label for a piece of shell text, or `default`. An empty string (an app that set
