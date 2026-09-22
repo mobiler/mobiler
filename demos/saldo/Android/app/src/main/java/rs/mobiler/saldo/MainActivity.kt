@@ -131,6 +131,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -393,6 +394,20 @@ private class FieldSync(initial: String) {
         pending.clear()
         if (v != field.text) field = TextFieldValue(v, TextRange(v.length))
     }
+}
+
+/** Set true only around the Scaffold body's designated fill `LazyList` (see [bodyFillIndex]) — the
+ *  `LazyList` branch reads it to switch from the 480.dp cap to filling its parent, and resets it to
+ *  false around its own children so a nested or second `fill: true` list keeps the cap. */
+private val LocalFillList = compositionLocalOf { false }
+
+/** The scaffold body's fill list, per the shared rule: the body itself, or the first direct child of
+ *  the body's column, that is a `LazyList { fill: true }`. `-1` ⇒ the body itself; `i >= 0` ⇒ child
+ *  `i` of the body's column; `null` ⇒ no fill mode (the body scrolls as a page, as today). */
+private fun bodyFillIndex(body: Widget): Int? = when {
+    body is Widget.LazyList && body.fill -> -1
+    body is Widget.Column -> body.children.indexOfFirst { it is Widget.LazyList && it.fill }.takeIf { it >= 0 }
+    else -> null
 }
 
 /**
@@ -1035,13 +1050,20 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val loading = widget.loading
             val hasMore = widget.hasMore
             val endLabel = widget.endLabel
+            // Only fills when the Scaffold body arm marked this exact list (LocalFillList) AND the
+            // app asked for it (widget.fill) — a nested or second `fill: true` list, not the one the
+            // Scaffold marked, keeps the 480.dp cap.
+            val fillParent = LocalFillList.current && widget.fill
+            val boundedOrFill = if (fillParent) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(max = 480.dp)
             val list: @Composable () -> Unit = {
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                    modifier = boundedOrFill,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     itemsIndexed(widget.children) { idx, child ->
-                        Render(child, send)
+                        // Reset the flag around the list's own children so a nested list (or a
+                        // second `fill: true` list further down) doesn't inherit fill mode.
+                        CompositionLocalProvider(LocalFillList provides false) { Render(child, send) }
                         // Fire load-more once when the second-to-last item composes (near the end).
                         if (onLoadMore != null && hasMore && !loading && idx >= widget.children.size - 2) {
                             LaunchedEffect(widget.children.size, idx) { send(Action.Fired(onLoadMore)) }
@@ -1066,7 +1088,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 PullToRefreshBox(
                     isRefreshing = widget.refreshing,
                     onRefresh = { send(Action.Fired(onRefresh)) },
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                    modifier = boundedOrFill,
                 ) { list() }
             } else {
                 list()
@@ -1277,11 +1299,16 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             },
                             label = "nav",
                         ) { screen ->
+                            // Fill mode (screen.body is a `LazyList { fill: true }`, or its first
+                            // direct Column child is): the body stops page-scrolling and that list
+                            // takes the rest of the height, scrolling itself. `bodyFillIndex` — null
+                            // means no fill list, and the column renders exactly as before.
+                            val fillIndex = bodyFillIndex(screen.body)
                             // Cap + center the content column so it doesn't stretch on a tablet.
                             val column: @Composable BoxScope.() -> Unit = {
                                 Column(
                                     modifier = Modifier
-                                        .fillMaxWidth()
+                                        .let { if (fillIndex != null) it.fillMaxSize() else it.fillMaxWidth() }
                                         .widthIn(max = 760.dp)
                                         .align(Alignment.TopCenter)
                                         .padding(horizontal = 16.dp),
@@ -1290,7 +1317,23 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     if (screen.refreshing) {
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
                                     }
-                                    Render(screen.body, send)
+                                    if (fillIndex == null) {
+                                        Render(screen.body, send)
+                                    } else if (fillIndex == -1) {
+                                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                            CompositionLocalProvider(LocalFillList provides true) { Render(screen.body, send) }
+                                        }
+                                    } else {
+                                        (screen.body as Widget.Column).children.forEachIndexed { i, child ->
+                                            if (i == fillIndex) {
+                                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                                    CompositionLocalProvider(LocalFillList provides true) { Render(child, send) }
+                                                }
+                                            } else {
+                                                Render(child, send)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             val onRefresh = screen.onRefresh
@@ -1302,11 +1345,15 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     onRefresh = { send(Action.Fired(onRefresh)) },
                                     modifier = Modifier.fillMaxSize().padding(padding),
                                 ) {
-                                    Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), content = column)
+                                    Box(
+                                        modifier = if (fillIndex != null) Modifier.fillMaxSize() else Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                        content = column,
+                                    )
                                 }
                             } else {
                                 Box(
-                                    modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
+                                    modifier = Modifier.fillMaxSize().padding(padding)
+                                        .let { if (fillIndex != null) it else it.verticalScroll(rememberScrollState()) },
                                     content = column,
                                 )
                             }
@@ -1676,7 +1723,7 @@ private fun PdfViewWidget(url: String) {
     }
     Column(modifier = Modifier.fillMaxWidth().heightIn(min = 480.dp)) {
         when {
-            error != null -> Text("PDF: $error")
+            error != null -> Text(ActiveLabels.current?.pdfError?.takeIf { it.isNotEmpty() } ?: "PDF: $error")
             pages.isEmpty() -> CircularProgressIndicator(modifier = Modifier.padding(16.dp))
             else -> pages.forEach { page ->
                 Image(
