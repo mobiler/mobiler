@@ -89,6 +89,7 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.StarHalf
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -320,7 +321,33 @@ fun App(core: Core = viewModel()) {
                 }
             }
         }
+        // A pending confirm from the dialog capability (see ConfirmHost in Core.kt).
+        ConfirmHost.pending?.let { ConfirmDialog(it) }
     }
+}
+
+// The confirm capability's dialog: the app's own labels, the confirming action in the theme's error
+// colour when destructive, and Density.LARGE button height + label size like other buttons.
+@Composable
+private fun ConfirmDialog(req: ConfirmRequest) {
+    val large = isLarge
+    val labelSize = if (large) 16.sp else TextUnit.Unspecified
+    val buttonModifier = if (large) Modifier.heightIn(min = 56.dp) else Modifier
+    AlertDialog(
+        onDismissRequest = { req.answer(false) },
+        title = if (req.title.isNotEmpty()) { { Text(req.title) } } else null,
+        text = if (req.message.isNotEmpty()) { { Text(req.message) } } else null,
+        confirmButton = {
+            TextButton(
+                onClick = { req.answer(true) },
+                modifier = buttonModifier,
+                colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
+            ) { Text(req.confirmLabel, fontSize = labelSize) }
+        },
+        dismissButton = {
+            TextButton(onClick = { req.answer(false) }, modifier = buttonModifier) { Text(req.cancelLabel, fontSize = labelSize) }
+        },
+    )
 }
 
 /** Local editing state for a controlled text field. The field owns its text, cursor and
@@ -1000,6 +1027,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val onLoadMore = widget.onLoadMore
             val loading = widget.loading
             val hasMore = widget.hasMore
+            val endLabel = widget.endLabel
             val list: @Composable () -> Unit = {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
@@ -1014,10 +1042,10 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     }
                     if (loading) {
                         item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(8.dp)) }
-                    } else if (!hasMore && onLoadMore != null) {
+                    } else if (!hasMore && onLoadMore != null && endLabel != null) {
                         item {
                             Text(
-                                "End of list",
+                                endLabel,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(8.dp),
