@@ -357,6 +357,64 @@ impl Default for Theme {
     }
 }
 
+/// Text the shells draw themselves (back buttons, web list controls, dialog/picker defaults), in the
+/// app's language. Set once on the scaffold with `with_labels`; every field is optional and falls
+/// back to the shell's built-in English. A label passed to a specific call (`confirm_with`,
+/// `Picker`) still wins over these.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct ShellLabels {
+    /// `Split` back-button text on every shell; the Scaffold back button's accessible name.
+    pub back: Option<String>,
+    /// Web `LazyList` "Load more" button.
+    pub load_more: Option<String>,
+    /// Web `LazyList` refresh button (shown after a ↻) and the web scaffold refresh button's name.
+    pub refresh: Option<String>,
+    /// Confirm dialog: the confirming button when the call gives no label.
+    pub ok: Option<String>,
+    /// Confirm dialog and pickers: the dismissing button when the call gives no label.
+    pub cancel: Option<String>,
+    /// Pickers: the accepting button when the call gives no label.
+    pub done: Option<String>,
+}
+
+impl ShellLabels {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+    #[must_use]
+    pub fn back(mut self, l: impl Into<String>) -> Self {
+        self.back = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn load_more(mut self, l: impl Into<String>) -> Self {
+        self.load_more = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn refresh(mut self, l: impl Into<String>) -> Self {
+        self.refresh = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn ok(mut self, l: impl Into<String>) -> Self {
+        self.ok = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn cancel(mut self, l: impl Into<String>) -> Self {
+        self.cancel = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn done(mut self, l: impl Into<String>) -> Self {
+        self.done = Some(l.into());
+        self
+    }
+}
+
 /// A bottom-navigation tab. `selected` marks the active one; tapping sends
 /// `on_select`. `icon` (optional) renders above the label for an icon tab bar.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug)]
@@ -655,6 +713,8 @@ pub enum Widget {
         refreshing: bool,
         route: String,
         depth: u32,
+        /// App-wide shell text (see [`ShellLabels`]). `None` ⇒ the shells' English defaults.
+        labels: Option<ShellLabels>,
     },
 }
 
@@ -732,6 +792,7 @@ mod tests {
             refreshing: false,
             route: "r".to_string(),
             depth: 2,
+            labels: None,
         });
         // Themed scaffold — all four theme knobs must round-trip.
         round_trips(&Widget::Scaffold {
@@ -753,6 +814,7 @@ mod tests {
             refreshing: true,
             route: "r".to_string(),
             depth: 1,
+            labels: None,
         });
         // Themed scaffold with Density::Large — the big-touch-target density must round-trip.
         round_trips(&Widget::Scaffold {
@@ -774,6 +836,31 @@ mod tests {
             refreshing: true,
             route: "r".to_string(),
             depth: 1,
+            labels: None,
+        });
+        // Labelled scaffold — every ShellLabels field must round-trip.
+        round_trips(&Widget::Scaffold {
+            title: "T".to_string(),
+            body: Box::new(Widget::Divider),
+            tabs: vec![],
+            back: None,
+            dark_mode: false,
+            theme: None,
+            fab: None,
+            sheet: None,
+            on_refresh: None,
+            refreshing: false,
+            route: "r".to_string(),
+            depth: 1,
+            labels: Some(
+                ShellLabels::new()
+                    .back("Nazad")
+                    .load_more("Učitaj još")
+                    .refresh("Osveži")
+                    .ok("U redu")
+                    .cancel("Otkaži")
+                    .done("Gotovo"),
+            ),
         });
     }
 }
