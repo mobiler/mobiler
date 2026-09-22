@@ -352,11 +352,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, let labels):
         // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
         // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
         // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
         ActiveTheme.current = theme
+        ActiveLabels.current = labels
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
             darkMode: darkMode, theme: theme, fab: fab, sheet: sheet,
@@ -372,6 +373,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 /// app-global, like dark mode.
 enum ActiveTheme {
     nonisolated(unsafe) static var current: Theme?
+}
+
+/// The current scaffold's app-wide shell text (ShellLabels), set when a Scaffold renders; read by
+/// the dialog/picker plugins for their defaults. `nil` ⇒ English defaults.
+enum ActiveLabels {
+    nonisolated(unsafe) static var current: ShellLabels?
 }
 
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
@@ -1025,7 +1032,7 @@ private struct SplitView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let onBack {
                     Button(action: { send(.fired(token: onBack)) }) {
-                        Label("Back", systemImage: "chevron.left").font(.body.weight(.semibold))
+                        Label(ActiveLabels.current?.back ?? "Back", systemImage: "chevron.left").font(.body.weight(.semibold))
                     }.buttonStyle(.plain)
                 }
                 render(detail, send)
@@ -1120,6 +1127,7 @@ private struct ScaffoldView: View {
                     Button(action: { send(.fired(token: back)) }) {
                         Image(systemName: "chevron.left")
                     }
+                    .accessibilityLabel(ActiveLabels.current?.back ?? "Back")
                 }
                 Spacer()
                 Text(title).font(.headline)
