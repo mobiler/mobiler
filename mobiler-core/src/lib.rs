@@ -1281,7 +1281,7 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
         },
         // Pull-to-refresh on a LazyList's top — same API as on a Scaffold. Leaves the load-more
         // fields intact.
-        Widget::LazyList { children, on_load_more, loading, has_more, end_label, .. } => Widget::LazyList {
+        Widget::LazyList { children, on_load_more, loading, has_more, end_label, fill, .. } => Widget::LazyList {
             children,
             on_load_more,
             loading,
@@ -1289,6 +1289,7 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
             on_refresh: Some(tok(on_refresh)),
             refreshing,
             end_label,
+            fill,
         },
         other => other,
     }
@@ -1323,13 +1324,14 @@ pub fn lazy_list<E: Serialize>(children: Vec<Widget>, loading: bool, has_more: b
         on_refresh: None,
         refreshing: false,
         end_label: None,
+        fill: false,
     }
 }
 
 /// A scrollable list with no load-more and no refresh — a plain virtualized list of `children`.
 #[must_use]
 pub fn lazy_list_static(children: Vec<Widget>) -> Widget {
-    Widget::LazyList { children, on_load_more: None, loading: false, has_more: false, on_refresh: None, refreshing: false, end_label: None }
+    Widget::LazyList { children, on_load_more: None, loading: false, has_more: false, on_refresh: None, refreshing: false, end_label: None, fill: false }
 }
 
 /// Text shown at the end of an exhausted paged list (a [`lazy_list`] whose `has_more` is false) —
@@ -1338,8 +1340,22 @@ pub fn lazy_list_static(children: Vec<Widget>) -> Widget {
 #[must_use]
 pub fn with_end_label(widget: Widget, label: impl Into<String>) -> Widget {
     match widget {
-        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, .. } => {
-            Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label: Some(label.into()) }
+        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, fill, .. } => {
+            Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label: Some(label.into()), fill }
+        }
+        other => other,
+    }
+}
+
+/// Let a paged list fill the rest of the screen: when it is the scaffold body (or a direct child
+/// of the body's column — the first such list), the body stops scrolling as a page and the list
+/// takes the remaining height, scrolling itself. Anywhere else it keeps its normal bounded height.
+/// Combines with [`with_refresh`] and [`with_end_label`] in any order. No-op on other widgets.
+#[must_use]
+pub fn with_fill(widget: Widget) -> Widget {
+    match widget {
+        Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label, .. } => {
+            Widget::LazyList { children, on_load_more, loading, has_more, on_refresh, refreshing, end_label, fill: true }
         }
         other => other,
     }
@@ -1873,7 +1889,7 @@ mod tests {
         // lazy_list carries the load-more token + app-owned flags; no refresh by default.
         assert!(matches!(
             lazy_list(vec![text("a"), text("b")], false, true, Ev::Tap),
-            Widget::LazyList { children, on_load_more: Some(t), loading: false, has_more: true, on_refresh: None, refreshing: false, end_label: None }
+            Widget::LazyList { children, on_load_more: Some(t), loading: false, has_more: true, on_refresh: None, refreshing: false, end_label: None, fill: false }
                 if children.len() == 2 && t == serde_json::to_string(&Ev::Tap).unwrap()
         ));
         assert!(matches!(lazy_list_static(vec![text("a")]), Widget::LazyList { on_load_more: None, on_refresh: None, .. }));
@@ -1910,6 +1926,19 @@ mod tests {
         // split: children boxed, show_detail + on_back carried.
         assert!(matches!(split(text("list"), text("detail"), true, Ev::Tap),
             Widget::Split { show_detail: true, on_back: Some(_), .. }));
+    }
+
+    #[test]
+    fn with_fill_marks_a_lazy_list_and_keeps_its_other_fields() {
+        assert!(matches!(lazy_list(vec![], false, true, Ev::Tap), Widget::LazyList { fill: false, .. }));
+        assert!(matches!(lazy_list_static(vec![]), Widget::LazyList { fill: false, .. }));
+        let l = with_fill(with_end_label(with_refresh(lazy_list(vec![text("a")], false, true, Ev::Tap), false, Ev::Open(1)), "End"));
+        assert!(matches!(&l, Widget::LazyList { fill: true, on_refresh: Some(_), end_label: Some(e), on_load_more: Some(_), .. } if e == "End"));
+        // Other orders keep fill too.
+        let l2 = with_end_label(with_refresh(with_fill(lazy_list(vec![], false, true, Ev::Tap)), false, Ev::Tap), "E");
+        assert!(matches!(l2, Widget::LazyList { fill: true, .. }));
+        assert!(matches!(with_fill(text("x")), Widget::Text { .. }));
+        assert_eq!(ShellLabels::new().pdf_error("x").pdf_error, Some("x".to_string()));
     }
 
     #[test]

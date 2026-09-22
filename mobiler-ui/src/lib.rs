@@ -376,6 +376,12 @@ pub struct ShellLabels {
     pub cancel: Option<String>,
     /// Pickers: the accepting button when the call gives no label.
     pub done: Option<String>,
+    /// Android PdfView error text.
+    pub pdf_error: Option<String>,
+    /// Web PDF iframe title (accessibility).
+    pub pdf_title: Option<String>,
+    /// Web WebView iframe title (accessibility).
+    pub web_title: Option<String>,
 }
 
 impl ShellLabels {
@@ -411,6 +417,21 @@ impl ShellLabels {
     #[must_use]
     pub fn done(mut self, l: impl Into<String>) -> Self {
         self.done = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn pdf_error(mut self, l: impl Into<String>) -> Self {
+        self.pdf_error = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn pdf_title(mut self, l: impl Into<String>) -> Self {
+        self.pdf_title = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn web_title(mut self, l: impl Into<String>) -> Self {
+        self.web_title = Some(l.into());
         self
     }
 }
@@ -492,6 +513,10 @@ pub struct MapMarker {
 // ------------------------------- widgets -------------------------------
 
 /// The app-agnostic widget tree the shell renders. **Fixed across all apps.**
+// `Scaffold`'s `ShellLabels` (nine `Option<String>` fields) makes it the largest variant by a wide
+// margin; boxing it would ripple through every `with_labels`/scaffold call site for no runtime
+// benefit on a wire type that is rebuilt per-render, not stored in bulk.
+#[allow(clippy::large_enum_variant)]
 #[derive(Facet, Serialize, Deserialize, Clone, Debug)]
 #[repr(C)]
 pub enum Widget {
@@ -629,6 +654,9 @@ pub enum Widget {
         /// e.g. "You're all caught up" in the app's language. `None` shows nothing. Set with
         /// `with_end_label`.
         end_label: Option<String>,
+        /// Fill the rest of the screen instead of the fixed height, when this list is the scaffold
+        /// body or a direct child of the body's column (the first one). Set with `with_fill`.
+        fill: bool,
     },
     Spacer { size: Spacing },
     // Layout
@@ -776,8 +804,9 @@ mod tests {
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: true, on_back: Some("back".to_string()) });
         round_trips(&Widget::Split { primary: Box::new(Widget::Divider), detail: Box::new(Widget::Divider), show_detail: false, on_back: None });
         round_trips(&Widget::Scroller { children: vec![Widget::Divider], edge_fade: true });
-        round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false, end_label: None });
-        round_trips(&Widget::LazyList { children: vec![], on_load_more: Some("more".to_string()), loading: false, has_more: false, on_refresh: None, refreshing: false, end_label: Some("Kraj liste".to_string()) });
+        round_trips(&Widget::LazyList { children: vec![Widget::Divider], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: Some("refresh".to_string()), refreshing: false, end_label: None, fill: false });
+        round_trips(&Widget::LazyList { children: vec![], on_load_more: Some("more".to_string()), loading: false, has_more: false, on_refresh: None, refreshing: false, end_label: Some("Kraj liste".to_string()), fill: false });
+        round_trips(&Widget::LazyList { children: vec![], on_load_more: Some("more".to_string()), loading: false, has_more: true, on_refresh: None, refreshing: false, end_label: None, fill: true });
         // Un-themed scaffold (theme: None) — the default, must round-trip.
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),
@@ -859,7 +888,10 @@ mod tests {
                     .refresh("Osveži")
                     .ok("U redu")
                     .cancel("Otkaži")
-                    .done("Gotovo"),
+                    .done("Gotovo")
+                    .pdf_error("Greška")
+                    .pdf_title("Dokument")
+                    .web_title("Stranica"),
             ),
         });
     }
