@@ -355,11 +355,10 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         )
 
     case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _):
-        // Theme-as-data: `theme` flows into ScaffoldView for the (non-View) mapper helpers —
-        // spacing(), imageShape(), CardMod, TextStyleMod — to pick up corner/density/font, and
-        // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
-        // `ActiveTheme.current` itself is stashed from the root view in Core.swift (see
-        // `ActiveTheme` below), not here.
+        // Theme-as-data: the non-View mapper helpers — spacing(), imageShape(), CardMod,
+        // TextStyleMod — read `ActiveTheme.current` (set from the root view in Core.swift, not
+        // here) for corner/density/font. `theme` itself still flows into ScaffoldView, which uses
+        // it directly only for its own `.tint` and the FAB background.
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
             darkMode: darkMode, theme: theme, fab: fab, sheet: sheet,
@@ -1267,6 +1266,10 @@ private struct ScaffoldView: View {
                     }
                 }
             }
+            // In fill mode this attaches `.refreshable` to the Group around the (non-scrolling)
+            // fill VStack; SwiftUI carries that refresh action down through the environment to the
+            // fill list's own inner ScrollView, so pulling on the list itself drives it even though
+            // the list has no `onRefresh` of its own.
             .refreshableIf(onRefresh, send)
             .id(route)
             .transition(navTransition)
