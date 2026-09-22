@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use mobiler_ui::{
     A11yRole, Action, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FieldKind, FontFamily, Icon,
-    ImageRatio, ImageShape, InputValue, MapMarker, ProjectColor, Rgb, Segment, Sheet, Spacing, SwipeButton, Tab,
+    ImageRatio, ImageShape, InputValue, MapMarker, ProjectColor, Rgb, Segment, Sheet, ShellLabels, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, Widget,
 };
 
@@ -1143,7 +1143,7 @@ pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bo
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1, labels: None }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -1152,7 +1152,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2 }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2, labels: None }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -1185,6 +1185,7 @@ where
         refreshing: false,
         route: nav.route_key(),
         depth: nav.depth(),
+        labels: None,
     }
 }
 
@@ -1193,7 +1194,7 @@ where
 /// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
 pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, labels, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1206,6 +1207,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
             refreshing,
             route,
             depth,
+            labels,
         },
         other => other,
     }
@@ -1215,7 +1217,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
 /// No-op on any other widget: `with_fab(scaffold(...), Icon::Add, Msg::New)`.
 pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1228,6 +1230,7 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
             refreshing,
             route,
             depth,
+            labels,
         },
         other => other,
     }
@@ -1237,7 +1240,7 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
 /// the model: `with_sheet(scaffold(...), title, sheet_body, Msg::CloseSheet)`.
 pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child: Widget, on_dismiss: E) -> Widget {
     match widget {
-        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, labels, .. } => Widget::Scaffold {
             title: t,
             body,
             tabs,
@@ -1250,6 +1253,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
             refreshing,
             route,
             depth,
+            labels,
         },
         other => other,
     }
@@ -1260,7 +1264,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
 /// when the async reload completes (the shell shows a spinner while true). No-op on other widgets.
 pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, labels, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1273,6 +1277,7 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
             refreshing,
             route,
             depth,
+            labels,
         },
         // Pull-to-refresh on a LazyList's top — same API as on a Scaffold. Leaves the load-more
         // fields intact.
@@ -1285,6 +1290,20 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
             refreshing,
             end_label,
         },
+        other => other,
+    }
+}
+
+/// Set the app-wide shell text (see [`ShellLabels`]) on a scaffold — e.g.
+/// `with_labels(root, ShellLabels::new().back("Nazad").ok("U redu").cancel("Otkaži"))` also puts
+/// those words on a plain `cx.confirm`. Combines with the other scaffold helpers in any order.
+/// No-op on other widgets.
+#[must_use]
+pub fn with_labels(widget: Widget, labels: ShellLabels) -> Widget {
+    match widget {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: Some(labels) }
+        }
         other => other,
     }
 }
@@ -1441,6 +1460,30 @@ mod tests {
             }
             other => panic!("expected Scaffold, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn with_labels_sets_scaffold_labels_and_combinators_keep_them() {
+        let l = ShellLabels::new().back("Nazad").ok("U redu");
+        assert!(matches!(scaffold("T", false, vec![], text("b")), Widget::Scaffold { labels: None, .. }));
+        let s = with_labels(scaffold("T", false, vec![], text("b")), l.clone());
+        assert!(matches!(&s, Widget::Scaffold { labels: Some(x), .. } if *x == l));
+        // Every scaffold combinator must carry labels through, in either order.
+        let themed = with_theme(s.clone(), Theme { seed: Rgb::new(1, 2, 3), ..Default::default() });
+        assert!(matches!(&themed, Widget::Scaffold { labels: Some(x), .. } if *x == l));
+        let refreshed = with_refresh(s.clone(), false, Ev::Tap);
+        assert!(matches!(&refreshed, Widget::Scaffold { labels: Some(x), .. } if *x == l));
+        let fabbed = with_fab(s.clone(), Icon::Calendar, Ev::Tap);
+        assert!(matches!(&fabbed, Widget::Scaffold { labels: Some(x), .. } if *x == l));
+        let sheeted = with_sheet(s, "Sheet", text("c"), Ev::Tap);
+        assert!(matches!(&sheeted, Widget::Scaffold { labels: Some(x), .. } if *x == l));
+        // No-op elsewhere.
+        assert!(matches!(with_labels(text("x"), ShellLabels::new()), Widget::Text { .. }));
+        // Builder fills only what was set.
+        assert_eq!(ShellLabels::new().done("Gotovo"), ShellLabels { done: Some("Gotovo".into()), ..ShellLabels::default() });
+        // nav_scaffold also defaults labels to None.
+        let nav = Nav::new(Route::Home);
+        assert!(matches!(nav_scaffold("T", false, vec![], text("x"), &nav, Ev::Tap), Widget::Scaffold { labels: None, .. }));
     }
 
     #[test]
