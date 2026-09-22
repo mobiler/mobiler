@@ -198,9 +198,7 @@ mod tests {
     #[test]
     fn added_appends_and_clears_the_draft() {
         let app = Notes;
-        let mut m = Model::default();
-        m.draft_title = "x".into();
-        m.draft_body = "y".into();
+        let mut m = Model { draft_title: "x".into(), draft_body: "y".into(), ..Model::default() };
         let note = serde_json::to_string(&Note { id: 5, title: "x".into(), body: "y".into() }).unwrap();
         app.update(Msg::Added(note), &mut m, &mut Cx::default());
         assert_eq!(m.notes.len(), 1);
@@ -210,8 +208,10 @@ mod tests {
     #[test]
     fn delete_removes_the_note_optimistically() {
         let app = Notes;
-        let mut m = Model::default();
-        m.notes = vec![Note { id: 1, title: "a".into(), body: "".into() }, Note { id: 2, title: "b".into(), body: "".into() }];
+        let mut m = Model {
+            notes: vec![Note { id: 1, title: "a".into(), body: "".into() }, Note { id: 2, title: "b".into(), body: "".into() }],
+            ..Model::default()
+        };
         app.update(Msg::Delete(1), &mut m, &mut Cx::default());
         assert_eq!(m.notes.len(), 1);
         assert_eq!(m.notes[0].id, 2);
@@ -220,8 +220,7 @@ mod tests {
     #[test]
     fn failed_delete_reports_the_error_and_reconciles_with_the_server() {
         let app = Notes;
-        let mut m = Model::default();
-        m.notes = vec![Note { id: 1, title: "a".into(), body: "".into() }];
+        let mut m = Model { notes: vec![Note { id: 1, title: "a".into(), body: "".into() }], ..Model::default() };
         // The delete removed the note optimistically...
         app.update(Msg::Delete(1), &mut m, &mut Cx::default());
         assert!(m.notes.is_empty());
