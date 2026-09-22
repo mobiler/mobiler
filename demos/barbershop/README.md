@@ -17,6 +17,10 @@ tree, no per-platform UI code.
 |:---:|:---:|
 | <img src="screenshots/large-controls.png" width="240" alt="Fade House bookings with Density::Large — taller buttons, larger chips and calendar cells, a wide Book now button with an icon, a tonal Reschedule, an outlined danger No-show and a wide filled danger Cancel next booking"> | <img src="screenshots/calendar-sr.png" width="260" alt="Serbian Monday-first calendar: Septembar 2026, header P U S Č P S N, 1 September under U, and 0–3 dots under each day showing how busy it is"> |
 
+| A destructive confirm with the app's own labels — `cx.confirm_with(Confirm::new(…).confirm_label("Cancel booking").cancel_label("Keep it").destructive(), …)` (Android) | The same confirm on the web — a themed modal instead of `window.confirm` |
+|:---:|:---:|
+| <img src="screenshots/confirm-android.png" width="240" alt="Android Material 3 dialog: Cancel your next booking? Your barber will be notified. Buttons Keep it and Cancel booking, the confirm button in the theme's error red"> | <img src="screenshots/confirm-web.png" width="390" alt="Web modal in the dark theme: Cancel your next booking? Your barber will be notified. A text Keep it button and a filled danger Cancel booking button"> |
+
 | Profile → Coverage — a `RegionChart` (variable-width stacked-region / coverage-gap chart) |
 |:---:|
 | <img src="screenshots/coverage.png" width="260" alt="Fade House coverage — a RegionChart: colored value bands across an irregular timeline (3 Mt./21 Mt./Children/65 J.), solid + dashed reference lines with value chips, y-axis + tick marks, and a legend"> |
