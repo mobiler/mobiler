@@ -1228,7 +1228,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         .widthIn(max = 760.dp)
                                         .align(Alignment.TopCenter)
                                         .padding(horizontal = 16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(if (isLarge && fillIndex != null && fillIndex >= 0) 12.dp else 6.dp),
                                 ) {
                                     if (screen.refreshing) {
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))

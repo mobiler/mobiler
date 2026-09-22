@@ -533,7 +533,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   /* Fill mode in the rail layout: `.scaffold.scaffold-fill` below already bounds the grid to
      100dvh (that rule isn't media-scoped), but a grid item's automatic minimum size would
      otherwise keep the body row from shrinking below its content — same fix as the flex case. */
-  .scaffold:has(.tabbar) > .scaffold-body { min-height: 0; }
+  .scaffold-fill:has(.tabbar) > .scaffold-body { min-height: 0; }
 }
 
 /* LazyList fill — the scaffold body stops page-scrolling and the chosen list takes the rest. */
