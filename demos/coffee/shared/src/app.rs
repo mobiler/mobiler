@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 const HERO: &str = "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200&q=80";
 
-/// Coffee demo, ported onto MobilerApp (was: per-app-typegen `demos/coffee`).
+/// Coffee demo, ported onto `MobilerApp` (was: per-app-typegen `demos/coffee`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
     SelectCategory(String),
@@ -115,6 +115,7 @@ impl MobilerApp for Coffee {
     type Event = Msg;
     type Model = Model;
 
+    #[allow(clippy::too_many_lines, reason = "one match arm per message; splitting hurts readability")]
     fn update(&self, event: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
         match event {
             Msg::SelectCategory(c) => model.selected_category = c,
@@ -242,10 +243,12 @@ impl MobilerApp for Coffee {
     }
 
     fn input(&self, id: &str, value: InputValue, model: &mut Model, _cx: &mut Cx<Msg>) {
-        if id == "sweetness" {
-            if let InputValue::Int(v) = value {
-                model.sweetness = v as i32;
-            }
+        if id == "sweetness"
+            && let InputValue::Int(v) = value
+        {
+            // The "sweetness" slider is built with a fixed 0..=100 range (see `slider(…, 100)`
+            // below), so every value the shell reports here fits i32; `unwrap_or` never triggers.
+            model.sweetness = i32::try_from(v).unwrap_or(100);
         }
     }
 
@@ -296,7 +299,8 @@ fn product_card(index: usize, p: &Product) -> Widget {
             row(vec![text(p.price), text(format!("★ {}", p.rating))]),
         ]),
         CardStyle::Filled,
-        Msg::OpenProduct(index as u32),
+        // The demo's product list is a small fixed array, well within u32 range.
+        Msg::OpenProduct(u32::try_from(index).unwrap_or(u32::MAX)),
     )
 }
 
@@ -333,7 +337,7 @@ fn detail(p: &Product, model: &Model) -> Widget {
     }
     // The scanner plugin returns "<format>:<value>" — show it so a tester can read the result.
     if let Some(code) = &model.scanned {
-        items.push(mobiler_core::caption(format!("Scanned: {}", code)));
+        items.push(mobiler_core::caption(format!("Scanned: {code}")));
     }
     // biometric + securestore demo status.
     if let Some(s) = &model.secret_status {

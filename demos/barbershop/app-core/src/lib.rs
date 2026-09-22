@@ -1805,7 +1805,7 @@ fn video_card(model: &Model) -> Widget {
                 button("Restart", ButtonStyle::Text, Msg::VideoRestart),
             ]),
             row(vec![
-                button(&format!("{:.1}×", model.video_rate), ButtonStyle::Text, Msg::VideoCycleRate),
+                button(format!("{:.1}×", model.video_rate), ButtonStyle::Text, Msg::VideoCycleRate),
                 button(if model.video_muted { "Unmute" } else { "Mute" }, ButtonStyle::Text, Msg::VideoToggleMute),
                 button(if model.video_captions { "CC ✓" } else { "CC" }, ButtonStyle::Text, Msg::VideoToggleCaptions),
                 button(if model.video_pip { "PiP ✓" } else { "PiP" }, ButtonStyle::Text, Msg::VideoTogglePip),
@@ -1953,7 +1953,7 @@ fn coverage_chart() -> Widget {
         ChartRegion::new(t21, tc, 55_742.0, 80_000.0, "CHF 24'258").with_color(gap),
         ChartRegion::new(tc, t65, 34_906.0, 80_000.0, "CHF 45'093").with_color(gap),
     ];
-    let chart = region_chart(
+    region_chart(
         regions,
         vec![ChartTick::new(t3, "3 Mt."), ChartTick::new(t21, "21 Mt."), ChartTick::new(tc, "Children 18/25"), ChartTick::new(t65, "65 J.")],
         100.0,
@@ -1967,8 +1967,7 @@ fn coverage_chart() -> Widget {
             ChartLegendItem::new("PK children", green),
             ChartLegendItem::new("Gap", gap),
         ],
-    );
-    chart
+    )
 }
 
 fn profile_screen(model: &Model) -> Widget {

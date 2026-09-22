@@ -512,8 +512,7 @@ mod test {
     #[test]
     fn restore_round_trips_durable_state() {
         let app = Todo;
-        let mut m = Model::default();
-        m.name = "Ada".into();
+        let mut m = Model { name: "Ada".into(), ..Model::default() };
         app.update(Msg::ToggleToday(2), &mut m, &mut Cx::default());
 
         let blob = serde_json::to_string(&m.persisted()).unwrap();
