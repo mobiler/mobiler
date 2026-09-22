@@ -362,7 +362,18 @@ enum ToastPlugin {
 enum DialogPlugin {
     /// The confirm alert currently on screen and how to answer it. A new confirm answers it
     /// `ok: false` and dismisses it first — one confirm at a time on every shell.
-    private static var open: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
+    private static var openConfirm: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
+
+    /// `topViewController()`, but skipping over an alert that's already mid-dismissal: that
+    /// alert is still `presentedViewController` for a moment, yet presenting on top of it fails,
+    /// so present from its own presenter instead in that case.
+    private static func topViewControllerForConfirm() -> UIViewController? {
+        guard let top = topViewController() else { return nil }
+        if let prev = openConfirm, prev.alert.isBeingDismissed, top === prev.alert {
+            return prev.alert.presentingViewController
+        }
+        return top
+    }
 
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "confirm" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
@@ -376,24 +387,30 @@ enum DialogPlugin {
         let destructive = obj?["destructive"] as? Bool ?? false
 
         // One confirm at a time: a new confirm dismisses the open one and answers it ok:false
-        // before we even look for a view controller to present the new one from.
-        if let prev = open {
-            open = nil
-            prev.alert.dismiss(animated: false)
+        // before we even look for a view controller to present the new one from — unless it's
+        // already being dismissed (the user just tapped it), in which case its own handler is
+        // about to answer it, so we leave it alone.
+        if let prev = openConfirm, !prev.alert.isBeingDismissed {
+            openConfirm = nil
+            prev.alert.presentingViewController?.dismiss(animated: false)
             prev.answer(PluginResponse(ok: false, output: "cancel"))
         }
 
-        guard let presenter = topViewController() else {
+        guard let presenter = topViewControllerForConfirm() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
             let alert = UIAlertController(
                 title: title.isEmpty ? nil : title, message: message, preferredStyle: .alert)
+            // Identity only, never a strong capture of `alert` — the closure below is retained by
+            // the UIAlertAction, which is retained by `alert` itself, so capturing `alert` there
+            // would be a retain cycle.
+            let alertID = ObjectIdentifier(alert)
             var resumed = false
             func done(_ r: PluginResponse) {
                 if !resumed {
                     resumed = true
-                    if open?.alert === alert { open = nil }
+                    if openConfirm.map({ ObjectIdentifier($0.alert) }) == alertID { openConfirm = nil }
                     cont.resume(returning: r)
                 }
             }
@@ -403,7 +420,7 @@ enum DialogPlugin {
             alert.addAction(UIAlertAction(title: confirmLabel, style: destructive ? .destructive : .default) { _ in
                 done(PluginResponse(ok: true, output: "ok"))
             })
-            open = (alert, done)
+            openConfirm = (alert, done)
             presenter.present(alert, animated: true)
         }
     }
