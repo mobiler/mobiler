@@ -2067,14 +2067,22 @@ thread_local! {
     /// `cx.unsubscribe(key)` can stop it; dropping the entry stops the source.
     static STREAMS: RefCell<HashMap<String, StreamHandle>> = RefCell::new(HashMap::new());
 
-    /// The current scaffold's app-wide shell text, set when the Scaffold renders and read by code
-    /// that never sees the view (the confirm modal). `None` ⇒ English defaults.
+    /// The current scaffold's app-wide shell text, set once in the root render closure from the
+    /// root widget and read by code that never sees the view (the confirm modal). `None` ⇒
+    /// English defaults.
     static ACTIVE_LABELS: std::cell::RefCell<Option<ShellLabels>> = const { std::cell::RefCell::new(None) };
 }
 
-/// The app's label for a piece of shell text, or `default`.
+/// The app's label for a piece of shell text, or `default`. An empty string (an app that set
+/// the field to `""`) falls back to `default` too, same as the other shells.
 fn shell_label(pick: impl Fn(&ShellLabels) -> Option<String>, default: &str) -> String {
-    ACTIVE_LABELS.with(|l| l.borrow().as_ref().and_then(pick).unwrap_or_else(|| default.to_string()))
+    ACTIVE_LABELS.with(|l| {
+        l.borrow()
+            .as_ref()
+            .and_then(pick)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| default.to_string())
+    })
 }
 
 /// Render an app [`Theme`] as inline CSS custom properties on the scaffold root — the web

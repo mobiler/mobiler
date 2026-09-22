@@ -351,7 +351,7 @@ enum ActiveLabels {
 ```swift
     /// The confirm alert currently on screen and how to answer it. A new confirm answers it
     /// `ok: false` and dismisses it first — one confirm at a time on every shell.
-    private static var open: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
+    private static var openConfirm: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
 ```
 
   Restructure the presentation so that:
@@ -362,7 +362,7 @@ enum ActiveLabels {
   - `label("cancel_label", "Cancel")` → `label("cancel_label", ActiveLabels.current?.cancel ?? "Cancel")`.
   - `label("confirm_label", "Done")` → `label("confirm_label", ActiveLabels.current?.done ?? "Done")`.
 - [ ] **Step 7: Port and check.** Apply to all 5 `Core.swift` by anchor.
-  - `grep -c "private static var open"` must be 1 in each.
+  - `grep -c "private static var openConfirm"` must be 1 in each.
   - md5 the `DialogPlugin` blocks: they must match across all 5.
   - Swift compiles on CI only, so read the Swift twice for: `ShellLabels` optional field names (the generated Swift uses camelCase `loadMore`; check the generated `SharedTypes` naming in how `Theme` fields are used, e.g. `theme.density`), tuple-typed static var syntax, and the main-actor isolation of the static var. The enum is `@MainActor`, so its statics are too.
 - [ ] **Step 8: Commit** `feat(ios): app-wide shell labels; one confirm at a time` + trailer.
@@ -500,7 +500,7 @@ Record the evidence under `$SCRATCH/r3-evidence/` and tear everything down.
 ### Task 11: Template port + CLI 0.54.0 (PR-C)
 - [ ] Branch `feat/shell-labels-catalog-cli`. Port the merged barbershop shell hunks (`git diff <PR-A base>..<PR-A head> -- demos/barbershop/{Android,iOS}`) into the template by anchor, keeping `{{NAME}}` / `__PACKAGE_PATH__` tokens. `cp` `Render.swift` if the template matched barbershop's pre-change file.
 - [ ] Pin `mobiler-core = "0.37"`, set `mobiler/Cargo.toml` to 0.54.0, then `cargo update -p mobiler` and `cargo test -p mobiler`.
-- [ ] Scaffold smoke: a fresh `mobiler new` resolves core 0.37.0 / ui 0.26.0, and `mobiler build android` produces an APK with `libshared.so`. Also grep for `object ActiveLabels`, `enum ActiveLabels` and `private static var open`.
+- [ ] Scaffold smoke: a fresh `mobiler new` resolves core 0.37.0 / ui 0.26.0, and `mobiler build android` produces an APK with `libshared.so`. Also grep for `object ActiveLabels`, `enum ActiveLabels` and `private static var openConfirm`.
 - [ ] Commit, ship-pr (ask the user before merging), squash.
 
 ### Task 12: Release CLI + post-release (ask first)

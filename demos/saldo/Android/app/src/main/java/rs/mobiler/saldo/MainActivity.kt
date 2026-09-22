@@ -1018,7 +1018,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     val back = widget.onBack
                     if (back != null) {
                         TextButton(onClick = { send(Action.Fired(back)) }) {
-                            Text("‹ ${ActiveLabels.current?.back ?: "Back"}", fontWeight = FontWeight.SemiBold)
+                            Text("‹ ${ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back"}", fontWeight = FontWeight.SemiBold)
                         }
                     }
                     Render(widget.detail, send)
@@ -1227,7 +1227,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 navigationIcon = {
                                     if (back != null) {
                                         IconButton(onClick = { send(Action.Fired(back)) }) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back ?: "Back")
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back")
                                         }
                                     }
                                 },
