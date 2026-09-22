@@ -273,8 +273,8 @@ color, corner radius, font, density), and the widget set covers real product UI:
 tab bars, a floating action button, cards, star ratings, avatars, horizontal carousels,
 segmented controls, search fields, and bottom sheets — plus native capabilities like
 `cx.pick_date` / `cx.pick_time`. `with_labels(...)` sets the app's own wording for
-shell-drawn text (back buttons, "Load more"/"Refresh", confirm/picker defaults) once,
-on the scaffold.
+shell-drawn text (back buttons, "Load more"/"Refresh", confirm/picker defaults, the
+PDF error text and web iframe titles) once, on the scaffold.
 
 **Fade House** ([`demos/barbershop`](demos/barbershop/)) — a barbershop booking demo: a
 brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar

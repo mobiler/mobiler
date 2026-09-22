@@ -542,6 +542,8 @@ textarea.field { resize: vertical; font-family: inherit; }
 .scaffold-fill > .scaffold-body > .col { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .scaffold-fill > .scaffold-body > .lazylist-fill,
 .scaffold-fill > .scaffold-body > .col > .lazylist-fill { flex: 1; min-height: 0; max-height: none; }
+/* A fill column's other children (e.g. a second, capped .lazylist with its own overflow-y: auto) keep their natural height instead of shrinking to 0. */
+.scaffold-fill > .scaffold-body > .col > :not(.lazylist-fill) { flex-shrink: 0; }
 
 /* ---- Density::Large — bigger controls for busy hands (control sizes only; text follows the browser). ---- */
 .density-large .row, .density-large .col { gap: 12px; }
