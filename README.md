@@ -156,7 +156,7 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 | Toast | `cx.toast(text)` | transient message / snackbar |
 | Device | `cx.device_model(then)` | device/model string |
 | Haptics | `cx.haptic(style)` | light / medium / heavy |
-| Confirm | `cx.confirm(title, message, then) · cx.confirm_with(Confirm::new(t, m).confirm_label(…).cancel_label(…).destructive(), then)` | native dialog; app labels + destructive style |
+| Confirm | `cx.confirm(title, message, then) · cx.confirm_with(Confirm::new(t, m).confirm_label(…).cancel_label(…).destructive(), then)` | native dialog; app labels + destructive style; defaults from the scaffold's ShellLabels |
 | Photo | `cx.pick_photo(then)` | system photo picker → local image URI (no permission) |
 | Camera | `cx.capture_photo(then)` | system camera → local image URI |
 | Date picker | `cx.pick_date(then) · cx.pick_date_with(Picker::new().title(…).confirm_label(…).cancel_label(…), then)` | native date picker → ISO YYYY-MM-DD string; title shown on iOS only, button labels on iOS/Android, web uses the browser picker |
@@ -271,7 +271,9 @@ One core, one `Widget` tree — `with_theme(...)` gives each app its own brand (
 color, corner radius, font, density), and the widget set covers real product UI: icon
 tab bars, a floating action button, cards, star ratings, avatars, horizontal carousels,
 segmented controls, search fields, and bottom sheets — plus native capabilities like
-`cx.pick_date` / `cx.pick_time`.
+`cx.pick_date` / `cx.pick_time`. `with_labels(...)` sets the app's own wording for
+shell-drawn text (back buttons, "Load more"/"Refresh", confirm/picker defaults) once,
+on the scaffold.
 
 **Fade House** ([`demos/barbershop`](demos/barbershop/)) — a barbershop booking demo: a
 brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar
