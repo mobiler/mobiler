@@ -16,7 +16,7 @@ use mobiler_core::{
     pdf_view, row, scaffold, scroller, scroller_hinted, search_field, secure_field, segment, segmented, skeleton,
     spacer, split, stack, video_player, video_playlist, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, toggle, with_captions, with_end_label, with_error,
-    with_fab, with_labels, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
+    with_fab, with_fill, with_labels, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
     TransferEvent,
 };
 use mobiler_core::format::{self, Currency, Locale};
@@ -38,6 +38,7 @@ pub enum Tab {
     Home,
     Services,
     Bookings,
+    Feed,
     Profile,
 }
 
@@ -1182,12 +1183,14 @@ impl MobilerApp for FadeHouse {
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),
             tab_icon("Services", Icon::Scissors, model.tab == Tab::Services, Msg::SelectTab(Tab::Services)),
             tab_icon("Bookings", Icon::Calendar, model.tab == Tab::Bookings, Msg::SelectTab(Tab::Bookings)),
+            tab_icon("Feed", Icon::Menu, model.tab == Tab::Feed, Msg::SelectTab(Tab::Feed)),
             tab_icon("Profile", Icon::Person, model.tab == Tab::Profile, Msg::SelectTab(Tab::Profile)),
         ];
         let (title_text, body) = match model.tab {
             Tab::Home => ("Fade House", home(model)),
             Tab::Services => ("Services", services_screen(model)),
             Tab::Bookings => ("Bookings", bookings_screen(model)),
+            Tab::Feed => ("Feed", feed_screen(model)),
             Tab::Profile => ("Profile", profile_screen(model)),
         };
         // Themed Scaffold + icon tab bar + a "book now" floating action button.
@@ -1206,7 +1209,16 @@ impl MobilerApp for FadeHouse {
         with_theme(
             with_labels(
                 root,
-                ShellLabels::new().back("Back to shop").load_more("Show more").refresh("Reload").ok("Sure").cancel("No thanks").done("Pick"),
+                ShellLabels::new()
+                    .back("Back to shop")
+                    .load_more("Show more")
+                    .refresh("Reload")
+                    .ok("Sure")
+                    .cancel("No thanks")
+                    .done("Pick")
+                    .pdf_error("Couldn't open the document")
+                    .pdf_title("Shop price list")
+                    .web_title("Shop website"),
             ),
             theme,
         )
@@ -1866,9 +1878,9 @@ fn web_card() -> Widget {
     )
 }
 
-/// The "Feed" card — a `LazyList` of synthetic bookings: pull-to-refresh at the top, load-more
-/// when you scroll near the end (stops at 60). The list owns a bounded scroll region.
-fn feed_card(model: &Model) -> Widget {
+/// The Feed tab body — a `LazyList` of synthetic bookings that fills the rest of the screen:
+/// pull-to-refresh at the top, load-more when you scroll near the end (stops at 60).
+fn feed_screen(model: &Model) -> Widget {
     let items: Vec<Widget> = model
         .feed
         .iter()
@@ -1882,14 +1894,7 @@ fn feed_card(model: &Model) -> Widget {
         ),
         "You're all caught up",
     );
-    card(
-        column(vec![
-            emphasis("Feed"),
-            caption("A long paged list — pull to refresh, scroll to load more (`LazyList`)."),
-            list,
-        ]),
-        CardStyle::Outlined,
-    )
+    column(vec![caption("Pull to refresh · scroll for more"), with_fill(list)])
 }
 
 fn format_card(device_locale: &str) -> Widget {
@@ -2098,7 +2103,6 @@ fn profile_screen(model: &Model) -> Widget {
         video_card(model),
         playlist_card(model),
         web_card(),
-        feed_card(model),
         // Skeleton placeholders — the shimmer shown while content streams in.
         card(
             column(vec![
@@ -2408,5 +2412,19 @@ mod test {
         assert_eq!(op, "time");
         assert!(v.get("confirm_label").is_none(), "accept button comes from ShellLabels.done");
         assert_eq!(v["cancel_label"], "Back");
+    }
+
+    #[test]
+    fn feed_tab_body_is_a_column_with_a_fill_list() {
+        let (app, mut model) = app();
+        model.tab = Tab::Feed;
+        match app.view(&model) {
+            Widget::Scaffold { body, labels: Some(l), .. } => {
+                let Widget::Column { children } = *body else { panic!("feed body should be a column") };
+                assert_eq!(children.iter().filter(|c| matches!(c, Widget::LazyList { fill: true, .. })).count(), 1);
+                assert!(l.pdf_error.is_some() && l.pdf_title.is_some() && l.web_title.is_some());
+            }
+            other => panic!("expected a scaffold, got {other:?}"),
+        }
     }
 }
