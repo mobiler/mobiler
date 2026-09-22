@@ -36,7 +36,7 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-        if case let .scaffold(_, _, _, _, _, _, _, _, _, _, _, _, labels) = view { ActiveLabels.current = labels } else { ActiveLabels.current = nil }
+        if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
         // Restore persisted state, then fire Start so the app can load initial data.
         let saved = StoragePlugin.load()
         if !saved.isEmpty { update(.restore(data: saved)) }
@@ -53,7 +53,7 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-                if case let .scaffold(_, _, _, _, _, _, _, _, _, _, _, _, labels) = view { ActiveLabels.current = labels } else { ActiveLabels.current = nil }
+                if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.
@@ -339,18 +339,20 @@ enum ToastPlugin {
 enum DialogPlugin {
     /// The confirm alert currently on screen and how to answer it. A new confirm answers it
     /// `ok: false` and dismisses it first — one confirm at a time on every shell.
-    /// `nonisolated(unsafe)` (like `ActiveTheme`/`ActiveLabels`): it's also touched from the
-    /// `withCheckedContinuation` body and the alert-action handlers, which the compiler treats as
-    /// nonisolated but which always run synchronously on the main thread.
+    /// `nonisolated(unsafe)` (like `ActiveTheme`/`ActiveLabels`): it's touched from the nested
+    /// `func done` below (called from the alert-action handlers), which the compiler treats as
+    /// nonisolated — though it always runs on the main thread.
     nonisolated(unsafe) private static var openConfirm: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
 
-    /// `topViewController()`, but skipping over an alert that's already mid-dismissal: that
-    /// alert is still `presentedViewController` for a moment, yet presenting on top of it fails,
-    /// so present from its own presenter instead in that case.
+    /// `topViewController()`, but walking past any `UIAlertController` that's already
+    /// mid-dismissal (each one is still `presentedViewController` for a moment, yet presenting on
+    /// top of it fails) to its own presenter instead — not just the current `openConfirm`'s alert,
+    /// since a third confirm can arrive while an earlier one is still only queued behind that
+    /// dismissal (its own alert never presented, so it can't be the one we see here).
     private static func topViewControllerForConfirm() -> UIViewController? {
-        guard let top = topViewController() else { return nil }
-        if let prev = openConfirm, prev.alert.isBeingDismissed, top === prev.alert {
-            return prev.alert.presentingViewController
+        var top = topViewController()
+        while let alert = top as? UIAlertController, alert.isBeingDismissed {
+            top = alert.presentingViewController
         }
         return top
     }
@@ -366,24 +368,29 @@ enum DialogPlugin {
         let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ((ActiveLabels.current?.cancel).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel")
         let destructive = obj?["destructive"] as? Bool ?? false
 
-        // One confirm at a time: a new confirm dismisses the open one and answers it ok:false
-        // before we even look for a view controller to present the new one from — unless it's
-        // already being dismissed (the user just tapped it), in which case its own handler is
-        // about to answer it, so we leave it alone.
+        // One confirm at a time: a new confirm answers the open one ok:false before we even look
+        // for a view controller to present the new one from — unless it's already being dismissed
+        // (the user just tapped it), in which case its own handler is about to answer it, so we
+        // leave it alone. Either way, the actual UIKit dismissal (ours, or the one already running)
+        // happens in `presentWhenReady` below, and the new alert is presented only once it's done —
+        // never while a dismissal is in flight.
         //
-        // Capture the outgoing alert's own presenter BEFORE dismissing it: UIKit doesn't clear
-        // `presentedViewController` synchronously, so a `topViewController()` taken right after
-        // `dismiss(animated:false)` can still resolve to the alert that's on its way out. Present
-        // the new alert from this captured hint instead of trusting that race.
-        var presenterHint: UIViewController?
+        // A previous confirm that was itself still queued behind an EARLIER dismissal never
+        // actually reached `presenter.present` — its `presentingViewController` is still nil, so
+        // there's nothing on screen for it to dismiss. Answer it, but don't queue it as
+        // `prevToDismiss`; a stray `dismiss(animated:false)` with no real presentation behind it
+        // would otherwise land on whatever view controller `topViewControllerForConfirm()` finds
+        // next (possibly an unrelated app sheet) and dismiss that instead.
+        var prevToDismiss: UIAlertController?
         if let prev = openConfirm, !prev.alert.isBeingDismissed {
-            presenterHint = prev.alert.presentingViewController
+            if prev.alert.presentingViewController != nil {
+                prevToDismiss = prev.alert
+            }
             openConfirm = nil
-            presenterHint?.dismiss(animated: false)
             prev.answer(PluginResponse(ok: false, output: "cancel"))
         }
 
-        guard let presenter = presenterHint ?? topViewControllerForConfirm() else {
+        guard let presenter = prevToDismiss?.presentingViewController ?? topViewControllerForConfirm() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
@@ -408,8 +415,79 @@ enum DialogPlugin {
                 done(PluginResponse(ok: true, output: "ok"))
             })
             openConfirm = (alert, done)
-            presenter.present(alert, animated: true)
+            presentWhenReady(alert, from: presenter, afterDismissing: prevToDismiss)
         }
+    }
+
+    /// Presents `alert` from `presenter`, but never while a dismissal is in flight — presenting on
+    /// top of an alert that's still animating away silently fails. Three cases:
+    /// - `prevToDismiss` (the previous confirm) is still on screen: dismiss it ourselves and
+    ///   present in that dismissal's completion.
+    /// - Nothing of ours needs dismissing, but the front-most controller already is an alert
+    ///   mid-dismissal (the user tapped it directly, and iOS is still animating it away): ride that
+    ///   transition's completion instead of racing it — or, if the transition can't be ridden (no
+    ///   coordinator, or `animate(alongsideTransition:)` itself fails to schedule), fall back to
+    ///   presenting on the next run loop turn.
+    /// - Otherwise: nothing is dismissing, so present immediately.
+    ///
+    /// Every one of those goes through `presentIfStillCurrent` rather than presenting directly:
+    /// by the time a deferred one actually runs, a THIRD confirm may already have superseded and
+    /// answered `alert` (`openConfirm` no longer names it), or `presenter` may no longer be able to
+    /// accept a presentation at all — either way, presenting would silently do nothing and leave
+    /// the caller's continuation hanging forever.
+    ///
+    /// `@MainActor`, the default for a member of this enum: the `withCheckedContinuation` body in
+    /// `handle` that calls this, and the UIKit completion closures inside it (`dismiss`'s
+    /// completion, a transition coordinator's `animate(alongsideTransition:)` completion,
+    /// `DispatchQueue.main.async`), all run main-actor-isolated — unlike the nested `func done`
+    /// above, which the compiler treats as nonisolated and which is why `openConfirm` itself needs
+    /// `nonisolated(unsafe)`.
+    @MainActor
+    private static func presentWhenReady(_ alert: UIAlertController, from presenter: UIViewController, afterDismissing prevToDismiss: UIAlertController?) {
+        if let prevToDismiss {
+            let prevPresenter = prevToDismiss.presentingViewController ?? presenter
+            prevPresenter.dismiss(animated: false) {
+                presentIfStillCurrent(alert, on: presenter)
+            }
+            return
+        }
+        let top = topViewController()
+        if let dismissing = top as? UIAlertController, dismissing.isBeingDismissed {
+            let scheduled = dismissing.transitionCoordinator?.animate(alongsideTransition: nil) { _ in
+                presentIfStillCurrent(alert, on: presenter)
+            }
+            if scheduled != true {
+                DispatchQueue.main.async { presentIfStillCurrent(alert, on: presenter) }
+            }
+            return
+        }
+        presentIfStillCurrent(alert, on: presenter)
+    }
+
+    /// Presents `alert` on `presenter` — but only if `alert` is still `openConfirm` (a third
+    /// confirm arriving while this one was deferred may already have superseded and answered it —
+    /// see `presentWhenReady`) and `presenter` can actually accept a presentation right now (still
+    /// in a window, and not already presenting something else). When either isn't true, `alert` is
+    /// resolved right here through its own stored answer instead of being silently dropped, so a
+    /// deferred present that can never happen still resolves the waiting continuation exactly once,
+    /// the same way `done` itself would.
+    ///
+    /// `@MainActor`, like `presentWhenReady` above: the deferred UIKit completion closures that
+    /// call this — `dismiss`'s completion, a transition coordinator's
+    /// `animate(alongsideTransition:)` completion, `DispatchQueue.main.async` — all run
+    /// main-actor-isolated, so this needs no isolation override of its own; only `openConfirm`
+    /// (touched from the genuinely nonisolated nested `func done`) does.
+    @MainActor
+    private static func presentIfStillCurrent(_ alert: UIAlertController, on presenter: UIViewController) {
+        let alertID = ObjectIdentifier(alert)
+        guard openConfirm.map({ ObjectIdentifier($0.alert) }) == alertID else { return }
+        guard presenter.view.window != nil, presenter.presentedViewController == nil else {
+            let current = openConfirm
+            openConfirm = nil
+            current?.answer(PluginResponse(ok: false, output: "no view controller to present from"))
+            return
+        }
+        presenter.present(alert, animated: true)
     }
 }
 
