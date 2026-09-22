@@ -352,7 +352,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _):
         // Theme-as-data: stash the active theme so the (non-View) mapper helpers — spacing(),
         // imageShape(), CardMod, TextStyleMod — pick up corner/density/font. The brand color
         // is applied as a SwiftUI `.tint` on the ScaffoldView (it cascades to controls).
@@ -372,6 +372,12 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 /// app-global, like dark mode.
 enum ActiveTheme {
     nonisolated(unsafe) static var current: Theme?
+}
+
+/// The current scaffold's app-wide shell text (ShellLabels), set from the root view in Core.swift;
+/// read by the dialog/picker plugins for their defaults. `nil` ⇒ English defaults.
+enum ActiveLabels {
+    nonisolated(unsafe) static var current: ShellLabels?
 }
 
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
@@ -1025,7 +1031,7 @@ private struct SplitView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let onBack {
                     Button(action: { send(.fired(token: onBack)) }) {
-                        Label("Back", systemImage: "chevron.left").font(.body.weight(.semibold))
+                        Label((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back", systemImage: "chevron.left").font(.body.weight(.semibold))
                     }.buttonStyle(.plain)
                 }
                 render(detail, send)
@@ -1120,6 +1126,7 @@ private struct ScaffoldView: View {
                     Button(action: { send(.fired(token: back)) }) {
                         Image(systemName: "chevron.left")
                     }
+                    .accessibilityLabel((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back")
                 }
                 Spacer()
                 Text(title).font(.headline)

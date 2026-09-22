@@ -36,6 +36,7 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
+        if case let .scaffold(_, _, _, _, _, _, _, _, _, _, _, _, labels) = view { ActiveLabels.current = labels } else { ActiveLabels.current = nil }
         // Restore persisted state, then fire Start so the app can load initial data.
         let saved = StoragePlugin.load()
         if !saved.isEmpty { update(.restore(data: saved)) }
@@ -52,6 +53,7 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
+                if case let .scaffold(_, _, _, _, _, _, _, _, _, _, _, _, labels) = view { ActiveLabels.current = labels } else { ActiveLabels.current = nil }
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.
@@ -335,27 +337,77 @@ enum ToastPlugin {
 /// once they tap. Input is JSON {title, message, confirm_label?, cancel_label?, destructive?}; system alerts keep their own size.
 @MainActor
 enum DialogPlugin {
+    /// The confirm alert currently on screen and how to answer it. A new confirm answers it
+    /// `ok: false` and dismisses it first — one confirm at a time on every shell.
+    /// `nonisolated(unsafe)` (like `ActiveTheme`/`ActiveLabels`): it's also touched from the
+    /// `withCheckedContinuation` body and the alert-action handlers, which the compiler treats as
+    /// nonisolated but which always run synchronously on the main thread.
+    nonisolated(unsafe) private static var openConfirm: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
+
+    /// `topViewController()`, but skipping over an alert that's already mid-dismissal: that
+    /// alert is still `presentedViewController` for a moment, yet presenting on top of it fails,
+    /// so present from its own presenter instead in that case.
+    private static func topViewControllerForConfirm() -> UIViewController? {
+        guard let top = topViewController() else { return nil }
+        if let prev = openConfirm, prev.alert.isBeingDismissed, top === prev.alert {
+            return prev.alert.presentingViewController
+        }
+        return top
+    }
+
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "confirm" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
         let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
         let title = obj?["title"] as? String ?? ""
         let message = obj?["message"] as? String ?? ""
-        // Optional app labels; a plain `cx.confirm` sends none and keeps OK / Cancel.
-        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "OK"
-        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel"
+        // Optional app labels; a plain `cx.confirm` sends none and falls back to the scaffold's
+        // ShellLabels, then OK / Cancel.
+        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ((ActiveLabels.current?.ok).flatMap { $0.isEmpty ? nil : $0 } ?? "OK")
+        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ((ActiveLabels.current?.cancel).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel")
         let destructive = obj?["destructive"] as? Bool ?? false
-        guard let presenter = topViewController() else {
+
+        // One confirm at a time: a new confirm dismisses the open one and answers it ok:false
+        // before we even look for a view controller to present the new one from — unless it's
+        // already being dismissed (the user just tapped it), in which case its own handler is
+        // about to answer it, so we leave it alone.
+        //
+        // Capture the outgoing alert's own presenter BEFORE dismissing it: UIKit doesn't clear
+        // `presentedViewController` synchronously, so a `topViewController()` taken right after
+        // `dismiss(animated:false)` can still resolve to the alert that's on its way out. Present
+        // the new alert from this captured hint instead of trusting that race.
+        var presenterHint: UIViewController?
+        if let prev = openConfirm, !prev.alert.isBeingDismissed {
+            presenterHint = prev.alert.presentingViewController
+            openConfirm = nil
+            presenterHint?.dismiss(animated: false)
+            prev.answer(PluginResponse(ok: false, output: "cancel"))
+        }
+
+        guard let presenter = presenterHint ?? topViewControllerForConfirm() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
         return await withCheckedContinuation { cont in
             let alert = UIAlertController(
                 title: title.isEmpty ? nil : title, message: message, preferredStyle: .alert)
+            // Identity only, never a strong capture of `alert` — the closure below is retained by
+            // the UIAlertAction, which is retained by `alert` itself, so capturing `alert` there
+            // would be a retain cycle.
+            let alertID = ObjectIdentifier(alert)
+            var resumed = false
+            func done(_ r: PluginResponse) {
+                if !resumed {
+                    resumed = true
+                    if openConfirm.map({ ObjectIdentifier($0.alert) }) == alertID { openConfirm = nil }
+                    cont.resume(returning: r)
+                }
+            }
             alert.addAction(UIAlertAction(title: cancelLabel, style: .cancel) { _ in
-                cont.resume(returning: PluginResponse(ok: false, output: "cancel"))
+                done(PluginResponse(ok: false, output: "cancel"))
             })
             alert.addAction(UIAlertAction(title: confirmLabel, style: destructive ? .destructive : .default) { _ in
-                cont.resume(returning: PluginResponse(ok: true, output: "ok"))
+                done(PluginResponse(ok: true, output: "ok"))
             })
+            openConfirm = (alert, done)
             presenter.present(alert, animated: true)
         }
     }
@@ -412,10 +464,10 @@ enum DateTimePlugin {
 
             var resumed = false
             func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
-            alert.addAction(UIAlertAction(title: label("cancel_label", "Cancel"), style: .cancel) { _ in
+            alert.addAction(UIAlertAction(title: label("cancel_label", (ActiveLabels.current?.cancel).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel"), style: .cancel) { _ in
                 done(PluginResponse(ok: false, output: "cancel"))
             })
-            alert.addAction(UIAlertAction(title: label("confirm_label", "Done"), style: .default) { _ in
+            alert.addAction(UIAlertAction(title: label("confirm_label", (ActiveLabels.current?.done).flatMap { $0.isEmpty ? nil : $0 } ?? "Done"), style: .default) { _ in
                 done(PluginResponse(ok: true, output: fmt.string(from: picker.date)))
             })
             // iPad presents action sheets in a popover, which needs a source.
