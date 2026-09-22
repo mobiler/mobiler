@@ -342,13 +342,15 @@ enum DialogPlugin {
     /// nonisolated but which always run synchronously on the main thread.
     nonisolated(unsafe) private static var openConfirm: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
 
-    /// `topViewController()`, but skipping over an alert that's already mid-dismissal: that
-    /// alert is still `presentedViewController` for a moment, yet presenting on top of it fails,
-    /// so present from its own presenter instead in that case.
+    /// `topViewController()`, but walking past any `UIAlertController` that's already
+    /// mid-dismissal (each one is still `presentedViewController` for a moment, yet presenting on
+    /// top of it fails) to its own presenter instead — not just the current `openConfirm`'s alert,
+    /// since a third confirm can arrive while an earlier one is still only queued behind that
+    /// dismissal (its own alert never presented, so it can't be the one we see here).
     private static func topViewControllerForConfirm() -> UIViewController? {
-        guard let top = topViewController() else { return nil }
-        if let prev = openConfirm, prev.alert.isBeingDismissed, top === prev.alert {
-            return prev.alert.presentingViewController
+        var top = topViewController()
+        while let alert = top as? UIAlertController, alert.isBeingDismissed {
+            top = alert.presentingViewController
         }
         return top
     }
@@ -371,13 +373,17 @@ enum DialogPlugin {
         // happens in `presentWhenReady` below, and the new alert is presented only once it's done —
         // never while a dismissal is in flight.
         //
-        // Capture the outgoing alert's own presenter BEFORE dismissing it: UIKit doesn't clear
-        // `presentedViewController` synchronously, so a `topViewController()` taken right after
-        // `dismiss(animated:false)` can still resolve to the alert that's on its way out. Present
-        // the new alert from this captured hint instead of trusting that race.
+        // A previous confirm that was itself still queued behind an EARLIER dismissal never
+        // actually reached `presenter.present` — its `presentingViewController` is still nil, so
+        // there's nothing on screen for it to dismiss. Answer it, but don't queue it as
+        // `prevToDismiss`; a stray `dismiss(animated:false)` with no real presentation behind it
+        // would otherwise land on whatever view controller `topViewControllerForConfirm()` finds
+        // next (possibly an unrelated app sheet) and dismiss that instead.
         var prevToDismiss: UIAlertController?
         if let prev = openConfirm, !prev.alert.isBeingDismissed {
-            prevToDismiss = prev.alert
+            if prev.alert.presentingViewController != nil {
+                prevToDismiss = prev.alert
+            }
             openConfirm = nil
             prev.answer(PluginResponse(ok: false, output: "cancel"))
         }
@@ -417,27 +423,63 @@ enum DialogPlugin {
     ///   present in that dismissal's completion.
     /// - Nothing of ours needs dismissing, but the front-most controller already is an alert
     ///   mid-dismissal (the user tapped it directly, and iOS is still animating it away): ride that
-    ///   transition's completion instead of racing it.
+    ///   transition's completion instead of racing it — or, if the transition can't be ridden (no
+    ///   coordinator, or `animate(alongsideTransition:)` itself fails to schedule), fall back to
+    ///   presenting on the next run loop turn.
     /// - Otherwise: nothing is dismissing, so present immediately.
     ///
-    /// Its closures touch only UIKit objects (`presenter`, the outgoing alert) and never an
-    /// actor-isolated static like `openConfirm` — the same reason `openConfirm` itself needed
-    /// `nonisolated(unsafe)` doesn't apply here, since nothing isolated is referenced.
-    @MainActor
-    private static func presentWhenReady(_ alert: UIAlertController, from presenter: UIViewController, afterDismissing prevToDismiss: UIAlertController?) {
+    /// Every one of those goes through `presentIfStillCurrent` rather than presenting directly:
+    /// by the time a deferred one actually runs, a THIRD confirm may already have superseded and
+    /// answered `alert` (`openConfirm` no longer names it), or `presenter` may no longer be able to
+    /// accept a presentation at all — either way, presenting would silently do nothing and leave
+    /// the caller's continuation hanging forever.
+    ///
+    /// `nonisolated` — it's called directly from the `withCheckedContinuation` body in `handle`
+    /// above, which the compiler treats as nonisolated (see `openConfirm`). Its one genuinely
+    /// `@MainActor` dependency, `topViewController()`, is bridged with `MainActor.assumeIsolated`
+    /// rather than making the caller hop, since — like everything else here — this always actually
+    /// runs on the main thread.
+    nonisolated private static func presentWhenReady(_ alert: UIAlertController, from presenter: UIViewController, afterDismissing prevToDismiss: UIAlertController?) {
         if let prevToDismiss {
             let prevPresenter = prevToDismiss.presentingViewController ?? presenter
             prevPresenter.dismiss(animated: false) {
-                presenter.present(alert, animated: true)
+                presentIfStillCurrent(alert, on: presenter)
             }
             return
         }
-        if let top = topViewController(), let dismissing = top as? UIAlertController, dismissing.isBeingDismissed {
-            if let tc = dismissing.transitionCoordinator {
-                tc.animate(alongsideTransition: nil) { _ in presenter.present(alert, animated: true) }
-            } else {
-                DispatchQueue.main.async { presenter.present(alert, animated: true) }
+        let top = MainActor.assumeIsolated { topViewController() }
+        if let dismissing = top as? UIAlertController, dismissing.isBeingDismissed {
+            let scheduled = dismissing.transitionCoordinator?.animate(alongsideTransition: nil) { _ in
+                presentIfStillCurrent(alert, on: presenter)
             }
+            if scheduled != true {
+                DispatchQueue.main.async { presentIfStillCurrent(alert, on: presenter) }
+            }
+            return
+        }
+        presentIfStillCurrent(alert, on: presenter)
+    }
+
+    /// Presents `alert` on `presenter` — but only if `alert` is still `openConfirm` (a third
+    /// confirm arriving while this one was deferred may already have superseded and answered it —
+    /// see `presentWhenReady`) and `presenter` can actually accept a presentation right now (still
+    /// in a window, and not already presenting something else). When either isn't true, `alert` is
+    /// resolved right here through its own stored answer instead of being silently dropped, so a
+    /// deferred present that can never happen still resolves the waiting continuation exactly once,
+    /// the same way `done` itself would.
+    ///
+    /// `nonisolated`, like `openConfirm` itself (which this touches): it's called from the same
+    /// kind of deferred UIKit completion closure — `dismiss`'s completion, a transition
+    /// coordinator's `animate(alongsideTransition:)` completion, `DispatchQueue.main.async` — that
+    /// the compiler treats as nonisolated, the same category as the `withCheckedContinuation` body
+    /// and the alert-action handlers above, even though all of them always run on the main thread.
+    nonisolated private static func presentIfStillCurrent(_ alert: UIAlertController, on presenter: UIViewController) {
+        let alertID = ObjectIdentifier(alert)
+        guard openConfirm.map({ ObjectIdentifier($0.alert) }) == alertID else { return }
+        guard presenter.view.window != nil, presenter.presentedViewController == nil else {
+            let current = openConfirm
+            openConfirm = nil
+            current?.answer(PluginResponse(ok: false, output: "no view controller to present from"))
             return
         }
         presenter.present(alert, animated: true)
