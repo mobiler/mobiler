@@ -204,6 +204,7 @@ import dev.mobiler.coffee.shared.types.ImageShape
 import dev.mobiler.coffee.shared.types.InputValue
 import dev.mobiler.coffee.shared.types.MapMarker
 import dev.mobiler.coffee.shared.types.ProjectColor
+import dev.mobiler.coffee.shared.types.ShellLabels
 import dev.mobiler.coffee.shared.types.Spacing
 import dev.mobiler.coffee.shared.types.TextStyle as ModelTextStyle
 import dev.mobiler.coffee.shared.types.Theme as ModelTheme
@@ -294,6 +295,7 @@ fun App(core: Core = viewModel()) {
     // Stash the active theme before rendering (app-global, like dark mode; render runs on the
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
     activeTheme = appTheme
+    ActiveLabels.current = (view as? Widget.Scaffold)?.labels
     CoffeeTheme(darkTheme = dark, theme = appTheme) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (view is Widget.Scaffold) {
@@ -1011,7 +1013,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     val back = widget.onBack
                     if (back != null) {
                         TextButton(onClick = { send(Action.Fired(back)) }) {
-                            Text("‹ Back", fontWeight = FontWeight.SemiBold)
+                            Text("‹ ${ActiveLabels.current?.back ?: "Back"}", fontWeight = FontWeight.SemiBold)
                         }
                     }
                     Render(widget.detail, send)
@@ -1220,7 +1222,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 navigationIcon = {
                                     if (back != null) {
                                         IconButton(onClick = { send(Action.Fired(back)) }) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back ?: "Back")
                                         }
                                     }
                                 },
@@ -1333,6 +1335,12 @@ private fun colorFor(style: ModelTextStyle): Color = when (style) {
 // null = framework defaults (no visual change). App-global, like dark mode; the SwiftUI
 // shell's `ActiveTheme.current` twin.
 private var activeTheme: ModelTheme? = null
+
+/** The current scaffold's app-wide shell text (ShellLabels), set when App() renders. Core.kt's
+ *  dialog/picker plugins read it for their defaults; null ⇒ English/platform defaults. */
+object ActiveLabels {
+    @Volatile var current: ShellLabels? = null
+}
 
 // Spacing multiplier from the theme's density. Comfortable (or un-themed) = 1.0; Compact tightens;
 // Large loosens.
