@@ -38,6 +38,13 @@ final class Core: ObservableObject {
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
         if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
         // Restore persisted state, then fire Start so the app can load initial data.
+        // The app's own version first, so the core's restore/init already see it (cx.app_info()).
+        let info = Bundle.main.infoDictionary
+        update(.appInfo(
+            version: info?["CFBundleShortVersionString"] as? String ?? "",
+            build: info?["CFBundleVersion"] as? String ?? "",
+            platform: "ios",
+            bundleId: Bundle.main.bundleIdentifier ?? ""))
         let saved = StoragePlugin.load()
         if !saved.isEmpty { update(.restore(data: saved)) }
         update(.start)

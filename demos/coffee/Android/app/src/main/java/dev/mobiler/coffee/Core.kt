@@ -452,6 +452,11 @@ class Core(application: Application) : AndroidViewModel(application) {
 
     init {
         // Hand any persisted state back to the core before the first frame.
+        // The app's own version first, so the core's restore/init already see it (cx.app_info()).
+        // update() launches on Main.immediate and core.update runs before the first suspension, so
+        // the core receives AppInfo, Restore and Start in this order.
+        val pkg = application.packageManager.getPackageInfo(application.packageName, 0)
+        update(Action.AppInfo(pkg.versionName ?: "", pkg.longVersionCode.toString(), "android", application.packageName))
         val saved = application.getSharedPreferences("mobiler", Context.MODE_PRIVATE).getString("state", "") ?: ""
         if (saved.isNotEmpty()) update(Action.Restore(saved))
         // Always fire Start (after any Restore) so the app can load initial data.
