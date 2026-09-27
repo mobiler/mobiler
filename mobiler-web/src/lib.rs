@@ -25,7 +25,7 @@ use mobiler_core::{
     A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, HttpHeader, HttpOutcome, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
-    Rgb, ShellLabels, Spacing, TextStyle, Theme, Tone, TransferEvent, Widget,
+    ColorRoles, Rgb, ShellLabels, Spacing, TextStyle, Theme, Tone, TransferEvent, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -2062,7 +2062,19 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let body_class = format!("scaffold-body {}", nav_class(route, *depth));
             // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
             // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
-            let theme_style = theme.as_ref().map(theme_css).unwrap_or_default();
+            let theme_style = theme.as_ref().map(|t| theme_css(t, *dark_mode)).unwrap_or_default();
+            // A palette's page background also paints the document behind the scaffold (overscroll,
+            // short pages); without one, clear it so switching palettes off leaves nothing behind.
+            let page_bg = theme.as_ref().and_then(|t| t.palette).and_then(|p| if *dark_mode { p.dark } else { p.light }.background);
+            if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
+                if let Some(el) = wasm_bindgen::JsCast::dyn_ref::<web_sys::HtmlElement>(&root) {
+                    let st = el.style();
+                    let _ = match page_bg {
+                        Some(c) => st.set_property("background", &format!("rgb({},{},{})", c.r, c.g, c.b)),
+                        None => st.remove_property("background").map(|_| ()),
+                    };
+                }
+            }
             // Mark the fill target by address so the LazyList arm can pick out exactly that one,
             // even if other `fill: true` lists exist elsewhere. `render` is a plain function, so
             // the whole subtree below builds synchronously within this call — the marker is only
@@ -2141,7 +2153,7 @@ fn shell_label(pick: impl Fn(&ShellLabels) -> Option<String>, default: &str) -> 
 /// twin of the native brand/tint + shape + spacing + font. Overrides `mobiler.css`'s defaults
 /// (its rules read these via `var(--…)`); dark mode still works (it only swaps the colors the
 /// seed doesn't pin).
-fn theme_css(t: &Theme) -> String {
+fn theme_css(t: &Theme, dark: bool) -> String {
     let (r, g, b) = (t.seed.r, t.seed.g, t.seed.b);
     let radius = match t.corner {
         Corner::None => "0px",
@@ -2162,12 +2174,66 @@ fn theme_css(t: &Theme) -> String {
     };
     // Secondary brand color (for the CardStyle::Brand gradient); falls back to the seed.
     let (ar, ag, ab) = t.accent.map_or((r, g, b), |a| (a.r, a.g, a.b));
-    format!(
+    let base = format!(
         "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
          --accent2:rgb({ar},{ag},{ab});\
          --accent-soft:rgba({r},{g},{b},0.16);--radius:{radius};\
          --gap:{gap};--pad:{pad};--font:{font};"
-    )
+    );
+    // A palette appends the active set's roles (later declarations win) plus the native
+    // `color-scheme`, so form controls and scrollbars match. No palette → `base` unchanged.
+    match &t.palette {
+        Some(p) => {
+            let (roles, scheme) = if dark { (&p.dark, "dark") } else { (&p.light, "light") };
+            format!("{base}{}color-scheme:{scheme};", palette_css(roles))
+        }
+        None => base,
+    }
+}
+
+/// Append `name:rgb(…);` for each name when the role is set.
+fn put_rgb(s: &mut String, names: &[&str], c: Option<Rgb>) {
+    if let Some(c) = c {
+        for n in names {
+            s.push_str(&format!("{n}:rgb({},{},{});", c.r, c.g, c.b));
+        }
+    }
+}
+
+/// The palette's set roles as CSS custom properties. Unset roles emit nothing, so
+/// `mobiler.css`'s values (today's colours) stay in force. Existing variables are overridden only
+/// where their meaning is exactly the role; every other role gets its own variable, which the CSS
+/// reads with the old expression as fallback.
+fn palette_css(p: &ColorRoles) -> String {
+    let mut s = String::new();
+    put_rgb(&mut s, &["--bg"], p.background);
+    put_rgb(&mut s, &["--surface"], p.surface);
+    put_rgb(&mut s, &["--surface-bar"], p.surface_bar);
+    put_rgb(&mut s, &["--surface-2", "--field-bg"], p.surface_muted);
+    put_rgb(&mut s, &["--ink", "--fg"], p.on_surface);
+    put_rgb(&mut s, &["--muted"], p.on_surface_variant);
+    put_rgb(&mut s, &["--outline"], p.outline);
+    put_rgb(&mut s, &["--line", "--border"], p.outline_variant);
+    put_rgb(&mut s, &["--primary", "--pal-primary"], p.primary);
+    put_rgb(&mut s, &["--primary-ink", "--pal-on-primary"], p.on_primary);
+    put_rgb(&mut s, &["--primary-text"], p.primary_text);
+    put_rgb(&mut s, &["--accent-soft", "--seg-sel-bg"], p.secondary_container);
+    put_rgb(&mut s, &["--on-secondary-container", "--seg-sel-fg"], p.on_secondary_container);
+    put_rgb(&mut s, &["--fab"], p.fab);
+    put_rgb(&mut s, &["--on-fab"], p.on_fab);
+    for (name, pair) in [("success", p.success), ("warning", p.warning), ("danger", p.danger), ("info", p.info)] {
+        if let Some(t) = pair {
+            put_rgb(&mut s, &[&format!("--tone-{name}")], Some(t.container));
+            put_rgb(&mut s, &[&format!("--tone-{name}-on")], Some(t.on_container));
+            if name == "danger" {
+                put_rgb(&mut s, &["--danger"], Some(t.on_container));
+            }
+        }
+    }
+    if let Some(a) = p.scrim {
+        s.push_str(&format!("--scrim:rgba({},{},{},{:.3});", a.r, a.g, a.b, f32::from(a.a) / 255.0));
+    }
+    s
 }
 
 /// Pick the Scaffold body's transition class for this render. Returns `""` for a
@@ -2677,4 +2743,56 @@ fn region_chart_view(
             {legend_row}
         </div>
     }.into_any()
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+    use mobiler_core::{ColorRoles, Palette, Rgba, TonePair};
+
+    #[test]
+    fn palette_css_emits_only_set_roles() {
+        let r = ColorRoles { background: Some(Rgb::hex(0x231f20)), ..Default::default() };
+        assert_eq!(palette_css(&r), "--bg:rgb(35,31,32);");
+    }
+
+    #[test]
+    fn palette_css_maps_pairs_and_scrim() {
+        let r = ColorRoles {
+            danger: Some(TonePair::new(Rgb::hex(0x4d2626), Rgb::hex(0xffb4ab))),
+            scrim: Some(Rgba::new(0, 0, 0, 82)),
+            outline_variant: Some(Rgb::hex(0x4a4442)),
+            primary_text: Some(Rgb::hex(0x6fcbbb)),
+            secondary_container: Some(Rgb::hex(0x314a48)),
+            ..Default::default()
+        };
+        let css = palette_css(&r);
+        assert!(css.contains("--tone-danger:rgb(77,38,38);"));
+        assert!(css.contains("--tone-danger-on:rgb(255,180,171);"));
+        assert!(css.contains("--danger:rgb(255,180,171);"));
+        assert!(css.contains("--line:rgb(74,68,66);--border:rgb(74,68,66);"));
+        assert!(css.contains("--scrim:rgba(0,0,0,0.322);"));
+        assert!(css.contains("--primary-text:rgb(111,203,187);"));
+        assert!(!css.contains("--accent:"), "primary_text must not override --accent (it also paints fills)");
+        assert!(css.contains("--accent-soft:rgb(49,74,72);--seg-sel-bg:rgb(49,74,72);"));
+    }
+
+    #[test]
+    fn theme_css_without_palette_is_unchanged() {
+        let t = Theme::default();
+        let expected = "--primary:rgb(92,107,192);--accent:rgb(92,107,192);--accent2:rgb(92,107,192);--accent-soft:rgba(92,107,192,0.16);--radius:14px;--gap:12px;--pad:14px;--font:system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif;";
+        assert_eq!(theme_css(&t, false), expected);
+        assert_eq!(theme_css(&t, true), expected);
+    }
+
+    #[test]
+    fn theme_css_appends_the_active_set() {
+        let p = Palette {
+            light: ColorRoles { background: Some(Rgb::hex(0xfaf7f0)), ..Default::default() },
+            dark: ColorRoles { background: Some(Rgb::hex(0x231f20)), ..Default::default() },
+        };
+        let t = Theme { palette: Some(p), ..Default::default() };
+        assert!(theme_css(&t, true).ends_with("--bg:rgb(35,31,32);color-scheme:dark;"));
+        assert!(theme_css(&t, false).ends_with("--bg:rgb(250,247,240);color-scheme:light;"));
+    }
 }
