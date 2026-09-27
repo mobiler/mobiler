@@ -163,7 +163,7 @@ Device APIs are async **capabilities** via `cx`, fulfilled by the generic shell 
 every platform — adding one is a shell-registry entry, never an ABI change. Built in:
 
 <!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
-HTTP, storage, clipboard, share, browser, toast, device info, haptics, a confirm dialog, the photo picker, camera capture, the date picker, and the time picker.
+HTTP, storage, clipboard, share, browser, toast, device info, the app's version/build, haptics, a confirm dialog, the photo picker, camera capture, the date picker, and the time picker.
 <!-- capabilities:end -->
 
 Navigation is a core-owned `Nav` stack; dark mode and theming are data in
@@ -198,7 +198,8 @@ geofencing + periodic wake** (`geofence` / `background-fetch` plugins; **experim
 master-detail** (`Split` — side-by-side on tablets/landscape, push-nav on phones), an **app `files` plugin**
 (read/write/list + download + export to Files/Downloads), rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
-(`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
+(`mobiler_core::format`), a device-locale getter (`cx.device_locale`), the app's own version/build
+(`cx.app_info()`, synchronous, set before `init`), an in-app PDF viewer
 (`PdfView`), a native→core streaming primitive (`cx.subscribe`/`unsubscribe`, with a built-in
 `ticker`), a paged feed list (`LazyList` — infinite scroll + pull-to-refresh), remote push
 (`push` plugin — APNs/FCM; **experimental**), and in-app purchases (`iap` plugin — StoreKit 2 / Play

@@ -42,6 +42,11 @@ pub enum Action {
     /// Fired once on startup (after `Restore`) so the app can kick off initial
     /// effects (e.g. fetching data).
     Start,
+    /// The app's own version, sent once by the shell at startup **before** `Restore`/`Start`:
+    /// iOS `CFBundleShortVersionString`/`CFBundleVersion`/bundle id, Android
+    /// `versionName`/`longVersionCode`/package name, web empty strings. `platform` is
+    /// `"ios"`/`"android"`/`"web"`. Read in the core via `cx.app_info()`.
+    AppInfo { version: String, build: String, platform: String, bundle_id: String },
 }
 
 // ---------------------------- style tokens ----------------------------
@@ -767,6 +772,12 @@ mod tests {
         round_trips(&Action::Fired { token: "tok".to_string() });
         round_trips(&Action::Input { id: "field".to_string(), value: InputValue::Bool(true) });
         round_trips(&Action::Restore { data: "{}".to_string() });
+        round_trips(&Action::AppInfo {
+            version: "1.0".to_string(),
+            build: "7".to_string(),
+            platform: "ios".to_string(),
+            bundle_id: "rs.x".to_string(),
+        });
     }
 
     #[test]

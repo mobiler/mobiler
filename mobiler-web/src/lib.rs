@@ -198,6 +198,10 @@ where
         })
     };
 
+    // The app's own version first, so `restore`/`init` already see it (`cx.app_info()`). The web
+    // build has no version manifest: only the platform is known.
+    send(Action::AppInfo { version: String::new(), build: String::new(), platform: "web".into(), bundle_id: String::new() });
+
     // Restore persisted state (localStorage), then fire Start — mirrors the native
     // shells (which restore before Start so the app sees its saved Model on launch).
     let saved = local_storage().and_then(|s| s.get_item(STORAGE_KEY).ok().flatten()).unwrap_or_default();
