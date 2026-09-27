@@ -144,6 +144,8 @@ body {
   border: none;
   cursor: pointer;
 }
+/* `.card-tappable`'s `color: inherit` outranks `.card-brand`'s text colour; a palette's on_primary wins back. */
+.card-brand.card-tappable { color: var(--pal-on-primary, inherit); }
 
 /* Z-stack. Scrim variant: bg image sets the size; overlay + content layer on top. */
 .box { position: relative; }

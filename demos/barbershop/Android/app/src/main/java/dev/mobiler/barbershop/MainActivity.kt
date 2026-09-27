@@ -118,6 +118,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.NavigationRailDefaults
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.ModalBottomSheet
@@ -1258,6 +1260,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     onClick = { send(Action.Fired(t.onSelect)) },
                                     label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
                                     icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
+                                    colors = LocalPalette.current?.primaryText?.color()?.let { NavigationRailItemDefaults.colors(selectedTextColor = it) } ?: NavigationRailItemDefaults.colors(),
                                 )
                             }
                         }
@@ -1286,6 +1289,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             onClick = { send(Action.Fired(t.onSelect)) },
                                             label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
                                             icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
+                                            // M3 colours the selected label with `secondary` (the brand accent); a palette uses primary_text.
+                                            colors = LocalPalette.current?.primaryText?.color()?.let { NavigationBarItemDefaults.colors(selectedTextColor = it) } ?: NavigationBarItemDefaults.colors(),
                                         )
                                     }
                                 }
