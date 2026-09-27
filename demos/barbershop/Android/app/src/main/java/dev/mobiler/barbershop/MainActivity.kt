@@ -310,12 +310,19 @@ fun App(core: Core = viewModel()) {
     activeTheme = appTheme
     ActiveLabels.current = (view as? Widget.Scaffold)?.labels
     // With a palette the system-bar icons follow `dark_mode` (the app's own dark flag), not the OS.
-    if (appTheme?.palette != null) {
-        val activity = androidx.compose.ui.platform.LocalContext.current as? PaletteActivity
-        LaunchedEffect(dark, activity) {
+    // If a palette goes away at runtime, restore the default (OS-following) bars once.
+    val hasPalette = appTheme?.palette != null
+    val activity = androidx.compose.ui.platform.LocalContext.current as? PaletteActivity
+    var paletteBars by remember { mutableStateOf(false) }
+    LaunchedEffect(dark, hasPalette, activity) {
+        if (hasPalette) {
             val t = android.graphics.Color.TRANSPARENT
             val style = if (dark) SystemBarStyle.dark(t) else SystemBarStyle.light(t, t)
             activity?.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            paletteBars = true
+        } else if (paletteBars) {
+            activity?.enableEdgeToEdge()
+            paletteBars = false
         }
     }
     FadehouseTheme(darkTheme = dark, theme = appTheme) {
@@ -1145,6 +1152,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             label = { Text(widget.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) },
             modifier = if (isLarge) Modifier.height(48.dp) else Modifier,
             colors = LocalPalette.current?.surfaceMuted?.let { FilterChipDefaults.filterChipColors(containerColor = it.color()) } ?: FilterChipDefaults.filterChipColors(),
+            border = LocalPalette.current?.outline?.let { FilterChipDefaults.filterChipBorder(enabled = true, selected = widget.selected, borderColor = it.color()) }
+                ?: FilterChipDefaults.filterChipBorder(enabled = true, selected = widget.selected),
         )
 
         is Widget.TextField -> {

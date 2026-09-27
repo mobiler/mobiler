@@ -52,6 +52,8 @@ private fun paletteScheme(base: ColorScheme, p: ColorRoles): ColorScheme {
         onSurfaceVariant = p.onSurfaceVariant?.color() ?: base.onSurfaceVariant,
         surfaceContainerLowest = surface ?: base.surfaceContainerLowest,
         surfaceContainerLow = surface ?: base.surfaceContainerLow,
+        // surfaceContainer is the bar slot (NavigationBar) — M3 menus/dropdowns read it too, so they
+        // take surface_bar as well, which suits them (a raised surface in the bar's tone).
         surfaceContainer = p.surfaceBar?.color() ?: base.surfaceContainer,
         surfaceContainerHigh = surface ?: base.surfaceContainerHigh,
         surfaceContainerHighest = surface ?: base.surfaceContainerHighest,
@@ -101,7 +103,8 @@ fun FadehouseTheme(
         theme != null -> {
             val seed = Color(theme.seed.r.toInt(), theme.seed.g.toInt(), theme.seed.b.toInt())
             // Optional accent seeds M3 secondary/tertiary (drives CardStyle.BRAND gradients); falls back to the seed.
-            val accent = theme.accent?.let { Color(it.r.toInt(), it.g.toInt(), it.b.toInt()) } ?: seed
+            // Without an app accent a palette's primary ends the Brand gradient (else the seed, as before).
+            val accent = theme.accent?.let { Color(it.r.toInt(), it.g.toInt(), it.b.toInt()) } ?: roles?.primary?.color() ?: seed
             val base = if (darkTheme) DarkColorScheme else LightColorScheme
             val themed = base.copy(primary = seed, secondary = accent, tertiary = accent)
             roles?.let { paletteScheme(themed, it) } ?: themed

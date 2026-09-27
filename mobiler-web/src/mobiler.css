@@ -138,7 +138,7 @@ body {
 .card-filled { background: var(--surface-2); }
 /* Brand gradient card (promo banner) — fills seed → accent. */
 .card-brand { background: linear-gradient(135deg, var(--primary), var(--accent2)); color: var(--pal-on-primary, #fff); border: none; }
-.card-brand .t-caption { color: rgba(255,255,255,0.85); }
+.card-brand .t-caption { color: var(--pal-on-primary-85, rgba(255,255,255,0.85)); }
 /* A tappable card is a <button>; strip the native chrome so it reads as a card. */
 .card-tappable {
   display: block;
@@ -225,7 +225,7 @@ body {
 
 /* Skeleton shimmer placeholder. */
 .skeleton { height: 48px; border-radius: 8px; margin: 6px 0;
-  background: linear-gradient(90deg, var(--line) 25%, rgba(127,127,127,.18) 37%, var(--line) 63%);
+  background: linear-gradient(90deg, var(--skeleton-base, var(--line)) 25%, rgba(127,127,127,.18) 37%, var(--skeleton-base, var(--line)) 63%);
   background-size: 400% 100%; animation: mobiler-shimmer 1.4s ease infinite; }
 @keyframes mobiler-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
@@ -282,7 +282,7 @@ body {
 .cal-sel:hover { background: var(--pal-primary, var(--accent, #5C6BC0)); }
 .cal-day { position: relative; }
 .cal-dots { position: absolute; left: 0; right: 0; bottom: 12%; display: flex; justify-content: center; gap: 2px; pointer-events: none; }
-.cal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
+.cal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--primary-text, var(--primary)); }
 .cal-sel .cal-dot { background: var(--primary-ink); }
 
 /* Pull-to-refresh — web fallback: a top-bar refresh button (the indeterminate bar reuses .progress). */
@@ -362,6 +362,8 @@ body {
   color: var(--ink);
   cursor: pointer;
 }
+/* A palette's `outline` rings the unselected chip (no palette: no ring, as before). */
+.chip:not(.selected) { box-shadow: var(--chip-ring, none); }
 .chip.selected { background: var(--accent-soft); color: var(--on-secondary-container, var(--accent)); box-shadow: inset 0 0 0 1px var(--on-secondary-container, var(--accent)); }
 
 .field {

@@ -256,13 +256,13 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         let control: AnyView
         switch kind {
         case .secure:
-            control = AnyView(SecureField(placeholder, text: binding).textFieldStyle(.roundedBorder))
+            control = AnyView(SecureField(placeholder, text: binding).modifier(PaletteFieldStyle()))
         case .multiline:
             control = AnyView(TextField(placeholder, text: binding, axis: .vertical)
-                .lineLimit(3...6).textFieldStyle(.roundedBorder))
+                .lineLimit(3...6).modifier(PaletteFieldStyle()))
         default:
             control = AnyView(TextField(placeholder, text: binding)
-                .textFieldStyle(.roundedBorder)
+                .modifier(PaletteFieldStyle())
                 .keyboardType(kb)
                 .textInputAutocapitalization(lowercase ? .never : .sentences)
                 .autocorrectionDisabled(lowercase))
@@ -414,6 +414,22 @@ private func palettePair(_ tone: Tone) -> TonePair? {
 private struct PaletteText: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         if let c = pal?.onSurface { content.foregroundColor(c.color) } else { content }
+    }
+}
+/// Text fields: with a palette's `surface_muted`, a plain field on that fill with an `outline` border
+/// (`.roundedBorder` can't be recoloured); otherwise the system rounded border, as before.
+private struct PaletteFieldStyle: ViewModifier {
+    @Environment(\.paletteRoles) private var paletteRoles
+    @ViewBuilder func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        if let fill = pal?.surfaceMuted {
+            content.textFieldStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(fill.color))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(role(pal?.outline, else: .clear)))
+        } else {
+            content.textFieldStyle(.roundedBorder)
+        }
     }
 }
 /// A horizontal hairline in the palette's `outline_variant`, else the system divider.
@@ -1199,7 +1215,7 @@ private struct ScaffoldView: View {
                     (pal?.scrim?.color ?? Color.black.opacity(0.45)).ignoresSafeArea()
                         .onTapGesture { send(.fired(token: sheet.onDismiss)) }
                     VStack(alignment: .leading, spacing: 8) {
-                        Capsule().fill(Color.secondary.opacity(0.4))
+                        Capsule().fill(role(pal?.outlineVariant, else: Color.secondary.opacity(0.4)))
                             .frame(width: 40, height: 4).frame(maxWidth: .infinity)
                         Text(sheet.title).font(.title3.bold())
                         render(sheet.child, send)
@@ -1551,7 +1567,8 @@ private struct CardMod: ViewModifier {
         case .brand:
             let t = ActiveTheme.current
             let grad = LinearGradient(
-                colors: [role(pal?.primary, else: t?.brandColor ?? .accentColor), t?.accentColor ?? .accentColor],
+                // Without an app accent a palette's primary ends the gradient (else the seed, as before).
+                colors: [role(pal?.primary, else: t?.brandColor ?? .accentColor), (t?.accent == nil ? pal?.primary?.color : nil) ?? t?.accentColor ?? .accentColor],
                 startPoint: .topLeading, endPoint: .bottomTrailing,
             )
             return AnyView(content.background(shape.fill(grad)).foregroundColor(role(pal?.onPrimary, else: .white)))
