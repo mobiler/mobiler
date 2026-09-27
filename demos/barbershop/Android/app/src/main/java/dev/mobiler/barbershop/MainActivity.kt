@@ -475,12 +475,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 modifier = Modifier.size(48.dp).clip(CircleShape),
             )
             widget.status?.let { st ->
-                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(if (LocalPalette.current != null) toneColors(st).second else toneColors(st).first))
+                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(if (tonePair(LocalPalette.current, st) != null) toneColors(st).second else toneColors(st).first))
             }
         }
 
         is Widget.Rating -> Row(verticalAlignment = Alignment.CenterVertically) {
-            val tint = MaterialTheme.colorScheme.primary
+            val tint = LocalPalette.current?.primaryText?.color() ?: MaterialTheme.colorScheme.primary
             val onRate = widget.onRate
             for (i in 1..widget.max.toInt()) {
                 val threshold = (i * 10).toUInt()
@@ -520,6 +520,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val series = widget.series
             val style = widget.style
             val primary = MaterialTheme.colorScheme.primary
+            val primaryText = LocalPalette.current?.primaryText?.color()
             val trackColor = MaterialTheme.colorScheme.surfaceVariant
             val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
             val palette = listOf(
@@ -530,7 +531,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 val c = series.getOrNull(i)?.color
                 return when {
                     c != null -> Color(c.r.toInt(), c.g.toInt(), c.b.toInt())
-                    i == 0 -> primary
+                    i == 0 -> primaryText ?: primary
                     else -> palette[(i - 1) % palette.size]
                 }
             }
@@ -899,7 +900,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     actions.forEach { a ->
                         val (bgSoft, fg) = toneColors(a.tone)
                         // A palette pair: container behind on-container; otherwise the strong colour + white.
-                        val pal = LocalPalette.current != null
+                        val pal = tonePair(LocalPalette.current, a.tone) != null
                         Box(
                             modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(if (pal) bgSoft else fg)
                                 .clickable { send(Action.Fired(a.onTap)); offsetX = 0f },
@@ -1273,7 +1274,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 navigationIcon = {
                                     if (back != null) {
                                         IconButton(onClick = { send(Action.Fired(back)) }) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back")
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back",
+                                                tint = LocalPalette.current?.primaryText?.color() ?: LocalContentColor.current)
                                         }
                                     }
                                 },
@@ -1494,7 +1496,7 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
 
 @Composable
 private fun iconTintFor(icon: WidgetIcon): Color = when (icon) {
-    WidgetIcon.STAR -> MaterialTheme.colorScheme.primary
+    WidgetIcon.STAR -> LocalPalette.current?.primaryText?.color() ?: MaterialTheme.colorScheme.primary
     else -> LocalContentColor.current
 }
 

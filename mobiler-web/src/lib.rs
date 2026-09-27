@@ -2063,18 +2063,10 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
             // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
             let theme_style = theme.as_ref().map(|t| theme_css(t, *dark_mode)).unwrap_or_default();
-            // A palette's page background also paints the document behind the scaffold (overscroll,
-            // short pages); without one, clear it so switching palettes off leaves nothing behind.
+            // A palette's page background also paints the page behind the scaffold (wide viewports,
+            // overscroll): `--bg` on <html> is what `body` reads, and body's background fills the canvas.
             let page_bg = theme.as_ref().and_then(|t| t.palette).and_then(|p| if *dark_mode { p.dark } else { p.light }.background);
-            if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
-                if let Some(el) = wasm_bindgen::JsCast::dyn_ref::<web_sys::HtmlElement>(&root) {
-                    let st = el.style();
-                    let _ = match page_bg {
-                        Some(c) => st.set_property("background", &format!("rgb({},{},{})", c.r, c.g, c.b)),
-                        None => st.remove_property("background").map(|_| ()),
-                    };
-                }
-            }
+            sync_page_bg(page_bg);
             // Mark the fill target by address so the LazyList arm can pick out exactly that one,
             // even if other `fill: true` lists exist elsewhere. `render` is a plain function, so
             // the whole subtree below builds synchronously within this call — the marker is only
@@ -2191,6 +2183,29 @@ fn theme_css(t: &Theme, dark: bool) -> String {
     }
 }
 
+thread_local! {
+    /// Whether mobiler put `--bg` on <html> — so it only ever removes its own value, never a host page's.
+    static PAGE_BG_SET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Mirror the palette's page background onto <html> as `--bg` (body reads it), or remove it if mobiler
+/// set it before and there is no longer one. No palette ever → <html> is never touched.
+fn sync_page_bg(bg: Option<Rgb>) {
+    let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) else { return };
+    let Some(el) = wasm_bindgen::JsCast::dyn_ref::<web_sys::HtmlElement>(&root) else { return };
+    match bg {
+        Some(c) => {
+            let _ = el.style().set_property("--bg", &format!("rgb({},{},{})", c.r, c.g, c.b));
+            PAGE_BG_SET.with(|f| f.set(true));
+        }
+        None if PAGE_BG_SET.with(std::cell::Cell::get) => {
+            let _ = el.style().remove_property("--bg");
+            PAGE_BG_SET.with(|f| f.set(false));
+        }
+        None => {}
+    }
+}
+
 /// Append `name:rgb(…);` for each name when the role is set.
 fn put_rgb(s: &mut String, names: &[&str], c: Option<Rgb>) {
     if let Some(c) = c {
@@ -2207,7 +2222,7 @@ fn put_rgb(s: &mut String, names: &[&str], c: Option<Rgb>) {
 fn palette_css(p: &ColorRoles) -> String {
     let mut s = String::new();
     put_rgb(&mut s, &["--bg"], p.background);
-    put_rgb(&mut s, &["--surface"], p.surface);
+    put_rgb(&mut s, &["--surface", "--pal-surface"], p.surface);
     put_rgb(&mut s, &["--surface-bar"], p.surface_bar);
     put_rgb(&mut s, &["--surface-2", "--field-bg"], p.surface_muted);
     put_rgb(&mut s, &["--ink", "--fg"], p.on_surface);
@@ -2416,7 +2431,7 @@ fn hex(c: Rgb) -> String {
 fn chart_color(i: usize, s: &ChartSeries) -> String {
     match s.color {
         Some(c) => hex(c),
-        None if i == 0 => "var(--accent, #5C6BC0)".to_string(),
+        None if i == 0 => "var(--primary-text, var(--accent, #5C6BC0))".to_string(),
         None => CHART_PALETTE[(i - 1) % CHART_PALETTE.len()].to_string(),
     }
 }

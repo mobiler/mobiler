@@ -386,6 +386,15 @@ enum ActivePalette {
     nonisolated(unsafe) static var current: ColorRoles?
 }
 private var pal: ColorRoles? { ActivePalette.current }
+/// The resolved palette in the environment too: views that read `pal` in their body declare
+/// `@Environment(\.paletteRoles)`, so a light/dark flip (same view inputs) still re-renders them.
+private struct PaletteRolesKey: EnvironmentKey { static let defaultValue: ColorRoles? = nil }
+extension EnvironmentValues {
+    var paletteRoles: ColorRoles? {
+        get { self[PaletteRolesKey.self] }
+        set { self[PaletteRolesKey.self] = newValue }
+    }
+}
 extension Rgb { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255) } }
 extension Rgba { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255) } }
 /// The palette colour for a role, else the shell's current colour.
@@ -401,9 +410,17 @@ private func palettePair(_ tone: Tone) -> TonePair? {
     case .neutral: return nil
     }
 }
+/// Body text in the palette's `on_surface`; without that role, no modifier (system label colour).
+private struct PaletteText: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if let c = pal?.onSurface { content.foregroundColor(c.color) } else { content }
+    }
+}
 /// A horizontal hairline in the palette's `outline_variant`, else the system divider.
 private struct PaletteDivider: View {
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         if let c = pal?.outlineVariant { Rectangle().fill(c.color).frame(height: 1) } else { Divider() }
     }
 }
@@ -523,7 +540,9 @@ private struct GridView: View {
 private struct AvatarView: View {
     let source: String
     let status: Tone?
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         let img: AnyView
         if source.hasPrefix("file:"), let url = URL(string: source) {
             img = AnyView(FileImageView(url: url))
@@ -537,7 +556,7 @@ private struct AvatarView: View {
             .clipShape(Circle())
             .overlay(alignment: .bottomTrailing) {
                 if let status = status {
-                    Circle().fill(pal != nil ? toneColors(status).1 : toneColors(status).0)
+                    Circle().fill(palettePair(status) != nil ? toneColors(status).1 : toneColors(status).0)
                         .frame(width: 12, height: 12)
                         .overlay(Circle().stroke(role(pal?.surface, else: Color(.systemBackground)), lineWidth: 2))
                 }
@@ -575,7 +594,7 @@ private struct ChartView: View {
         if i < series.count, let c = series[i].color {
             return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
         }
-        return i == 0 ? Color.accentColor : chartPalette[(i - 1) % chartPalette.count]
+        return i == 0 ? role(pal?.primaryText, else: Color.accentColor) : chartPalette[(i - 1) % chartPalette.count]
     }
     private func mag(_ i: Int) -> Float { i < series.count ? series[i].values.reduce(0, +) : 0 }
     private func fmtTick(_ v: Float) -> String {
@@ -977,17 +996,19 @@ private struct SwipeActionView: View {
     let send: (Action) -> Void
     @State private var offset: CGFloat = 0
     private var revealWidth: CGFloat { CGFloat(actions.count) * 84 }
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         ZStack(alignment: .trailing) {
             HStack(spacing: 8) {
                 ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
                     Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
                         Text(a.label)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundColor(pal != nil ? toneColors(a.tone).1 : .white)
+                            .foregroundColor(palettePair(a.tone) != nil ? toneColors(a.tone).1 : .white)
                             .frame(width: 76)
                             .frame(maxHeight: .infinity)
-                            .background(pal != nil ? toneColors(a.tone).0 : toneColors(a.tone).1)
+                            .background(palettePair(a.tone) != nil ? toneColors(a.tone).0 : toneColors(a.tone).1)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain)
                 }
@@ -1017,7 +1038,9 @@ private struct CalendarView: View {
     let markers: [UInt8]
     let send: (Action) -> Void
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         let cell: CGFloat = isLargeDensity() ? 48 : 32
         VStack(spacing: 6) {
             Text(title).font(.headline)
@@ -1067,10 +1090,10 @@ private struct RatingView: View {
                 if let tokens = onRate, i - 1 < tokens.count {
                     let token = tokens[i - 1]
                     Button(action: { send(.fired(token: token)) }) {
-                        Image(systemName: name).foregroundColor(.accentColor)
+                        Image(systemName: name).foregroundColor(role(pal?.primaryText, else: .accentColor))
                     }.buttonStyle(.plain)
                 } else {
-                    Image(systemName: name).foregroundColor(.accentColor)
+                    Image(systemName: name).foregroundColor(role(pal?.primaryText, else: .accentColor))
                 }
             }
         }
@@ -1147,6 +1170,8 @@ private struct ScaffoldView: View {
             }
         }
         .background(role(pal?.background, else: .clear).ignoresSafeArea())
+        .modifier(PaletteText())
+        .environment(\.paletteRoles, pal)
         .preferredColorScheme(darkMode ? .dark : .light)
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
@@ -1197,6 +1222,8 @@ private struct ScaffoldView: View {
                     Button(action: { send(.fired(token: back)) }) {
                         Image(systemName: "chevron.left")
                     }
+                    // The back chevron in primary_text (a palette's primary is a fill colour); else the tint.
+                    .tint(pal?.primaryText?.color ?? pal?.primary?.color ?? theme?.brandColor)
                     .accessibilityLabel((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back")
                 }
                 Spacer()
@@ -1342,7 +1369,9 @@ private struct TextStyleMod: ViewModifier {
     init(_ s: TextStyle) { style = s }
     // The theme's font design (rounded/serif/mono); `.default` when un-themed.
     private var design: Font.Design { ActiveTheme.current?.fontDesign ?? .default }
+    @Environment(\.paletteRoles) private var paletteRoles
     func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         switch style {
         case .title: return AnyView(content.font(.system(.largeTitle, design: design).bold()))
         case .subtitle: return AnyView(content.font(.system(.title3, design: design).weight(.semibold)))
@@ -1367,7 +1396,9 @@ private struct MobilerButton: View {
     private var neutral: Bool { if case .neutral = tone { return true }; return false }
     private var tint: Color { neutral ? .accentColor : toneColors(tone).1 }
 
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         let button = Button(action: action) { labelView }
         if let c = paletteColors() {
             button.buttonStyle(PaletteButtonStyle(fill: c.fill, fg: c.fg, stroke: c.stroke, large: isLargeDensity()))
@@ -1396,13 +1427,21 @@ private struct MobilerButton: View {
             case .text: return (.clear, on, .clear)
             }
         }
-        let primary = role(p.primary, else: ActiveTheme.current?.brandColor ?? .accentColor)
-        let text = role(p.primaryText, else: primary)
+        // A neutral button switches to palette colours only when the palette sets the role its style
+        // reads; otherwise the system style it has today (a partial palette changes nothing else).
         switch style {
-        case .filled: return (primary, role(p.onPrimary, else: .white), .clear)
-        case .tonal: return (role(p.secondaryContainer, else: primary.opacity(0.18)), role(p.onSecondaryContainer, else: primary), .clear)
-        case .outlined: return (.clear, text, role(p.outline, else: text))
-        case .text: return (.clear, text, .clear)
+        case .filled:
+            guard let fill = p.primary else { return nil }
+            return (fill.color, role(p.onPrimary, else: .white), .clear)
+        case .tonal:
+            guard let bg = p.secondaryContainer else { return nil }
+            return (bg.color, role(p.onSecondaryContainer, else: role(p.primary, else: .accentColor)), .clear)
+        case .outlined:
+            guard let text = p.primaryText else { return nil }
+            return (.clear, text.color, role(p.outline, else: text.color))
+        case .text:
+            guard let text = p.primaryText else { return nil }
+            return (.clear, text.color, .clear)
         }
     }
 
@@ -1497,7 +1536,9 @@ private struct LargeButtonStyle: SwiftUI.ButtonStyle {
 private struct CardMod: ViewModifier {
     let style: CardStyle
     init(_ s: CardStyle) { style = s }
+    @Environment(\.paletteRoles) private var paletteRoles
     func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         let shape = RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14)
         switch style {
         case .elevated:
@@ -1594,7 +1635,7 @@ private func sfSymbol(_ icon: Icon) -> String {
 }
 
 private func iconTint(_ icon: Icon) -> Color {
-    switch icon { case .star: return .accentColor; default: return .primary }
+    switch icon { case .star: return role(pal?.primaryText, else: .accentColor); default: return .primary }
 }
 
 private func imageShape(_ s: ImageShape) -> AnyShape {

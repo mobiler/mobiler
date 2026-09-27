@@ -96,12 +96,17 @@ body {
 /* Avatar — circular image with an optional status dot. */
 .avatar { position: relative; display: inline-block; width: 48px; height: 48px; }
 .avatar-img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
-.avatar-status { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg); }
+.avatar-status { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--pal-surface, var(--bg)); }
+/* With a palette pair the status dot is the strong on-container colour (the container alone is too faint). */
+.avatar-status.tone-success { background: var(--tone-success-on, #e6f4ea); }
+.avatar-status.tone-warning { background: var(--tone-warning-on, #fff4e5); }
+.avatar-status.tone-danger  { background: var(--tone-danger-on, #fde8e8); }
+.avatar-status.tone-info    { background: var(--tone-info-on, var(--accent-soft)); }
 
 /* Star rating. */
 .rating { display: inline-flex; gap: 2px; color: var(--primary-text, var(--accent)); font-size: 16px; line-height: 1; }
-.star { color: var(--accent); }
-.star-tappable { border: none; background: transparent; cursor: pointer; font-size: 20px; color: var(--accent); padding: 0 1px; }
+.star { color: var(--primary-text, var(--accent)); }
+.star-tappable { border: none; background: transparent; cursor: pointer; font-size: 20px; color: var(--primary-text, var(--accent)); padding: 0 1px; }
 
 /* Modal bottom sheet — scrim + a panel rising from the bottom. */
 .sheet-scrim { position: fixed; inset: 0; background: var(--scrim, rgba(0,0,0,0.45)); z-index: 20; }
@@ -214,7 +219,7 @@ body {
 
 /* Progress bar (determinate) + indeterminate variant. */
 .progress { width: 100%; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0; }
-.progress-bar { height: 100%; background: var(--accent, #5C6BC0); border-radius: 3px; transition: width .25s ease; }
+.progress-bar { height: 100%; background: var(--pal-primary, var(--accent, #5C6BC0)); border-radius: 3px; transition: width .25s ease; }
 .progress-indeterminate .progress-bar { width: 40%; border-radius: 3px; animation: mobiler-indeterminate 1.1s ease-in-out infinite; }
 @keyframes mobiler-indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 
@@ -433,7 +438,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   background: var(--surface-bar, var(--bg));
 }
 .topbar .title { flex: 1; text-align: center; font-size: 17px; font-weight: 650; }
-.back { border: none; background: transparent; color: var(--ink); font-size: 24px; line-height: 1; cursor: pointer; }
+.back { border: none; background: transparent; color: var(--primary-text, var(--ink)); font-size: 24px; line-height: 1; cursor: pointer; }
 .scaffold-body { flex: 1; padding: var(--pad); }
 /* Navigation transitions — the web twin of the native shells' push/pop slide and
  * lateral crossfade. The shell alternates the -a/-b class each navigation so the
