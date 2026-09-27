@@ -2172,12 +2172,19 @@ fn theme_css(t: &Theme, dark: bool) -> String {
          --accent-soft:rgba({r},{g},{b},0.16);--radius:{radius};\
          --gap:{gap};--pad:{pad};--font:{font};"
     );
-    // A palette appends the active set's roles (later declarations win) plus the native
-    // `color-scheme`, so form controls and scrollbars match. No palette → `base` unchanged.
+    // A palette appends the active set's roles (later declarations win). Without an app accent the
+    // Brand gradient ends at the palette's primary (not the seed); a palette that sets the page
+    // background also sets the native `color-scheme`, so form controls and scrollbars match it.
+    // No palette → `base` unchanged.
     match &t.palette {
         Some(p) => {
             let (roles, scheme) = if dark { (&p.dark, "dark") } else { (&p.light, "light") };
-            format!("{base}{}color-scheme:{scheme};", palette_css(roles))
+            let accent2 = match (t.accent, roles.primary) {
+                (None, Some(c)) => format!("--accent2:rgb({},{},{});", c.r, c.g, c.b),
+                _ => String::new(),
+            };
+            let color_scheme = if roles.background.is_some() { format!("color-scheme:{scheme};") } else { String::new() };
+            format!("{base}{accent2}{}{color_scheme}", palette_css(roles))
         }
         None => base,
     }
@@ -2224,13 +2231,19 @@ fn palette_css(p: &ColorRoles) -> String {
     put_rgb(&mut s, &["--bg"], p.background);
     put_rgb(&mut s, &["--surface", "--pal-surface"], p.surface);
     put_rgb(&mut s, &["--surface-bar"], p.surface_bar);
-    put_rgb(&mut s, &["--surface-2", "--field-bg"], p.surface_muted);
+    put_rgb(&mut s, &["--surface-2", "--field-bg", "--skeleton-base"], p.surface_muted);
     put_rgb(&mut s, &["--ink", "--fg"], p.on_surface);
     put_rgb(&mut s, &["--muted"], p.on_surface_variant);
     put_rgb(&mut s, &["--outline"], p.outline);
+    if let Some(c) = p.outline {
+        s.push_str(&format!("--chip-ring:inset 0 0 0 1px rgb({},{},{});", c.r, c.g, c.b));
+    }
     put_rgb(&mut s, &["--line", "--border"], p.outline_variant);
     put_rgb(&mut s, &["--primary", "--pal-primary"], p.primary);
     put_rgb(&mut s, &["--primary-ink", "--pal-on-primary"], p.on_primary);
+    if let Some(c) = p.on_primary {
+        s.push_str(&format!("--pal-on-primary-85:rgba({},{},{},0.85);", c.r, c.g, c.b));
+    }
     put_rgb(&mut s, &["--primary-text"], p.primary_text);
     put_rgb(&mut s, &["--accent-soft", "--seg-sel-bg"], p.secondary_container);
     put_rgb(&mut s, &["--on-secondary-container", "--seg-sel-fg"], p.on_secondary_container);
@@ -2798,6 +2811,37 @@ mod palette_tests {
         let expected = "--primary:rgb(92,107,192);--accent:rgb(92,107,192);--accent2:rgb(92,107,192);--accent-soft:rgba(92,107,192,0.16);--radius:14px;--gap:12px;--pad:14px;--font:system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif;";
         assert_eq!(theme_css(&t, false), expected);
         assert_eq!(theme_css(&t, true), expected);
+    }
+
+    #[test]
+    fn palette_css_emits_skeleton_chip_ring_and_brand_caption_vars() {
+        let r = ColorRoles {
+            surface_muted: Some(Rgb::hex(0x3a3534)),
+            outline: Some(Rgb::hex(0x6a6462)),
+            on_primary: Some(Rgb::hex(0xffffff)),
+            ..Default::default()
+        };
+        let css = palette_css(&r);
+        assert!(css.contains("--skeleton-base:rgb(58,53,52);"));
+        assert!(css.contains("--chip-ring:inset 0 0 0 1px rgb(106,100,98);"));
+        assert!(css.contains("--pal-on-primary-85:rgba(255,255,255,0.85);"));
+    }
+
+    #[test]
+    fn color_scheme_only_when_the_palette_sets_a_background() {
+        let only_primary = ColorRoles { primary: Some(Rgb::hex(0x1f8276)), ..Default::default() };
+        let t = Theme { palette: Some(Palette { light: only_primary, dark: only_primary }), ..Default::default() };
+        assert!(!theme_css(&t, true).contains("color-scheme"));
+    }
+
+    #[test]
+    fn brand_gradient_ends_at_palette_primary_without_an_accent() {
+        let roles = ColorRoles { primary: Some(Rgb::hex(0x1f8276)), ..Default::default() };
+        let p = Some(Palette { light: roles, dark: roles });
+        let no_accent = Theme { palette: p, ..Default::default() };
+        assert!(theme_css(&no_accent, true).contains("--accent2:rgb(31,130,118);"));
+        let with_accent = Theme { accent: Some(Rgb::hex(0xe06a2c)), palette: p, ..Default::default() };
+        assert!(!theme_css(&with_accent, true).contains("--accent2:rgb(31,130,118);"));
     }
 
     #[test]
