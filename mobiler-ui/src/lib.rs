@@ -772,6 +772,12 @@ mod tests {
         round_trips(&Action::Fired { token: "tok".to_string() });
         round_trips(&Action::Input { id: "field".to_string(), value: InputValue::Bool(true) });
         round_trips(&Action::Restore { data: "{}".to_string() });
+        round_trips(&Action::AppInfo {
+            version: "1.0".to_string(),
+            build: "7".to_string(),
+            platform: "ios".to_string(),
+            bundle_id: "rs.x".to_string(),
+        });
     }
 
     #[test]
