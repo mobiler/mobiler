@@ -8,7 +8,7 @@ use mobiler_core::{
     map, marker_titled, with_markers,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, MobilerApp, MobilerShell, Picker, PluginResponse, Rgb, ShellLabels, Spacing, Theme, Tone, Widget, avatar_status,
+    ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, button_with, calendar_in, caption, card, card_button, chip, column, divider, donut_chart,
     email_field, emphasis,
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
@@ -304,6 +304,8 @@ pub struct Model {
     picked_day: Option<u8>,
     /// Profile "Large controls" toggle → `Theme.density = Density::Large`.
     large_controls: bool,
+    /// Home "Light theme" toggle → the palette's light set (dark is the default).
+    light_mode: bool,
     /// Bookings "Serbian calendar" toggle → `calendar_in(Locale::SrLatn, …)`, Monday-first September 2026.
     serbian_calendar: bool,
     /// Note text (edited in Profile; saved/loaded via SQLite, dictated via speech).
@@ -422,6 +424,7 @@ impl Default for Model {
             ],
             picked_day: None,
             large_controls: false,
+            light_mode: false,
             serbian_calendar: false,
             note: String::new(),
             saved_note: String::new(),
@@ -1163,6 +1166,7 @@ impl MobilerApp for FadeHouse {
             }
             InputValue::Bool(on) => match id {
                 "large_controls" => model.large_controls = on,
+                "light_mode" => model.light_mode = on,
                 "serbian_calendar" => model.serbian_calendar = on,
                 _ => {}
             },
@@ -1178,7 +1182,7 @@ impl MobilerApp for FadeHouse {
             corner: Corner::Medium,
             density: if model.large_controls { Density::Large } else { Density::Comfortable },
             font: FontFamily::System,
-            ..Default::default()
+            palette: Some(moj_termin_palette()),
         };
         let tabs = vec![
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),
@@ -1195,7 +1199,7 @@ impl MobilerApp for FadeHouse {
             Tab::Profile => ("Profile", profile_screen(model)),
         };
         // Themed Scaffold + icon tab bar + a "book now" floating action button.
-        let mut root = with_fab(scaffold(title_text, true, tabs, body), Icon::Calendar, Msg::Book);
+        let mut root = with_fab(scaffold(title_text, !model.light_mode, tabs, body), Icon::Calendar, Msg::Book);
         // The Bookings tab is pull-to-refresh (the app owns `refreshing`).
         if model.tab == Tab::Bookings {
             root = with_refresh(root, model.refreshing, Msg::RefreshBookings);
@@ -1291,6 +1295,54 @@ fn audience_segmented(model: &Model) -> Widget {
     ])
 }
 
+/// The Moj Termin design's colour tokens (the appointments app) — dark is the default set. The light
+/// set leaves `on_primary`, `fab`, `on_fab` and `scrim` unset: those keep the shell's own colours.
+fn moj_termin_palette() -> Palette {
+    let pair = |c: u32, on: u32| Some(TonePair::new(Rgb::hex(c), Rgb::hex(on)));
+    let dark = ColorRoles {
+        background: Some(Rgb::hex(0x231f20)),
+        surface: Some(Rgb::hex(0x2e3434)),
+        surface_bar: Some(Rgb::hex(0x2c2828)),
+        surface_muted: Some(Rgb::hex(0x3a3534)),
+        on_surface: Some(Rgb::hex(0xf4ecd6)),
+        on_surface_variant: Some(Rgb::hex(0xb3ab9c)),
+        outline: Some(Rgb::hex(0x6a6462)),
+        outline_variant: Some(Rgb::hex(0x4a4442)),
+        primary: Some(Rgb::hex(0x1f8276)),
+        on_primary: Some(Rgb::hex(0xffffff)),
+        primary_text: Some(Rgb::hex(0x6fcbbb)),
+        secondary_container: Some(Rgb::hex(0x314a48)),
+        on_secondary_container: Some(Rgb::hex(0xd6ece8)),
+        fab: Some(Rgb::hex(0xb4d5d1)),
+        on_fab: Some(Rgb::hex(0x10201e)),
+        success: pair(0x233f2e, 0xa6dcb0),
+        warning: pair(0x4a3222, 0xffc79e),
+        danger: pair(0x4d2626, 0xffb4ab),
+        info: pair(0x25324a, 0xc7d8ff),
+        scrim: Some(Rgba::new(0, 0, 0, 82)),
+    };
+    let light = ColorRoles {
+        background: Some(Rgb::hex(0xfaf7f0)),
+        surface: Some(Rgb::hex(0xffffff)),
+        surface_bar: Some(Rgb::hex(0xf0ebe1)),
+        surface_muted: Some(Rgb::hex(0xe7e1d6)),
+        on_surface: Some(Rgb::hex(0x231f20)),
+        on_surface_variant: Some(Rgb::hex(0x645d55)),
+        outline: Some(Rgb::hex(0x8a837b)),
+        outline_variant: Some(Rgb::hex(0xd6cfc4)),
+        primary: Some(Rgb::hex(0x1f8276)),
+        primary_text: Some(Rgb::hex(0x146a60)),
+        secondary_container: Some(Rgb::hex(0xd3e8e4)),
+        on_secondary_container: Some(Rgb::hex(0x0f2b28)),
+        success: pair(0xdcefdd, 0x1b5e20),
+        warning: pair(0xffe5d3, 0x8a3a00),
+        danger: pair(0xffdad6, 0x93000a),
+        info: pair(0xdfe8ff, 0x1a2c52),
+        ..Default::default()
+    };
+    Palette { light, dark }
+}
+
 fn home(model: &Model) -> Widget {
     // Native: nearest-shop (geolocation) + connection status (connectivity).
     let nearby = if model.location.is_empty() && model.signal.is_empty() {
@@ -1318,6 +1370,8 @@ fn home(model: &Model) -> Widget {
         ],
     );
     column(vec![
+        // Switches the palette's light/dark set (the Moj Termin design: dark by default).
+        toggle("light_mode", "Light theme", model.light_mode),
         row(vec![
             column(vec![caption("Welcome back"), emphasis("Marcus")]),
             spacer(Spacing::Md),
@@ -2318,6 +2372,18 @@ mod test {
         assert_eq!(model.search, "beard");
         app.update(Msg::SelectAudience(Audience::Kids), &mut model, &mut cx);
         assert_eq!(model.audience, Audience::Kids);
+    }
+
+    #[test]
+    fn barbershop_theme_carries_the_moj_termin_palette() {
+        let p = moj_termin_palette();
+        assert_eq!(p.dark.background, Some(Rgb::hex(0x231f20)));
+        assert_eq!(p.dark.danger, Some(TonePair::new(Rgb::hex(0x4d2626), Rgb::hex(0xffb4ab))));
+        assert_eq!(p.light.on_primary, None);
+        let (app, mut model) = app();
+        assert!(matches!(app.view(&model), Widget::Scaffold { dark_mode: true, theme: Some(Theme { palette: Some(_), .. }), .. }));
+        app.input("light_mode", InputValue::Bool(true), &mut model, &mut Cx::<Msg>::default());
+        assert!(matches!(app.view(&model), Widget::Scaffold { dark_mode: false, .. }));
     }
 
     #[test]
