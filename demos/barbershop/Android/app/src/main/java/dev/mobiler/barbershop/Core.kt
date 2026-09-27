@@ -169,8 +169,14 @@ class SharePlugin(private val context: Context) : MobilerPlugin {
 class BrowserPlugin(private val context: Context) : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         val view = Intent(Intent.ACTION_VIEW, Uri.parse(input)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(view)
-        return PluginResponse(true, "")
+        // No app handles this link (e.g. `tel:` on a tablet without a dialer): answer ok=false
+        // instead of crashing, so a cx.plugin("browser", "open", …) caller can tell the user.
+        return try {
+            context.startActivity(view)
+            PluginResponse(true, "")
+        } catch (e: android.content.ActivityNotFoundException) {
+            PluginResponse(false, "no app can open this link")
+        }
     }
 }
 
