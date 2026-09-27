@@ -72,7 +72,7 @@ body {
 .split[data-detail] .split-detail { display: block; }
 .split-back {
   display: inline-flex; align-items: center; gap: 4px; margin-bottom: 8px;
-  background: none; border: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; padding: 4px 0;
+  background: none; border: none; color: var(--primary-text, var(--accent)); font: inherit; font-weight: 600; cursor: pointer; padding: 4px 0;
 }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -84,27 +84,32 @@ body {
 .scroller > .scroller-end { flex: 0 0 32px; }
 
 /* Search field — leading magnifier + pill input. */
-.searchfield { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; }
+.searchfield { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--outline, var(--line)); border-radius: 999px; padding: 8px 14px; }
 .search-icon { color: var(--muted); }
 .search-input { flex: 1; border: none; background: transparent; outline: none; font: inherit; color: var(--ink); }
 
 /* Segmented control — exclusive options in a pill track. */
 .segmented { display: flex; gap: 4px; background: var(--surface-2); border-radius: 999px; padding: 4px; }
 .segment { flex: 1; border: none; background: transparent; border-radius: 999px; padding: 8px 12px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
-.segment.selected { background: var(--primary); color: #fff; }
+.segment.selected { background: var(--seg-sel-bg, var(--primary)); color: var(--seg-sel-fg, #fff); }
 
 /* Avatar — circular image with an optional status dot. */
 .avatar { position: relative; display: inline-block; width: 48px; height: 48px; }
 .avatar-img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
-.avatar-status { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg); }
+.avatar-status { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--pal-surface, var(--bg)); }
+/* With a palette pair the status dot is the strong on-container colour (the container alone is too faint). */
+.avatar-status.tone-success { background: var(--tone-success-on, #e6f4ea); }
+.avatar-status.tone-warning { background: var(--tone-warning-on, #fff4e5); }
+.avatar-status.tone-danger  { background: var(--tone-danger-on, #fde8e8); }
+.avatar-status.tone-info    { background: var(--tone-info-on, var(--accent-soft)); }
 
 /* Star rating. */
-.rating { display: inline-flex; gap: 2px; color: var(--accent); font-size: 16px; line-height: 1; }
-.star { color: var(--accent); }
-.star-tappable { border: none; background: transparent; cursor: pointer; font-size: 20px; color: var(--accent); padding: 0 1px; }
+.rating { display: inline-flex; gap: 2px; color: var(--primary-text, var(--accent)); font-size: 16px; line-height: 1; }
+.star { color: var(--primary-text, var(--accent)); }
+.star-tappable { border: none; background: transparent; cursor: pointer; font-size: 20px; color: var(--primary-text, var(--accent)); padding: 0 1px; }
 
 /* Modal bottom sheet — scrim + a panel rising from the bottom. */
-.sheet-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 20; }
+.sheet-scrim { position: fixed; inset: 0; background: var(--scrim, rgba(0,0,0,0.45)); z-index: 20; }
 .sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
   background: var(--surface); border-radius: 20px 20px 0 0; padding: 12px 18px 28px;
@@ -117,7 +122,7 @@ body {
 
 /* Confirm dialog (cx.confirm / cx.confirm_with) — the web twin of the native alert. Mounted on
    <body>; the scrim carries the scaffold's theme vars + theme-dark/density-large classes. */
-.confirm-scrim { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,0.45); }
+.confirm-scrim { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--scrim, rgba(0,0,0,0.45)); }
 .confirm-card { width: 100%; max-width: 360px; background: var(--surface); color: var(--ink); border-radius: var(--radius); padding: 20px 20px 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.3); font-family: var(--font); }
 .confirm-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
 .confirm-message { margin: 0 0 16px; color: var(--muted); }
@@ -132,7 +137,7 @@ body {
 .card-outlined { background: transparent; border: 1px solid var(--line); }
 .card-filled { background: var(--surface-2); }
 /* Brand gradient card (promo banner) — fills seed → accent. */
-.card-brand { background: linear-gradient(135deg, var(--primary), var(--accent2)); color: #fff; border: none; }
+.card-brand { background: linear-gradient(135deg, var(--primary), var(--accent2)); color: var(--pal-on-primary, #fff); border: none; }
 .card-brand .t-caption { color: rgba(255,255,255,0.85); }
 /* A tappable card is a <button>; strip the native chrome so it reads as a card. */
 .card-tappable {
@@ -144,6 +149,8 @@ body {
   border: none;
   cursor: pointer;
 }
+/* `.card-tappable`'s `color: inherit` outranks `.card-brand`'s text colour; a palette's on_primary wins back. */
+.card-brand.card-tappable { color: var(--pal-on-primary, inherit); }
 
 /* Z-stack. Scrim variant: bg image sets the size; overlay + content layer on top. */
 .box { position: relative; }
@@ -195,10 +202,10 @@ body {
   font-weight: 600;
 }
 .tone-neutral { background: var(--surface-2); color: var(--muted); }
-.tone-success { background: #e6f4ea; color: #1e7e34; }
-.tone-warning { background: #fff4e5; color: #b66a00; }
-.tone-danger  { background: #fde8e8; color: #c0392b; }
-.tone-info    { background: var(--accent-soft); color: var(--accent); }
+.tone-success { background: var(--tone-success, #e6f4ea); color: var(--tone-success-on, #1e7e34); }
+.tone-warning { background: var(--tone-warning, #fff4e5); color: var(--tone-warning-on, #b66a00); }
+.tone-danger  { background: var(--tone-danger, #fde8e8); color: var(--tone-danger-on, #c0392b); }
+.tone-info    { background: var(--tone-info, var(--accent-soft)); color: var(--tone-info-on, var(--accent)); }
 
 .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
 .dot-indigo { background: #5c6bc0; }
@@ -212,7 +219,7 @@ body {
 
 /* Progress bar (determinate) + indeterminate variant. */
 .progress { width: 100%; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0; }
-.progress-bar { height: 100%; background: var(--accent, #5C6BC0); border-radius: 3px; transition: width .25s ease; }
+.progress-bar { height: 100%; background: var(--pal-primary, var(--accent, #5C6BC0)); border-radius: 3px; transition: width .25s ease; }
 .progress-indeterminate .progress-bar { width: 40%; border-radius: 3px; animation: mobiler-indeterminate 1.1s ease-in-out infinite; }
 @keyframes mobiler-indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 
@@ -271,8 +278,8 @@ body {
 .cal-day { aspect-ratio: 1; border: none; background: transparent; color: var(--fg, inherit);
   border-radius: 50%; cursor: pointer; font-size: 14px; }
 .cal-day:hover { background: var(--line); }
-.cal-sel { background: var(--accent, #5C6BC0); color: #fff; }
-.cal-sel:hover { background: var(--accent, #5C6BC0); }
+.cal-sel { background: var(--pal-primary, var(--accent, #5C6BC0)); color: var(--pal-on-primary, #fff); }
+.cal-sel:hover { background: var(--pal-primary, var(--accent, #5C6BC0)); }
 .cal-day { position: relative; }
 .cal-dots { position: absolute; left: 0; right: 0; bottom: 12%; display: flex; justify-content: center; gap: 2px; pointer-events: none; }
 .cal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
@@ -322,25 +329,27 @@ body {
 }
 .btn:hover { filter: brightness(1.06); }
 .btn-filled   { background: var(--primary); color: var(--primary-ink); }
-.btn-outlined { background: transparent; color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
-.btn-text     { background: transparent; color: var(--primary); padding: 10px 8px; }
-.btn-tonal    { background: var(--accent-soft); color: var(--primary); }
+.btn-outlined { background: transparent; color: var(--primary-text, var(--primary)); box-shadow: inset 0 0 0 1px var(--outline, var(--primary)); }
+.btn-text     { background: transparent; color: var(--primary-text, var(--primary)); padding: 10px 8px; }
+.btn-tonal    { background: var(--accent-soft); color: var(--on-secondary-container, var(--primary)); }
 .btn-wide     { width: 100%; }
 .btn-icon     { margin-right: 8px; }
 /* Toned buttons: --tone is the strong color, --tone-soft the container. */
-.btn-danger  { --tone: #c0392b; --tone-soft: #fde8e8; }
-.btn-success { --tone: #2e7d32; --tone-soft: #e3f3e4; }
-.btn-warning { --tone: #b35c00; --tone-soft: #fdeede; }
-.btn-info    { --tone: #1f6fb2; --tone-soft: #e3effa; }
-.theme-dark .btn-danger  { --tone: #ff8a80; --tone-soft: rgba(255, 138, 128, 0.18); }
-.theme-dark .btn-success { --tone: #81c784; --tone-soft: rgba(129, 199, 132, 0.18); }
-.theme-dark .btn-warning { --tone: #ffb74d; --tone-soft: rgba(255, 183, 77, 0.18); }
-.theme-dark .btn-info    { --tone: #64b5f6; --tone-soft: rgba(100, 181, 246, 0.18); }
-.btn-filled:is(.btn-danger, .btn-success, .btn-warning, .btn-info)   { background: var(--tone); color: #fff; }
-.theme-dark .btn-filled:is(.btn-danger, .btn-success, .btn-warning, .btn-info) { color: #15171f; }
+.btn-filled:is(.btn-danger, .btn-success, .btn-warning, .btn-info)   { background: var(--tone); color: var(--tone-fill-ink, #fff); }
+.theme-dark .btn-filled:is(.btn-danger, .btn-success, .btn-warning, .btn-info) { color: var(--tone-fill-ink, #15171f); }
 .btn-outlined:is(.btn-danger, .btn-success, .btn-warning, .btn-info) { color: var(--tone); box-shadow: inset 0 0 0 1px var(--tone); }
 .btn-text:is(.btn-danger, .btn-success, .btn-warning, .btn-info)     { color: var(--tone); }
 .btn-tonal:is(.btn-danger, .btn-success, .btn-warning, .btn-info)    { background: var(--tone-soft); color: var(--tone); }
+/* A palette pair (`--tone-X` container, `--tone-X-on` foreground) replaces a tone's strong/soft
+   colours. Filled buttons flip the pair: on-container fill, container text. */
+.btn-danger  { --tone: var(--tone-danger-on, #c0392b); --tone-soft: var(--tone-danger, #fde8e8); --tone-fill-ink: var(--tone-danger); }
+.btn-success { --tone: var(--tone-success-on, #2e7d32); --tone-soft: var(--tone-success, #e3f3e4); --tone-fill-ink: var(--tone-success); }
+.btn-warning { --tone: var(--tone-warning-on, #b35c00); --tone-soft: var(--tone-warning, #fdeede); --tone-fill-ink: var(--tone-warning); }
+.btn-info    { --tone: var(--tone-info-on, #1f6fb2); --tone-soft: var(--tone-info, #e3effa); --tone-fill-ink: var(--tone-info); }
+.theme-dark .btn-danger  { --tone: var(--tone-danger-on, #ff8a80); --tone-soft: var(--tone-danger, rgba(255, 138, 128, 0.18)); }
+.theme-dark .btn-success { --tone: var(--tone-success-on, #81c784); --tone-soft: var(--tone-success, rgba(129, 199, 132, 0.18)); }
+.theme-dark .btn-warning { --tone: var(--tone-warning-on, #ffb74d); --tone-soft: var(--tone-warning, rgba(255, 183, 77, 0.18)); }
+.theme-dark .btn-info    { --tone: var(--tone-info-on, #64b5f6); --tone-soft: var(--tone-info, rgba(100, 181, 246, 0.18)); }
 
 .iconbtn { background: transparent; border: none; cursor: pointer; font-size: 17px; padding: 4px; }
 
@@ -353,15 +362,15 @@ body {
   color: var(--ink);
   cursor: pointer;
 }
-.chip.selected { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chip.selected { background: var(--accent-soft); color: var(--on-secondary-container, var(--accent)); box-shadow: inset 0 0 0 1px var(--on-secondary-container, var(--accent)); }
 
 .field {
   width: 100%;
   padding: 11px 13px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--outline, var(--line));
   border-radius: 10px;
   font-size: 15px;
-  background: var(--surface);
+  background: var(--field-bg, var(--surface));
   color: var(--ink);
   box-sizing: border-box;
 }
@@ -408,7 +417,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--outline, var(--line));
   background: var(--surface);
   color: var(--ink);
   font-size: 18px;
@@ -426,10 +435,10 @@ textarea.field { resize: vertical; font-family: inherit; }
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
-  background: var(--bg);
+  background: var(--surface-bar, var(--bg));
 }
 .topbar .title { flex: 1; text-align: center; font-size: 17px; font-weight: 650; }
-.back { border: none; background: transparent; color: var(--ink); font-size: 24px; line-height: 1; cursor: pointer; }
+.back { border: none; background: transparent; color: var(--primary-text, var(--ink)); font-size: 24px; line-height: 1; cursor: pointer; }
 .scaffold-body { flex: 1; padding: var(--pad); }
 /* Navigation transitions — the web twin of the native shells' push/pop slide and
  * lateral crossfade. The shell alternates the -a/-b class each navigation so the
@@ -440,9 +449,9 @@ textarea.field { resize: vertical; font-family: inherit; }
 .nav-push-a, .nav-push-b { animation: nav-push 0.28s ease; }
 .nav-pop-a,  .nav-pop-b  { animation: nav-pop 0.28s ease; }
 .nav-fade-a, .nav-fade-b { animation: nav-fade 0.28s ease; }
-.tabbar { display: flex; border-top: 1px solid var(--line); background: var(--bg); position: sticky; bottom: 0; }
+.tabbar { display: flex; border-top: 1px solid var(--line); background: var(--surface-bar, var(--bg)); position: sticky; bottom: 0; }
 .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; border: none; background: transparent; padding: 8px 12px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; }
-.tab.selected { color: var(--accent); font-weight: 650; }
+.tab.selected { color: var(--primary-text, var(--accent)); font-weight: 650; }
 .tab-icon { font-size: 20px; line-height: 1; }
 .tab-label { font-size: 12px; }
 
@@ -450,7 +459,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 .fab {
   position: fixed; right: 18px; bottom: 84px; z-index: 5;
   width: 56px; height: 56px; border: none; border-radius: 18px;
-  background: var(--primary); color: #fff; font-size: 24px; line-height: 1;
+  background: var(--fab, var(--primary)); color: var(--on-fab, #fff); font-size: 24px; line-height: 1;
   box-shadow: 0 6px 18px rgba(0,0,0,0.28); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
@@ -528,7 +537,7 @@ textarea.field { resize: vertical; font-family: inherit; }
     border-radius: 10px;
     padding: 12px 14px;
   }
-  .scaffold:has(.tabbar) > .tabbar .tab.selected { background: var(--accent-soft); }
+  .scaffold:has(.tabbar) > .tabbar .tab.selected { background: var(--accent-soft); color: var(--on-secondary-container, var(--primary-text, var(--accent))); }
 
   /* Fill mode in the rail layout: `.scaffold.scaffold-fill` below already bounds the grid to
      100dvh (that rule isn't media-scoped), but a grid item's automatic minimum size would

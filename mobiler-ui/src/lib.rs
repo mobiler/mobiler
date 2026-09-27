@@ -310,6 +310,12 @@ impl Rgb {
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
+
+    /// `Rgb::hex(0x231f20)` — a colour from a 24-bit hex literal, as design tokens are written.
+    #[must_use]
+    pub const fn hex(v: u32) -> Self {
+        Self { r: ((v >> 16) & 0xff) as u8, g: ((v >> 8) & 0xff) as u8, b: (v & 0xff) as u8 }
+    }
 }
 
 /// Global corner-radius scale. `Medium` ≈ the current (un-themed) look.
@@ -335,6 +341,10 @@ pub enum FontFamily { System, Rounded, Serif, Monospace }
 /// (`theme: None` = the framework defaults, i.e. no visual change). The shell maps these
 /// to its native theming: `seed` → the brand/primary color (Android M3 scheme / iOS tint /
 /// web `--primary`), plus a global corner, spacing, and font choice.
+///
+/// **Breaking in mobiler-ui 0.29 / mobiler-core 0.40:** `Theme` gained `palette` (and further
+/// design-release fields follow). Code that lists every field in a `Theme { … }` literal no longer
+/// compiles. Write `Theme { seed, ..Default::default() }` and set only what you need.
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct Theme {
@@ -345,6 +355,9 @@ pub struct Theme {
     pub corner: Corner,
     pub density: Density,
     pub font: FontFamily,
+    /// Explicit colour roles for light and dark (`dark_mode` picks the set). `None` = the shell's
+    /// own colours, exactly as before; a role left `None` inside a set keeps the shell's colour too.
+    pub palette: Option<Palette>,
 }
 
 /// `Theme::default()` matches the framework's un-themed look as closely as a theme can
@@ -358,7 +371,87 @@ impl Default for Theme {
             corner: Corner::Medium,
             density: Density::Comfortable,
             font: FontFamily::System,
+            palette: None,
         }
+    }
+}
+
+/// A light and a dark set of colour roles — the design's tokens. See [`ColorRoles`].
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct Palette {
+    pub light: ColorRoles,
+    pub dark: ColorRoles,
+}
+
+/// Colour roles; every one optional (`None` = the shell's current colour for that role).
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct ColorRoles {
+    /// Page background.
+    pub background: Option<Rgb>,
+    /// Cards, sheets, dialogs.
+    pub surface: Option<Rgb>,
+    /// Top bar, bottom navigation, navigation rail.
+    pub surface_bar: Option<Rgb>,
+    /// Chips, input fills, segmented track, Filled cards, skeletons, the Neutral tone.
+    pub surface_muted: Option<Rgb>,
+    /// Text and icons.
+    pub on_surface: Option<Rgb>,
+    /// Secondary text (captions, unselected tabs).
+    pub on_surface_variant: Option<Rgb>,
+    /// Field and outlined-button borders.
+    pub outline: Option<Rgb>,
+    /// Hairlines and dividers.
+    pub outline_variant: Option<Rgb>,
+    /// Filled buttons, selected calendar day, toggles.
+    pub primary: Option<Rgb>,
+    pub on_primary: Option<Rgb>,
+    /// Primary-coloured text/icons on the background (text buttons, selected tab, back button).
+    pub primary_text: Option<Rgb>,
+    /// Tonal buttons, selected segment/chip, navigation indicator.
+    pub secondary_container: Option<Rgb>,
+    pub on_secondary_container: Option<Rgb>,
+    pub fab: Option<Rgb>,
+    pub on_fab: Option<Rgb>,
+    /// One container/on-container pair per [`Tone`]. Filled toned buttons swap the pair.
+    pub success: Option<TonePair>,
+    pub warning: Option<TonePair>,
+    pub danger: Option<TonePair>,
+    pub info: Option<TonePair>,
+    /// Sheet and dialog scrim.
+    pub scrim: Option<Rgba>,
+}
+
+/// A tone's soft background and its foreground.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct TonePair {
+    pub container: Rgb,
+    pub on_container: Rgb,
+}
+
+impl TonePair {
+    #[must_use]
+    pub const fn new(container: Rgb, on_container: Rgb) -> Self {
+        Self { container, on_container }
+    }
+}
+
+/// A colour with alpha (`a`: 0 = transparent, 255 = opaque).
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Rgba {
+    #[must_use]
+    pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self { r, g, b, a }
     }
 }
 
@@ -781,6 +874,26 @@ mod tests {
     }
 
     #[test]
+    fn rgb_hex_splits_channels() {
+        assert_eq!(Rgb::hex(0x231f20), Rgb::new(0x23, 0x1f, 0x20));
+        assert_eq!(Rgb::hex(0xffffff), Rgb::new(255, 255, 255));
+    }
+
+    #[test]
+    fn theme_default_has_no_palette_and_palette_round_trips() {
+        assert_eq!(Theme::default().palette, None);
+        let dark = ColorRoles {
+            background: Some(Rgb::hex(0x231f20)),
+            danger: Some(TonePair::new(Rgb::hex(0x4d2626), Rgb::hex(0xffb4ab))),
+            scrim: Some(Rgba::new(0, 0, 0, 82)),
+            ..Default::default()
+        };
+        let theme = Theme { palette: Some(Palette { light: ColorRoles::default(), dark }), ..Default::default() };
+        round_trips(&theme);
+        assert_eq!(ColorRoles::default().surface, None);
+    }
+
+    #[test]
     fn widget_round_trips() {
         round_trips(&Widget::Text { content: "hi".to_string(), style: TextStyle::Title });
         round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
@@ -847,6 +960,7 @@ mod tests {
                 corner: Corner::Large,
                 density: Density::Compact,
                 font: FontFamily::Rounded,
+                ..Default::default()
             }),
             fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
             sheet: Some(Sheet { title: "S".to_string(), child: Box::new(Widget::Divider), on_dismiss: "d".to_string() }),
@@ -869,6 +983,7 @@ mod tests {
                 corner: Corner::Large,
                 density: Density::Large,
                 font: FontFamily::Rounded,
+                ..Default::default()
             }),
             fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
             sheet: Some(Sheet { title: "S".to_string(), child: Box::new(Widget::Divider), on_dismiss: "d".to_string() }),

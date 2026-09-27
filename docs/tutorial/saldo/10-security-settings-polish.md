@@ -61,6 +61,7 @@ fn saldo_theme() -> Theme {
         corner: Corner::Large,
         density: Density::Comfortable,
         font: FontFamily::System,
+        ..Default::default()               // palette and later theme fields
     }
 }
 
