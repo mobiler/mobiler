@@ -198,7 +198,8 @@ geofencing + periodic wake** (`geofence` / `background-fetch` plugins; **experim
 master-detail** (`Split` — side-by-side on tablets/landscape, push-nav on phones), an **app `files` plugin**
 (read/write/list + download + export to Files/Downloads), rich form fields, the
 `oauth` plugin (OAuth/OIDC login), locale-aware number/currency/date formatting
-(`mobiler_core::format`), a device-locale getter (`cx.device_locale`), an in-app PDF viewer
+(`mobiler_core::format`), a device-locale getter (`cx.device_locale`), the app's own version/build
+(`cx.app_info()`, synchronous, set before `init`), an in-app PDF viewer
 (`PdfView`), a native→core streaming primitive (`cx.subscribe`/`unsubscribe`, with a built-in
 `ticker`), a paged feed list (`LazyList` — infinite scroll + pull-to-refresh), remote push
 (`push` plugin — APNs/FCM; **experimental**), and in-app purchases (`iap` plugin — StoreKit 2 / Play

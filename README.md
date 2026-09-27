@@ -156,6 +156,7 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 | Browser | `cx.open_url(url)` | open a link externally |
 | Toast | `cx.toast(text)` | transient message / snackbar |
 | Device | `cx.device_model(then)` | device/model string |
+| App info | `cx.app_info()` (sync) | `AppInfo { version, build, platform, bundle_id }` — the store's version/build number, set before `init` |
 | Haptics | `cx.haptic(style)` | light / medium / heavy |
 | Confirm | `cx.confirm(title, message, then) · cx.confirm_with(Confirm::new(t, m).confirm_label(…).cancel_label(…).destructive(), then)` | native dialog; app labels + destructive style; defaults from the scaffold's ShellLabels |
 | Photo | `cx.pick_photo(then)` | system photo picker → local image URI (no permission) |
