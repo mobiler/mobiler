@@ -90,7 +90,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
 
     case .divider:
-        return AnyView(Divider())
+        return AnyView(PaletteDivider())
 
     case .progress(let value):
         if let v = value {
@@ -99,7 +99,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(ProgressView().padding(.vertical, 4))
 
     case .skeleton:
-        return AnyView(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2)).frame(height: 48).padding(.vertical, 4))
+        return AnyView(RoundedRectangle(cornerRadius: 8).fill(role(pal?.surfaceMuted, else: Color.gray.opacity(0.2))).frame(height: 48).padding(.vertical, 4))
 
     case .chart(let series, let labels, let style, let axis, let legend):
         return AnyView(ChartView(series: series, labels: labels, style: style, axis: axis, legend: legend))
@@ -231,9 +231,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                         Text(label).font(.subheadline).padding(.horizontal, 12).padding(.vertical, 6)
                     }
                 }
-                .background(selected ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
-                .foregroundColor(selected ? Color.accentColor : .primary)
-                .overlay(Capsule().stroke(selected ? Color.accentColor : .clear))
+                .background(selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.18)) : role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
+                .foregroundColor(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : role(pal?.onSurface, else: .primary))
+                .overlay(Capsule().stroke(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : .clear))
                 .clipShape(Capsule())
             }.buttonStyle(.plain)
         )
@@ -286,7 +286,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 ))
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(Color.gray.opacity(0.12))
+            .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
             .clipShape(Capsule())
         )
 
@@ -299,15 +299,15 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                         Text(seg.label).font(large ? Font.body.weight(.semibold) : Font.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: large ? 48 : nil)
                             .padding(.vertical, large ? 0 : 8)
-                            .background(seg.selected ? Color.accentColor : Color.clear)
-                            .foregroundColor(seg.selected ? .white : .secondary)
+                            .background(seg.selected ? role(pal?.secondaryContainer, else: Color.accentColor) : Color.clear)
+                            .foregroundColor(seg.selected ? role(pal?.onSecondaryContainer, else: .white) : role(pal?.onSurfaceVariant, else: .secondary))
                             .clipShape(Capsule())
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
             }
             .padding(4)
-            .background(Color.gray.opacity(0.12))
+            .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
             .clipShape(Capsule())
         )
 
@@ -378,6 +378,34 @@ enum ActiveTheme {
 /// read by the dialog/picker plugins for their defaults. `nil` ⇒ English defaults.
 enum ActiveLabels {
     nonisolated(unsafe) static var current: ShellLabels?
+}
+
+/// The active palette set — the root scaffold's `theme.palette`, light or dark by its dark mode — set
+/// in Core.swift with `ActiveTheme`. `nil` = no palette: every widget keeps its system colours.
+enum ActivePalette {
+    nonisolated(unsafe) static var current: ColorRoles?
+}
+private var pal: ColorRoles? { ActivePalette.current }
+extension Rgb { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255) } }
+extension Rgba { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255) } }
+/// The palette colour for a role, else the shell's current colour.
+func role(_ c: Rgb?, else fallback: Color) -> Color { c?.color ?? fallback }
+/// The palette's container/on-container pair for a tone (nil: no palette, neutral, or unset).
+private func palettePair(_ tone: Tone) -> TonePair? {
+    guard let p = pal else { return nil }
+    switch tone {
+    case .success: return p.success
+    case .warning: return p.warning
+    case .danger: return p.danger
+    case .info: return p.info
+    case .neutral: return nil
+    }
+}
+/// A horizontal hairline in the palette's `outline_variant`, else the system divider.
+private struct PaletteDivider: View {
+    var body: some View {
+        if let c = pal?.outlineVariant { Rectangle().fill(c.color).frame(height: 1) } else { Divider() }
+    }
 }
 
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
@@ -509,9 +537,9 @@ private struct AvatarView: View {
             .clipShape(Circle())
             .overlay(alignment: .bottomTrailing) {
                 if let status = status {
-                    Circle().fill(toneColors(status).0)
+                    Circle().fill(pal != nil ? toneColors(status).1 : toneColors(status).0)
                         .frame(width: 12, height: 12)
-                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                        .overlay(Circle().stroke(role(pal?.surface, else: Color(.systemBackground)), lineWidth: 2))
                 }
             }
     }
@@ -956,17 +984,17 @@ private struct SwipeActionView: View {
                     Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
                         Text(a.label)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(pal != nil ? toneColors(a.tone).1 : .white)
                             .frame(width: 76)
                             .frame(maxHeight: .infinity)
-                            .background(toneColors(a.tone).1)
+                            .background(pal != nil ? toneColors(a.tone).0 : toneColors(a.tone).1)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain)
                 }
             }
             .padding(.vertical, 4)
             render(content, send)
-                .background(Color(.systemBackground))
+                .background(role(pal?.surface, else: Color(.systemBackground)))
                 .offset(x: offset)
                 .gesture(
                     DragGesture()
@@ -1004,14 +1032,14 @@ private struct CalendarView: View {
                     let level = idx < markers.count ? min(Int(markers[idx]), 3) : 0
                     Button(action: { send(.fired(token: token)) }) {
                         Text("\(day)").frame(maxWidth: .infinity, minHeight: cell)
-                            .background(isSel ? Color.accentColor : Color.clear)
-                            .foregroundColor(isSel ? .white : .primary)
+                            .background(isSel ? role(pal?.primary, else: Color.accentColor) : Color.clear)
+                            .foregroundColor(isSel ? role(pal?.onPrimary, else: .white) : role(pal?.onSurface, else: .primary))
                             .clipShape(Circle())
                             .overlay(alignment: .bottom) {
                                 if level > 0 {
                                     HStack(spacing: 2) {
                                         ForEach(0..<level, id: \.self) { _ in
-                                            Circle().fill(isSel ? Color.white : Color.accentColor).frame(width: 4, height: 4)
+                                            Circle().fill(isSel ? role(pal?.onPrimary, else: Color.white) : role(pal?.primaryText, else: Color.accentColor)).frame(width: 4, height: 4)
                                         }
                                     }
                                     .padding(.bottom, 3)
@@ -1118,10 +1146,11 @@ private struct ScaffoldView: View {
                 mainColumn(showBottomTabs: true)
             }
         }
+        .background(role(pal?.background, else: .clear).ignoresSafeArea())
         .preferredColorScheme(darkMode ? .dark : .light)
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
-        // toggles, sliders, text fields — one modifier themes most controls.
-        .tint(theme?.brandColor)
+        // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
+        .tint(pal?.primary?.color ?? theme?.brandColor)
         .animation(.easeInOut(duration: 0.28), value: route)
         // Edge-swipe to go back — the iOS idiom for Android's system BackHandler. The
         // gesture only engages past a 90pt drag from the leading edge, so it doesn't
@@ -1142,7 +1171,7 @@ private struct ScaffoldView: View {
         .overlay {
             if let sheet = sheet {
                 ZStack(alignment: .bottom) {
-                    Color.black.opacity(0.45).ignoresSafeArea()
+                    (pal?.scrim?.color ?? Color.black.opacity(0.45)).ignoresSafeArea()
                         .onTapGesture { send(.fired(token: sheet.onDismiss)) }
                     VStack(alignment: .leading, spacing: 8) {
                         Capsule().fill(Color.secondary.opacity(0.4))
@@ -1152,7 +1181,7 @@ private struct ScaffoldView: View {
                     }
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.systemBackground))
+                    .background(role(pal?.surface, else: Color(.systemBackground)))
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                 }
                 .transition(.opacity)
@@ -1177,8 +1206,9 @@ private struct ScaffoldView: View {
                 if back != nil { Image(systemName: "chevron.left").hidden() }
             }
             .padding()
+            .background(role(pal?.surfaceBar, else: .clear).ignoresSafeArea(edges: .top))
 
-            Divider()
+            PaletteDivider()
 
             // The body is keyed by `route`, so a push/pop swaps the whole screen
             // (with a slide+fade; lateral move crossfades); a same-route update
@@ -1234,8 +1264,8 @@ private struct ScaffoldView: View {
                         Image(systemName: sfSymbol(fab.icon))
                             .font(.title2)
                             .frame(width: 56, height: 56)
-                            .background(theme?.brandColor ?? .accentColor)
-                            .foregroundColor(.white)
+                            .background(role(pal?.fab, else: theme?.brandColor ?? .accentColor))
+                            .foregroundColor(role(pal?.onFab, else: .white))
                             .clipShape(RoundedRectangle(cornerRadius: 18))
                             .shadow(radius: 6, y: 3)
                     }
@@ -1244,7 +1274,7 @@ private struct ScaffoldView: View {
             }
 
             if showBottomTabs && !tabs.isEmpty {
-                Divider()
+                PaletteDivider()
                 HStack {
                     ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
                         Button(action: { send(.fired(token: tab.onSelect)) }) {
@@ -1255,12 +1285,13 @@ private struct ScaffoldView: View {
                                 Text(tab.label).font(isLargeDensity() ? .subheadline : .caption)
                             }
                             .fontWeight(tab.selected ? .semibold : .regular)
-                            .foregroundColor(tab.selected ? .accentColor : .secondary)
+                            .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
                             .frame(maxWidth: .infinity)
                         }
                     }
                 }
                 .padding(.vertical, 10)
+                .background(role(pal?.surfaceBar, else: .clear).ignoresSafeArea(edges: .bottom))
             }
         }
     }
@@ -1277,11 +1308,11 @@ private struct ScaffoldView: View {
                         Text(tab.label)
                     }
                     .fontWeight(tab.selected ? .semibold : .regular)
-                    .foregroundColor(tab.selected ? .accentColor : .secondary)
+                    .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 12)
                     .padding(.horizontal, 14)
-                    .background(tab.selected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    .background(tab.selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.12)) : Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
@@ -1291,6 +1322,7 @@ private struct ScaffoldView: View {
         .padding(.vertical, 12)
         .padding(.horizontal, 8)
         .frame(width: 220)
+        .background(role(pal?.surfaceBar, else: .clear))
     }
 
     private var navTransition: AnyTransition {
@@ -1314,7 +1346,7 @@ private struct TextStyleMod: ViewModifier {
         switch style {
         case .title: return AnyView(content.font(.system(.largeTitle, design: design).bold()))
         case .subtitle: return AnyView(content.font(.system(.title3, design: design).weight(.semibold)))
-        case .caption: return AnyView(content.font(.system(.footnote, design: design)).foregroundColor(.secondary))
+        case .caption: return AnyView(content.font(.system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
         case .emphasis: return AnyView(content.font(.system(.body, design: design).weight(.semibold)))
         case .body: return AnyView(content.font(.system(.body, design: design)))
         }
@@ -1337,12 +1369,40 @@ private struct MobilerButton: View {
 
     var body: some View {
         let button = Button(action: action) { labelView }
-        if isLargeDensity() {
+        if let c = paletteColors() {
+            button.buttonStyle(PaletteButtonStyle(fill: c.fill, fg: c.fg, stroke: c.stroke, large: isLargeDensity()))
+        } else if isLargeDensity() {
             button.buttonStyle(LargeButtonStyle(style: style, color: tint))
         } else if neutral {
             button.modifier(ButtonStyleMod(style))
         } else {
             button.modifier(ButtonStyleMod(style, tint: tint)).tint(tint)
+        }
+    }
+
+    /// With a palette: neutral buttons use primary / secondary_container / primary_text; a toned button
+    /// uses its pair (filled flips it: on-container fill, container text). nil = no palette, or a toned
+    /// button whose pair the palette leaves unset — today's styling then.
+    private func paletteColors() -> (fill: Color, fg: Color, stroke: Color)? {
+        guard let p = pal else { return nil }
+        let pair = palettePair(tone)
+        if !neutral && pair == nil { return nil }
+        if let pair {
+            let c = pair.container.color, on = pair.onContainer.color
+            switch style {
+            case .filled: return (on, c, .clear)
+            case .tonal: return (c, on, .clear)
+            case .outlined: return (.clear, on, on)
+            case .text: return (.clear, on, .clear)
+            }
+        }
+        let primary = role(p.primary, else: ActiveTheme.current?.brandColor ?? .accentColor)
+        let text = role(p.primaryText, else: primary)
+        switch style {
+        case .filled: return (primary, role(p.onPrimary, else: .white), .clear)
+        case .tonal: return (role(p.secondaryContainer, else: primary.opacity(0.18)), role(p.onSecondaryContainer, else: primary), .clear)
+        case .outlined: return (.clear, text, role(p.outline, else: text))
+        case .text: return (.clear, text, .clear)
         }
     }
 
@@ -1385,6 +1445,28 @@ private struct TonalButtonStyle: SwiftUI.ButtonStyle {
     }
 }
 
+// A palette-coloured button (any ButtonStyle): explicit fill / label / outline on a capsule, at the
+// regular or the Density.large size.
+private struct PaletteButtonStyle: SwiftUI.ButtonStyle {
+    let fill: Color
+    let fg: Color
+    let stroke: Color
+    let large: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .padding(.horizontal, large ? 24 : 14)
+            .padding(.vertical, large ? 0 : 7)
+            .frame(minHeight: large ? 56 : nil)
+            .foregroundColor(fg)
+            .background(fill)
+            .overlay(Capsule().stroke(stroke, lineWidth: 1))
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
 // Density.large button: 56pt min height, 24pt side padding, body-semibold label (scales with Dynamic
 // Type), capsule — one style for all four ButtonStyles so every large button is the same height.
 private struct LargeButtonStyle: SwiftUI.ButtonStyle {
@@ -1419,19 +1501,19 @@ private struct CardMod: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14)
         switch style {
         case .elevated:
-            return AnyView(content.background(shape.fill(Color(.secondarySystemBackground)))
+            return AnyView(content.background(shape.fill(role(pal?.surface, else: Color(.secondarySystemBackground))))
                 .shadow(color: .black.opacity(0.08), radius: 4, y: 2))
         case .filled:
-            return AnyView(content.background(shape.fill(Color(.tertiarySystemBackground))))
+            return AnyView(content.background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemBackground)))))
         case .outlined:
-            return AnyView(content.overlay(shape.stroke(Color.gray.opacity(0.3))))
+            return AnyView(content.overlay(shape.stroke(role(pal?.outlineVariant, else: Color.gray.opacity(0.3)))))
         case .brand:
             let t = ActiveTheme.current
             let grad = LinearGradient(
-                colors: [t?.brandColor ?? .accentColor, t?.accentColor ?? .accentColor],
+                colors: [role(pal?.primary, else: t?.brandColor ?? .accentColor), t?.accentColor ?? .accentColor],
                 startPoint: .topLeading, endPoint: .bottomTrailing,
             )
-            return AnyView(content.background(shape.fill(grad)).foregroundColor(.white))
+            return AnyView(content.background(shape.fill(grad)).foregroundColor(role(pal?.onPrimary, else: .white)))
         }
     }
 }
@@ -1453,6 +1535,8 @@ private func a11yTraits(_ role: SharedTypes.A11yRole) -> AccessibilityTraits {
 }
 
 private func toneColors(_ tone: Tone) -> (Color, Color) {
+    if let pair = palettePair(tone) { return (pair.container.color, pair.onContainer.color) }
+    if case .neutral = tone, let p = pal { return (role(p.surfaceMuted, else: Color.gray.opacity(0.15)), role(p.onSurfaceVariant, else: .secondary)) }
     switch tone {
     case .neutral: return (Color.gray.opacity(0.15), .secondary)
     case .success: return (Color.green.opacity(0.15), .green)
