@@ -59,6 +59,12 @@ pub type App = MobilerShell<Counter>;
 Most users go through the [`mobiler`](https://crates.io/crates/mobiler) CLI, which
 scaffolds a project wired to this crate and a generic native shell.
 
+## Upgrading
+
+**Breaking in mobiler-ui 0.29 / mobiler-core 0.40:** `Theme` gained `palette` (and further
+design-release fields follow). Code that lists every field in a `Theme { … }` literal no longer
+compiles. Write `Theme { seed, ..Default::default() }` and set only what you need.
+
 ## License
 
 Dual-licensed under either [MIT](https://github.com/mobiler/mobiler/blob/main/LICENSE-MIT) or [Apache-2.0](https://github.com/mobiler/mobiler/blob/main/LICENSE-APACHE), at your option.

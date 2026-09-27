@@ -262,6 +262,7 @@ impl MobilerApp for Coffee {
             corner: Corner::Large,
             density: Density::Comfortable,
             font: FontFamily::Rounded,
+            ..Default::default()
         };
         // Both screens are themed Scaffolds (title bar + body). Detail keeps its in-body
         // "← Back" button (guarded by the CoffeeUITests regression), so no top-bar back.

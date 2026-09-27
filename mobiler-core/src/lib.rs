@@ -32,9 +32,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
     A11yRole, Action, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
-    ChartSeries, ChartStyle, ChartTick, Corner, Density, Fab, FieldKind, FontFamily, Icon,
-    ImageRatio, ImageShape, InputValue, MapMarker, ProjectColor, Rgb, Segment, Sheet, ShellLabels, Spacing, SwipeButton, Tab,
-    TextStyle, Theme, Tone, Widget,
+    ChartSeries, ChartStyle, ChartTick, ColorRoles, Corner, Density, Fab, FieldKind, FontFamily, Icon,
+    ImageRatio, ImageShape, InputValue, MapMarker, Palette, ProjectColor, Rgb, Rgba, Segment, Sheet, ShellLabels, Spacing, SwipeButton, Tab,
+    TextStyle, Theme, Tone, TonePair, Widget,
 };
 
 // ============================ capabilities ============================

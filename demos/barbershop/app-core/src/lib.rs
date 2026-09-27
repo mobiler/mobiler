@@ -1178,6 +1178,7 @@ impl MobilerApp for FadeHouse {
             corner: Corner::Medium,
             density: if model.large_controls { Density::Large } else { Density::Comfortable },
             font: FontFamily::System,
+            ..Default::default()
         };
         let tabs = vec![
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),

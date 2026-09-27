@@ -303,6 +303,7 @@ impl MobilerApp for Todo {
             corner: Corner::Large,
             density: Density::Comfortable,
             font: FontFamily::Rounded,
+            ..Default::default()
         };
         with_theme(nav_scaffold(title, model.dark_mode, tabs, body, &model.nav, Msg::Back), theme)
     }

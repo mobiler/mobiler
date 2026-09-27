@@ -357,6 +357,14 @@ is offered as `<file>.mobiler-new`; `--apply` writes it in place after saving a 
 `.mobiler/` so the baseline (and version stamp) travel with the repo. Apps scaffolded before baselines
 existed fall back to a conservative reconcile and get a baseline written for next time.
 
+### Breaking changes in your app code
+
+`mobiler upgrade` never edits your Rust code, so API changes show up as compile errors there:
+
+- **Breaking in mobiler-ui 0.29 / mobiler-core 0.40:** `Theme` gained `palette` (and further
+  design-release fields follow). Code that lists every field in a `Theme { … }` literal no longer
+  compiles. Write `Theme { seed, ..Default::default() }` and set only what you need.
+
 ## License
 
 Dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
