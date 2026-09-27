@@ -7,12 +7,14 @@
 
 use std::marker::PhantomData;
 
+pub mod app_info;
 pub mod bunny;
 pub mod dialog;
 pub mod format;
 pub mod http;
 pub mod i18n;
 pub mod transfer;
+pub use app_info::AppInfo;
 pub use dialog::{Confirm, Picker};
 pub use format::{Currency, Locale, Weekday};
 pub use http::{HttpHeader, HttpOutcome};
@@ -123,15 +125,31 @@ pub struct Cx<E> {
     notifications: Vec<PluginNotify>,
     requests: Vec<(PluginCall, Continuation<E>)>,
     streams: Vec<(PluginStreamCall, StreamContinuation<E>)>,
+    app_info: AppInfo,
 }
 
 impl<E> Default for Cx<E> {
     fn default() -> Self {
-        Self { notifications: Vec::new(), requests: Vec::new(), streams: Vec::new() }
+        Self { notifications: Vec::new(), requests: Vec::new(), streams: Vec::new(), app_info: AppInfo::default() }
     }
 }
 
 impl<E> Cx<E> {
+    /// A `Cx` carrying `info` — for app unit tests that exercise code reading [`app_info`](Self::app_info).
+    #[must_use]
+    pub fn with_app_info(info: AppInfo) -> Self {
+        Self { app_info: info, ..Self::default() }
+    }
+
+    /// The app's own version/build/platform/bundle id, as the shell reported it at startup
+    /// (before `restore`/`init`), so `init` can put the build number on the first request.
+    /// All fields are empty when the shell predates it. `view` has no `Cx`: copy what a screen
+    /// shows into the Model in `init`.
+    #[must_use]
+    pub fn app_info(&self) -> &AppInfo {
+        &self.app_info
+    }
+
     /// Fire-and-forget call to a native plugin.
     pub fn notify(&mut self, plugin: impl Into<String>, op: impl Into<String>, input: impl Into<String>) {
         self.notifications.push(PluginNotify { plugin: plugin.into(), op: op.into(), input: input.into() });
@@ -400,7 +418,7 @@ impl<A: MobilerApp> App for MobilerShell<A> {
 
     fn update(&self, action: Action, model: &mut Self::Model) -> Command<Effect, Action> {
         let app = A::default();
-        let mut cx = Cx::<A::Event>::default();
+        let mut cx = Cx::<A::Event>::with_app_info(app_info::get());
         match action {
             Action::Fired { token } => {
                 if let Ok(event) = serde_json::from_str::<A::Event>(&token) {
@@ -410,6 +428,9 @@ impl<A: MobilerApp> App for MobilerShell<A> {
             Action::Input { id, value } => app.input(&id, value, model, &mut cx),
             Action::Restore { data } => app.restore(&data, model),
             Action::Start => app.init(model, &mut cx),
+            Action::AppInfo { version, build, platform, bundle_id } => {
+                app_info::set(AppInfo { version, build, platform, bundle_id });
+            }
         }
         // Render first: the model is final once the app's handler returns, so the first frame
         // must show it. A shell that awaits a request before looking at later effects (the
@@ -2026,6 +2047,7 @@ mod tests {
             Action::Input { id: "n".into(), value: InputValue::Bool(true) },
             Action::Restore { data: "blob".into() },
             Action::Start,
+            Action::AppInfo { version: "1.0".into(), build: "7".into(), platform: "android".into(), bundle_id: "rs.x".into() },
         ];
         for a in actions {
             let s = serde_json::to_string(&a).unwrap();
@@ -2042,6 +2064,7 @@ mod tests {
         restored: String,
         started: bool,
         last_input: String,
+        app_build: String,
     }
 
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -2070,8 +2093,9 @@ mod tests {
         fn restore(&self, data: &str, model: &mut CounterModel) {
             model.restored = data.to_string();
         }
-        fn init(&self, model: &mut CounterModel, _cx: &mut Cx<CounterEv>) {
+        fn init(&self, model: &mut CounterModel, cx: &mut Cx<CounterEv>) {
             model.started = true;
+            model.app_build = cx.app_info().build.clone();
         }
         fn view(&self, model: &CounterModel) -> Widget {
             text(format!("{}", model.count))
@@ -2098,6 +2122,70 @@ mod tests {
         assert!(m.started);
         // view renders the (mutated) model through the ABI.
         assert!(matches!(shell.view(&m), Widget::Text { .. }));
+    }
+
+    fn info(build: &str) -> AppInfo {
+        AppInfo { version: "1.0".into(), build: build.into(), platform: "android".into(), bundle_id: "rs.x".into() }
+    }
+
+    fn app_info_action(build: &str) -> Action {
+        let i = info(build);
+        Action::AppInfo { version: i.version, build: i.build, platform: i.platform, bundle_id: i.bundle_id }
+    }
+
+    // The global is process-wide, so every test that sends Action::AppInfo holds this lock to keep
+    // `cargo test`'s parallel threads from interleaving.
+    static APP_INFO_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn init_sees_app_info_sent_before_start() {
+        use crux_core::App as _;
+        let _g = APP_INFO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let shell = MobilerShell::<CounterApp>::default();
+        let mut m = CounterModel::default();
+        let _ = shell.update(app_info_action("7"), &mut m);
+        let _ = shell.update(Action::Start, &mut m);
+        assert_eq!(m.app_build, "7");
+    }
+
+    #[test]
+    fn later_app_info_replaces_earlier() {
+        use crux_core::App as _;
+        let _g = APP_INFO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let shell = MobilerShell::<CounterApp>::default();
+        let mut m = CounterModel::default();
+        let _ = shell.update(app_info_action("7"), &mut m);
+        let _ = shell.update(app_info_action("8"), &mut m);
+        let _ = shell.update(Action::Start, &mut m);
+        assert_eq!(m.app_build, "8");
+    }
+
+    #[test]
+    fn app_info_action_does_not_touch_the_model() {
+        use crux_core::App as _;
+        let _g = APP_INFO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let shell = MobilerShell::<CounterApp>::default();
+        let mut m = CounterModel::default();
+        let _ = shell.update(app_info_action("9"), &mut m);
+        assert!(!m.started);
+        assert_eq!(m.count, 0);
+        assert!(m.restored.is_empty());
+        assert!(m.last_input.is_empty());
+        assert!(m.app_build.is_empty());
+    }
+
+    #[test]
+    fn cx_default_has_empty_app_info() {
+        let cx = Cx::<Ev>::default();
+        assert_eq!(cx.app_info(), &AppInfo::default());
+        assert!(cx.app_info().platform.is_empty());
+    }
+
+    #[test]
+    fn cx_with_app_info_carries_it() {
+        let cx = Cx::<Ev>::with_app_info(info("42"));
+        assert_eq!(cx.app_info().build, "42");
+        assert_eq!(cx.app_info().bundle_id, "rs.x");
     }
 
     #[test]

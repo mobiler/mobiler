@@ -42,6 +42,11 @@ pub enum Action {
     /// Fired once on startup (after `Restore`) so the app can kick off initial
     /// effects (e.g. fetching data).
     Start,
+    /// The app's own version, sent once by the shell at startup **before** `Restore`/`Start`:
+    /// iOS `CFBundleShortVersionString`/`CFBundleVersion`/bundle id, Android
+    /// `versionName`/`longVersionCode`/package name, web empty strings. `platform` is
+    /// `"ios"`/`"android"`/`"web"`. Read in the core via `cx.app_info()`.
+    AppInfo { version: String, build: String, platform: String, bundle_id: String },
 }
 
 // ---------------------------- style tokens ----------------------------
