@@ -10,6 +10,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.ComponentActivity as PaletteActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -113,6 +115,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.NavigationRailDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -189,6 +196,9 @@ import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import dev.mobiler.barbershop.ui.theme.FadehouseTheme
+import dev.mobiler.barbershop.ui.theme.LocalPalette
+import dev.mobiler.barbershop.ui.theme.color
+import dev.mobiler.barbershop.shared.types.TonePair
 import dev.mobiler.barbershop.shared.types.A11yRole
 import dev.mobiler.barbershop.shared.types.Action
 import dev.mobiler.barbershop.shared.types.BoxAlign
@@ -297,6 +307,15 @@ fun App(core: Core = viewModel()) {
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
     activeTheme = appTheme
     ActiveLabels.current = (view as? Widget.Scaffold)?.labels
+    // With a palette the system-bar icons follow `dark_mode` (the app's own dark flag), not the OS.
+    if (appTheme?.palette != null) {
+        val activity = androidx.compose.ui.platform.LocalContext.current as? PaletteActivity
+        LaunchedEffect(dark, activity) {
+            val t = android.graphics.Color.TRANSPARENT
+            val style = if (dark) SystemBarStyle.dark(t) else SystemBarStyle.light(t, t)
+            activity?.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+        }
+    }
     FadehouseTheme(darkTheme = dark, theme = appTheme) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (view is Widget.Scaffold) {
@@ -454,7 +473,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 modifier = Modifier.size(48.dp).clip(CircleShape),
             )
             widget.status?.let { st ->
-                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(toneColors(st).first))
+                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(if (LocalPalette.current != null) toneColors(st).second else toneColors(st).first))
             }
         }
 
@@ -490,7 +509,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         }
         is Widget.Skeleton -> Box(
             modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp)
-                .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                .clip(RoundedCornerShape(8.dp)).background(LocalPalette.current?.surfaceMuted?.color() ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
         )
         is Widget.Chart -> {
             // Multi-series chart: cartesian (bar/line/stacked) with optional y-axis + legend, or
@@ -876,12 +895,14 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             Box(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
                     actions.forEach { a ->
-                        val (_, fg) = toneColors(a.tone)
+                        val (bgSoft, fg) = toneColors(a.tone)
+                        // A palette pair: container behind on-container; otherwise the strong colour + white.
+                        val pal = LocalPalette.current != null
                         Box(
-                            modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(fg)
+                            modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(if (pal) bgSoft else fg)
                                 .clickable { send(Action.Fired(a.onTap)); offsetX = 0f },
                             contentAlignment = Alignment.Center,
-                        ) { Text(a.label, color = Color.White, style = MaterialTheme.typography.labelMedium) }
+                        ) { Text(a.label, color = if (pal) fg else Color.White, style = MaterialTheme.typography.labelMedium) }
                     }
                 }
                 Box(
@@ -950,7 +971,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         .background(grad)
                         .then(clickMod)
                     Box(modifier = brandMod) {
-                        CompositionLocalProvider(LocalContentColor provides Color.White) { CardBody(widget.child, send) }
+                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onPrimary?.color() ?: Color.White)) { CardBody(widget.child, send) }
                     }
                 }
             }
@@ -1120,6 +1141,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             onClick = { send(Action.Fired(widget.onPress)) },
             label = { Text(widget.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) },
             modifier = if (isLarge) Modifier.height(48.dp) else Modifier,
+            colors = LocalPalette.current?.surfaceMuted?.let { FilterChipDefaults.filterChipColors(containerColor = it.color()) } ?: FilterChipDefaults.filterChipColors(),
         )
 
         is Widget.TextField -> {
@@ -1146,6 +1168,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 isError = widget.error != null,
                 supportingText = widget.error?.let { msg -> { Text(msg) } },
                 modifier = Modifier.fillMaxWidth(),
+                colors = paletteFieldColors(),
             )
         }
 
@@ -1160,6 +1183,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 singleLine = true,
                 shape = RoundedCornerShape(50),
                 modifier = Modifier.fillMaxWidth(),
+                colors = paletteFieldColors(),
             )
         }
 
@@ -1211,7 +1235,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             // Modal bottom sheet — present in the tree ⇒ shown (a Popup, so it overlays
             // everything regardless of where it's composed). Scrim/swipe fires on_dismiss.
             widget.sheet?.let { sheet ->
-                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }) {
+                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }, scrimColor = LocalPalette.current?.scrim?.color() ?: BottomSheetDefaults.ScrimColor) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1227,7 +1251,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 val wide = maxWidth >= 600.dp && widget.tabs.isNotEmpty()
                 Row(modifier = Modifier.fillMaxSize()) {
                     if (wide) {
-                        NavigationRail {
+                        NavigationRail(containerColor = LocalPalette.current?.surfaceBar?.color() ?: NavigationRailDefaults.ContainerColor) {
                             widget.tabs.forEach { t ->
                                 NavigationRailItem(
                                     selected = t.selected,
@@ -1250,7 +1274,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         }
                                     }
                                 },
-                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = LocalPalette.current?.surfaceBar?.color() ?: MaterialTheme.colorScheme.surface),
                             )
                         },
                         bottomBar = {
@@ -1472,6 +1496,9 @@ private fun iconTintFor(icon: WidgetIcon): Color = when (icon) {
 @Composable
 private fun toneColors(tone: Tone): Pair<Color, Color> {
     val cs = MaterialTheme.colorScheme
+    val pal = LocalPalette.current
+    tonePair(pal, tone)?.let { return it.container.color() to it.onContainer.color() }
+    if (pal != null && tone == Tone.NEUTRAL) return (pal.surfaceMuted?.color() ?: cs.surfaceVariant) to (pal.onSurfaceVariant?.color() ?: cs.onSurfaceVariant)
     return when (tone) {
         Tone.NEUTRAL -> cs.surfaceVariant to cs.onSurfaceVariant
         Tone.SUCCESS -> Color(0xFF2E7D32).copy(alpha = 0.15f) to Color(0xFF2E7D32)
@@ -1485,6 +1512,8 @@ private fun toneColors(tone: Tone): Pair<Color, Color> {
 @Composable
 private fun toneStrong(tone: Tone): Pair<Color, Color> {
     val cs = MaterialTheme.colorScheme
+    // A palette pair flips for fills: on-container fill, container text.
+    tonePair(LocalPalette.current, tone)?.let { return it.onContainer.color() to it.container.color() }
     return when (tone) {
         Tone.NEUTRAL -> cs.primary to cs.onPrimary
         Tone.SUCCESS -> Color(0xFF2E7D32) to Color.White
@@ -1492,6 +1521,22 @@ private fun toneStrong(tone: Tone): Pair<Color, Color> {
         Tone.DANGER -> cs.error to cs.onError
         Tone.INFO -> cs.tertiary to cs.onTertiary
     }
+}
+
+// The palette's container/on-container pair for a tone (null: no palette, NEUTRAL, or unset).
+private fun tonePair(roles: dev.mobiler.barbershop.shared.types.ColorRoles?, tone: Tone): TonePair? = when (tone) {
+    Tone.SUCCESS -> roles?.success
+    Tone.WARNING -> roles?.warning
+    Tone.DANGER -> roles?.danger
+    Tone.INFO -> roles?.info
+    Tone.NEUTRAL -> null
+}
+
+// Text-field fill from the palette's `surface_muted` (the M3 default colours otherwise).
+@Composable
+private fun paletteFieldColors(): TextFieldColors {
+    val muted = LocalPalette.current?.surfaceMuted?.color() ?: return OutlinedTextFieldDefaults.colors()
+    return OutlinedTextFieldDefaults.colors(focusedContainerColor = muted, unfocusedContainerColor = muted)
 }
 
 // Widget.Button. A NEUTRAL tone keeps each M3 button's default colors (an un-toned button renders
@@ -1530,7 +1575,9 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
             content = content,
         )
         ButtonStyle.OUTLINED -> if (neutral) {
-            OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding, content = content)
+            val pt = LocalPalette.current?.primaryText?.color()
+            OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                colors = if (pt != null) ButtonDefaults.outlinedButtonColors(contentColor = pt) else ButtonDefaults.outlinedButtonColors(), content = content)
         } else {
             OutlinedButton(
                 onClick = onClick,
@@ -1545,7 +1592,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
             onClick = onClick,
             modifier = modifier,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.TextButtonContentPadding,
-            colors = if (neutral) ButtonDefaults.textButtonColors() else ButtonDefaults.textButtonColors(contentColor = strong),
+            colors = if (neutral) (LocalPalette.current?.primaryText?.color()?.let { ButtonDefaults.textButtonColors(contentColor = it) } ?: ButtonDefaults.textButtonColors()) else ButtonDefaults.textButtonColors(contentColor = strong),
             content = content,
         )
     }
