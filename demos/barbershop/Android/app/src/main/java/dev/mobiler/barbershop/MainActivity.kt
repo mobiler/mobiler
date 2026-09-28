@@ -1301,7 +1301,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     // cx.snackbar needs a composed host to time out; count this one while it's on screen.
                     DisposableEffect(Unit) {
                         SnackbarBus.hosts++
-                        onDispose { SnackbarBus.hosts-- }
+                        onDispose {
+                            SnackbarBus.hosts--
+                            // The last host went: nothing would time the snackbar out any more. Its call
+                            // answers "timeout" (a dismiss, unlike a replace).
+                            if (SnackbarBus.hosts == 0) SnackbarBus.state.currentSnackbarData?.dismiss()
+                        }
                     }
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),

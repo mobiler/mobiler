@@ -132,9 +132,10 @@ pub enum Msg {
     PickDay(u8),
     /// Swipe a booking row and tap "Cancel" (`SwipeAction`).
     CancelBooking(u32),
-    /// A cancel snackbar resolved (`cx.snackbar`): `undo` = its Undo was tapped. Carries the booking
-    /// and its old position, so a snackbar replaced by a newer cancel resolves on its own.
-    UndoCancel { undo: bool, index: usize, booking: String },
+    /// A cancel snackbar resolved (`cx.snackbar`): `undo` = its Undo was tapped. Carries the booking,
+    /// its old position and the booking that followed it, so a snackbar replaced by a newer cancel
+    /// resolves on its own and Undo restores it next to its old neighbour.
+    UndoCancel { undo: bool, index: usize, booking: String, next: Option<String> },
     /// The destructive "Cancel next booking" button — asks first (`cx.confirm_with`).
     AskCancelNext,
     /// The result of the "Cancel next booking" confirm (`true` = confirmed).
@@ -787,14 +788,19 @@ impl MobilerApp for FadeHouse {
                 let i = i as usize;
                 if i < model.bookings.len() {
                     let b = model.bookings.remove(i);
+                    let next = model.bookings.get(i).cloned();
                     // A snackbar with Undo (cx.snackbar), above the tab bar and the FAB.
                     let text = format!("Cancelled {b}");
-                    cx.snackbar(Snackbar::new(text).action("Undo"), move |r| Msg::UndoCancel { undo: r.ok, index: i, booking: b });
+                    cx.snackbar(Snackbar::new(text).action("Undo"), move |r| Msg::UndoCancel { undo: r.ok, index: i, booking: b, next });
                 }
             }
-            Msg::UndoCancel { undo, index, booking } => {
+            Msg::UndoCancel { undo, index, booking, next } => {
                 if undo {
-                    model.bookings.insert(index.min(model.bookings.len()), booking);
+                    // Back before the booking that followed it, if that's still there; else its old slot.
+                    let at = next
+                        .and_then(|n| model.bookings.iter().position(|x| *x == n))
+                        .unwrap_or_else(|| index.min(model.bookings.len()));
+                    model.bookings.insert(at, booking);
                 }
             }
             // The destructive "Cancel next booking" button asks first, naming the action on the
@@ -2533,7 +2539,7 @@ mod test {
         let (app, mut model) = app();
         let mut cx = Cx::<Msg>::default();
         let before = model.bookings.clone();
-        let undo = |undo: bool, index: usize, booking: &str| Msg::UndoCancel { undo, index, booking: booking.to_string() };
+        let undo = |undo: bool, index: usize, booking: &str| Msg::UndoCancel { undo, index, booking: booking.to_string(), next: None };
         app.update(Msg::CancelBooking(1), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before.len() - 1);
         app.update(undo(true, 1, &before[1]), &mut model, &mut cx);
@@ -2545,6 +2551,19 @@ mod test {
         app.update(undo(false, 0, &before[0]), &mut model, &mut cx);
         app.update(undo(true, 0, &before[1]), &mut model, &mut cx);
         assert_eq!(model.bookings, before[1..].to_vec());
+    }
+
+    #[test]
+    fn undo_restores_before_the_booking_that_followed_it() {
+        // [A, B, C]: cancel B, then A — undoing B puts it back before C, not at its stale index 1.
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        let before = model.bookings.clone();
+        app.update(Msg::CancelBooking(1), &mut model, &mut cx);
+        app.update(Msg::CancelBooking(0), &mut model, &mut cx);
+        let undo_b = Msg::UndoCancel { undo: true, index: 1, booking: before[1].clone(), next: Some(before[2].clone()) };
+        app.update(undo_b, &mut model, &mut cx);
+        assert_eq!(model.bookings, vec![before[1].clone(), before[2].clone()]);
     }
 
     #[test]
