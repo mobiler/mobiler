@@ -455,6 +455,12 @@ impl Rgba {
     }
 }
 
+/// How the scaffold picks light or dark. `Light`/`Dark` force it; `System` follows the OS live (the
+/// shell switches palette sets itself, no core round-trip). Set with `with_appearance`.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum Appearance { Light, Dark, System }
+
 /// Text the shells draw themselves (back buttons, web list controls, dialog/picker defaults), in the
 /// app's language. Set once on the scaffold with `with_labels`; every field is optional and falls
 /// back to the shell's built-in English. A label passed to a specific call (`confirm_with`,
@@ -841,6 +847,8 @@ pub enum Widget {
         depth: u32,
         /// App-wide shell text (see [`ShellLabels`]). `None` ⇒ the shells' English defaults.
         labels: Option<ShellLabels>,
+        /// `Some` overrides `dark_mode` (see [`Appearance`]); `None` = `dark_mode` decides.
+        appearance: Option<Appearance>,
     },
 }
 
@@ -946,6 +954,7 @@ mod tests {
             route: "r".to_string(),
             depth: 2,
             labels: None,
+            appearance: None,
         });
         // Themed scaffold — all four theme knobs must round-trip.
         round_trips(&Widget::Scaffold {
@@ -969,6 +978,7 @@ mod tests {
             route: "r".to_string(),
             depth: 1,
             labels: None,
+            appearance: None,
         });
         // Themed scaffold with Density::Large — the big-touch-target density must round-trip.
         round_trips(&Widget::Scaffold {
@@ -992,6 +1002,7 @@ mod tests {
             route: "r".to_string(),
             depth: 1,
             labels: None,
+            appearance: None,
         });
         // Labelled scaffold — every ShellLabels field must round-trip.
         round_trips(&Widget::Scaffold {
@@ -1019,6 +1030,7 @@ mod tests {
                     .pdf_title("Dokument")
                     .web_title("Stranica"),
             ),
+            appearance: Some(Appearance::System),
         });
     }
 }

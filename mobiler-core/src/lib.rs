@@ -31,7 +31,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
-    A11yRole, Action, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
+    A11yRole, Action, Appearance, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, ColorRoles, Corner, Density, Fab, FieldKind, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, MapMarker, Palette, ProjectColor, Rgb, Rgba, Segment, Sheet, ShellLabels, Spacing, SwipeButton, Tab,
     TextStyle, Theme, Tone, TonePair, Widget,
@@ -296,6 +296,18 @@ impl<E> Cx<E> {
     /// formatting locale at startup. Works on iOS, Android, and web.
     pub fn device_locale(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("device", "locale", "", then);
+    }
+
+    /// The OS light/dark setting (`"light"` / `"dark"` in `response.output`) via the built-in
+    /// `device` capability — the system's value even while the app forces one with `with_appearance`.
+    pub fn system_appearance(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("device", "appearance", "", then);
+    }
+
+    /// Subscribe to the OS light/dark setting: `on_event` gets `"light"` / `"dark"` once right away,
+    /// then on every change. Stop it with [`unsubscribe`](Self::unsubscribe)`(key)`.
+    pub fn subscribe_appearance(&mut self, key: impl Into<String>, on_event: impl Fn(PluginResponse) -> E + Send + 'static) {
+        self.subscribe(key, "appearance", "changes", "", on_event);
     }
 
     /// Let the user pick an image (built-in `photo` capability — the system photo
@@ -1164,7 +1176,7 @@ pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bo
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1, labels: None }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1, labels: None, appearance: None }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -1173,7 +1185,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2, labels: None }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2, labels: None, appearance: None }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -1207,6 +1219,7 @@ where
         route: nav.route_key(),
         depth: nav.depth(),
         labels: None,
+        appearance: None,
     }
 }
 
@@ -1215,7 +1228,7 @@ where
 /// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
 pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, labels, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1229,6 +1242,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
             route,
             depth,
             labels,
+            appearance,
         },
         other => other,
     }
@@ -1238,7 +1252,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
 /// No-op on any other widget: `with_fab(scaffold(...), Icon::Add, Msg::New)`.
 pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, appearance, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1252,6 +1266,7 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
             route,
             depth,
             labels,
+            appearance,
         },
         other => other,
     }
@@ -1261,7 +1276,7 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
 /// the model: `with_sheet(scaffold(...), title, sheet_body, Msg::CloseSheet)`.
 pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child: Widget, on_dismiss: E) -> Widget {
     match widget {
-        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, labels, .. } => Widget::Scaffold {
+        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, labels, appearance, .. } => Widget::Scaffold {
             title: t,
             body,
             tabs,
@@ -1275,6 +1290,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
             route,
             depth,
             labels,
+            appearance,
         },
         other => other,
     }
@@ -1285,7 +1301,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
 /// when the async reload completes (the shell shows a spinner while true). No-op on other widgets.
 pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, labels, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, labels, appearance, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1299,6 +1315,7 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
             route,
             depth,
             labels,
+            appearance,
         },
         // Pull-to-refresh on a LazyList's top — same API as on a Scaffold. Leaves the load-more
         // fields intact.
@@ -1323,8 +1340,20 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
 #[must_use]
 pub fn with_labels(widget: Widget, labels: ShellLabels) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, .. } => {
-            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: Some(labels) }
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, appearance, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: Some(labels), appearance }
+        }
+        other => other,
+    }
+}
+
+/// Choose Light / Dark / System for the scaffold. `System` follows the OS live on every shell and
+/// switches the theme palette's light/dark set by itself; `dark_mode` is then ignored.
+#[must_use]
+pub fn with_appearance(widget: Widget, appearance: Appearance) -> Widget {
+    match widget {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance: Some(appearance) }
         }
         other => other,
     }
@@ -1737,6 +1766,32 @@ mod tests {
             ]
         );
         assert!(cx.requests.is_empty());
+    }
+
+    #[test]
+    fn with_appearance_sets_it_on_a_scaffold_and_ignores_other_roots() {
+        let s = with_appearance(scaffold("T", false, vec![], text("x")), Appearance::System);
+        assert!(matches!(s, Widget::Scaffold { appearance: Some(Appearance::System), .. }));
+        assert!(matches!(scaffold("T", true, vec![], text("x")), Widget::Scaffold { appearance: None, .. }));
+        assert!(matches!(with_appearance(text("x"), Appearance::Dark), Widget::Text { .. }));
+    }
+
+    #[test]
+    fn with_theme_and_labels_keep_the_appearance() {
+        let s = with_appearance(scaffold("T", false, vec![], text("x")), Appearance::Light);
+        let s = with_labels(with_theme(s, Theme::default()), ShellLabels::default());
+        assert!(matches!(s, Widget::Scaffold { appearance: Some(Appearance::Light), .. }));
+    }
+
+    #[test]
+    fn appearance_query_and_stream_shapes() {
+        let mut cx = Cx::<Ev>::default();
+        cx.system_appearance(|_| Ev::Tap);
+        let (call, _) = &cx.requests[0];
+        assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("device", "appearance", ""));
+        cx.subscribe_appearance("appr", |_| Ev::Tap);
+        let (st, _) = &cx.streams[0];
+        assert_eq!((st.key.as_str(), st.plugin.as_str(), st.op.as_str(), st.input.as_str()), ("appr", "appearance", "changes", ""));
     }
 
     #[test]

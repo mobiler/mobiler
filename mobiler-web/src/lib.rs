@@ -1977,7 +1977,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _ } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance: _appearance } => {
             // ACTIVE_LABELS is stashed once at the root render closure (from the root widget's
             // own `labels`), not here — a Scaffold nested in a sheet, body or Split must not
             // overwrite the root's labels. This arm's own aria-label reads below still see the
