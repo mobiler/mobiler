@@ -472,6 +472,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 .font-custom :is(.t-title, .t-subtitle, .topbar .title, .sheet-title, .confirm-title) { font-family: var(--font-display, var(--font)); }
 /* Form controls don't inherit the page font by default — make them use the body family too. */
 .font-custom :is(button, input, textarea, select) { font-family: inherit; }
+.toast.font-custom { font-family: var(--font); }
 
 /* Transient toast (cx.toast) — appended to <body>, auto-removed after a beat. */
 .toast {

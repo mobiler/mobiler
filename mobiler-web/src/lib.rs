@@ -1188,6 +1188,13 @@ fn show_toast(text: &str) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let (Ok(el), Some(body)) = (doc.create_element("div"), doc.body()) else { return };
     el.set_class_name("toast");
+    // A custom-font app's toast uses its body family too (it lives outside the scaffold).
+    if let Some(scaffold) = doc.query_selector(".scaffold.font-custom").ok().flatten() {
+        if let Some(style) = scaffold.get_attribute("style") {
+            let _ = el.set_attribute("style", &style);
+        }
+        let _ = el.class_list().add_1("font-custom");
+    }
     el.set_text_content(Some(text));
     let _ = body.append_child(&el);
     gloo_timers::callback::Timeout::new(2600, move || el.remove()).forget();

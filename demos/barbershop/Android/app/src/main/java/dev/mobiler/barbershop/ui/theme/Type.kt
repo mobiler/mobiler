@@ -14,12 +14,15 @@ private val baseBody = TextStyle(
     letterSpacing = 0.5.sp,
 )
 
-/// The Material3 `Typography` for a theme's font choice. Android has no native "rounded"
-/// system font, so Rounded falls back to SansSerif; Serif/Monospace map natively. `null`
-/// (un-themed) keeps the default sans body — the original look.
 /** A synced font role (`mobiler fonts sync` → res/font/mobiler_<role>_<weight>), looked up by name so
  *  the shell compiles without it; null when the app synced none (the system font is used). */
-fun syncedFamily(context: android.content.Context, role: String): FontFamily? {
+fun syncedFamily(context: android.content.Context, role: String): FontFamily? =
+    syncedFamilies.getOrPut(role) { lookUpFamily(context, role) }
+
+// Resources don't change while the app runs, so each role is looked up once.
+private val syncedFamilies = mutableMapOf<String, FontFamily?>()
+
+private fun lookUpFamily(context: android.content.Context, role: String): FontFamily? {
     val fonts = (100..900 step 100).mapNotNull { w ->
         val id = context.resources.getIdentifier("mobiler_${role}_$w", "font", context.packageName)
         if (id != 0) androidx.compose.ui.text.font.Font(id, FontWeight(w)) else null
@@ -55,6 +58,9 @@ fun typographyFor(font: ModelFontFamily?, context: android.content.Context): Typ
     return typographyFor(font)
 }
 
+/// The Material3 `Typography` for a theme's font choice. Android has no native "rounded"
+/// system font, so Rounded falls back to SansSerif; Serif/Monospace map natively. `null`
+/// (un-themed) keeps the default sans body — the original look.
 fun typographyFor(font: ModelFontFamily?): Typography {
     val family = when (font) {
         ModelFontFamily.SERIF -> FontFamily.Serif
