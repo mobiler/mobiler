@@ -29,6 +29,9 @@ pub struct RoleSpec {
     pub family: Option<String>,
     #[serde(default)]
     pub files: Vec<String>,
+    /// The font's licence file, copied next to the web fonts (`web/fonts/mobiler-<role>-LICENSE.txt`) —
+    /// e.g. the SIL OFL, which asks that the licence travel with the fonts.
+    pub license: Option<String>,
 }
 
 /// What a font file says about itself.
@@ -77,16 +80,23 @@ pub fn read_font_info(bytes: &[u8]) -> Result<FontInfo, String> {
 fn family_name(name: &[u8]) -> Result<String, String> {
     let count = usize::from(be16(name, 2)?);
     let strings = usize::from(be16(name, 4)?);
-    let mut found: [Option<String>; 2] = [None, None]; // [id16, id1]
+    // Per slot [id16, id1]: the best record so far, ranked Windows-English (0) < Windows/Unicode (1) <
+    // Mac (2), so a localized record can't win by coming first in the table.
+    let mut found: [Option<(u8, String)>; 2] = [None, None];
     for i in 0..count {
         let r = 6 + 12 * i;
-        let (platform, name_id) = (be16(name, r)?, be16(name, r + 6)?);
+        let (platform, lang, name_id) = (be16(name, r)?, be16(name, r + 4)?, be16(name, r + 6)?);
         let slot = match name_id {
             16 => 0,
             1 => 1,
             _ => continue,
         };
-        if found[slot].is_some() {
+        let rank = match (platform, lang) {
+            (3, 0x409) => 0,
+            (0 | 3, _) => 1,
+            _ => 2,
+        };
+        if found[slot].as_ref().is_some_and(|(best, _)| *best <= rank) {
             continue;
         }
         let (len, off) = (usize::from(be16(name, r + 8)?), usize::from(be16(name, r + 10)?));
@@ -97,11 +107,11 @@ fn family_name(name: &[u8]) -> Result<String, String> {
             _ => continue,
         };
         if !text.trim().is_empty() {
-            found[slot] = Some(text.trim().to_string());
+            found[slot] = Some((rank, text.trim().to_string()));
         }
     }
     let [id16, id1] = found;
-    id16.or(id1).ok_or_else(|| "no family name in the font".into())
+    id16.or(id1).map(|(_, f)| f).ok_or_else(|| "no family name in the font".into())
 }
 
 /// What a sync did: one warning per skipped file / missing anchor, and the roles it wrote.
@@ -122,6 +132,7 @@ struct Role {
     name: &'static str,
     family: String,
     faces: Vec<Face>,
+    license: Option<Vec<u8>>,
 }
 
 /// Sync `mobiler.toml` `[fonts]` into the shells:
@@ -135,13 +146,20 @@ struct Role {
 pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     let mut report = SyncReport::default();
     let manifest_path = root.join("mobiler.toml");
-    if !manifest_path.exists() {
-        return Ok(report);
-    }
-    let text = fs::read_to_string(&manifest_path).with_context(|| format!("reading {}", manifest_path.display()))?;
-    let manifest: Manifest = toml::from_str(&text).with_context(|| format!("parsing {}", manifest_path.display()))?;
-    let section = manifest.fonts.unwrap_or_default();
+    let section = if manifest_path.exists() {
+        let text = fs::read_to_string(&manifest_path).with_context(|| format!("reading {}", manifest_path.display()))?;
+        let manifest: Manifest = toml::from_str(&text).with_context(|| format!("parsing {}", manifest_path.display()))?;
+        manifest.fonts.unwrap_or_default()
+    } else if previously_synced(root) {
+        // mobiler.toml was removed after a sync: clean up like an empty [fonts].
+        FontsSection::default()
+    } else {
+        return Ok(report); // never used fonts: touch nothing
+    };
     let mut roles = Vec::new();
+    // A listed file that can't be read at all (missing, permissions, a checkout without the fonts) stops
+    // the sync before it changes anything, so committed copies aren't deleted by accident.
+    let mut unreadable = Vec::new();
     for (name, spec) in [("display", section.display), ("body", section.body)] {
         let Some(spec) = spec else { continue };
         let mut faces: BTreeMap<u16, Face> = BTreeMap::new();
@@ -151,7 +169,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             let bytes = match fs::read(root.join(file)) {
                 Ok(b) => b,
                 Err(e) => {
-                    report.warnings.push(format!("{file}: can't read it ({e}) — skipped"));
+                    unreadable.push(format!("{file}: can't read it ({e}) — synced fonts left unchanged"));
                     continue;
                 }
             };
@@ -175,6 +193,22 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             first_family.get_or_insert(info.family);
             faces.insert(weight, Face { weight, ext, bytes });
         }
+        if families.len() > 1 {
+            report.warnings.push(format!(
+                "[fonts] {name}: the files declare several families ({}) — use one family per role (iOS registers each separately)",
+                families.join(", ")
+            ));
+        }
+        let license = match &spec.license {
+            Some(path) => match fs::read(root.join(path)) {
+                Ok(b) => Some(b),
+                Err(e) => {
+                    unreadable.push(format!("{path}: can't read it ({e}) — synced fonts left unchanged"));
+                    None
+                }
+            },
+            None => None,
+        };
         if faces.is_empty() {
             if !spec.files.is_empty() {
                 report.warnings.push(format!("[fonts] {name}: no usable font files — the system font is used"));
@@ -191,7 +225,12 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
         }
         let family = spec.family.or(first_family).unwrap_or_default();
         report.synced.push((name.to_string(), family.clone(), faces.keys().copied().collect()));
-        roles.push(Role { name, family, faces: faces.into_values().collect() });
+        roles.push(Role { name, family, faces: faces.into_values().collect(), license });
+    }
+    if !unreadable.is_empty() {
+        report.warnings.extend(unreadable);
+        report.synced.clear();
+        return Ok(report);
     }
 
     sync_android(root, &roles)?;
@@ -227,8 +266,8 @@ fn sync_ios(root: &Path, roles: &[Role], report: &mut SyncReport) -> anyhow::Res
                 }
                 lines
             }) {
-                Some(new) => write_if_changed(&yml_path, new.as_bytes())?,
-                None => report.warnings.push("iOS/project.yml has no `# mobiler:info-plist` anchor — add the fonts block by hand".into()),
+                Ok(new) => write_if_changed(&yml_path, new.as_bytes())?,
+                Err(why) => report.warnings.push(format!("iOS/project.yml: {why} — fonts block not written")),
             }
         }
     }
@@ -238,30 +277,35 @@ fn sync_ios(root: &Path, roles: &[Role], report: &mut SyncReport) -> anyhow::Res
 fn sync_web(root: &Path, roles: &[Role], report: &mut SyncReport) -> anyhow::Result<()> {
     let index = root.join("web/index.html");
     if index.exists() {
-        let files = roles.iter().flat_map(|r| r.faces.iter().map(move |f| (format!("mobiler-{}-{}.{}", r.name, f.weight, f.ext), &f.bytes)));
-        let fonts_dir = root.join("web/fonts");
-        write_set(&fonts_dir, "mobiler-", &files.collect::<Vec<_>>())?;
-        let css_path = fonts_dir.join("fonts.css");
-        if roles.is_empty() {
-            let _ = fs::remove_file(&css_path);
-            let _ = fs::remove_dir(&fonts_dir); // only if now empty
-        } else {
-            write_if_changed(&css_path, fonts_css(roles).as_bytes())?;
+        let css = fonts_css(roles).into_bytes();
+        let mut files: Vec<(String, &Vec<u8>)> = roles
+            .iter()
+            .flat_map(|r| r.faces.iter().map(move |f| (format!("mobiler-{}-{}.{}", r.name, f.weight, f.ext), &f.bytes)))
+            .collect();
+        files.extend(roles.iter().filter_map(|r| r.license.as_ref().map(|l| (format!("mobiler-{}-LICENSE.txt", r.name), l))));
+        if !roles.is_empty() {
+            files.push(("mobiler-fonts.css".to_string(), &css));
         }
+        // The stylesheet was `fonts.css` before it moved to the prefixed name — drop our old one only.
+        let legacy = root.join("web/fonts/fonts.css");
+        if fs::read_to_string(&legacy).is_ok_and(|t| t.starts_with("/* Generated by `mobiler fonts sync`")) {
+            let _ = fs::remove_file(&legacy);
+        }
+        write_set(&root.join("web/fonts"), "mobiler-", &files)?;
         let html = fs::read_to_string(&index).with_context(|| format!("reading {}", index.display()))?;
         let has_fonts = !roles.is_empty();
         match replace_block(&html, "<!-- mobiler:fonts-begin -->", "<!-- mobiler:fonts-end -->", "</head>", |indent| {
             if has_fonts {
                 vec![
                     format!("{indent}<link data-trunk rel=\"copy-dir\" href=\"fonts\"/>"),
-                    format!("{indent}<link rel=\"stylesheet\" href=\"fonts/fonts.css\"/>"),
+                    format!("{indent}<link rel=\"stylesheet\" href=\"fonts/mobiler-fonts.css\"/>"),
                 ]
             } else {
                 Vec::new()
             }
         }) {
-            Some(new) => write_if_changed(&index, new.as_bytes())?,
-            None => report.warnings.push("web/index.html has no `</head>` — add the fonts links by hand".into()),
+            Ok(new) => write_if_changed(&index, new.as_bytes())?,
+            Err(why) => report.warnings.push(format!("web/index.html: {why} — fonts block not written")),
         }
     }
     Ok(())
@@ -290,7 +334,20 @@ fn fonts_css(roles: &[Role]) -> String {
 }
 
 fn yaml_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.chars().filter(|c| !c.is_control()).collect::<String>().replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Whether an earlier sync left copies or blocks behind (so a removed mobiler.toml still cleans up).
+fn previously_synced(root: &Path) -> bool {
+    let has_prefixed = |dir: &str, prefix: &str| {
+        fs::read_dir(root.join(dir)).is_ok_and(|entries| entries.flatten().any(|e| e.file_name().to_string_lossy().starts_with(prefix)))
+    };
+    let has_marker = |file: &str, marker: &str| fs::read_to_string(root.join(file)).is_ok_and(|t| t.contains(marker));
+    has_prefixed("Android/app/src/main/res/font", "mobiler_")
+        || has_prefixed("iOS/Sources/Fonts", "mobiler-")
+        || has_prefixed("web/fonts", "mobiler-")
+        || has_marker("iOS/project.yml", "# mobiler:fonts-begin")
+        || has_marker("web/index.html", "<!-- mobiler:fonts-begin -->")
 }
 
 /// Make `dir` hold exactly `files` among the entries starting with `prefix` (others untouched).
@@ -324,27 +381,32 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Replace the `begin`..`end` block (inclusive, one per file) with begin + `body(indent)` + end, or insert
-/// it just above the `anchor` line (indented like it). `None` when neither a block nor the anchor exists.
-fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn(&str) -> Vec<String>) -> Option<String> {
+/// it just above the `anchor` line (indented like it). Keeps the file's line endings (LF or CRLF).
+/// `Err` (nothing written) when the markers are unbalanced or there is neither a block nor the anchor.
+fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn(&str) -> Vec<String>) -> Result<String, &'static str> {
     let lines: Vec<&str> = text.lines().collect();
     let indent_of = |l: &str| l[..l.len() - l.trim_start().len()].to_string();
-    let (start, stop, indent) = match (lines.iter().position(|l| l.contains(begin)), lines.iter().position(|l| l.contains(end))) {
-        (Some(b), Some(e)) if e >= b => (b, e + 1, indent_of(lines[b])),
-        _ => {
-            let a = lines.iter().position(|l| l.contains(anchor))?;
+    let begins: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains(begin)).map(|(i, _)| i).collect();
+    let ends: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains(end)).map(|(i, _)| i).collect();
+    let (start, stop, indent) = match (begins.as_slice(), ends.as_slice()) {
+        ([b], [e]) if e > b => (*b, e + 1, indent_of(lines[*b])),
+        ([], []) => {
+            let a = lines.iter().position(|l| l.contains(anchor)).ok_or("no anchor to insert the fonts block at")?;
             (a, a, indent_of(lines[a]))
         }
+        _ => return Err("unbalanced mobiler:fonts marker lines (fix them by hand)"),
     };
     let mut out: Vec<String> = lines[..start].iter().map(|l| (*l).to_string()).collect();
     out.push(format!("{indent}{begin}"));
     out.extend(body(&indent));
     out.push(format!("{indent}{end}"));
     out.extend(lines[stop..].iter().map(|l| (*l).to_string()));
-    let mut s = out.join("\n");
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut s = out.join(nl);
     if text.ends_with('\n') {
-        s.push('\n');
+        s.push_str(nl);
     }
-    Some(s)
+    Ok(s)
 }
 
 /// `mobiler fonts sync` — run the sync from the app root and print what happened.
@@ -380,6 +442,23 @@ pub fn sync_for_build(root: &Path) {
     }
 }
 
+/// What `mobiler watch` should also watch for fonts: `mobiler.toml` and the directories holding the
+/// listed font/licence files (so editing a font re-runs the build, which re-syncs).
+pub fn watch_paths(root: &Path) -> (Vec<std::path::PathBuf>, Vec<std::path::PathBuf>) {
+    let manifest = root.join("mobiler.toml");
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(section) = fs::read_to_string(&manifest).ok().and_then(|t| toml::from_str::<Manifest>(&t).ok()).and_then(|m| m.fonts) {
+        for spec in [section.display, section.body].into_iter().flatten() {
+            for file in spec.files.iter().chain(spec.license.iter()) {
+                if let Some(parent) = root.join(file).parent().map(Path::to_path_buf).filter(|p| !dirs.contains(p)) {
+                    dirs.push(parent);
+                }
+            }
+        }
+    }
+    (dirs, vec![manifest])
+}
+
 /// One `mobiler doctor` line about `[fonts]` in the current directory.
 pub fn doctor_line(root: &Path) -> String {
     let path = root.join("mobiler.toml");
@@ -408,15 +487,26 @@ mod tests {
 
     /// A minimal sfnt with just OS/2 (weight) and name (family, nameID 1, Windows UTF-16BE).
     pub(super) fn tiny_font(weight: u16, family: &str) -> Vec<u8> {
-        let name_str: Vec<u8> = family.encode_utf16().flat_map(u16::to_be_bytes).collect();
+        tiny_font_names(weight, &[(3, 0x409, 1, family)])
+    }
+
+    /// Like `tiny_font`, with explicit (platform, language, nameID, text) records (Windows UTF-16BE).
+    pub(super) fn tiny_font_names(weight: u16, records: &[(u16, u16, u16, &str)]) -> Vec<u8> {
+        let encoded: Vec<Vec<u8>> = records.iter().map(|(_, _, _, t)| t.encode_utf16().flat_map(u16::to_be_bytes).collect()).collect();
         let mut name = Vec::new();
         name.extend_from_slice(&0u16.to_be_bytes()); // format
-        name.extend_from_slice(&1u16.to_be_bytes()); // count
-        name.extend_from_slice(&(6u16 + 12).to_be_bytes()); // stringOffset
-        for v in [3u16, 1, 0x409, 1, name_str.len() as u16, 0] {
-            name.extend_from_slice(&v.to_be_bytes());
+        name.extend_from_slice(&(records.len() as u16).to_be_bytes()); // count
+        name.extend_from_slice(&(6 + 12 * records.len() as u16).to_be_bytes()); // stringOffset
+        let mut off = 0u16;
+        for ((platform, lang, id, _), bytes) in records.iter().zip(&encoded) {
+            for v in [*platform, 1, *lang, *id, bytes.len() as u16, off] {
+                name.extend_from_slice(&v.to_be_bytes());
+            }
+            off += bytes.len() as u16;
         }
-        name.extend_from_slice(&name_str);
+        for bytes in &encoded {
+            name.extend_from_slice(bytes);
+        }
         let mut os2 = vec![0u8; 8];
         os2[4..6].copy_from_slice(&weight.to_be_bytes());
         let tables: [(&[u8; 4], &Vec<u8>); 2] = [(b"OS/2", &os2), (b"name", &name)];
@@ -496,11 +586,11 @@ mod tests {
         assert_eq!(yml.matches("# mobiler:fonts-begin").count(), 1);
         assert!(yml.contains(r#"UIAppFonts: ["mobiler-body-400.ttf", "mobiler-display-400.ttf", "mobiler-display-600.ttf"]"#), "{yml}");
         assert!(yml.contains(r#"MobilerFontDisplay: "Space Grotesk""#) && yml.contains(r#"MobilerFontBody: "Roboto""#));
-        let css = read(&root, "web/fonts/fonts.css");
+        let css = read(&root, "web/fonts/mobiler-fonts.css");
         assert!(css.contains(r#"font-family: "mobiler-display"; font-weight: 600;"#), "{css}");
         let html = read(&root, "web/index.html");
         assert_eq!(html.matches("<!-- mobiler:fonts-begin -->").count(), 1);
-        assert!(html.contains(r#"<link data-trunk rel="copy-dir" href="fonts"/>"#) && html.contains(r#"href="fonts/fonts.css""#));
+        assert!(html.contains(r#"<link data-trunk rel="copy-dir" href="fonts"/>"#) && html.contains(r#"href="fonts/mobiler-fonts.css""#));
         assert!(html.find("mobiler:fonts-begin").unwrap() < html.find("</head>").unwrap());
     }
 
@@ -508,7 +598,7 @@ mod tests {
     fn sync_is_idempotent() {
         let root = app("idem", true);
         sync(&root).unwrap();
-        let files = ["iOS/project.yml", "web/index.html", "web/fonts/fonts.css"];
+        let files = ["iOS/project.yml", "web/index.html", "web/fonts/mobiler-fonts.css"];
         let before: Vec<String> = files.iter().map(|f| read(&root, f)).collect();
         sync(&root).unwrap();
         let after: Vec<String> = files.iter().map(|f| read(&root, f)).collect();
@@ -526,7 +616,7 @@ mod tests {
         assert!(!root.join("web/fonts/mobiler-display-400.ttf").exists());
         let yml = read(&root, "iOS/project.yml");
         assert!(!yml.contains("MobilerFontDisplay") && yml.contains(r#"UIAppFonts: ["mobiler-body-400.ttf"]"#), "{yml}");
-        assert!(!read(&root, "web/fonts/fonts.css").contains("mobiler-display"));
+        assert!(!read(&root, "web/fonts/mobiler-fonts.css").contains("mobiler-display"));
     }
 
     #[test]
@@ -538,12 +628,12 @@ mod tests {
         fs::write(root.join("assets/fonts/trunc.ttf"), t).unwrap();
         fs::write(
             root.join("mobiler.toml"),
-            "[fonts]\ndisplay = { files = [\"assets/fonts/d400.ttf\", \"assets/fonts/missing.ttf\", \"assets/fonts/x.woff2\", \"assets/fonts/trunc.ttf\"] }\n",
+            "[fonts]\ndisplay = { files = [\"assets/fonts/d400.ttf\", \"assets/fonts/x.woff2\", \"assets/fonts/trunc.ttf\"] }\n",
         )
         .unwrap();
         let r = sync(&root).unwrap();
-        assert_eq!(r.warnings.len(), 3, "{:?}", r.warnings);
-        for f in ["missing.ttf", "x.woff2", "trunc.ttf"] {
+        assert_eq!(r.warnings.len(), 2, "{:?}", r.warnings);
+        for f in ["x.woff2", "trunc.ttf"] {
             assert!(r.warnings.iter().any(|w| w.contains(f)), "{f}: {:?}", r.warnings);
         }
         assert!(root.join("Android/app/src/main/res/font/mobiler_display_400.ttf").exists());
@@ -601,6 +691,85 @@ mod tests {
         .unwrap();
         let r = sync(&root).unwrap();
         assert!(r.warnings.iter().any(|w| w.contains("Space Grotesq") && w.contains("Space Grotesk")), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn unreadable_file_changes_nothing() {
+        let root = app("unreadable", true);
+        sync(&root).unwrap();
+        let before = read(&root, "iOS/project.yml");
+        fs::remove_file(root.join("assets/fonts/d600.ttf")).unwrap();
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains("d600.ttf") && w.contains("unchanged")), "{:?}", r.warnings);
+        assert!(root.join("Android/app/src/main/res/font/mobiler_display_600.ttf").exists());
+        assert_eq!(read(&root, "iOS/project.yml"), before);
+    }
+
+    #[test]
+    fn unbalanced_markers_are_left_alone_with_a_warning() {
+        let root = app("unbalanced", false);
+        let yml = read(&root, "iOS/project.yml").replace("        # mobiler:info-plist", "        # mobiler:fonts-begin\n        # mobiler:info-plist");
+        fs::write(root.join("iOS/project.yml"), &yml).unwrap();
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains("project.yml") && w.contains("marker")), "{:?}", r.warnings);
+        assert_eq!(read(&root, "iOS/project.yml"), yml);
+    }
+
+    #[test]
+    fn crlf_line_endings_are_kept() {
+        let root = app("crlf", true);
+        let html = read(&root, "web/index.html").replace('\n', "\r\n");
+        fs::write(root.join("web/index.html"), html).unwrap();
+        sync(&root).unwrap();
+        let html = read(&root, "web/index.html");
+        assert!(html.contains("<!-- mobiler:fonts-begin -->\r\n") && !html.replace("\r\n", "").contains('\n'), "{html:?}");
+    }
+
+    #[test]
+    fn deleting_the_manifest_cleans_up() {
+        let root = app("delmanifest", true);
+        sync(&root).unwrap();
+        fs::remove_file(root.join("mobiler.toml")).unwrap();
+        sync(&root).unwrap();
+        assert!(!root.join("Android/app/src/main/res/font/mobiler_display_400.ttf").exists());
+        assert!(!root.join("web/fonts").exists());
+        assert!(!read(&root, "iOS/project.yml").contains("UIAppFonts"));
+        assert!(!read(&root, "web/index.html").contains("copy-dir"));
+    }
+
+    #[test]
+    fn mixed_families_in_a_role_warn() {
+        let root = app("mixed", false);
+        fs::write(root.join("assets/fonts/d600.ttf"), tiny_font(600, "Other Sans")).unwrap();
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains("Other Sans") && w.contains("Space Grotesk")), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn license_is_copied_next_to_the_web_fonts() {
+        let root = app("license", true);
+        fs::write(root.join("assets/fonts/OFL.txt"), "SIL Open Font License").unwrap();
+        fs::write(
+            root.join("mobiler.toml"),
+            "[fonts]\ndisplay = { files = [\"assets/fonts/d400.ttf\"], license = \"assets/fonts/OFL.txt\" }\n",
+        )
+        .unwrap();
+        sync(&root).unwrap();
+        assert_eq!(read(&root, "web/fonts/mobiler-display-LICENSE.txt"), "SIL Open Font License");
+    }
+
+    #[test]
+    fn family_prefers_the_english_windows_record() {
+        let bytes = tiny_font_names(400, &[(3, 0x404, 1, "思源"), (3, 0x409, 1, "Space Grotesk")]);
+        assert_eq!(read_font_info(&bytes).unwrap().family, "Space Grotesk");
+    }
+
+    #[test]
+    fn yaml_family_drops_control_characters() {
+        let root = app("ctrl", false);
+        fs::write(root.join("mobiler.toml"), "[fonts]\nbody = { family = \"Rob\\u0000oto\", files = [\"assets/fonts/b400.ttf\"] }\n").unwrap();
+        sync(&root).unwrap();
+        assert!(!read(&root, "iOS/project.yml").contains('\u{0}'));
     }
 
     #[test]

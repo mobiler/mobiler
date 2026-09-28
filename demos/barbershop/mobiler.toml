@@ -1,5 +1,5 @@
 # Fonts for FontFamily::Custom (the Moj Termin design): `mobiler build`/`dev`/`fonts sync` copy them
 # into the Android, iOS and web shells. Space Grotesk and Roboto are SIL OFL 1.1 (licences alongside).
 [fonts]
-display = { family = "Space Grotesk", files = ["assets/fonts/SpaceGrotesk-Regular.ttf", "assets/fonts/SpaceGrotesk-Medium.ttf", "assets/fonts/SpaceGrotesk-SemiBold.ttf"] }
-body = { family = "Roboto", files = ["assets/fonts/Roboto-Regular.ttf", "assets/fonts/Roboto-Medium.ttf", "assets/fonts/Roboto-Bold.ttf"] }
+display = { family = "Space Grotesk", files = ["assets/fonts/SpaceGrotesk-Regular.ttf", "assets/fonts/SpaceGrotesk-Medium.ttf", "assets/fonts/SpaceGrotesk-SemiBold.ttf"], license = "assets/fonts/SpaceGrotesk-OFL.txt" }
+body = { family = "Roboto", files = ["assets/fonts/Roboto-Regular.ttf", "assets/fonts/Roboto-Medium.ttf", "assets/fonts/Roboto-Bold.ttf"], license = "assets/fonts/Roboto-OFL.txt" }

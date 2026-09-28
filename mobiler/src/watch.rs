@@ -61,6 +61,11 @@ pub fn run(no_install: bool, no_run: bool, device: Option<&str>) -> Result<()> {
         project.root.join("Android/shared/build.gradle.kts"),
     ];
 
+    // Custom fonts: mobiler.toml + the font source dirs (the rebuild re-syncs them into the shells).
+    let (font_dirs, font_files) = crate::fonts::watch_paths(&project.root);
+    let watch_dirs: Vec<_> = watch_dirs.into_iter().chain(font_dirs).collect();
+    let watch_files: Vec<_> = watch_files.into_iter().chain(font_files).collect();
+
     for dir in &watch_dirs {
         if dir.is_dir() {
             debouncer
