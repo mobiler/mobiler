@@ -203,6 +203,7 @@ import dev.mobiler.barbershop.ui.theme.color
 import dev.mobiler.barbershop.shared.types.TonePair
 import dev.mobiler.barbershop.shared.types.A11yRole
 import dev.mobiler.barbershop.shared.types.Action
+import dev.mobiler.barbershop.shared.types.Appearance
 import dev.mobiler.barbershop.shared.types.BoxAlign
 import dev.mobiler.barbershop.shared.types.ButtonStyle
 import dev.mobiler.barbershop.shared.types.Caption
@@ -303,7 +304,17 @@ fun App(core: Core = viewModel()) {
     // Brand color, corner radius (Cards via MaterialTheme.shapes), and font flow through
     // MaterialTheme automatically. Density (spacing) + image-corner aren't MaterialTheme knobs,
     // so the non-composable mapper helpers (spacingFor/shapeFor) read them from `activeTheme`.
-    val dark = (view as? Widget.Scaffold)?.darkMode ?: isSystemInDarkTheme()
+    val osDark = isSystemInDarkTheme()
+    // Appearance: Light/Dark force the mode, System follows the OS (recomposes on its change); none →
+    // dark_mode, as before. A non-Scaffold root follows the OS, as before.
+    val dark = (view as? Widget.Scaffold)?.let { sc ->
+        when (sc.appearance) {
+            Appearance.LIGHT -> false
+            Appearance.DARK -> true
+            Appearance.SYSTEM -> osDark
+            null -> sc.darkMode
+        }
+    } ?: osDark
     val appTheme = (view as? Widget.Scaffold)?.theme
     // Stash the active theme before rendering (app-global, like dark mode; render runs on the
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).

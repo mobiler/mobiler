@@ -139,8 +139,35 @@ class DevicePlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
         "locale" -> PluginResponse(true, java.util.Locale.getDefault().toLanguageTag())
+        // The OS light/dark setting (system resources: unaffected by the app's own appearance).
+        "appearance" -> PluginResponse(true, nightName(android.content.res.Resources.getSystem().configuration))
         else -> PluginResponse(false, "unknown op '$op'")
     }
+}
+
+private fun nightName(c: android.content.res.Configuration): String =
+    if ((c.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES) "dark" else "light"
+
+/** Built-in `appearance` stream: the OS light/dark setting — the current value first, then each
+ *  change. Application-level callbacks, so it survives Activity recreation on a uiMode change. */
+class AppearancePlugin(private val app: Application) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse =
+        PluginResponse(false, "appearance is a streaming capability — use cx.subscribe_appearance")
+    override fun subscribe(op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> =
+        kotlinx.coroutines.flow.callbackFlow {
+            var last = nightName(android.content.res.Resources.getSystem().configuration)
+            trySend(PluginResponse(true, last))
+            val cb = object : android.content.ComponentCallbacks {
+                override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+                    val now = nightName(newConfig)
+                    if (now != last) { last = now; trySend(PluginResponse(true, now)) }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onLowMemory() {}
+            }
+            app.registerComponentCallbacks(cb)
+            awaitClose { app.unregisterComponentCallbacks(cb) }
+        }
 }
 
 /** Official, bundled plugin: copy text to the system clipboard. */
@@ -435,6 +462,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "device" to DevicePlugin(),
         "ticker" to TickerPlugin(),
         "system" to SystemPlugin(),
+        "appearance" to AppearancePlugin(application),
         "storage" to StoragePlugin(application),
         "http" to HttpPlugin(),
         "clipboard" to ClipboardPlugin(application),
