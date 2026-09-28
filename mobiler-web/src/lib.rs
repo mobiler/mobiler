@@ -198,6 +198,17 @@ where
         })
     };
 
+    // `Appearance::System` follows the OS: re-render the current view when the OS colour scheme
+    // changes, so the scaffold re-reads it. Page-lifetime listener, like the shell itself.
+    if let Some(mql) = dark_query() {
+        let core = core.clone();
+        let on_change = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_e: web_sys::Event| {
+            set_view.set(core.view());
+        });
+        let _ = mql.add_event_listener_with_callback("change", wasm_bindgen::JsCast::unchecked_ref(on_change.as_ref()));
+        on_change.forget();
+    }
+
     // The app's own version first, so `restore`/`init` already see it (`cx.app_info()`). The web
     // build has no version manifest: only the platform is known.
     send(Action::AppInfo { version: String::new(), build: String::new(), platform: "web".into(), bundle_id: String::new() });
@@ -340,6 +351,17 @@ fn start_stream<A: WebApp>(
             let _ = win.add_event_listener_with_callback("popstate", onpop.as_ref().unchecked_ref());
             let _ = doc.add_event_listener_with_callback("visibilitychange", onvis.as_ref().unchecked_ref());
             StreamHandle::System(SystemStream { win, doc, _onpop: onpop, _onvis: onvis })
+        }
+        // Built-in `appearance` source: the OS colour scheme — the current value first, then each
+        // change of `prefers-color-scheme`. The listener is removed on unsubscribe (Drop).
+        ("appearance", "changes") => {
+            let Some(mql) = dark_query() else { return };
+            emit(PluginResponse::text(true, if mql.matches() { "dark" } else { "light" }));
+            let onchange = Closure::<dyn FnMut(web_sys::MediaQueryListEvent)>::new(move |e: web_sys::MediaQueryListEvent| {
+                emit(PluginResponse::text(true, if e.matches() { "dark" } else { "light" }));
+            });
+            let _ = mql.add_event_listener_with_callback("change", onchange.as_ref().unchecked_ref());
+            StreamHandle::Appearance(AppearanceStream { mql, _onchange: onchange })
         }
         // Streaming file transfer (`cx.upload` / `cx.download`, Release B). See
         // `start_web_upload` / `start_web_download` for the WEB ASYMMETRY: upload uses
@@ -782,6 +804,9 @@ enum StreamHandle {
     /// unsubscribe (the handle is dropped when removed from `STREAMS`). Never pattern-matched.
     #[allow(dead_code)]
     System(SystemStream),
+    /// The built-in `appearance` source — its `Drop` removes the media-query listener. Never pattern-matched.
+    #[allow(dead_code)]
+    Appearance(AppearanceStream),
     /// An in-flight transfer — held so dropping it (on unsubscribe) aborts the XHR /
     /// cancels the fetch reader. Never pattern-matched.
     #[allow(dead_code)]
@@ -845,6 +870,18 @@ impl Drop for SystemStream {
     }
 }
 
+/// The `appearance` stream's media query + its `change` listener (kept alive until unsubscribe).
+struct AppearanceStream {
+    mql: web_sys::MediaQueryList,
+    _onchange: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MediaQueryListEvent)>,
+}
+impl Drop for AppearanceStream {
+    fn drop(&mut self) {
+        use wasm_bindgen::JsCast;
+        let _ = self.mql.remove_event_listener_with_callback("change", self._onchange.as_ref().unchecked_ref());
+    }
+}
+
 /// An open web `WebSocket` subscription — holds its JS closures so they stay alive.
 struct WsStream {
     ws: web_sys::WebSocket,
@@ -860,6 +897,9 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         let output = if call.op == "locale" {
             // The browser's preferred language as a BCP-47 tag (e.g. "de-CH").
             nav.and_then(|n| n.language()).unwrap_or_else(|| "en-US".into())
+        } else if call.op == "appearance" {
+            // The OS colour scheme, whatever the app forces.
+            (if os_dark() { "dark" } else { "light" }).to_string()
         } else {
             nav.and_then(|n| n.user_agent().ok()).unwrap_or_default()
         };
@@ -1977,7 +2017,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance: _appearance } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance } => {
             // ACTIVE_LABELS is stashed once at the root render closure (from the root widget's
             // own `labels`), not here — a Scaffold nested in a sheet, body or Split must not
             // overwrite the root's labels. This arm's own aria-label reads below still see the
@@ -2041,9 +2081,12 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // `LazyList { fill: true }` (`body_fill_index`). Stops page-scroll; that list takes
             // the rest of the height and scrolls itself.
             let fill_index = body_fill_index(body);
+            // Appearance: Light/Dark force the mode, System follows the OS (`prefers-color-scheme`,
+            // re-rendered on its change); none → `dark_mode`, as before.
+            let dark = resolve_dark(*appearance, *dark_mode);
             let class = format!(
                 "scaffold{}{}{}",
-                if *dark_mode { " theme-dark" } else { "" },
+                if dark { " theme-dark" } else { "" },
                 if large { " density-large" } else { "" },
                 if fill_index.is_some() { " scaffold-fill" } else { "" },
             );
@@ -2062,10 +2105,10 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let body_class = format!("scaffold-body {}", nav_class(route, *depth));
             // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
             // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
-            let theme_style = theme.as_ref().map(|t| theme_css(t, *dark_mode)).unwrap_or_default();
+            let theme_style = theme.as_ref().map(|t| theme_css(t, dark)).unwrap_or_default();
             // A palette's page background also paints the page behind the scaffold (wide viewports,
             // overscroll): `--bg` on <html> is what `body` reads, and body's background fills the canvas.
-            let page_bg = theme.as_ref().and_then(|t| t.palette).and_then(|p| if *dark_mode { p.dark } else { p.light }.background);
+            let page_bg = theme.as_ref().and_then(|t| t.palette).and_then(|p| if dark { p.dark } else { p.light }.background);
             sync_page_bg(page_bg);
             // Mark the fill target by address so the LazyList arm can pick out exactly that one,
             // even if other `fill: true` lists exist elsewhere. `render` is a plain function, so
@@ -2187,6 +2230,26 @@ fn theme_css(t: &Theme, dark: bool) -> String {
             format!("{base}{accent2}{}{color_scheme}", palette_css(roles))
         }
         None => base,
+    }
+}
+
+/// The OS colour scheme (`prefers-color-scheme: dark`); false where there is no window.
+fn os_dark() -> bool {
+    dark_query().is_some_and(|m| m.matches())
+}
+
+fn dark_query() -> Option<web_sys::MediaQueryList> {
+    web_sys::window().and_then(|w| w.match_media("(prefers-color-scheme: dark)").ok().flatten())
+}
+
+/// The scaffold's effective dark flag: an `Appearance` overrides `dark_mode`; `System` reads the OS.
+fn resolve_dark(appearance: Option<mobiler_core::Appearance>, dark_mode: bool) -> bool {
+    use mobiler_core::Appearance;
+    match appearance {
+        Some(Appearance::Light) => false,
+        Some(Appearance::Dark) => true,
+        Some(Appearance::System) => os_dark(),
+        None => dark_mode,
     }
 }
 
@@ -2842,6 +2905,16 @@ mod palette_tests {
         assert!(theme_css(&no_accent, true).contains("--accent2:rgb(31,130,118);"));
         let with_accent = Theme { accent: Some(Rgb::hex(0xe06a2c)), palette: p, ..Default::default() };
         assert!(!theme_css(&with_accent, true).contains("--accent2:rgb(31,130,118);"));
+    }
+
+    #[test]
+    fn resolve_dark_follows_the_appearance() {
+        use mobiler_core::Appearance;
+        assert!(!resolve_dark(None, false) && resolve_dark(None, true));
+        assert!(!resolve_dark(Some(Appearance::Light), true));
+        assert!(resolve_dark(Some(Appearance::Dark), false));
+        // `System` reads `prefers-color-scheme` via web-sys, which only exists on wasm — covered by
+        // the headless-Chrome acceptance run (CDP `setEmulatedMedia`).
     }
 
     #[test]
