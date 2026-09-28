@@ -470,6 +470,8 @@ textarea.field { resize: vertical; font-family: inherit; }
    family for titles. Only under .font-custom — other theme fonts keep their current rendering. */
 .scaffold.font-custom, .confirm-scrim.font-custom .confirm-card { font-family: var(--font); }
 .font-custom :is(.t-title, .t-subtitle, .topbar .title, .sheet-title, .confirm-title) { font-family: var(--font-display, var(--font)); }
+/* Form controls don't inherit the page font by default — make them use the body family too. */
+.font-custom :is(button, input, textarea, select) { font-family: inherit; }
 
 /* Transient toast (cx.toast) — appended to <body>, auto-removed after a beat. */
 .toast {
