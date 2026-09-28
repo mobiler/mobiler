@@ -26,7 +26,7 @@ no image. Existing badges and avatars render as today.
   - palette `secondary_container` / `on_secondary_container`, else a 16% brand tint + brand text
   - drawn when the source is empty or the image failed; a loading or loaded image wins
 - **Sizes:** default 48; the status dot stays 12.
-- **Kotlin enum name:** `WidgetIcon.DONE_ALL`; Swift `.doneAll`.
+- **Kotlin enum name:** `WidgetIcon.DONEALL`; Swift `.doneAll`.
 - **Repo rules:**
   - don't touch the templates
   - don't publish

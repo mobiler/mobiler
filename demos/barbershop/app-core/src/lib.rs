@@ -5,7 +5,7 @@
 
 use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
-    map, marker_titled, with_markers, with_extended_fab,
+    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Snackbar, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
@@ -1677,6 +1677,12 @@ fn bookings_screen(model: &Model) -> Widget {
         card(month, CardStyle::Outlined),
         subtitle("Upcoming"),
         column(rows),
+        // Status is never colour alone: each badge carries an icon (with_icon).
+        subtitle("Status"),
+        row(vec![with_icon(badge("Confirmed", Tone::Success), Icon::Check), with_icon(badge("Pending", Tone::Warning), Icon::Clock)]),
+        row(vec![with_icon(badge("Finished", Tone::Info), Icon::DoneAll), with_icon(badge("No-show", Tone::Danger), Icon::Close)]),
+        // A client without a photo: initials in a 40 circle (with_initials / with_avatar_size).
+        card(row(vec![with_avatar_size(with_initials(avatar(""), "MJ"), 40), text("Milan Jovanović")]), CardStyle::Outlined),
         // Main action: wide + icon. Secondary: tonal. Destructive: danger tone (outlined + filled).
         button_with("Book now", ButtonStyle::Filled, Msg::Book, ButtonOpts::default().icon(Icon::Calendar).wide()),
         row(vec![
@@ -2522,6 +2528,16 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn bookings_show_icon_badges_and_an_initials_avatar() {
+        let (_, model) = app();
+        let j = serde_json::to_string(&bookings_screen(&model)).unwrap();
+        for (label, icon) in [("Confirmed", "Check"), ("Pending", "Clock"), ("Finished", "DoneAll"), ("No-show", "Close")] {
+            assert!(j.contains(&format!("\"label\":\"{label}\"")) && j.contains(&format!("\"icon\":\"{icon}\"")), "{label}");
+        }
+        assert!(j.contains(r#""initials":"MJ","size":40"#), "{j}");
     }
 
     #[test]
