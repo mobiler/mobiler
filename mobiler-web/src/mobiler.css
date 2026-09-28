@@ -466,6 +466,10 @@ textarea.field { resize: vertical; font-family: inherit; }
   display: flex; align-items: center; justify-content: center;
 }
 .scaffold { position: relative; }
+/* FontFamily::Custom (CLI-synced web/fonts/fonts.css): the body family for the scaffold, the display
+   family for titles. Only under .font-custom — other theme fonts keep their current rendering. */
+.scaffold.font-custom, .confirm-scrim.font-custom .confirm-card { font-family: var(--font); }
+.font-custom :is(.t-title, .t-subtitle, .topbar .title, .sheet-title, .confirm-title) { font-family: var(--font-display, var(--font)); }
 
 /* Transient toast (cx.toast) — appended to <body>, auto-removed after a beat. */
 .toast {

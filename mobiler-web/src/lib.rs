@@ -1273,7 +1273,7 @@ async fn confirm_modal(ask: ConfirmAsk) -> bool {
             let _ = scrim.set_attribute("style", &style);
         }
         let classes = scaffold.class_list();
-        for c in ["theme-dark", "density-large"] {
+        for c in ["theme-dark", "density-large", "font-custom"] {
             if classes.contains(c) {
                 let _ = scrim.class_list().add_1(c);
             }
@@ -2100,10 +2100,12 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // Appearance: Light/Dark force the mode, System follows the OS (`prefers-color-scheme`,
             // re-rendered on its change); none → `dark_mode`, as before.
             let dark = resolve_dark(*appearance, *dark_mode);
+            let custom_font = theme.as_ref().is_some_and(|t| t.font == FontFamily::Custom);
             let class = format!(
-                "scaffold{}{}{}",
+                "scaffold{}{}{}{}",
                 if dark { " theme-dark" } else { "" },
                 if large { " density-large" } else { "" },
+                if custom_font { " font-custom" } else { "" },
                 if fill_index.is_some() { " scaffold-fill" } else { "" },
             );
             // Pull-to-refresh — web has no pull gesture, so expose a top-bar refresh button +
@@ -2124,7 +2126,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let theme_style = theme.as_ref().map(|t| theme_css(t, dark)).unwrap_or_default();
             // An open confirm copied the scaffold's theme when it opened; keep it in step (e.g. an OS
             // light/dark flip under `Appearance::System` while it is open).
-            sync_confirm_theme(&theme_style, dark, large);
+            sync_confirm_theme(&theme_style, dark, large, custom_font);
             // A palette's page background also paints the page behind the scaffold (wide viewports,
             // overscroll): `--bg` on <html> is what `body` reads, and body's background fills the canvas.
             let page_bg = theme.as_ref().and_then(|t| t.palette).and_then(|p| if dark { p.dark } else { p.light }.background);
@@ -2225,9 +2227,13 @@ fn theme_css(t: &Theme, dark: bool) -> String {
         FontFamily::Rounded => "ui-rounded, \"SF Pro Rounded\", \"Segoe UI\", system-ui, sans-serif",
         FontFamily::Serif => "ui-serif, Georgia, \"Times New Roman\", serif",
         FontFamily::Monospace => "ui-monospace, \"SF Mono\", \"Cascadia Code\", Menlo, monospace",
+        // The CLI-synced `mobiler.toml` [fonts] (web/fonts/fonts.css); unsynced → the system stack.
+        FontFamily::Custom => "\"mobiler-body\", system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif",
     };
     // Secondary brand color (for the CardStyle::Brand gradient); falls back to the seed.
     let (ar, ag, ab) = t.accent.map_or((r, g, b), |a| (a.r, a.g, a.b));
+    // Custom fonts: titles use the display family (falling back to the body stack).
+    let display = if t.font == FontFamily::Custom { "--font-display:\"mobiler-display\", var(--font);" } else { "" };
     let base = format!(
         "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
          --accent2:rgb({ar},{ag},{ab});\
@@ -2246,15 +2252,15 @@ fn theme_css(t: &Theme, dark: bool) -> String {
                 _ => String::new(),
             };
             let color_scheme = if roles.background.is_some() { format!("color-scheme:{scheme};") } else { String::new() };
-            format!("{base}{accent2}{}{color_scheme}", palette_css(roles))
+            format!("{base}{display}{accent2}{}{color_scheme}", palette_css(roles))
         }
-        None => base,
+        None => format!("{base}{display}"),
     }
 }
 
 /// Re-apply the scaffold's theme (inline vars + dark / Large-density classes) to an open confirm
 /// dialog, which copies them once when it opens (`confirm_modal`).
-fn sync_confirm_theme(style: &str, dark: bool, large: bool) {
+fn sync_confirm_theme(style: &str, dark: bool, large: bool, custom_font: bool) {
     let Some(scrim) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.query_selector(".confirm-scrim").ok().flatten())
@@ -2269,6 +2275,7 @@ fn sync_confirm_theme(style: &str, dark: bool, large: bool) {
     let classes = scrim.class_list();
     let _ = classes.toggle_with_force("theme-dark", dark);
     let _ = classes.toggle_with_force("density-large", large);
+    let _ = classes.toggle_with_force("font-custom", custom_font);
 }
 
 /// The OS colour scheme (`prefers-color-scheme: dark`); false where there is no window.
@@ -2953,6 +2960,15 @@ mod palette_tests {
         assert!(resolve_dark(Some(Appearance::Dark), false));
         // `System` reads `prefers-color-scheme` via web-sys, which only exists on wasm — covered by
         // the headless-Chrome acceptance run (CDP `setEmulatedMedia`).
+    }
+
+    #[test]
+    fn custom_font_sets_body_and_display_stacks() {
+        let t = Theme { font: mobiler_core::FontFamily::Custom, ..Default::default() };
+        let css = theme_css(&t, false);
+        assert!(css.contains("--font:\"mobiler-body\", system-ui"), "{css}");
+        assert!(css.contains("--font-display:\"mobiler-display\", var(--font);"), "{css}");
+        assert!(!theme_css(&Theme::default(), false).contains("--font-display"));
     }
 
     #[test]
