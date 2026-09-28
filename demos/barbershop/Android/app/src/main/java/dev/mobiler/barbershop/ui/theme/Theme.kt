@@ -72,6 +72,12 @@ private fun paletteScheme(base: ColorScheme, p: ColorRoles): ColorScheme {
     )
 }
 
+/** A Theme.shapes radius: `Pill` = fully round (half the height, at any density), `Dp(n)` = n dp. */
+fun radiusShape(r: dev.mobiler.barbershop.shared.types.Radius): androidx.compose.ui.graphics.Shape = when (r) {
+    is dev.mobiler.barbershop.shared.types.Radius.Pill -> RoundedCornerShape(percent = 50)
+    is dev.mobiler.barbershop.shared.types.Radius.Dp -> RoundedCornerShape(r.value.toInt().dp)
+}
+
 /// Maps a model `Corner` to a Material3 `Shapes` set (small/medium/large component corners).
 private fun shapesFor(corner: Corner): Shapes {
     val r = when (corner) {
