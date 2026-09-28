@@ -1194,6 +1194,7 @@ impl MobilerApp for FadeHouse {
             // Space Grotesk titles + Roboto body, from mobiler.toml [fonts] (synced by the CLI).
             font: FontFamily::Custom,
             palette: Some(moj_termin_palette()),
+            type_scale: None,
         };
         let tabs = vec![
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),
