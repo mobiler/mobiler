@@ -471,7 +471,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   display: flex; align-items: center; justify-content: center;
 }
 /* Extended FAB (with_extended_fab): icon + label in the same anchored button. */
-.fab-extended { width: auto; max-width: calc(100vw - 36px); padding: 0 16px 0 14px; gap: 12px;
+.fab-extended { width: auto; max-width: calc(100vw - 36px); padding: 0; padding-inline: 16px 20px; gap: 12px;
   font-size: 16px; font-weight: 600; font-family: var(--font); }
 .fab-extended .fab-icon { font-size: 24px; line-height: 1; }
 .fab-extended .fab-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

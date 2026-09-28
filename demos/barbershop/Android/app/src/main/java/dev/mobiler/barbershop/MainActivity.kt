@@ -193,6 +193,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -1354,7 +1355,11 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         onClick = { send(Action.Fired(fab.onPress)) },
                                         // M3 clears its label's semantics (inside the expand animation), which left the
                                         // button unnamed for TalkBack; name it by the label.
-                                        modifier = Modifier.semantics { contentDescription = label },
+                                        // Capped like web/iOS so a very long label ellipsizes on screen instead of
+                                        // pushing the FAB's leading edge off it.
+                                        modifier = Modifier
+                                            .semantics { contentDescription = label }
+                                            .widthIn(max = LocalConfiguration.current.screenWidthDp.dp - 32.dp),
                                         icon = { Icon(iconFor(fab.icon), contentDescription = null) },
                                         text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                         shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.extendedFabShape,

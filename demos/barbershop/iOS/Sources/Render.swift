@@ -2423,10 +2423,13 @@ private func fabContent(_ fab: SharedTypes.Fab) -> some View {
     if let label = fab.label {
         HStack(spacing: 12) {
             Image(systemName: sfSymbol(fab.icon)).font(.title2).accessibilityHidden(true)
-            Text(label).font(.body.weight(.semibold)).lineLimit(1)
+            // The theme's body family (Custom fonts), like every other control label.
+            Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold)).lineLimit(1)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 56)
+        // M3's extended FAB: 16 before the icon, 20 after the label; grows past 56 at large text sizes.
+        .padding(.leading, 16)
+        .padding(.trailing, 20)
+        .frame(minHeight: 56)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
     } else {
