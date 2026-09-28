@@ -146,6 +146,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
         let Some(spec) = spec else { continue };
         let mut faces: BTreeMap<u16, Face> = BTreeMap::new();
         let mut first_family = None;
+        let mut families: Vec<String> = Vec::new();
         for file in &spec.files {
             let bytes = match fs::read(root.join(file)) {
                 Ok(b) => b,
@@ -161,12 +162,16 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
                     continue;
                 }
             };
-            let weight = ((info.weight + 50) / 100 * 100).clamp(100, 900);
+            // Nearest hundred, in u32 so a corrupt usWeightClass (up to 65535) can't overflow.
+            let weight = u16::try_from(((u32::from(info.weight) + 50) / 100 * 100).clamp(100, 900)).unwrap_or(900);
             if faces.contains_key(&weight) {
                 report.warnings.push(format!("{file}: a second file for weight {weight} — skipped"));
                 continue;
             }
             let ext = if bytes.starts_with(b"OTTO") { "otf" } else { "ttf" };
+            if !families.contains(&info.family) {
+                families.push(info.family.clone());
+            }
             first_family.get_or_insert(info.family);
             faces.insert(weight, Face { weight, ext, bytes });
         }
@@ -175,6 +180,14 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
                 report.warnings.push(format!("[fonts] {name}: no usable font files — the system font is used"));
             }
             continue;
+        }
+        // An explicit family must be one the files declare — iOS looks the fonts up by it and would
+        // silently fall back to the system font on a mismatch (e.g. a typo).
+        if let Some(explicit) = spec.family.as_ref().filter(|e| !families.contains(e)) {
+            report.warnings.push(format!(
+                "[fonts] {name}: family \"{explicit}\" doesn't match the files ({}) — iOS won't find it; use the files' family name",
+                families.join(", ")
+            ));
         }
         let family = spec.family.or(first_family).unwrap_or_default();
         report.synced.push((name.to_string(), family.clone(), faces.keys().copied().collect()));
@@ -567,6 +580,27 @@ mod tests {
         let r = sync(&root).unwrap();
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
         assert!(root.join("iOS/Sources/Fonts/mobiler-display-400.ttf").exists() && !root.join("web").exists());
+    }
+
+    #[test]
+    fn extreme_weight_is_clamped_not_overflowed() {
+        let root = app("weight", false);
+        fs::write(root.join("assets/fonts/d400.ttf"), tiny_font(0xFFFF, "Space Grotesk")).unwrap();
+        let r = sync(&root).unwrap();
+        let (_, _, weights) = r.synced.iter().find(|(role, _, _)| role == "display").unwrap();
+        assert!(weights.contains(&900), "{weights:?}");
+    }
+
+    #[test]
+    fn explicit_family_that_matches_no_file_warns() {
+        let root = app("family", false);
+        fs::write(
+            root.join("mobiler.toml"),
+            "[fonts]\ndisplay = { family = \"Space Grotesq\", files = [\"assets/fonts/d400.ttf\"] }\n",
+        )
+        .unwrap();
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains("Space Grotesq") && w.contains("Space Grotesk")), "{:?}", r.warnings);
     }
 
     #[test]

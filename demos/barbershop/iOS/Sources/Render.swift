@@ -226,9 +226,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             Button(action: { send(.fired(token: onPress)) }) {
                 Group {
                     if large {
-                        Text(label).font(.body).padding(.horizontal, 16).frame(minHeight: 48)
+                        Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body)).padding(.horizontal, 16).frame(minHeight: 48)
                     } else {
-                        Text(label).font(.subheadline).padding(.horizontal, 12).padding(.vertical, 6)
+                        Text(label).font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline)).padding(.horizontal, 12).padding(.vertical, 6)
                     }
                 }
                 .background(selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.18)) : role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
@@ -271,7 +271,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             VStack(alignment: .leading, spacing: 4) {
                 control
                 if let error = error {
-                    Text(error).font(.caption).foregroundColor(.red)
+                    Text(error).font(CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption)).foregroundColor(.red)
                 }
             }
         )
@@ -296,7 +296,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             HStack(spacing: 4) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
                     Button(action: { send(.fired(token: seg.onSelect)) }) {
-                        Text(seg.label).font(large ? Font.body.weight(.semibold) : Font.subheadline.weight(.semibold))
+                        Text(seg.label).font(large ? CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold) : CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: large ? 48 : nil)
                             .padding(.vertical, large ? 0 : 8)
                             .background(seg.selected ? role(pal?.secondaryContainer, else: Color.accentColor) : Color.clear)
@@ -347,7 +347,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(
             HStack(spacing: 12) {
                 Button("−") { send(.fired(token: onDecrement)) }.buttonStyle(.bordered)
-                Text("\(value)").font(.title3)
+                Text("\(value)").font(CustomFonts.bodyOr(.title3, size: 20, relativeTo: .title3))
                 Button("+") { send(.fired(token: onIncrement)) }.buttonStyle(.bordered)
             }
         )
@@ -417,8 +417,11 @@ enum CustomFonts {
     static let display: String? = registered("MobilerFontDisplay")
     static let body: String? = registered("MobilerFontBody")
     private static func registered(_ key: String) -> String? {
-        guard let family = Bundle.main.infoDictionary?[key] as? String, !family.isEmpty,
-              !UIFont.fontNames(forFamilyName: family).isEmpty else { return nil }
+        guard let family = Bundle.main.infoDictionary?[key] as? String, !family.isEmpty else { return nil }
+        guard !UIFont.fontNames(forFamilyName: family).isEmpty else {
+            print("mobiler: font family \"\(family)\" (\(key)) isn't registered — using the system font. Check mobiler.toml [fonts] and run `mobiler fonts sync`.")
+            return nil
+        }
         return family
     }
     static var active: Bool { if case .some(.custom) = ActiveTheme.current?.font { return true }; return false }
@@ -427,6 +430,11 @@ enum CustomFonts {
     static func font(_ family: String?, size: CGFloat, relativeTo: Font.TextStyle) -> Font? {
         guard active, let family else { return nil }
         return Font.custom(family, size: size, relativeTo: relativeTo)
+    }
+    /// For controls that set their own font: the body family at the system style's size, else exactly
+    /// `system` (so a non-custom theme is unchanged).
+    static func bodyOr(_ system: Font, size: CGFloat, relativeTo: Font.TextStyle) -> Font {
+        font(body, size: size, relativeTo: relativeTo) ?? system
     }
 }
 
@@ -689,7 +697,7 @@ private struct ChartView: View {
             } else {
                 ZStack {
                     circularCanvas
-                    if case .gauge = style { Text("\(gaugePct)%").font(.title2).bold() }
+                    if case .gauge = style { Text("\(gaugePct)%").font(CustomFonts.bodyOr(.title2, size: 22, relativeTo: .title2)).bold() }
                 }.frame(height: 140)
             }
             if legend, !series.isEmpty {
@@ -1048,7 +1056,7 @@ private struct SwipeActionView: View {
                 ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
                     Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
                         Text(a.label)
-                            .font(.subheadline.weight(.semibold))
+                            .font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
                             .foregroundColor(palettePair(a.tone) != nil ? toneColors(a.tone).1 : .white)
                             .frame(width: 76)
                             .frame(maxHeight: .infinity)
@@ -1087,7 +1095,7 @@ private struct CalendarView: View {
         let _ = paletteRoles // re-render on a light/dark palette flip
         let cell: CGFloat = isLargeDensity() ? 48 : 32
         VStack(spacing: 6) {
-            Text(title).font(.headline)
+            Text(title).font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
             LazyVGrid(columns: cols, spacing: 4) {
                 ForEach(Array(weekdayLabels.enumerated()), id: \.offset) { _, w in
                     Text(w).font(.caption2).foregroundColor(.secondary)
@@ -1373,7 +1381,7 @@ private struct ScaffoldView: View {
                                 if let icon = tab.icon {
                                     Image(systemName: sfSymbol(icon)).font(.system(size: 20))
                                 }
-                                Text(tab.label).font(isLargeDensity() ? .subheadline : .caption)
+                                Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
                             }
                             .fontWeight(tab.selected ? .semibold : .regular)
                             .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
@@ -1541,7 +1549,7 @@ private struct TonalButtonStyle: SwiftUI.ButtonStyle {
     let color: Color
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
             .padding(.horizontal, 14).padding(.vertical, 7)
             .foregroundColor(color)
             .background(color.opacity(0.18))
@@ -1559,7 +1567,7 @@ private struct PaletteButtonStyle: SwiftUI.ButtonStyle {
     let large: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
             .padding(.horizontal, large ? 24 : 14)
             .padding(.vertical, large ? 0 : 7)
             .frame(minHeight: large ? 56 : nil)
@@ -1587,7 +1595,7 @@ private struct LargeButtonStyle: SwiftUI.ButtonStyle {
             }
         }()
         return configuration.label
-            .font(.body.weight(.semibold))
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
             .padding(.horizontal, 24)
             .frame(minHeight: 56)
             .foregroundColor(fg)
