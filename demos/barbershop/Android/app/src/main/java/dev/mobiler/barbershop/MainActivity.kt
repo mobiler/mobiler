@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
@@ -202,6 +203,7 @@ import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import dev.mobiler.barbershop.ui.theme.FadehouseTheme
 import dev.mobiler.barbershop.ui.theme.LocalPalette
 import dev.mobiler.barbershop.ui.theme.color
@@ -487,7 +489,18 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val (bg, fg) = toneColors(widget.tone)
             Box(
                 modifier = Modifier.background(color = bg, shape = shapeOf { it.badge } ?: RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
-            ) { Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg) }
+            ) {
+                val icon = widget.icon
+                if (icon == null) {
+                    Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg)
+                } else {
+                    // with_icon: the status reads without its colour; the icon is decorative.
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(iconFor(icon), contentDescription = null, modifier = Modifier.size(14.dp), tint = fg)
+                        Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg)
+                    }
+                }
+            }
         }
 
         is Widget.ColorDot -> Box(
@@ -495,12 +508,29 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         )
 
         is Widget.Avatar -> Box {
-            AsyncImage(
-                model = widget.source,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(48.dp).clip(CircleShape),
-            )
+            val d = (widget.size?.toInt() ?: 48).dp
+            val initials = widget.initials
+            if (initials == null) {
+                AsyncImage(
+                    model = widget.source,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(d).clip(CircleShape),
+                )
+            } else if (widget.source.isEmpty()) {
+                AvatarInitials(initials, d)
+            } else {
+                // with_initials: drawn when the image fails to load; a loaded image wins.
+                SubcomposeAsyncImage(
+                    model = widget.source,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(d).clip(CircleShape),
+                    // Loading: the plain placeholder (as on iOS); failed: the initials.
+                    loading = { Box(Modifier.size(d).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))) },
+                    error = { AvatarInitials(initials, d) },
+                )
+            }
             widget.status?.let { st ->
                 Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(if (tonePair(LocalPalette.current, st) != null) toneColors(st).second else toneColors(st).first))
             }
@@ -1556,6 +1586,22 @@ private fun spacingFor(size: Spacing): Dp {
     return (base * densityScale).dp
 }
 
+/** An avatar's initials (the first two characters) on the secondary container, 40% of the diameter. */
+@Composable
+private fun AvatarInitials(initials: String, d: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier.size(d).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            // Two code points, not UTF-16 units (which could split an emoji); like web.
+            initials.codePoints().limit(2).toArray().let { String(it, 0, it.size) },
+            style = MaterialTheme.typography.bodyLarge.copy(fontSize = (d.value * 0.4f).sp, fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
+}
+
 private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.ImageVector = when (icon) {
     WidgetIcon.DELETE -> Icons.Default.Delete
     WidgetIcon.ADD -> Icons.Default.Add
@@ -1588,6 +1634,7 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.PHOTO -> Icons.Default.Image
     WidgetIcon.PLAY -> Icons.Default.PlayArrow
     WidgetIcon.SCISSORS -> Icons.Default.ContentCut
+    WidgetIcon.DONEALL -> Icons.Default.DoneAll
 }
 
 @Composable

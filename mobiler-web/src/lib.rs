@@ -1628,22 +1628,45 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let (class, source) = (image_class(*shape, *ratio), source.clone());
             view! { <img class=class src=source /> }.into_any()
         }
-        Widget::Badge { label, tone } => {
+        Widget::Badge { label, tone, icon } => {
             let (class, label) = (format!("badge {}", tone_class(*tone)), label.clone());
-            view! { <span class=class>{label}</span> }.into_any()
+            match icon {
+                // The icon makes the status readable without its colour; only the label is read.
+                Some(i) => view! {
+                    <span class=class><span class="badge-icon" aria-hidden="true">{badge_glyph(*i)}</span>{label}</span>
+                }
+                .into_any(),
+                None => view! { <span class=class>{label}</span> }.into_any(),
+            }
         }
         Widget::ColorDot { color } => {
             view! { <span class=format!("dot {}", dot_class(*color))></span> }.into_any()
         }
-        Widget::Avatar { source, status } => {
+        Widget::Avatar { source, status, initials, size } => {
             let dot = status.map(|t| view! { <span class=format!("avatar-status {}", tone_class(t))></span> });
-            view! {
-                <span class="avatar">
-                    <img class="avatar-img" src=source.clone() />
-                    {dot}
-                </span>
+            if initials.is_none() && size.is_none() {
+                return view! {
+                    <span class="avatar">
+                        <img class="avatar-img" src=source.clone() />
+                        {dot}
+                    </span>
+                }
+                .into_any();
             }
-            .into_any()
+            // Initials sit under the image: a loaded image covers them, an empty or failed one
+            // (hidden on error) leaves them showing. The size scales the circle and the text (40%).
+            let style = size.map(|n| format!("width:{n}px;height:{n}px;font-size:{}px", f32::from(n) * 0.4));
+            let letters = initials.as_deref().map(|i| view! { <span class="avatar-initials">{initials_text(i)}</span> });
+            let img = (!source.is_empty()).then(|| {
+                view! {
+                    <img class="avatar-img" src=source.clone() on:error=|e| {
+                        if let Some(img) = e.target().and_then(|t| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(t).ok()) {
+                            let _ = img.style().set_property("display", "none");
+                        }
+                    } />
+                }
+            });
+            view! { <span class="avatar" style=style>{letters}{img}{dot}</span> }.into_any()
         }
         Widget::PdfView { url } => {
             // Browsers render PDFs natively in an iframe (remote URL or local blob/file URL).
@@ -2731,6 +2754,20 @@ fn spacer_class(s: Spacing) -> &'static str {
     }
 }
 
+/// An avatar's initials as drawn: the first two characters (the app passes initials, not a name).
+fn initials_text(initials: &str) -> String {
+    initials.chars().take(2).collect()
+}
+
+/// A badge's icon glyph: [`icon_glyph`], except where that is a colour emoji, which would ignore
+/// the tone colour (the badge's point is a status readable in its own colour and shape).
+fn badge_glyph(i: Icon) -> &'static str {
+    match i {
+        Icon::Clock => "◷",
+        other => icon_glyph(other),
+    }
+}
+
 fn icon_glyph(i: Icon) -> &'static str {
     match i {
         Icon::Delete => "🗑",
@@ -2764,6 +2801,7 @@ fn icon_glyph(i: Icon) -> &'static str {
         Icon::Photo => "🖼",
         Icon::Play => "▶",
         Icon::Scissors => "✂",
+        Icon::DoneAll => "✓✓",
     }
 }
 
@@ -3319,6 +3357,22 @@ mod snackbar_tests {
         assert_eq!((b.action_label, b.ms), (None, 4_000));
         assert_eq!(SnackbarAsk::parse(r#"{"text":"x","action_label":""}"#).action_label, None);
         assert_eq!(SnackbarAsk::parse("garbage").ms, 4_000);
+    }
+
+    #[test]
+    fn badge_glyphs_are_text_not_colour_emoji() {
+        // A colour emoji ignores the tone colour; badge icons must take it.
+        assert_eq!(badge_glyph(Icon::Clock), "◷");
+        assert_eq!(badge_glyph(Icon::Check), icon_glyph(Icon::Check));
+        assert_eq!(badge_glyph(Icon::DoneAll), "✓✓");
+    }
+
+    #[test]
+    fn initials_take_two_characters() {
+        assert_eq!(initials_text("MŽX"), "MŽ"); // a cap, not name parsing: the app passes initials
+        assert_eq!(initials_text("MJ"), "MJ");
+        assert_eq!(initials_text("Ž"), "Ž");
+        assert_eq!(initials_text("👩\u{200d}🔧x"), "👩\u{200d}"); // grapheme clusters: accepted limit
     }
 
     #[test]

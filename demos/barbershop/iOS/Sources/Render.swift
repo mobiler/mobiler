@@ -51,10 +51,14 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 .allowsHitTesting(false)
         )
 
-    case .badge(let label, let tone):
+    case .badge(let label, let tone, let icon):
         let (bg, fg) = toneColors(tone)
         return AnyView(
-            Text(label).font(.footnote.weight(.semibold))
+            // with_icon: the status reads without its colour; the icon is decorative.
+            HStack(spacing: 4) {
+                if let icon { Image(systemName: sfSymbol(icon)).font(.system(size: 14)).accessibilityHidden(true) }
+                Text(label).font(.footnote.weight(.semibold))
+            }
                 .padding(.horizontal, 12).padding(.vertical, 5)
                 .background(bg).foregroundColor(fg).clipShape(ShapeTokens.shape(ShapeTokens.shapes?.badge) ?? AnyShape(Capsule()))
         )
@@ -62,8 +66,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .colorDot(let color):
         return AnyView(Circle().fill(projectColor(color)).frame(width: 12, height: 12))
 
-    case .avatar(let source, let status):
-        return AnyView(AvatarView(source: source, status: status))
+    case .avatar(let source, let status, let initials, let size):
+        return AnyView(AvatarView(source: source, status: status, initials: initials, size: size))
 
     case .pdfView(let url):
         return AnyView(PDFKitView(urlString: url).frame(minHeight: 480))
@@ -638,19 +642,36 @@ private struct GridView: View {
 private struct AvatarView: View {
     let source: String
     let status: Tone?
+    let initials: String?
+    let size: UInt8?
     @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
+        let d = CGFloat(size ?? 48)
         let img: AnyView
-        if source.hasPrefix("file:"), let url = URL(string: source) {
-            img = AnyView(FileImageView(url: url))
+        if let initials, source.isEmpty {
+            img = AnyView(initialsView(initials, d))
+        } else if source.hasPrefix("file:"), let url = URL(string: source) {
+            img = AnyView(FileImageView(url: url, fallback: initials.map { AnyView(initialsView($0, d)) }))
+        } else if let initials, URL(string: source) == nil {
+            // Not a loadable URL at all: AsyncImage would stay empty, so it's a failure.
+            img = AnyView(initialsView(initials, d))
+        } else if let initials {
+            // with_initials: drawn when the image fails to load; a loaded image wins.
+            img = AnyView(AsyncImage(url: URL(string: source)) { phase in
+                switch phase {
+                case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
+                case .failure: initialsView(initials, d)
+                default: Color.gray.opacity(0.15)
+                }
+            })
         } else {
             img = AnyView(AsyncImage(url: URL(string: source)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: { Color.gray.opacity(0.15) })
         }
         return img
-            .frame(width: 48, height: 48)
+            .frame(width: d, height: d)
             .clipShape(Circle())
             .overlay(alignment: .bottomTrailing) {
                 if let status = status {
@@ -659,6 +680,19 @@ private struct AvatarView: View {
                         .overlay(Circle().stroke(role(pal?.surface, else: Color(.systemBackground)), lineWidth: 2))
                 }
             }
+    }
+
+    /// The first two characters on the palette's secondary container (else a 16% brand tint), 40% of
+    /// the diameter, in the body family.
+    private func initialsView(_ initials: String, _ d: CGFloat) -> some View {
+        let brand = ActiveTheme.current?.brandColor ?? .accentColor
+        return Circle()
+            .fill(role(pal?.secondaryContainer, else: brand.opacity(0.16)))
+            .overlay(
+                Text(String(initials.prefix(2)))
+                    .font(CustomFonts.bodyOr(.system(size: d * 0.4), size: d * 0.4, relativeTo: .body).weight(.semibold))
+                    .foregroundColor(role(pal?.onSecondaryContainer, else: brand))
+            )
     }
 }
 
@@ -1811,6 +1845,7 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .photo: return "photo"
     case .play: return "play.fill"
     case .scissors: return "scissors"
+    case .doneAll: return "checkmark.circle"
     }
 }
 
@@ -1846,18 +1881,25 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
 /// every state update). A perf safeguard for many-megapixel camera/picked photos.
 private struct FileImageView: View {
     let url: URL
+    /// Shown instead of the grey placeholder once the file fails to load (an avatar's initials).
+    var fallback: AnyView? = nil
     @State private var image: UIImage?
+    @State private var failed = false
     var body: some View {
         ZStack {
             if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else if failed, let fallback {
+                fallback
             } else {
                 Color.gray.opacity(0.15)
             }
         }
         .task(id: url.path) {
+            failed = false
             if let cached = fileImageCache.object(forKey: url.path as NSString) { image = cached; return }
             image = await Task.detached(priority: .userInitiated) { downsampledFileImage(at: url) }.value
+            failed = image == nil
         }
     }
 }

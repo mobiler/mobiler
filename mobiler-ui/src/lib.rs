@@ -274,6 +274,8 @@ pub enum Icon {
     Camera, Photo, Play,
     // domain
     Scissors,
+    // status: a double check ("finished")
+    DoneAll,
 }
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -705,9 +707,14 @@ pub enum Widget {
     // Content
     Text { content: String, style: TextStyle },
     Image { source: String, shape: ImageShape, ratio: ImageRatio },
-    Badge { label: String, tone: Tone },
-    /// A circular avatar image with an optional colored status dot.
-    Avatar { source: String, status: Option<Tone> },
+    /// A status pill. `icon` (before the label, decorative) makes the status readable without its
+    /// colour. BREAKING (Moj Termin design release): `icon` was added — exhaustive patterns and full
+    /// literals need it; `badge` / `with_icon` are unaffected.
+    Badge { label: String, tone: Tone, icon: Option<Icon> },
+    /// A circular avatar image with an optional colored status dot. `initials` (at most two
+    /// characters) are drawn when `source` is empty or fails to load; `size` is the diameter
+    /// (`None` = 48). BREAKING (Moj Termin design release): `initials` and `size` were added.
+    Avatar { source: String, status: Option<Tone>, initials: Option<String>, size: Option<u8> },
     /// An in-app PDF viewer showing the document at `url` (a remote https URL or a local
     /// file URI). Each shell uses its native renderer — PDFKit on iOS, a paged `PdfRenderer`
     /// on Android, an `<iframe>` on web — so the app only supplies the URL (e.g. a
@@ -957,6 +964,12 @@ mod tests {
             platform: "ios".to_string(),
             bundle_id: "rs.x".to_string(),
         });
+    }
+
+    #[test]
+    fn badge_icon_and_avatar_initials_round_trip() {
+        round_trips(&Widget::Badge { label: "Finished".into(), tone: Tone::Info, icon: Some(Icon::DoneAll) });
+        round_trips(&Widget::Avatar { source: String::new(), status: None, initials: Some("MJ".into()), size: Some(40) });
     }
 
     #[test]

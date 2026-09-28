@@ -96,6 +96,15 @@ body {
 /* Avatar — circular image with an optional status dot. */
 .avatar { position: relative; display: inline-block; width: 48px; height: 48px; }
 .avatar-img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+/* Initials (with_initials): under the image, so a loaded image covers them; 40% of the diameter. The
+   palette's secondary container (else the 16% brand tint), with its on-colour (else the brand). */
+.avatar:has(.avatar-initials) { font-size: 19.2px; }
+.avatar[style] .avatar-img { width: 100%; height: 100%; }
+.avatar-img { position: relative; }
+.avatar-initials { position: absolute; inset: 0; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; background: var(--accent-soft);
+  color: var(--on-secondary-container, var(--primary-text, var(--primary)));
+  font-family: var(--font); font-weight: 600; line-height: 1; }
 .avatar-status { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--pal-surface, var(--bg)); }
 /* With a palette pair the status dot is the strong on-container colour (the container alone is too faint). */
 .avatar-status.tone-success { background: var(--tone-success-on, #e6f4ea); }
@@ -611,3 +620,6 @@ textarea.field { resize: vertical; font-family: inherit; }
   /* An inverse primary: the brand colour halfway toward the bar's text colour, so it reads on the
      inverted background (plain primary on on-surface is ~2:1). */
   color: color-mix(in srgb, var(--primary) 50%, var(--surface)); }
+
+/* A badge's status icon (with_icon): before the label, decorative. */
+.badge-icon { display: inline-block; font-size: 14px; line-height: 1; margin-inline-end: 4px; }
