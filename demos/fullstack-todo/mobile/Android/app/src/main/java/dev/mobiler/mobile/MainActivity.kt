@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
@@ -1382,6 +1383,7 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.PHOTO -> Icons.Default.Image
     WidgetIcon.PLAY -> Icons.Default.PlayArrow
     WidgetIcon.SCISSORS -> Icons.Default.ContentCut
+    WidgetIcon.DONEALL -> Icons.Default.DoneAll
 }
 
 @Composable
