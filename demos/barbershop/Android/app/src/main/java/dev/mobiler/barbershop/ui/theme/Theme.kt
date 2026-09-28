@@ -69,6 +69,10 @@ private fun paletteScheme(base: ColorScheme, p: ColorRoles): ColorScheme {
         onError = p.danger?.container?.color() ?: base.onError,
         errorContainer = p.danger?.container?.color() ?: base.errorContainer,
         onErrorContainer = p.danger?.onContainer?.color() ?: base.onErrorContainer,
+        // The snackbar's inverse slots: on_surface background, surface text, primary action.
+        inverseSurface = p.onSurface?.color() ?: base.inverseSurface,
+        inverseOnSurface = surface ?: base.inverseOnSurface,
+        inversePrimary = p.primary?.color() ?: base.inversePrimary,
     )
 }
 

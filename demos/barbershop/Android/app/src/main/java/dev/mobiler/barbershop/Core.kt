@@ -16,6 +16,9 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -299,6 +302,36 @@ class DialogPlugin : MobilerPlugin {
     }
 }
 
+/** The scaffold's snackbar host (MainActivity passes it to the M3 Scaffold). `seq` numbers each show,
+ *  so a call whose snackbar was dismissed for a newer one can tell it was replaced. */
+object SnackbarBus {
+    val state = SnackbarHostState()
+    var seq = 0
+}
+
+/** Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+ *  "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout" | "replaced"
+ *  (M3 snackbars aren't swipeable, so there's no "dismissed" here). A newer snackbar replaces a
+ *  visible one — M3 would queue it. */
+class SnackbarPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "show") return PluginResponse(false, "unknown op '$op'")
+        val obj = runCatching { JSONObject(input) }.getOrElse { JSONObject() }
+        val label = obj.optString("action_label").ifEmpty { null }
+        val duration = if (obj.optString("duration") == "long") SnackbarDuration.Long else SnackbarDuration.Short
+        return withContext(Dispatchers.Main) {
+            val mine = ++SnackbarBus.seq
+            SnackbarBus.state.currentSnackbarData?.dismiss() // one at a time: the older call answers "replaced"
+            val result = SnackbarBus.state.showSnackbar(obj.optString("text"), actionLabel = label, duration = duration)
+            when {
+                result == SnackbarResult.ActionPerformed -> PluginResponse(true, "action")
+                SnackbarBus.seq != mine -> PluginResponse(false, "replaced")
+                else -> PluginResponse(false, "timeout")
+            }
+        }
+    }
+}
+
 /** Official, bundled plugin: native date / time pickers (request/response). op is
  *  "date" (→ ISO "YYYY-MM-DD") or "time" (→ 24-hour "HH:MM"); ok=false on cancel.
  *  Suspends until the user picks or dismisses. */
@@ -481,6 +514,7 @@ class Core(application: Application) : AndroidViewModel(application) {
     // (e.g. premium plugins); the generic shell ships only the official ones.
     private val plugins: Map<String, MobilerPlugin> = mapOf(
         "toast" to ToastPlugin(application),
+        "snackbar" to SnackbarPlugin(),
         "device" to DevicePlugin(),
         "ticker" to TickerPlugin(),
         "system" to SystemPlugin(),
