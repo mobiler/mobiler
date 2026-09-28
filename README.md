@@ -155,6 +155,7 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 | Share | `cx.share(text)` | system share sheet |
 | Browser | `cx.open_url(url)` | open a link externally |
 | Toast | `cx.toast(text)` | transient message / snackbar |
+| Snackbar | `cx.snackbar(Snackbar::new(text).action(label), then)` | message + optional action (undo) above the nav and FAB |
 | Device | `cx.device_model(then)` | device/model string |
 | App info | `cx.app_info()` | sync, set by the shell before init: AppInfo { version, build, platform, bundle_id } — the store's version/build number |
 | Appearance | `cx.system_appearance(then) · cx.subscribe_appearance(key, on_event)` | "light" / "dark" — the OS value even when the app forces one; the stream sends the current value, then each change. Pair with with_appearance(Light/Dark/System) |

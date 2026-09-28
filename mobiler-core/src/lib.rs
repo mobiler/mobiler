@@ -15,7 +15,7 @@ pub mod http;
 pub mod i18n;
 pub mod transfer;
 pub use app_info::AppInfo;
-pub use dialog::{Confirm, Picker};
+pub use dialog::{Confirm, Picker, Snackbar, SnackbarDuration};
 pub use format::{Currency, Locale, Weekday};
 pub use http::{HttpHeader, HttpOutcome};
 pub use i18n::{Catalog, negotiate};
@@ -345,6 +345,14 @@ impl<E> Cx<E> {
     /// .cancel_label("Keep it").destructive()`. Same response: `ok` is `true` only if confirmed.
     pub fn confirm_with(&mut self, dialog: Confirm, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("dialog", "confirm", dialog.to_input(), then);
+    }
+
+    /// Show a snackbar (built-in `snackbar` capability) above the bottom navigation and the FAB,
+    /// e.g. `cx.snackbar(Snackbar::new("Booking cancelled").action("Undo"), |r| Msg::Undo(r.ok))`.
+    /// `then` gets `ok: true` (output `"action"`) when its action is tapped; otherwise `ok: false`
+    /// with output `"timeout"`, `"dismissed"` (swiped away) or `"replaced"` (a newer snackbar).
+    pub fn snackbar(&mut self, snackbar: Snackbar, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("snackbar", "show", snackbar.to_input(), then);
     }
 
     /// Let the user pick a date via the native date picker (built-in `datetime`
@@ -1914,6 +1922,25 @@ mod tests {
         cx.confirm_with(Confirm::new("T", "M").confirm_label("Go"), |_| Ev::Tap);
         let v: serde_json::Value = serde_json::from_str(&cx.requests.pop().unwrap().0.input).unwrap();
         assert!(v.get("cancel_label").is_none() && v.get("destructive").is_none());
+    }
+
+    #[test]
+    fn snackbar_input_is_the_wire_json() {
+        assert_eq!(Snackbar::new("Saved").to_input(), r#"{"text":"Saved","duration":"short"}"#);
+        assert_eq!(
+            Snackbar::new("Cancelled").action("Undo").long().to_input(),
+            r#"{"text":"Cancelled","action_label":"Undo","duration":"long"}"#
+        );
+    }
+
+    #[test]
+    fn cx_snackbar_sends_a_snackbar_show_request() {
+        let mut cx = Cx::<Ev>::default();
+        cx.snackbar(Snackbar::new("Cancelled").action("Undo"), |r| if r.ok { Ev::Tap } else { Ev::Open(0) });
+        let (call, then) = cx.requests.pop().unwrap();
+        assert_eq!((call.plugin.as_str(), call.op.as_str()), ("snackbar", "show"));
+        assert_eq!(call.input, Snackbar::new("Cancelled").action("Undo").to_input());
+        assert!(matches!(then(PluginResponse::text(true, "action")), Ev::Tap));
     }
 
     #[test]

@@ -98,3 +98,47 @@ impl Picker {
         serde_json::to_string(self).expect("serialize picker")
     }
 }
+
+/// How long a snackbar stays up: `Short` ≈ 4 s, `Long` ≈ 10 s.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SnackbarDuration {
+    #[default]
+    Short,
+    Long,
+}
+
+/// A snackbar: a short message above the bottom navigation and the FAB, with an optional action
+/// ("Undo"). Shown with [`Cx::snackbar`](crate::Cx::snackbar); a newer snackbar replaces a visible one.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Snackbar {
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    action_label: Option<String>,
+    duration: SnackbarDuration,
+}
+
+impl Snackbar {
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into(), action_label: None, duration: SnackbarDuration::Short }
+    }
+
+    /// The action button ("Undo"); tapping it resolves `ok: true`.
+    #[must_use]
+    pub fn action(mut self, label: impl Into<String>) -> Self {
+        self.action_label = Some(label.into());
+        self
+    }
+
+    /// Stay up ≈ 10 s instead of ≈ 4 s.
+    #[must_use]
+    pub fn long(mut self) -> Self {
+        self.duration = SnackbarDuration::Long;
+        self
+    }
+
+    pub(crate) fn to_input(&self) -> String {
+        serde_json::to_string(self).expect("serialize snackbar")
+    }
+}
