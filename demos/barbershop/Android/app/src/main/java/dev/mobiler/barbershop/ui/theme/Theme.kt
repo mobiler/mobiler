@@ -119,7 +119,7 @@ fun FadehouseTheme(
     CompositionLocalProvider(LocalPalette provides roles) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = typographyFor(theme?.font),
+            typography = typographyFor(theme?.font, LocalContext.current),
             shapes = theme?.let { shapesFor(it.corner) } ?: Shapes(),
             content = content,
         )
