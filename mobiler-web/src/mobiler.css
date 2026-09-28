@@ -117,7 +117,7 @@ body {
   animation: sheet-rise 0.24s ease;
 }
 .sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 12px; }
-.sheet-title { font-size: var(--ts-headline-size, 18px); font-weight: var(--ts-headline-weight, 700); line-height: var(--ts-headline-lh); margin-bottom: 8px; }
+.sheet-title { font-size: var(--ts-headline-size, 18px); font-weight: var(--ts-headline-weight, 700); margin-bottom: 8px; }
 @keyframes sheet-rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
 /* Confirm dialog (cx.confirm / cx.confirm_with) — the web twin of the native alert. Mounted on
@@ -181,14 +181,15 @@ body {
 /* ---- content ----
    Reading text is sized in `rem` so it honors the browser's default-font-size setting (the web
    equivalent of iOS Dynamic Type / Android fontScale). Controls + chart text stay px on purpose. */
-/* A Theme.type_scale sets --ts-<style>-size/-weight/-lh; unset → today's values. A var() with no
-   fallback that is unset makes the declaration inherit — exactly as before it existed. */
-.t-title    { font-size: var(--ts-title-size, 1.75rem); font-weight: var(--ts-title-weight, 750); line-height: var(--ts-title-lh); margin: 2px 0; letter-spacing: -0.01em; }
-.t-subtitle { font-size: var(--ts-subtitle-size, 1.125rem); font-weight: var(--ts-subtitle-weight, 650); line-height: var(--ts-subtitle-lh); margin: 0; }
-.t-emphasis { font-size: var(--ts-emphasis-size, 0.9375rem); font-weight: var(--ts-emphasis-weight, 650); line-height: var(--ts-emphasis-lh); margin: 0; }
-.t-caption  { font-size: var(--ts-caption-size, 0.8125rem); font-weight: var(--ts-caption-weight); color: var(--muted); margin: 0; line-height: var(--ts-caption-lh, 1.4); }
-.t-body     { font-size: var(--ts-body-size, 0.9375rem); font-weight: var(--ts-body-weight); line-height: var(--ts-body-lh); margin: 0; }
-.t-display  { font-size: var(--ts-display-size, 2.25rem); font-weight: var(--ts-display-weight, 700); line-height: var(--ts-display-lh, 1.2); margin: 0; }
+/* A Theme.type_scale sets --ts-<style>-size/-weight/-lh; unset → today's values. Declarations the
+   old rules didn't have (line heights, some weights) live under .type-scale (a scaffold with a scale)
+   so an app's own stylesheet still reaches these styles when no scale is set. */
+.t-title    { font-size: var(--ts-title-size, 1.75rem); font-weight: var(--ts-title-weight, 750); margin: 2px 0; letter-spacing: -0.01em; }
+.t-subtitle { font-size: var(--ts-subtitle-size, 1.125rem); font-weight: var(--ts-subtitle-weight, 650); margin: 0; }
+.t-emphasis { font-size: var(--ts-emphasis-size, 0.9375rem); font-weight: var(--ts-emphasis-weight, 650); margin: 0; }
+.t-caption  { font-size: var(--ts-caption-size, 0.8125rem); color: var(--muted); margin: 0; line-height: var(--ts-caption-lh, 1.4); }
+.t-body     { font-size: var(--ts-body-size, 0.9375rem); margin: 0; }
+.t-display  { font-size: var(--ts-display-size, 2.25rem); font-weight: var(--ts-display-weight, 700); line-height: var(--ts-display-lh, 1.25); margin: 0; }
 .t-headline { font-size: var(--ts-headline-size, 1.5rem); font-weight: var(--ts-headline-weight, 600); line-height: var(--ts-headline-lh, 1.25); margin: 0; }
 
 .img { display: block; width: 100%; object-fit: cover; }
@@ -443,7 +444,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   top: 0;
   background: var(--surface-bar, var(--bg));
 }
-.topbar .title { flex: 1; text-align: center; font-size: var(--ts-title-size, 17px); font-weight: var(--ts-title-weight, 650); line-height: var(--ts-title-lh); }
+.topbar .title { flex: 1; text-align: center; font-size: var(--ts-title-size, 17px); font-weight: var(--ts-title-weight, 650); }
 .back { border: none; background: transparent; color: var(--primary-text, var(--ink)); font-size: 24px; line-height: 1; cursor: pointer; }
 .scaffold-body { flex: 1; padding: var(--pad); }
 /* Navigation transitions — the web twin of the native shells' push/pop slide and
@@ -473,15 +474,23 @@ textarea.field { resize: vertical; font-family: inherit; }
 /* FontFamily::Custom (CLI-synced web/fonts/fonts.css): the body family for the scaffold, the display
    family for titles. Only under .font-custom — other theme fonts keep their current rendering. */
 .scaffold.font-custom, .confirm-scrim.font-custom .confirm-card { font-family: var(--font); }
-/* Per-style family: the scale's role, else display for titles/headings and body for the rest. */
-.font-custom .confirm-title { font-family: var(--font-display, var(--font)); }
-.font-custom .t-display { font-family: var(--ts-display-family, var(--font-display, var(--font))); }
-.font-custom .t-headline, .font-custom .sheet-title { font-family: var(--ts-headline-family, var(--font-display, var(--font))); }
-.font-custom .t-title, .font-custom .topbar .title { font-family: var(--ts-title-family, var(--font-display, var(--font))); }
-.font-custom .t-subtitle { font-family: var(--ts-subtitle-family, var(--font-display, var(--font))); }
-.font-custom .t-body { font-family: var(--ts-body-family, var(--font)); }
-.font-custom .t-emphasis { font-family: var(--ts-emphasis-family, var(--font)); }
-.font-custom .t-caption { font-family: var(--ts-caption-family, var(--font)); }
+/* Per-style family: the scale's role, else display for titles/headings (at the specificity the
+   single title rule had) and, only with a scale, body for the rest. */
+.confirm-scrim.font-custom .confirm-title { font-family: var(--font-display, var(--font)); }
+.scaffold.font-custom .t-display { font-family: var(--ts-display-family, var(--font-display, var(--font))); }
+.scaffold.font-custom .t-headline, .scaffold.font-custom .sheet-title { font-family: var(--ts-headline-family, var(--font-display, var(--font))); }
+.scaffold.font-custom .t-title, .scaffold.font-custom .topbar .title { font-family: var(--ts-title-family, var(--font-display, var(--font))); }
+.scaffold.font-custom .t-subtitle { font-family: var(--ts-subtitle-family, var(--font-display, var(--font))); }
+.type-scale.font-custom .t-body { font-family: var(--ts-body-family, var(--font)); }
+.type-scale.font-custom .t-emphasis { font-family: var(--ts-emphasis-family, var(--font)); }
+.type-scale.font-custom .t-caption { font-family: var(--ts-caption-family, var(--font)); }
+/* Line heights / weights the scale sets (an unset one inherits). */
+.type-scale .t-title, .type-scale .topbar .title { line-height: var(--ts-title-lh); }
+.type-scale .t-subtitle { line-height: var(--ts-subtitle-lh); }
+.type-scale .t-emphasis { line-height: var(--ts-emphasis-lh); }
+.type-scale .t-body { font-weight: var(--ts-body-weight); line-height: var(--ts-body-lh); }
+.type-scale .t-caption { font-weight: var(--ts-caption-weight); }
+.type-scale .sheet-title { line-height: var(--ts-headline-lh); }
 /* Form controls don't inherit the page font by default — make them use the body family too. */
 .font-custom :is(button, input, textarea, select) { font-family: inherit; }
 .toast.font-custom { font-family: var(--font); }

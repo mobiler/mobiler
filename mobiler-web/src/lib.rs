@@ -2108,11 +2108,13 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // re-rendered on its change); none → `dark_mode`, as before.
             let dark = resolve_dark(*appearance, *dark_mode);
             let custom_font = theme.as_ref().is_some_and(|t| t.font == FontFamily::Custom);
+            let type_scale = theme.as_ref().is_some_and(|t| t.type_scale.is_some());
             let class = format!(
-                "scaffold{}{}{}{}",
+                "scaffold{}{}{}{}{}",
                 if dark { " theme-dark" } else { "" },
                 if large { " density-large" } else { "" },
                 if custom_font { " font-custom" } else { "" },
+                if type_scale { " type-scale" } else { "" },
                 if fill_index.is_some() { " scaffold-fill" } else { "" },
             );
             // Pull-to-refresh — web has no pull gesture, so expose a top-bar refresh button +
@@ -2241,9 +2243,13 @@ fn theme_css(t: &Theme, dark: bool) -> String {
     let (ar, ag, ab) = t.accent.map_or((r, g, b), |a| (a.r, a.g, a.b));
     // Custom fonts: titles use the display family (falling back to the body stack).
     let custom = t.font == FontFamily::Custom;
-    let display = if custom { "--font-display:\"mobiler-display\", var(--font);" } else { "" };
-    // The app's type scale: per-style size/weight/line-height (+ the font role under Custom).
-    let display = format!("{display}{}", t.type_scale.map(|ts| type_scale_css(&ts, custom)).unwrap_or_default());
+    // Custom fonts' display stack, then the app's type scale (per-style size/weight/line-height, + the
+    // font role under Custom) — both empty for other themes, so `base` is unchanged.
+    let typography = format!(
+        "{}{}",
+        if custom { "--font-display:\"mobiler-display\", var(--font);" } else { "" },
+        t.type_scale.map(|ts| type_scale_css(&ts, custom)).unwrap_or_default()
+    );
     let base = format!(
         "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
          --accent2:rgb({ar},{ag},{ab});\
@@ -2262,9 +2268,9 @@ fn theme_css(t: &Theme, dark: bool) -> String {
                 _ => String::new(),
             };
             let color_scheme = if roles.background.is_some() { format!("color-scheme:{scheme};") } else { String::new() };
-            format!("{base}{display}{accent2}{}{color_scheme}", palette_css(roles))
+            format!("{base}{typography}{accent2}{}{color_scheme}", palette_css(roles))
         }
-        None => format!("{base}{display}"),
+        None => format!("{base}{typography}"),
     }
 }
 
