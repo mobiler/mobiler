@@ -1352,6 +1352,9 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     // Extended FAB (with_extended_fab): icon + label; the label is the spoken name.
                                     ExtendedFloatingActionButton(
                                         onClick = { send(Action.Fired(fab.onPress)) },
+                                        // M3 clears its label's semantics (inside the expand animation), which left the
+                                        // button unnamed for TalkBack; name it by the label.
+                                        modifier = Modifier.semantics { contentDescription = label },
                                         icon = { Icon(iconFor(fab.icon), contentDescription = null) },
                                         text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                         shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.extendedFabShape,
