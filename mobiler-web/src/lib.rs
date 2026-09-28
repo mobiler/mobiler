@@ -2250,6 +2250,7 @@ fn theme_css(t: &Theme, dark: bool) -> String {
         if custom { "--font-display:\"mobiler-display\", var(--font);" } else { "" },
         t.type_scale.map(|ts| type_scale_css(&ts, custom)).unwrap_or_default()
     );
+    let typography = format!("{typography}{}", t.shapes.map(|sh| shapes_css(&sh)).unwrap_or_default());
     let base = format!(
         "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
          --accent2:rgb({ar},{ag},{ab});\
@@ -2361,6 +2362,29 @@ fn type_scale_css(ts: &mobiler_core::TypeScale, custom: bool) -> String {
         if custom {
             let family = if spec.family == FamilyRole::Display { "var(--font-display)" } else { "var(--font)" };
             s.push_str(&format!("--ts-{name}-family:{family};"));
+        }
+    }
+    s
+}
+
+/// `--r-<component>:<n>px|999px;` for each radius the theme sets (unset components keep the CSS's
+/// current radius).
+fn shapes_css(sh: &mobiler_core::Shapes) -> String {
+    use mobiler_core::Radius;
+    let mut s = String::new();
+    for (name, r) in [
+        ("card", sh.card),
+        ("button", sh.button),
+        ("fab", sh.fab),
+        ("sheet-top", sh.sheet_top),
+        ("chip", sh.chip),
+        ("badge", sh.badge),
+        ("input", sh.input),
+    ] {
+        match r {
+            Some(Radius::Dp(n)) => s.push_str(&format!("--r-{name}:{n}px;")),
+            Some(Radius::Pill) => s.push_str(&format!("--r-{name}:999px;")),
+            None => {}
         }
     }
     s
@@ -3052,6 +3076,22 @@ mod palette_tests {
         let css = theme_css(&Theme { type_scale: Some(ts), ..Default::default() }, false);
         assert!(css.contains("--ts-body-weight:100;") && css.contains("--ts-title-weight:900;"), "{css}");
         assert!(css.contains("--ts-title-size:1.375rem;"), "{css}");
+    }
+
+    #[test]
+    fn theme_css_without_shapes_is_unchanged() {
+        use mobiler_core::Shapes;
+        let t = Theme { shapes: Some(Shapes::default()), ..Default::default() };
+        assert_eq!(theme_css(&t, false), theme_css(&Theme::default(), false));
+    }
+
+    #[test]
+    fn theme_css_emits_only_set_radii() {
+        use mobiler_core::{Radius, Shapes};
+        let shapes = Shapes { card: Some(Radius::Dp(12)), button: Some(Radius::Pill), ..Default::default() };
+        let css = theme_css(&Theme { shapes: Some(shapes), ..Default::default() }, false);
+        assert!(css.contains("--r-card:12px;--r-button:999px;"), "{css}");
+        assert!(!css.contains("--r-fab"));
     }
 
     #[test]
