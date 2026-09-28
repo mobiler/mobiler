@@ -71,6 +71,11 @@ enum Command {
         #[arg(value_enum, default_value = "android")]
         platform: build::Platform,
     },
+    /// Custom fonts from `mobiler.toml` `[fonts]` (synced automatically by build/dev/watch).
+    Fonts {
+        #[command(subcommand)]
+        cmd: FontsCmd,
+    },
     /// Manage plugins (add a capability package to this app).
     Plugin {
         #[command(subcommand)]
@@ -91,6 +96,12 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum FontsCmd {
+    /// Copy the `[fonts]` files into the Android, iOS and web shells (idempotent).
+    Sync,
 }
 
 fn main() -> std::process::ExitCode {
@@ -119,6 +130,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Build { platform } => match build::run(platform) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::Fonts { cmd: FontsCmd::Sync } => match fonts::run_sync_cli() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

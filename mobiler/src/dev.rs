@@ -31,6 +31,8 @@ pub fn pipeline(
     no_run: bool,
     device: Option<&str>,
 ) -> Result<()> {
+    // Custom fonts (`mobiler.toml` [fonts]) into the shells first — warnings only, never fails.
+    crate::fonts::sync_for_build(&project.root);
     stage("Building Rust core (shared, uniffi)", || {
         run_capture(
             Command::new("cargo")

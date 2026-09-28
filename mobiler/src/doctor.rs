@@ -95,6 +95,10 @@ pub fn run() -> ExitCode {
     }
 
     println!("{}", "-".repeat(70));
+    // The current app's custom fonts (mobiler.toml [fonts]), if run from an app root.
+    if let Some(root) = env::current_dir().ok().filter(|r| r.join("mobiler.toml").exists()) {
+        println!("  {}", crate::fonts::doctor_line(&root));
+    }
 
     // If neither platform is configured you can't build anything — nudge to set one up.
     if !android_on && !ios_on {
