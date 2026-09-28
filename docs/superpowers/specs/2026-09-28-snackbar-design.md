@@ -24,6 +24,8 @@ shows a snackbar after a state change ("Termin završen · Milan Jovanović"), w
    - **Result:** `ok: true`, `output "action"` when the action is tapped. Otherwise `ok: false`, with
      `output` set to `"timeout"`, `"dismissed"` (swiped away) or `"replaced"` (a newer snackbar).
    - A snackbar without an action still takes `then`; it resolves `ok: false, "timeout"`.
+   - With no scaffold on screen it resolves `ok: false, "timeout"` at once, without being shown.
+   - iOS keeps it up at least 10 s while VoiceOver is running and it has an action.
 2. **Wire.** A new built-in request/response capability `snackbar`, op `show`. The input is JSON
    `{"text", "action_label"?, "duration": "short" | "long"}`, like the `dialog` plugin.
    - No `mobiler-ui` change.
@@ -35,7 +37,8 @@ shows a snackbar after a state change ("Termin završen · Milan Jovanović"), w
 5. **Colours: the M3 inverse convention, from existing roles** (no new palette tokens):
    - background = `on_surface`
    - text = `surface`
-   - action = `primary`
+   - action = an inverse primary: `primary` mixed halfway toward the text colour. Plain `primary`
+     on `on_surface` is about 2:1 (changed after review, 2026-09-28).
    - Without a palette, each shell's own default: Android M3 `SnackbarDefaults`, iOS/web a near-black
      surface with white text and the theme's primary action colour.
    - Corners: 4 dp/pt/px (the M3 snackbar default). No shape token.

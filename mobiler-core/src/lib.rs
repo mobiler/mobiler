@@ -350,7 +350,8 @@ impl<E> Cx<E> {
     /// Show a snackbar (built-in `snackbar` capability) above the bottom navigation and the FAB,
     /// e.g. `cx.snackbar(Snackbar::new("Booking cancelled").action("Undo"), |r| Msg::Undo(r.ok))`.
     /// `then` gets `ok: true` (output `"action"`) when its action is tapped; otherwise `ok: false`
-    /// with output `"timeout"`, `"dismissed"` (swiped away) or `"replaced"` (a newer snackbar).
+    /// with output `"timeout"`, `"dismissed"` (swiped away) or `"replaced"` (a newer snackbar). With
+    /// no scaffold on screen there's nothing to show it on, and it resolves `"timeout"` at once.
     pub fn snackbar(&mut self, snackbar: Snackbar, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("snackbar", "show", snackbar.to_input(), then);
     }
