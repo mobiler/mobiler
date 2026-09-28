@@ -1633,7 +1633,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             match icon {
                 // The icon makes the status readable without its colour; only the label is read.
                 Some(i) => view! {
-                    <span class=class><span class="badge-icon" aria-hidden="true">{icon_glyph(*i)}</span>{label}</span>
+                    <span class=class><span class="badge-icon" aria-hidden="true">{badge_glyph(*i)}</span>{label}</span>
                 }
                 .into_any(),
                 None => view! { <span class=class>{label}</span> }.into_any(),
@@ -2759,6 +2759,15 @@ fn initials_text(initials: &str) -> String {
     initials.chars().take(2).collect()
 }
 
+/// A badge's icon glyph: [`icon_glyph`], except where that is a colour emoji, which would ignore
+/// the tone colour (the badge's point is a status readable in its own colour and shape).
+fn badge_glyph(i: Icon) -> &'static str {
+    match i {
+        Icon::Clock => "◷",
+        other => icon_glyph(other),
+    }
+}
+
 fn icon_glyph(i: Icon) -> &'static str {
     match i {
         Icon::Delete => "🗑",
@@ -3348,6 +3357,14 @@ mod snackbar_tests {
         assert_eq!((b.action_label, b.ms), (None, 4_000));
         assert_eq!(SnackbarAsk::parse(r#"{"text":"x","action_label":""}"#).action_label, None);
         assert_eq!(SnackbarAsk::parse("garbage").ms, 4_000);
+    }
+
+    #[test]
+    fn badge_glyphs_are_text_not_colour_emoji() {
+        // A colour emoji ignores the tone colour; badge icons must take it.
+        assert_eq!(badge_glyph(Icon::Clock), "◷");
+        assert_eq!(badge_glyph(Icon::Check), icon_glyph(Icon::Check));
+        assert_eq!(badge_glyph(Icon::DoneAll), "✓✓");
     }
 
     #[test]

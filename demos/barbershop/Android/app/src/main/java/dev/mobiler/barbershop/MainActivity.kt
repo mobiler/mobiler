@@ -526,6 +526,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.size(d).clip(CircleShape),
+                    // Loading: the plain placeholder (as on iOS); failed: the initials.
+                    loading = { Box(Modifier.size(d).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))) },
                     error = { AvatarInitials(initials, d) },
                 )
             }
@@ -1592,7 +1594,8 @@ private fun AvatarInitials(initials: String, d: androidx.compose.ui.unit.Dp) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            initials.take(2),
+            // Two code points, not UTF-16 units (which could split an emoji); like web.
+            initials.codePoints().limit(2).toArray().let { String(it, 0, it.size) },
             style = MaterialTheme.typography.bodyLarge.copy(fontSize = (d.value * 0.4f).sp, fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSecondaryContainer,
         )

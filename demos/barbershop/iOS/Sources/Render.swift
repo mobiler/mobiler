@@ -652,7 +652,10 @@ private struct AvatarView: View {
         if let initials, source.isEmpty {
             img = AnyView(initialsView(initials, d))
         } else if source.hasPrefix("file:"), let url = URL(string: source) {
-            img = AnyView(FileImageView(url: url))
+            img = AnyView(FileImageView(url: url, fallback: initials.map { AnyView(initialsView($0, d)) }))
+        } else if let initials, URL(string: source) == nil {
+            // Not a loadable URL at all: AsyncImage would stay empty, so it's a failure.
+            img = AnyView(initialsView(initials, d))
         } else if let initials {
             // with_initials: drawn when the image fails to load; a loaded image wins.
             img = AnyView(AsyncImage(url: URL(string: source)) { phase in
@@ -1878,18 +1881,25 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
 /// every state update). A perf safeguard for many-megapixel camera/picked photos.
 private struct FileImageView: View {
     let url: URL
+    /// Shown instead of the grey placeholder once the file fails to load (an avatar's initials).
+    var fallback: AnyView? = nil
     @State private var image: UIImage?
+    @State private var failed = false
     var body: some View {
         ZStack {
             if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else if failed, let fallback {
+                fallback
             } else {
                 Color.gray.opacity(0.15)
             }
         }
         .task(id: url.path) {
+            failed = false
             if let cached = fileImageCache.object(forKey: url.path as NSString) { image = cached; return }
             image = await Task.detached(priority: .userInitiated) { downsampledFileImage(at: url) }.value
+            failed = image == nil
         }
     }
 }
