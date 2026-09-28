@@ -2413,6 +2413,8 @@ fn text_class(s: TextStyle) -> &'static str {
         TextStyle::Caption => "t-caption",
         TextStyle::Emphasis => "t-emphasis",
         TextStyle::Body => "t-body",
+        TextStyle::Display => "t-display",
+        TextStyle::Headline => "t-headline",
     }
 }
 
