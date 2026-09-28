@@ -1267,6 +1267,17 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
 /// Anchor a floating action button over a scaffold's body (the raised primary action).
 /// No-op on any other widget: `with_fab(scaffold(...), Icon::Add, Msg::New)`.
 pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget {
+    set_fab(widget, Fab { icon, on_press: tok(on_press), label: None })
+}
+
+/// An extended FAB: the icon plus a label ("Novi termin"), which is also its accessible name.
+/// Same anchor, colours and shape as [`with_fab`]; no-op on any other widget:
+/// `with_extended_fab(scaffold(...), Icon::Add, "New booking", Msg::New)`.
+pub fn with_extended_fab<E: Serialize>(widget: Widget, icon: Icon, label: impl Into<String>, on_press: E) -> Widget {
+    set_fab(widget, Fab { icon, on_press: tok(on_press), label: Some(label.into()) })
+}
+
+fn set_fab(widget: Widget, fab: Fab) -> Widget {
     match widget {
         Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, appearance, .. } => Widget::Scaffold {
             title,
@@ -1275,7 +1286,7 @@ pub fn with_fab<E: Serialize>(widget: Widget, icon: Icon, on_press: E) -> Widget
             back,
             dark_mode,
             theme,
-            fab: Some(Fab { icon, on_press: tok(on_press) }),
+            fab: Some(fab),
             sheet,
             on_refresh,
             refreshing,
@@ -1923,6 +1934,14 @@ mod tests {
         cx.confirm_with(Confirm::new("T", "M").confirm_label("Go"), |_| Ev::Tap);
         let v: serde_json::Value = serde_json::from_str(&cx.requests.pop().unwrap().0.input).unwrap();
         assert!(v.get("cancel_label").is_none() && v.get("destructive").is_none());
+    }
+
+    #[test]
+    fn with_extended_fab_sets_the_label_and_with_fab_does_not() {
+        let s = with_extended_fab(scaffold("T", false, vec![], text("x")), Icon::Add, "Novi termin", Ev::Tap);
+        assert!(matches!(&s, Widget::Scaffold { fab: Some(Fab { label: Some(l), .. }), .. } if l == "Novi termin"));
+        let r = with_fab(scaffold("T", false, vec![], text("x")), Icon::Add, Ev::Tap);
+        assert!(matches!(&r, Widget::Scaffold { fab: Some(Fab { label: None, .. }), .. }));
     }
 
     #[test]

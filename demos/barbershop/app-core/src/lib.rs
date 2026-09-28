@@ -5,7 +5,7 @@
 
 use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
-    map, marker_titled, with_markers,
+    map, marker_titled, with_markers, with_extended_fab,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Snackbar, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
@@ -16,7 +16,7 @@ use mobiler_core::{
     pdf_view, row, scaffold, scroller, scroller_hinted, search_field, secure_field, segment, segmented, skeleton,
     spacer, split, stack, video_player, video_playlist, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, toggle, with_captions, with_end_label, with_error,
-    with_fab, with_fill, with_labels, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
+    with_fill, with_labels, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
     TransferEvent,
 };
 use mobiler_core::format::{self, Currency, Locale};
@@ -1228,7 +1228,7 @@ impl MobilerApp for FadeHouse {
             Tab::Profile => ("Profile", profile_screen(model)),
         };
         // Themed Scaffold + icon tab bar + a "book now" floating action button.
-        let mut root = with_fab(with_appearance(scaffold(title_text, true, tabs, body), model.appearance), Icon::Calendar, Msg::Book);
+        let mut root = with_extended_fab(with_appearance(scaffold(title_text, true, tabs, body), model.appearance), Icon::Calendar, "Book", Msg::Book);
         // The Bookings tab is pull-to-refresh (the app owns `refreshing`).
         if model.tab == Tab::Bookings {
             root = with_refresh(root, model.refreshing, Msg::RefreshBookings);
@@ -2522,6 +2522,15 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn home_has_an_extended_book_fab() {
+        let (app, model) = app();
+        assert!(matches!(
+            app.view(&model),
+            Widget::Scaffold { fab: Some(mobiler_core::Fab { label: Some(l), .. }), .. } if l == "Book"
+        ));
     }
 
     #[test]

@@ -2252,12 +2252,26 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 view! { <div class="tabbar">{tabs}</div> }
             });
             // Floating action button — the raised primary action, anchored over the body.
+            // An extended FAB (with_extended_fab) carries a label: icon + label, named by the label.
             let fab_btn = fab.clone().map(|f| {
                 let (send, token) = (send.clone(), f.on_press.clone());
-                view! {
-                    <button class="fab" on:click=move |_| send(Action::Fired { token: token.clone() })>
-                        {icon_glyph(f.icon)}
-                    </button>
+                match f.label {
+                    Some(label) => {
+                        let name = label.clone();
+                        view! {
+                            <button class="fab fab-extended" aria-label=name on:click=move |_| send(Action::Fired { token: token.clone() })>
+                                <span class="fab-icon" aria-hidden="true">{icon_glyph(f.icon)}</span>
+                                <span class="fab-label">{label}</span>
+                            </button>
+                        }
+                        .into_any()
+                    }
+                    None => view! {
+                        <button class="fab" on:click=move |_| send(Action::Fired { token: token.clone() })>
+                            {icon_glyph(f.icon)}
+                        </button>
+                    }
+                    .into_any(),
                 }
             });
             // Modal bottom sheet — a scrim (tap to dismiss) + a panel rising from the bottom.

@@ -632,6 +632,10 @@ pub struct Tab {
 pub struct Fab {
     pub icon: Icon,
     pub on_press: ActionToken,
+    /// Extended FAB: the label shown next to the icon, which is also its accessible name. `None` = the
+    /// round FAB. BREAKING (Moj Termin design release): `Fab { .. }` literals need this field; the
+    /// `with_fab` / `with_extended_fab` builders are unaffected.
+    pub label: Option<String>,
 }
 
 /// One option in a [`Widget::Segmented`] control (mirrors [`Tab`]). `selected` marks the
@@ -956,6 +960,12 @@ mod tests {
     }
 
     #[test]
+    fn extended_fab_round_trips() {
+        round_trips(&Fab { icon: Icon::Add, on_press: "\"New\"".into(), label: Some("Novi termin".into()) });
+        round_trips(&Fab { icon: Icon::Add, on_press: "\"New\"".into(), label: None });
+    }
+
+    #[test]
     fn shapes_round_trip() {
         let shapes = Shapes { card: Some(Radius::Dp(12)), button: Some(Radius::Pill), ..Default::default() };
         round_trips(&Theme { shapes: Some(shapes), ..Default::default() });
@@ -1066,7 +1076,7 @@ mod tests {
                 font: FontFamily::Rounded,
                 ..Default::default()
             }),
-            fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
+            fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string(), label: None }),
             sheet: Some(Sheet { title: "S".to_string(), child: Box::new(Widget::Divider), on_dismiss: "d".to_string() }),
             on_refresh: Some("r".to_string()),
             refreshing: true,
@@ -1090,7 +1100,7 @@ mod tests {
                 font: FontFamily::Rounded,
                 ..Default::default()
             }),
-            fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string() }),
+            fab: Some(Fab { icon: Icon::Calendar, on_press: "f".to_string(), label: None }),
             sheet: Some(Sheet { title: "S".to_string(), child: Box::new(Widget::Divider), on_dismiss: "d".to_string() }),
             on_refresh: Some("r".to_string()),
             refreshing: true,

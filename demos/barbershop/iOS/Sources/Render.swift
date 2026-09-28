@@ -1426,9 +1426,7 @@ private struct ScaffoldView: View {
             .overlay(alignment: .bottomTrailing) {
                 if let fab = fab {
                     Button(action: { send(.fired(token: fab.onPress)) }) {
-                        Image(systemName: sfSymbol(fab.icon))
-                            .font(.title2)
-                            .frame(width: 56, height: 56)
+                        fabContent(fab)
                             .background(role(pal?.fab, else: theme?.brandColor ?? .accentColor))
                             .foregroundColor(role(pal?.onFab, else: .white))
                             .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.fab) ?? AnyShape(RoundedRectangle(cornerRadius: 18)))
@@ -2415,5 +2413,28 @@ struct SnackbarView: View {
         let toward = paletteColors.map { (Double($0.fg.r), Double($0.fg.g), Double($0.fg.b)) }
             ?? (colorScheme == .dark ? (0, 0, 0) : (255, 255, 255))
         return Color(red: (Double(p.r) + toward.0) / 510, green: (Double(p.g) + toward.1) / 510, blue: (Double(p.b) + toward.2) / 510)
+    }
+}
+
+/// The FAB's content: the round icon, or (with_extended_fab) the icon plus its label, which is then
+/// the spoken name. Both are 56pt tall; the caller adds the fill, shape and shadow.
+@ViewBuilder
+private func fabContent(_ fab: SharedTypes.Fab) -> some View {
+    if let label = fab.label {
+        HStack(spacing: 12) {
+            Image(systemName: sfSymbol(fab.icon)).font(.title2).accessibilityHidden(true)
+            // The theme's body family (Custom fonts), like every other control label.
+            Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold)).lineLimit(1)
+        }
+        // M3's extended FAB: 16 before the icon, 20 after the label; grows past 56 at large text sizes.
+        .padding(.leading, 16)
+        .padding(.trailing, 20)
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+    } else {
+        Image(systemName: sfSymbol(fab.icon))
+            .font(.title2)
+            .frame(width: 56, height: 56)
     }
 }

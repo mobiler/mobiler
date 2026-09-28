@@ -59,6 +59,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -107,6 +108,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -191,6 +193,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -1345,8 +1348,26 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         },
                         floatingActionButton = {
                             widget.fab?.let { fab ->
-                                FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }, shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.shape) {
-                                    Icon(iconFor(fab.icon), contentDescription = null)
+                                val label = fab.label
+                                if (label != null) {
+                                    // Extended FAB (with_extended_fab): icon + label; the label is the spoken name.
+                                    ExtendedFloatingActionButton(
+                                        onClick = { send(Action.Fired(fab.onPress)) },
+                                        // M3 clears its label's semantics (inside the expand animation), which left the
+                                        // button unnamed for TalkBack; name it by the label.
+                                        // Capped like web/iOS so a very long label ellipsizes on screen instead of
+                                        // pushing the FAB's leading edge off it.
+                                        modifier = Modifier
+                                            .semantics { contentDescription = label }
+                                            .widthIn(max = LocalConfiguration.current.screenWidthDp.dp - 32.dp),
+                                        icon = { Icon(iconFor(fab.icon), contentDescription = null) },
+                                        text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.extendedFabShape,
+                                    )
+                                } else {
+                                    FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }, shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.shape) {
+                                        Icon(iconFor(fab.icon), contentDescription = null)
+                                    }
                                 }
                             }
                         },
