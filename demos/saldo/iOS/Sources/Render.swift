@@ -51,7 +51,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 .allowsHitTesting(false)
         )
 
-    case .badge(let label, let tone):
+    case .badge(let label, let tone, _):
         let (bg, fg) = toneColors(tone)
         return AnyView(
             Text(label).font(.footnote.weight(.semibold))
@@ -62,7 +62,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
     case .colorDot(let color):
         return AnyView(Circle().fill(projectColor(color)).frame(width: 12, height: 12))
 
-    case .avatar(let source, let status):
+    case .avatar(let source, let status, _, _):
         return AnyView(AvatarView(source: source, status: status))
 
     case .pdfView(let url):
@@ -1622,6 +1622,7 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .photo: return "photo"
     case .play: return "play.fill"
     case .scissors: return "scissors"
+    case .doneAll: return "checkmark.circle"
     }
 }
 
