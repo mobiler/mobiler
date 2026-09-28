@@ -934,6 +934,10 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             other => PluginResponse::text(false, format!("unknown datetime op '{other}'")),
         };
     }
+    if call.plugin == "snackbar" && call.op == "show" {
+        let outcome = show_snackbar(SnackbarAsk::parse(&call.input)).await;
+        return PluginResponse::text(outcome == "action", outcome);
+    }
     if call.plugin == "dialog" && call.op == "confirm" {
         let ok = confirm_modal(ConfirmAsk::parse(&call.input)).await;
         return PluginResponse::text(ok, if ok { "ok" } else { "cancel" });
@@ -1198,6 +1202,138 @@ fn show_toast(text: &str) {
     el.set_text_content(Some(text));
     let _ = body.append_child(&el);
     gloo_timers::callback::Timeout::new(2600, move || el.remove()).forget();
+}
+
+/// What the `snackbar`/`show` request asks for (see `mobiler_core::Snackbar`): an empty or missing
+/// action label means no action; `"long"` stays 10 s, anything else 4 s.
+struct SnackbarAsk {
+    text: String,
+    action_label: Option<String>,
+    ms: u32,
+}
+
+impl SnackbarAsk {
+    fn parse(input: &str) -> Self {
+        let v: serde_json::Value = serde_json::from_str(input).unwrap_or(serde_json::Value::Null);
+        let text = v.get("text").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+        let action_label =
+            v.get("action_label").and_then(serde_json::Value::as_str).filter(|l| !l.is_empty()).map(str::to_string);
+        let ms = if v.get("duration").and_then(serde_json::Value::as_str) == Some("long") { 10_000 } else { 4_000 };
+        Self { text, action_label, ms }
+    }
+}
+
+/// How far above the viewport bottom the snackbar sits: 12px above the highest bottom-anchored piece of
+/// chrome (the FAB, the bottom tab bar), given their rect tops. Only tops in the lower half count — on
+/// a wide screen the tab bar is a left rail with top 0, which must not push the bar off the top.
+fn snackbar_lift(vh: f64, tops: &[f64]) -> f64 {
+    let limit = tops.iter().copied().filter(|t| *t > vh / 2.0).fold(vh, f64::min);
+    (vh - limit).max(0.0) + 12.0
+}
+
+type SnackbarTx = std::rc::Rc<std::cell::RefCell<Option<futures_channel::oneshot::Sender<&'static str>>>>;
+
+/// The snackbar on screen: its element and how to answer it (a newer snackbar answers "replaced").
+struct OpenSnackbar {
+    el: web_sys::HtmlElement,
+    tx: SnackbarTx,
+}
+
+thread_local! {
+    static OPEN_SNACKBAR: std::cell::RefCell<Option<OpenSnackbar>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The web snackbar: a `.snackbar` bar on `<body>` above the tab bar and the FAB, with an optional
+/// action button. Resolves `"action"`, `"timeout"` after `ask.ms`, or `"replaced"` when a newer
+/// snackbar opens (the web has no swipe, so never `"dismissed"`).
+async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let Some(window) = web_sys::window() else { return "timeout" };
+    let Some(doc) = window.document() else { return "timeout" };
+    let Some(body) = doc.body() else { return "timeout" };
+    let el = |tag: &str, class: &str| -> Option<web_sys::HtmlElement> {
+        let e = doc.create_element(tag).ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
+        e.set_class_name(class);
+        Some(e)
+    };
+    let (Some(bar), Some(text)) = (el("div", "snackbar"), el("span", "snackbar-text")) else { return "timeout" };
+    // Inherit the scaffold's theme: brand/palette vars (inline style) + dark / Large / custom font.
+    if let Some(scaffold) = doc.query_selector(".scaffold").ok().flatten() {
+        if let Some(style) = scaffold.get_attribute("style") {
+            let _ = bar.set_attribute("style", &style);
+        }
+        let classes = scaffold.class_list();
+        for c in ["theme-dark", "density-large", "font-custom"] {
+            if classes.contains(c) {
+                let _ = bar.class_list().add_1(c);
+            }
+        }
+    }
+    let _ = bar.set_attribute("role", "status");
+    let _ = bar.set_attribute("aria-live", "polite");
+    // The text goes in a moment after the live region is in the DOM: screen readers announce a
+    // polite region's changes, not content it was inserted with.
+    let _ = bar.append_child(&text);
+    let action = ask.action_label.as_deref().and_then(|label| {
+        let b = el("button", "snackbar-action")?;
+        let _ = b.set_attribute("type", "button");
+        b.set_text_content(Some(label));
+        let _ = bar.append_child(&b);
+        Some(b)
+    });
+
+    // One at a time: the visible snackbar answers "replaced" and goes.
+    if let Some(old) = OPEN_SNACKBAR.with(|c| c.borrow_mut().take()) {
+        if let Some(tx) = old.tx.borrow_mut().take() {
+            let _ = tx.send("replaced");
+        }
+        old.el.remove();
+    }
+    let _ = body.append_child(&bar);
+    // Sit 12px above whatever is lowest on screen of the FAB and the tab bar (or the viewport).
+    let vh = window.inner_height().ok().and_then(|h| h.as_f64()).unwrap_or(0.0);
+    let top_of = |sel: &str| doc.query_selector(sel).ok().flatten().map(|e| e.get_bounding_client_rect().top());
+    let tops: Vec<f64> = [top_of(".fab"), top_of(".tabbar")].into_iter().flatten().collect();
+    let lift = snackbar_lift(vh, &tops);
+    // Only the bare-viewport case needs the safe-area inset; the FAB and tab bar already sit above it.
+    let bottom = if lift > 12.0 { format!("{lift}px") } else { format!("calc({lift}px + env(safe-area-inset-bottom, 0px))") };
+    let _ = bar.style().set_property("bottom", &bottom);
+    let announce = ask.text.clone();
+    let text_el = text.clone();
+    gloo_timers::callback::Timeout::new(100, move || text_el.set_text_content(Some(&announce))).forget();
+
+    let (tx, rx) = futures_channel::oneshot::channel::<&'static str>();
+    let tx: SnackbarTx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
+    OPEN_SNACKBAR.with(|c| *c.borrow_mut() = Some(OpenSnackbar { el: bar.clone(), tx: tx.clone() }));
+    let answer = |tx: &SnackbarTx, outcome: &'static str| {
+        if let Some(tx) = tx.borrow_mut().take() {
+            let _ = tx.send(outcome);
+        }
+    };
+    let t1 = tx.clone();
+    let on_action = Closure::wrap(Box::new(move || answer(&t1, "action")) as Box<dyn FnMut()>);
+    if let Some(b) = &action {
+        b.set_onclick(Some(on_action.as_ref().unchecked_ref()));
+    }
+    let t2 = tx.clone();
+    let timer = gloo_timers::callback::Timeout::new(ask.ms, move || answer(&t2, "timeout"));
+
+    let outcome = rx.await.unwrap_or("replaced");
+    drop(timer);
+    // Detach before the closure drops (a click may still be dispatching; see `confirm_modal`).
+    if let Some(b) = &action {
+        b.set_onclick(None);
+    }
+    // Only tear down if it's still ours — a newer snackbar already removed this one.
+    OPEN_SNACKBAR.with(|c| {
+        let mut open = c.borrow_mut();
+        if open.as_ref().is_some_and(|o| std::rc::Rc::ptr_eq(&o.tx, &tx)) {
+            *open = None;
+            bar.remove();
+        }
+    });
+    drop(on_action);
+    outcome
 }
 
 /// What the `dialog`/`confirm` request asks for (see `mobiler_core::Confirm`); missing fields keep
@@ -3114,5 +3250,31 @@ mod palette_tests {
         let t = Theme { palette: Some(p), ..Default::default() };
         assert!(theme_css(&t, true).ends_with("--bg:rgb(35,31,32);color-scheme:dark;"));
         assert!(theme_css(&t, false).ends_with("--bg:rgb(250,247,240);color-scheme:light;"));
+    }
+}
+
+#[cfg(test)]
+mod snackbar_tests {
+    use super::*;
+
+    #[test]
+    fn snackbar_ask_parses_the_wire_json() {
+        let a = SnackbarAsk::parse(r#"{"text":"Cancelled","action_label":"Undo","duration":"long"}"#);
+        assert_eq!((a.text.as_str(), a.action_label.as_deref(), a.ms), ("Cancelled", Some("Undo"), 10_000));
+        let b = SnackbarAsk::parse(r#"{"text":"Saved","duration":"short"}"#);
+        assert_eq!((b.action_label, b.ms), (None, 4_000));
+        assert_eq!(SnackbarAsk::parse(r#"{"text":"x","action_label":""}"#).action_label, None);
+        assert_eq!(SnackbarAsk::parse("garbage").ms, 4_000);
+    }
+
+    #[test]
+    fn snackbar_lift_clears_only_bottom_anchored_chrome() {
+        // Phone: FAB top 775, bottom tab bar top 862 → 12px above the FAB.
+        assert_eq!(snackbar_lift(915.0, &[775.0, 862.0]), 915.0 - 775.0 + 12.0);
+        // Wide layout: the tab bar is a left rail (top 0) — ignored, not "above the viewport".
+        assert_eq!(snackbar_lift(900.0, &[0.0]), 12.0);
+        assert_eq!(snackbar_lift(900.0, &[0.0, 760.0]), 900.0 - 760.0 + 12.0);
+        // Nothing on screen → just the gap.
+        assert_eq!(snackbar_lift(900.0, &[]), 12.0);
     }
 }

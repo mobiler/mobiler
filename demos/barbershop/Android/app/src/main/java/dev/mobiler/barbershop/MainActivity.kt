@@ -132,6 +132,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -1297,8 +1298,15 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             }
                         }
                     }
+                    // cx.snackbar needs a composed host to time out; count this one while it's on screen.
+                    DisposableEffect(Unit) {
+                        SnackbarBus.hosts++
+                        onDispose { SnackbarBus.hosts-- }
+                    }
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
+                        // cx.snackbar — M3 stacks it above the bottom bar and the FAB.
+                        snackbarHost = { SnackbarHost(SnackbarBus.state) },
                         topBar = {
                             CenterAlignedTopAppBar(
                                 // The type scale's `title` spec, else the app bar's own style.

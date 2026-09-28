@@ -1311,6 +1311,9 @@ private struct ScaffoldView: View {
         )
         // After each route settles, record its depth for the next transition.
         .task(id: route) { prevDepth = depth }
+        // cx.snackbar draws inside a scaffold; count the ones on screen (see SnackbarHost.hosts).
+        .onAppear { SnackbarHost.shared.hosts += 1 }
+        .onDisappear { SnackbarHost.shared.hosts -= 1 }
         // Modal bottom sheet — a scrim (tap to dismiss) + a panel from the bottom.
         .overlay {
             if let sheet = sheet {
@@ -1429,6 +1432,11 @@ private struct ScaffoldView: View {
                     }
                     .padding(18)
                 }
+            }
+            // cx.snackbar — bottom-centre over the body (which ends above the tab bar), lifted above the FAB.
+            .overlay(alignment: .bottom) {
+                SnackbarView(seed: theme?.seed)
+                    .padding(.bottom, fab != nil ? 56 + 18 + 12 : 12)
             }
 
             if showBottomTabs && !tabs.isEmpty {
@@ -2336,5 +2344,60 @@ struct WebKitWebView: UIViewRepresentable {
     private func load(into view: WKWebView) {
         guard let url = URL(string: urlString) else { return }
         view.load(URLRequest(url: url))
+    }
+}
+
+/// The snackbar from `SnackbarHost` (cx.snackbar): inverse colours (on_surface / surface / primary
+/// from the palette), an optional action button, a timer, and a downward swipe to dismiss.
+struct SnackbarView: View {
+    let seed: Rgb?
+    @Environment(\.paletteRoles) private var paletteRoles
+
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        ZStack {
+            if let r = SnackbarHost.shared.current {
+                HStack(spacing: 12) {
+                    Text(r.text)
+                        .font(.subheadline)
+                        .foregroundColor(role(pal?.surface, else: .white))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let action = r.action {
+                        Button(action) { SnackbarHost.shared.finish("action", id: r.id) }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(actionColor)
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .background(role(pal?.onSurface, else: Color(white: 0.2)))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .shadow(radius: 6, y: 3)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: 560)
+                .accessibilityElement(children: .contain)
+                .gesture(DragGesture(minimumDistance: 10).onEnded { g in
+                    if g.translation.height > 30 { SnackbarHost.shared.finish("dismissed", id: r.id) }
+                })
+                .onAppear {
+                    UIAccessibility.post(notification: .announcement, argument: r.action.map { "\(r.text). \($0)" } ?? r.text)
+                }
+                .task(id: r.id) {
+                    try? await Task.sleep(for: .seconds(r.seconds))
+                    SnackbarHost.shared.finish("timeout", id: r.id)
+                }
+                .id(r.id)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: SnackbarHost.shared.current?.id)
+    }
+
+    /// An inverse primary: the brand halfway toward the bar's text colour (the palette's surface, else
+    /// white on the default dark bar), so it reads on the inverted background.
+    private var actionColor: Color {
+        guard let p = pal?.primary ?? seed else { return .accentColor }
+        let toward = pal?.surface.map { (Double($0.r), Double($0.g), Double($0.b)) } ?? (255, 255, 255)
+        return Color(red: (Double(p.r) + toward.0) / 510, green: (Double(p.g) + toward.1) / 510, blue: (Double(p.b) + toward.2) / 510)
     }
 }

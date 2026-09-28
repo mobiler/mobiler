@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SharedTypes
 import UIKit
 import PhotosUI
@@ -287,6 +288,7 @@ enum Plugins {
         case "share": return await SharePlugin.handle(op: op, input: input)
         case "browser": return await BrowserPlugin.handle(op: op, input: input)
         case "toast": return await ToastPlugin.handle(op: op, input: input)
+        case "snackbar": return await SnackbarPlugin.handle(op: op, input: input)
         case "device": return await DevicePlugin.handle(op: op, input: input)
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
@@ -490,6 +492,63 @@ enum ToastPlugin {
         UIView.animate(withDuration: 0.2) { label.alpha = 1 }
         UIView.animate(withDuration: 0.3, delay: 2.3) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
         return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// The snackbar on screen, drawn by `ScaffoldView` (`SnackbarView`). `nonisolated(unsafe)` like
+/// `ActiveTheme`: only ever touched on the main thread, from the plugin and the view.
+@Observable final class SnackbarHost {
+    nonisolated(unsafe) static let shared = SnackbarHost()
+    struct Request: Identifiable {
+        let id: Int
+        let text: String
+        let action: String?
+        let seconds: Double
+    }
+    var current: Request?
+    /// ScaffoldViews on screen: the timeout runs in `SnackbarView`, so with none there'd be no end.
+    @ObservationIgnored var hosts = 0
+    @ObservationIgnored private var answer: ((String) -> Void)?
+    @ObservationIgnored private var nextId = 0
+
+    /// Show a snackbar; a visible one answers "replaced" first (one at a time).
+    func show(text: String, action: String?, seconds: Double, answer: @escaping (String) -> Void) {
+        finish("replaced")
+        nextId += 1
+        current = Request(id: nextId, text: text, action: action, seconds: seconds)
+        self.answer = answer
+    }
+
+    /// Resolve and hide the visible snackbar — only if it's still request `id`, when one is given
+    /// (a late timer or swipe must not close a newer snackbar).
+    func finish(_ outcome: String, id: Int? = nil) {
+        guard let cur = current, id == nil || id == cur.id else { return }
+        let a = answer
+        answer = nil
+        current = nil
+        a?(outcome)
+    }
+}
+
+/// Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+/// "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout", "dismissed"
+/// (swiped down) or "replaced" (a newer snackbar).
+@MainActor
+enum SnackbarPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "show" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        let text = obj?["text"] as? String ?? ""
+        let action = (obj?["action_label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        var seconds: Double = (obj?["duration"] as? String) == "long" ? 10 : 4
+        // VoiceOver needs time to reach the action (Android's M3 host lengthens it the same way).
+        if action != nil && UIAccessibility.isVoiceOverRunning { seconds = max(seconds, 10) }
+        // No scaffold on screen → nothing to show it on, and nothing would ever time it out.
+        if SnackbarHost.shared.hosts == 0 { return PluginResponse(ok: false, output: "timeout") }
+        let outcome: String = await withCheckedContinuation { cont in
+            SnackbarHost.shared.show(text: text, action: action, seconds: seconds) { cont.resume(returning: $0) }
+        }
+        return PluginResponse(ok: outcome == "action", output: outcome)
     }
 }
 

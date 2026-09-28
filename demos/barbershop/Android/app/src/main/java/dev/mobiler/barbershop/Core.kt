@@ -16,12 +16,19 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.channels.awaitClose
@@ -299,6 +306,45 @@ class DialogPlugin : MobilerPlugin {
     }
 }
 
+/** The scaffold's snackbar host (MainActivity passes it to the M3 Scaffold). `current` is the show in
+ *  flight (showing, or still waiting on the host's queue), so a newer snackbar can cancel it; `hosts`
+ *  counts the composed Scaffolds — M3 runs the timeout in the host, so with none there'd be no end. */
+object SnackbarBus {
+    val state = SnackbarHostState()
+    var current: Job? = null
+    var hosts = 0
+}
+
+/** Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+ *  "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout" | "replaced"
+ *  (M3 snackbars aren't swipeable, so there's no "dismissed" here). A newer snackbar replaces a
+ *  visible or queued one — M3 would queue it. With no Scaffold on screen it resolves "timeout" at
+ *  once (nothing to show it on). */
+class SnackbarPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "show") return PluginResponse(false, "unknown op '$op'")
+        val obj = runCatching { JSONObject(input) }.getOrElse { JSONObject() }
+        val label = obj.optString("action_label").ifEmpty { null }
+        val duration = if (obj.optString("duration") == "long") SnackbarDuration.Long else SnackbarDuration.Short
+        return withContext(Dispatchers.Main) {
+            if (SnackbarBus.hosts == 0) return@withContext PluginResponse(false, "timeout")
+            // One at a time: cancelling the older show (on screen, or queued on the host's mutex)
+            // removes it and makes that call answer "replaced".
+            SnackbarBus.current?.cancel()
+            val show = async { SnackbarBus.state.showSnackbar(obj.optString("text"), actionLabel = label, duration = duration) }
+            SnackbarBus.current = show
+            try {
+                if (show.await() == SnackbarResult.ActionPerformed) PluginResponse(true, "action") else PluginResponse(false, "timeout")
+            } catch (e: CancellationException) {
+                if (!isActive) throw e // this call itself was cancelled, not replaced
+                PluginResponse(false, "replaced")
+            } finally {
+                if (SnackbarBus.current === show) SnackbarBus.current = null
+            }
+        }
+    }
+}
+
 /** Official, bundled plugin: native date / time pickers (request/response). op is
  *  "date" (→ ISO "YYYY-MM-DD") or "time" (→ 24-hour "HH:MM"); ok=false on cancel.
  *  Suspends until the user picks or dismisses. */
@@ -481,6 +527,7 @@ class Core(application: Application) : AndroidViewModel(application) {
     // (e.g. premium plugins); the generic shell ships only the official ones.
     private val plugins: Map<String, MobilerPlugin> = mapOf(
         "toast" to ToastPlugin(application),
+        "snackbar" to SnackbarPlugin(),
         "device" to DevicePlugin(),
         "ticker" to TickerPlugin(),
         "system" to SystemPlugin(),

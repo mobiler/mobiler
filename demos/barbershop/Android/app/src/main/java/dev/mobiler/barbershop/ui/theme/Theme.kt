@@ -69,6 +69,12 @@ private fun paletteScheme(base: ColorScheme, p: ColorRoles): ColorScheme {
         onError = p.danger?.container?.color() ?: base.onError,
         errorContainer = p.danger?.container?.color() ?: base.errorContainer,
         onErrorContainer = p.danger?.onContainer?.color() ?: base.onErrorContainer,
+        // The snackbar's inverse slots: on_surface background, surface text, primary action.
+        inverseSurface = p.onSurface?.color() ?: base.inverseSurface,
+        inverseOnSurface = surface ?: base.inverseOnSurface,
+        // An inverse primary: the brand halfway toward the snackbar text colour, so the action reads
+        // on the inverted background (plain primary on on-surface is ~2:1).
+        inversePrimary = p.primary?.color()?.let { androidx.compose.ui.graphics.lerp(it, surface ?: base.surface, 0.5f) } ?: base.inversePrimary,
     )
 }
 
