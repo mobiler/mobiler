@@ -101,7 +101,7 @@ Barbershop gets the design's scale:
 - emphasis 16/600 body family
 - caption 12/400 body family
 
-It shows `display("12:00 – 12:45")` and `headline("Booking")` on Home.
+It shows `display("12:00 – 12:45")` and `headline("Next booking")` on Home.
 
 ## Verification
 

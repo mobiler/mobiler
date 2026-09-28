@@ -1235,6 +1235,9 @@ private struct ScaffoldView: View {
     @Environment(\.horizontalSizeClass) private var hSize
     // The live scheme around the scaffold: the OS's under `.system` (no preferredColorScheme then).
     @Environment(\.colorScheme) private var systemScheme
+    // The type scale's system-font sizes for the top-bar and sheet titles are scaled by hand
+    // (UIFontMetrics), so a text-size change must re-render the scaffold too.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     // Light/Dark force the mode; System follows the OS; none → dark_mode, as before.
     private var resolvedDark: Bool {
@@ -1252,6 +1255,7 @@ private struct ScaffoldView: View {
         // and re-resolves it here, before the children render (they read `pal`). Other modes are
         // resolved from the root in Core.swift (a nested scaffold never overrides it).
         let _ = { if isSystem { ActivePalette.current = ActiveTheme.current?.palette.map { resolvedDark ? $0.dark : $0.light } } }()
+        let _ = dynamicTypeSize
         let useRail = hSize == .regular && !tabs.isEmpty
         Group {
             if useRail {

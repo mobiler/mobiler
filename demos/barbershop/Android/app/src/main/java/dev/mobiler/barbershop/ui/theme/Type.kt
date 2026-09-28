@@ -27,12 +27,14 @@ fun applySpec(
     val w = ((spec.weight.toInt() + 50) / 100 * 100).coerceIn(100, 900)
     val size = spec.size.toInt()
     val role = if (spec.family == dev.mobiler.barbershop.shared.types.FamilyRole.DISPLAY) "display" else "body"
-    val family = if (custom) syncedFamily(context, role) else null
+    // Under CUSTOM the spec's role decides: its synced family, or the system font if that role isn't
+    // synced (as on web and iOS) — never the slot's other role. Otherwise the slot's family, as before.
+    val family = if (custom) syncedFamily(context, role) ?: FontFamily.Default else base.fontFamily
     return base.copy(
         fontSize = size.sp,
         fontWeight = FontWeight(w),
         lineHeight = (size * if (tight) 1.25f else 1.45f).sp,
-        fontFamily = family ?: base.fontFamily,
+        fontFamily = family,
     )
 }
 
