@@ -76,6 +76,11 @@ targets:
         NSBluetoothAlwaysUsageDescription: "Discover and connect to nearby Bluetooth devices."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Used to notify you about places near you, even when the app is in the background."
         BGTaskSchedulerPermittedIdentifiers: ["mobiler.refresh"]
+        # mobiler:fonts-begin
+        UIAppFonts: ["mobiler-body-400.ttf", "mobiler-body-500.ttf", "mobiler-body-700.ttf", "mobiler-display-400.ttf", "mobiler-display-500.ttf", "mobiler-display-600.ttf"]
+        MobilerFontDisplay: "Space Grotesk"
+        MobilerFontBody: "Roboto"
+        # mobiler:fonts-end
         # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:
