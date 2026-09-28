@@ -44,6 +44,9 @@ shells (for example the badge pill). The design needs its own radius per compone
 4. **`Dp(n)`:** Android `n.dp`, iOS `n` pt, web `n` px.
 5. **Out of scope:** segmented control, image corners (`ImageShape` keeps its own), progress bars,
    the calendar day cells, and the web confirm dialog card.
+6. **Follow-ups (2026-09-28):** `sheet_top: Pill` is capped at 32 on every shell (a dome clips the
+   sheet's content). The confirm dialog's buttons follow `button` where the shell draws them (web modal,
+   Android AlertDialog); iOS keeps the system alert.
 
 ## Per shell
 

@@ -2250,7 +2250,8 @@ fn theme_css(t: &Theme, dark: bool) -> String {
         if custom { "--font-display:\"mobiler-display\", var(--font);" } else { "" },
         t.type_scale.map(|ts| type_scale_css(&ts, custom)).unwrap_or_default()
     );
-    let typography = format!("{typography}{}", t.shapes.map(|sh| shapes_css(&sh)).unwrap_or_default());
+    // Per-component corner radii — empty without `shapes`.
+    let shapes = t.shapes.map(|sh| shapes_css(&sh)).unwrap_or_default();
     let base = format!(
         "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
          --accent2:rgb({ar},{ag},{ab});\
@@ -2269,9 +2270,9 @@ fn theme_css(t: &Theme, dark: bool) -> String {
                 _ => String::new(),
             };
             let color_scheme = if roles.background.is_some() { format!("color-scheme:{scheme};") } else { String::new() };
-            format!("{base}{typography}{accent2}{}{color_scheme}", palette_css(roles))
+            format!("{base}{typography}{shapes}{accent2}{}{color_scheme}", palette_css(roles))
         }
-        None => format!("{base}{typography}"),
+        None => format!("{base}{typography}{shapes}"),
     }
 }
 
@@ -2383,6 +2384,8 @@ fn shapes_css(sh: &mobiler_core::Shapes) -> String {
     ] {
         match r {
             Some(Radius::Dp(n)) => s.push_str(&format!("--r-{name}:{n}px;")),
+            // A pill sheet top would be a dome that clips the sheet's content: capped at 32.
+            Some(Radius::Pill) if name == "sheet-top" => s.push_str("--r-sheet-top:32px;"),
             Some(Radius::Pill) => s.push_str(&format!("--r-{name}:999px;")),
             None => {}
         }
@@ -3092,6 +3095,14 @@ mod palette_tests {
         let css = theme_css(&Theme { shapes: Some(shapes), ..Default::default() }, false);
         assert!(css.contains("--r-card:12px;--r-button:999px;"), "{css}");
         assert!(!css.contains("--r-fab"));
+    }
+
+    #[test]
+    fn sheet_top_pill_is_capped_at_32px() {
+        use mobiler_core::{Radius, Shapes};
+        let shapes = Shapes { sheet_top: Some(Radius::Pill), ..Default::default() };
+        let css = theme_css(&Theme { shapes: Some(shapes), ..Default::default() }, false);
+        assert!(css.contains("--r-sheet-top:32px;"), "{css}");
     }
 
     #[test]

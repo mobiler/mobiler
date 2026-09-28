@@ -386,11 +386,12 @@ private fun ConfirmDialog(req: ConfirmRequest) {
             TextButton(
                 onClick = { req.answer(true) },
                 modifier = buttonModifier,
+                shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
                 colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
             ) { Text(req.confirmLabel, fontSize = labelSize) }
         },
         dismissButton = {
-            TextButton(onClick = { req.answer(false) }, modifier = buttonModifier) { Text(req.cancelLabel, fontSize = labelSize) }
+            TextButton(onClick = { req.answer(false) }, modifier = buttonModifier, shape = shapeOf { it.button } ?: ButtonDefaults.textShape) { Text(req.cancelLabel, fontSize = labelSize) }
         },
     )
 }
@@ -1265,7 +1266,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             // everything regardless of where it's composed). Scrim/swipe fires on_dismiss.
             widget.sheet?.let { sheet ->
                 ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }, shape = activeTheme?.shapes?.sheetTop?.let { r ->
-                    val top = if (r is dev.mobiler.barbershop.shared.types.Radius.Dp) r.value.toInt().dp else 999.dp
+                    // Pill is capped at 32dp: a dome would clip the sheet's content.
+                    val top = if (r is dev.mobiler.barbershop.shared.types.Radius.Dp) r.value.toInt().dp else 32.dp
                     RoundedCornerShape(topStart = top, topEnd = top)
                 } ?: BottomSheetDefaults.ExpandedShape, scrimColor = LocalPalette.current?.scrim?.color() ?: BottomSheetDefaults.ScrimColor) {
                     Column(

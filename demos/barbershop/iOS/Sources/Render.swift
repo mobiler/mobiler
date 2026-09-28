@@ -488,15 +488,9 @@ enum ShapeTokens {
         case .some(.dp(let n)): return AnyShape(RoundedRectangle(cornerRadius: CGFloat(n)))
         }
     }
-    /// The radius in points for shapes that need a number (Pill → effectively round).
-    static func points(_ r: Radius) -> CGFloat {
-        switch r {
-        case .pill: return 999
-        case .dp(let n): return CGFloat(n)
-        }
-    }
     static var button: AnyShape { shape(shapes?.button) ?? AnyShape(Capsule()) }
 }
+
 
 /// Text fields: with a palette's `surface_muted`, a plain field on that fill with an `outline` border
 /// (`.roundedBorder` can't be recoloured); otherwise the system rounded border, as before.
@@ -1333,7 +1327,15 @@ private struct ScaffoldView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(role(pal?.surface, else: Color(.systemBackground)))
                     // Theme.shapes `sheet_top` rounds the top corners only (the bottom keeps 20).
-                    .clipShape(ShapeTokens.shapes?.sheetTop.map { r in AnyShape(UnevenRoundedRectangle(topLeadingRadius: ShapeTokens.points(r), bottomLeadingRadius: 20, bottomTrailingRadius: 20, topTrailingRadius: ShapeTokens.points(r))) } ?? AnyShape(RoundedRectangle(cornerRadius: 20)))
+                    .clipShape(ShapeTokens.shapes?.sheetTop.map { (r: Radius) -> AnyShape in
+                        // Pill is capped at 32: a dome would clip the sheet's content.
+                        let top: CGFloat
+                        switch r {
+                        case .dp(let n): top = CGFloat(n)
+                        case .pill: top = 32
+                        }
+                        return AnyShape(UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: 20, bottomTrailingRadius: 20, topTrailingRadius: top))
+                    } ?? AnyShape(RoundedRectangle(cornerRadius: 20)))
                 }
                 .transition(.opacity)
             }
