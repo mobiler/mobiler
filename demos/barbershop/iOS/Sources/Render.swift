@@ -512,7 +512,9 @@ private struct PaletteFieldStyle: ViewModifier {
             content.textFieldStyle(.plain)
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemFill))))
-                .overlay(shape.stroke(role(pal?.outline, else: Color.gray.opacity(0.3))))
+                // A palette without `outline` keeps its borderless field; the gray hairline is only for
+                // an input radius without a palette.
+                .overlay(shape.stroke(role(pal?.outline, else: pal?.surfaceMuted != nil ? .clear : Color.gray.opacity(0.3))))
         } else {
             content.textFieldStyle(.roundedBorder)
         }
