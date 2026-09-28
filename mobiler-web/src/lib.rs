@@ -1235,6 +1235,7 @@ type SnackbarTx = std::rc::Rc<std::cell::RefCell<Option<futures_channel::oneshot
 
 /// The snackbar on screen: its element and how to answer it (a newer snackbar answers "replaced").
 struct OpenSnackbar {
+    /// The positioned `.snackbar-host` wrapper (the themed `.snackbar` bar is inside it).
     el: web_sys::HtmlElement,
     tx: SnackbarTx,
 }
@@ -1256,7 +1257,12 @@ async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
         e.set_class_name(class);
         Some(e)
     };
-    let (Some(bar), Some(text)) = (el("div", "snackbar"), el("span", "snackbar-text")) else { return "timeout" };
+    // The host carries the position (`bottom`); the bar inside carries the theme, so re-theming it
+    // (`sync_overlay_theme`) never disturbs the position.
+    let (Some(host), Some(bar), Some(text)) = (el("div", "snackbar-host"), el("div", "snackbar"), el("span", "snackbar-text")) else {
+        return "timeout";
+    };
+    let _ = host.append_child(&bar);
     // Inherit the scaffold's theme: brand/palette vars (inline style) + dark / Large / custom font.
     if let Some(scaffold) = doc.query_selector(".scaffold").ok().flatten() {
         if let Some(style) = scaffold.get_attribute("style") {
@@ -1289,22 +1295,30 @@ async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
         }
         old.el.remove();
     }
-    let _ = body.append_child(&bar);
-    // Sit 12px above whatever is lowest on screen of the FAB and the tab bar (or the viewport).
-    let vh = window.inner_height().ok().and_then(|h| h.as_f64()).unwrap_or(0.0);
-    let top_of = |sel: &str| doc.query_selector(sel).ok().flatten().map(|e| e.get_bounding_client_rect().top());
-    let tops: Vec<f64> = [top_of(".fab"), top_of(".tabbar")].into_iter().flatten().collect();
-    let lift = snackbar_lift(vh, &tops);
-    // Only the bare-viewport case needs the safe-area inset; the FAB and tab bar already sit above it.
-    let bottom = if lift > 12.0 { format!("{lift}px") } else { format!("calc({lift}px + env(safe-area-inset-bottom, 0px))") };
-    let _ = bar.style().set_property("bottom", &bottom);
+    let _ = body.append_child(&host);
+    // Sit 12px above the FAB / bottom tab bar (or the viewport); again on every resize or rotation.
+    let place = {
+        let (window, doc, host) = (window.clone(), doc.clone(), host.clone());
+        move || {
+            let vh = window.inner_height().ok().and_then(|h| h.as_f64()).unwrap_or(0.0);
+            let top_of = |sel: &str| doc.query_selector(sel).ok().flatten().map(|e| e.get_bounding_client_rect().top());
+            let tops: Vec<f64> = [top_of(".fab"), top_of(".tabbar")].into_iter().flatten().collect();
+            let lift = snackbar_lift(vh, &tops);
+            // Only the bare-viewport case needs the safe-area inset; the FAB and tab bar sit above it.
+            let bottom = if lift > 12.0 { format!("{lift}px") } else { format!("calc({lift}px + env(safe-area-inset-bottom, 0px))") };
+            let _ = host.style().set_property("bottom", &bottom);
+        }
+    };
+    place();
+    let on_resize = Closure::wrap(Box::new(place) as Box<dyn FnMut()>);
+    let _ = window.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
     let announce = ask.text.clone();
     let text_el = text.clone();
     gloo_timers::callback::Timeout::new(100, move || text_el.set_text_content(Some(&announce))).forget();
 
     let (tx, rx) = futures_channel::oneshot::channel::<&'static str>();
     let tx: SnackbarTx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
-    OPEN_SNACKBAR.with(|c| *c.borrow_mut() = Some(OpenSnackbar { el: bar.clone(), tx: tx.clone() }));
+    OPEN_SNACKBAR.with(|c| *c.borrow_mut() = Some(OpenSnackbar { el: host.clone(), tx: tx.clone() }));
     let answer = |tx: &SnackbarTx, outcome: &'static str| {
         if let Some(tx) = tx.borrow_mut().take() {
             let _ = tx.send(outcome);
@@ -1315,11 +1329,38 @@ async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
     if let Some(b) = &action {
         b.set_onclick(Some(on_action.as_ref().unchecked_ref()));
     }
-    let t2 = tx.clone();
-    let timer = gloo_timers::callback::Timeout::new(ask.ms, move || answer(&t2, "timeout"));
+    // The timeout pauses while the pointer is over the bar or focus is inside it (so a keyboard or
+    // screen-reader user can reach the action), and restarts in full when they leave.
+    let timer: std::rc::Rc<std::cell::RefCell<Option<gloo_timers::callback::Timeout>>> = std::rc::Rc::default();
+    let start = {
+        let (timer, tx, ms) = (timer.clone(), tx.clone(), ask.ms);
+        move || {
+            let t = tx.clone();
+            *timer.borrow_mut() = Some(gloo_timers::callback::Timeout::new(ms, move || answer(&t, "timeout")));
+        }
+    };
+    start();
+    let pause = {
+        let timer = timer.clone();
+        Closure::wrap(Box::new(move || drop(timer.borrow_mut().take())) as Box<dyn FnMut()>)
+    };
+    let resume = Closure::wrap(Box::new(start) as Box<dyn FnMut()>);
+    for ev in ["pointerenter", "focusin"] {
+        let _ = bar.add_event_listener_with_callback(ev, pause.as_ref().unchecked_ref());
+    }
+    for ev in ["pointerleave", "focusout"] {
+        let _ = bar.add_event_listener_with_callback(ev, resume.as_ref().unchecked_ref());
+    }
 
     let outcome = rx.await.unwrap_or("replaced");
-    drop(timer);
+    drop(timer.borrow_mut().take());
+    for ev in ["pointerenter", "focusin"] {
+        let _ = bar.remove_event_listener_with_callback(ev, pause.as_ref().unchecked_ref());
+    }
+    for ev in ["pointerleave", "focusout"] {
+        let _ = bar.remove_event_listener_with_callback(ev, resume.as_ref().unchecked_ref());
+    }
+    let _ = window.remove_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
     // Detach before the closure drops (a click may still be dispatching; see `confirm_modal`).
     if let Some(b) = &action {
         b.set_onclick(None);
@@ -1329,10 +1370,10 @@ async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
         let mut open = c.borrow_mut();
         if open.as_ref().is_some_and(|o| std::rc::Rc::ptr_eq(&o.tx, &tx)) {
             *open = None;
-            bar.remove();
+            host.remove();
         }
     });
-    drop(on_action);
+    drop((on_action, pause, resume, on_resize));
     outcome
 }
 
@@ -2271,7 +2312,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let theme_style = theme.as_ref().map(|t| theme_css(t, dark)).unwrap_or_default();
             // An open confirm copied the scaffold's theme when it opened; keep it in step (e.g. an OS
             // light/dark flip under `Appearance::System` while it is open).
-            sync_confirm_theme(&theme_style, dark, large, custom_font);
+            sync_overlay_theme(&theme_style, dark, large, custom_font);
             // A palette's page background also paints the page behind the scaffold (wide viewports,
             // overscroll): `--bg` on <html> is what `body` reads, and body's background fills the canvas.
             let page_bg = theme.as_ref().and_then(|t| t.palette).and_then(|p| if dark { p.dark } else { p.light }.background);
@@ -2412,24 +2453,23 @@ fn theme_css(t: &Theme, dark: bool) -> String {
     }
 }
 
-/// Re-apply the scaffold's theme (inline vars + dark / Large-density classes) to an open confirm
-/// dialog, which copies them once when it opens (`confirm_modal`).
-fn sync_confirm_theme(style: &str, dark: bool, large: bool, custom_font: bool) {
-    let Some(scrim) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.query_selector(".confirm-scrim").ok().flatten())
-    else {
-        return;
-    };
-    if style.is_empty() {
-        let _ = scrim.remove_attribute("style");
-    } else {
-        let _ = scrim.set_attribute("style", style);
+/// Re-apply the scaffold's theme (inline vars + dark / Large-density / custom-font classes) to an
+/// open confirm dialog and snackbar, which copy them once when they open (`confirm_modal`,
+/// `show_snackbar`).
+fn sync_overlay_theme(style: &str, dark: bool, large: bool, custom_font: bool) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    for sel in [".confirm-scrim", ".snackbar"] {
+        let Some(el) = doc.query_selector(sel).ok().flatten() else { continue };
+        if style.is_empty() {
+            let _ = el.remove_attribute("style");
+        } else {
+            let _ = el.set_attribute("style", style);
+        }
+        let classes = el.class_list();
+        let _ = classes.toggle_with_force("theme-dark", dark);
+        let _ = classes.toggle_with_force("density-large", large);
+        let _ = classes.toggle_with_force("font-custom", custom_font);
     }
-    let classes = scrim.class_list();
-    let _ = classes.toggle_with_force("theme-dark", dark);
-    let _ = classes.toggle_with_force("density-large", large);
-    let _ = classes.toggle_with_force("font-custom", custom_font);
 }
 
 /// The OS colour scheme (`prefers-color-scheme: dark`); false where there is no window.

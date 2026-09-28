@@ -1313,7 +1313,11 @@ private struct ScaffoldView: View {
         .task(id: route) { prevDepth = depth }
         // cx.snackbar draws inside a scaffold; count the ones on screen (see SnackbarHost.hosts).
         .onAppear { SnackbarHost.shared.hosts += 1 }
-        .onDisappear { SnackbarHost.shared.hosts -= 1 }
+        .onDisappear {
+            SnackbarHost.shared.hosts -= 1
+            // The last scaffold went: nothing draws the snackbar or runs its timer any more.
+            if SnackbarHost.shared.hosts == 0 { SnackbarHost.shared.finish("timeout") }
+        }
         // Modal bottom sheet — a scrim (tap to dismiss) + a panel from the bottom.
         .overlay {
             if let sheet = sheet {
@@ -2352,6 +2356,14 @@ struct WebKitWebView: UIViewRepresentable {
 struct SnackbarView: View {
     let seed: Rgb?
     @Environment(\.paletteRoles) private var paletteRoles
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The palette's inverse pair, only when it sets both (one alone could pair with a default of
+    /// the same lightness).
+    private var paletteColors: (bg: Rgb, fg: Rgb)? {
+        guard let bg = pal?.onSurface, let fg = pal?.surface else { return nil }
+        return (bg, fg)
+    }
 
     var body: some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
@@ -2360,7 +2372,7 @@ struct SnackbarView: View {
                 HStack(spacing: 12) {
                     Text(r.text)
                         .font(.subheadline)
-                        .foregroundColor(role(pal?.surface, else: .white))
+                        .foregroundColor(paletteColors?.fg.color ?? Color(.systemBackground))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if let action = r.action {
                         Button(action) { SnackbarHost.shared.finish("action", id: r.id) }
@@ -2370,7 +2382,8 @@ struct SnackbarView: View {
                 }
                 .padding(.vertical, 12)
                 .padding(.horizontal, 16)
-                .background(role(pal?.onSurface, else: Color(white: 0.2)))
+                // Inverse of the page, as on web and Android: the label colour, with background text.
+                .background(paletteColors?.bg.color ?? Color(.label))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
                 .shadow(radius: 6, y: 3)
                 .padding(.horizontal, 16)
@@ -2383,7 +2396,9 @@ struct SnackbarView: View {
                     UIAccessibility.post(notification: .announcement, argument: r.action.map { "\(r.text). \($0)" } ?? r.text)
                 }
                 .task(id: r.id) {
-                    try? await Task.sleep(for: .seconds(r.seconds))
+                    // A cancelled sleep (the view rebuilt mid-show) must not close it: the new view's
+                    // task starts the timer again.
+                    do { try await Task.sleep(for: .seconds(r.seconds)) } catch { return }
                     SnackbarHost.shared.finish("timeout", id: r.id)
                 }
                 .id(r.id)
@@ -2394,10 +2409,11 @@ struct SnackbarView: View {
     }
 
     /// An inverse primary: the brand halfway toward the bar's text colour (the palette's surface, else
-    /// white on the default dark bar), so it reads on the inverted background.
+    /// the system background: white in light mode, black in dark), so it reads on the inverted bar.
     private var actionColor: Color {
         guard let p = pal?.primary ?? seed else { return .accentColor }
-        let toward = pal?.surface.map { (Double($0.r), Double($0.g), Double($0.b)) } ?? (255, 255, 255)
+        let toward = paletteColors.map { (Double($0.fg.r), Double($0.fg.g), Double($0.fg.b)) }
+            ?? (colorScheme == .dark ? (0, 0, 0) : (255, 255, 255))
         return Color(red: (Double(p.r) + toward.0) / 510, green: (Double(p.g) + toward.1) / 510, blue: (Double(p.b) + toward.2) / 510)
     }
 }
