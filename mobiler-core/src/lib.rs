@@ -582,7 +582,7 @@ pub fn image(source: impl Into<String>, shape: ImageShape, ratio: ImageRatio) ->
 }
 #[must_use]
 pub fn badge(label: impl Into<String>, tone: Tone) -> Widget {
-    Widget::Badge { label: label.into(), tone }
+    Widget::Badge { label: label.into(), tone, icon: None }
 }
 /// A small colored identity dot.
 #[must_use]
@@ -947,6 +947,38 @@ pub fn card(child: Widget, style: CardStyle) -> Widget {
 pub fn card_button<E: Serialize>(child: Widget, style: CardStyle, on_press: E) -> Widget {
     Widget::Card { child: Box::new(child), style, on_press: Some(tok(on_press)), on_long_press: None }
 }
+/// Put an icon before a `Badge`'s label, so the status reads without its colour
+/// (`with_icon(badge("Confirmed", Tone::Success), Icon::Check)`). Decorative: only the label is
+/// read. No-op on any other widget.
+#[must_use]
+pub fn with_icon(widget: Widget, icon: Icon) -> Widget {
+    match widget {
+        Widget::Badge { label, tone, .. } => Widget::Badge { label, tone, icon: Some(icon) },
+        other => other,
+    }
+}
+
+/// Give an `Avatar` initials, drawn when its `source` is empty or fails to load:
+/// `with_initials(avatar(""), "MŽ")`. Pass the initials, not the name — only the first two
+/// characters are drawn. No-op on any other widget.
+#[must_use]
+pub fn with_initials(widget: Widget, initials: impl Into<String>) -> Widget {
+    match widget {
+        Widget::Avatar { source, status, size, .. } => Widget::Avatar { source, status, initials: Some(initials.into()), size },
+        other => other,
+    }
+}
+
+/// Set an `Avatar`'s diameter in dp/pt/px (default 48); the status dot keeps its size. No-op on any
+/// other widget.
+#[must_use]
+pub fn with_avatar_size(widget: Widget, size: u8) -> Widget {
+    match widget {
+        Widget::Avatar { source, status, initials, .. } => Widget::Avatar { source, status, initials, size: Some(size) },
+        other => other,
+    }
+}
+
 /// Attach a long-press (press-and-hold) event to a `Card`. No-op on any other widget.
 /// Combines with `card` / `card_button` — a card can carry both a tap and a long-press.
 #[must_use]
@@ -985,11 +1017,11 @@ pub fn scroller(children: Vec<Widget>) -> Widget { Widget::Scroller { children, 
 pub fn scroller_hinted(children: Vec<Widget>) -> Widget { Widget::Scroller { children, edge_fade: true } }
 /// A circular avatar image.
 #[must_use]
-pub fn avatar(source: impl Into<String>) -> Widget { Widget::Avatar { source: source.into(), status: None } }
+pub fn avatar(source: impl Into<String>) -> Widget { Widget::Avatar { source: source.into(), status: None, initials: None, size: None } }
 /// A circular avatar image with a colored status dot.
 #[must_use]
 pub fn avatar_status(source: impl Into<String>, status: Tone) -> Widget {
-    Widget::Avatar { source: source.into(), status: Some(status) }
+    Widget::Avatar { source: source.into(), status: Some(status), initials: None, size: None }
 }
 /// A read-only star rating. `value` is in tenths (e.g. `48` = 4.8 of `max` stars).
 #[must_use]
@@ -1934,6 +1966,19 @@ mod tests {
         cx.confirm_with(Confirm::new("T", "M").confirm_label("Go"), |_| Ev::Tap);
         let v: serde_json::Value = serde_json::from_str(&cx.requests.pop().unwrap().0.input).unwrap();
         assert!(v.get("cancel_label").is_none() && v.get("destructive").is_none());
+    }
+
+    #[test]
+    fn badge_icon_and_avatar_initials_modifiers() {
+        assert!(matches!(with_icon(badge("ok", Tone::Success), Icon::Check), Widget::Badge { icon: Some(Icon::Check), .. }));
+        assert!(matches!(badge("ok", Tone::Success), Widget::Badge { icon: None, .. }));
+        let a = with_avatar_size(with_initials(avatar(""), "MJ"), 40);
+        assert!(matches!(&a, Widget::Avatar { initials: Some(i), size: Some(40), .. } if i == "MJ"));
+        assert!(matches!(avatar("u"), Widget::Avatar { initials: None, size: None, .. }));
+        // No-ops elsewhere.
+        assert!(matches!(with_icon(text("x"), Icon::Check), Widget::Text { .. }));
+        assert!(matches!(with_initials(badge("b", Tone::Info), "MJ"), Widget::Badge { .. }));
+        assert!(matches!(with_avatar_size(text("x"), 40), Widget::Text { .. }));
     }
 
     #[test]

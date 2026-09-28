@@ -1628,14 +1628,14 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let (class, source) = (image_class(*shape, *ratio), source.clone());
             view! { <img class=class src=source /> }.into_any()
         }
-        Widget::Badge { label, tone } => {
+        Widget::Badge { label, tone, .. } => {
             let (class, label) = (format!("badge {}", tone_class(*tone)), label.clone());
             view! { <span class=class>{label}</span> }.into_any()
         }
         Widget::ColorDot { color } => {
             view! { <span class=format!("dot {}", dot_class(*color))></span> }.into_any()
         }
-        Widget::Avatar { source, status } => {
+        Widget::Avatar { source, status, .. } => {
             let dot = status.map(|t| view! { <span class=format!("avatar-status {}", tone_class(t))></span> });
             view! {
                 <span class="avatar">
@@ -2764,6 +2764,7 @@ fn icon_glyph(i: Icon) -> &'static str {
         Icon::Photo => "🖼",
         Icon::Play => "▶",
         Icon::Scissors => "✂",
+        Icon::DoneAll => "✓✓",
     }
 }
 
