@@ -4,7 +4,7 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
-    A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec,
+    A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
     map, marker_titled, with_markers,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
@@ -1195,7 +1195,7 @@ impl MobilerApp for FadeHouse {
             font: FontFamily::Custom,
             palette: Some(moj_termin_palette()),
             type_scale: Some(moj_termin_type_scale()),
-            shapes: None,
+            shapes: Some(moj_termin_shapes()),
         };
         let tabs = vec![
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),
@@ -1354,6 +1354,19 @@ fn moj_termin_palette() -> Palette {
         ..Default::default()
     };
     Palette { light, dark }
+}
+
+/// The Moj Termin shapes: cards 12, pill buttons, FAB 16, sheet top 28, chips 8, pill badges, inputs 12.
+fn moj_termin_shapes() -> Shapes {
+    Shapes {
+        card: Some(Radius::Dp(12)),
+        button: Some(Radius::Pill),
+        fab: Some(Radius::Dp(16)),
+        sheet_top: Some(Radius::Dp(28)),
+        chip: Some(Radius::Dp(8)),
+        badge: Some(Radius::Pill),
+        input: Some(Radius::Dp(12)),
+    }
 }
 
 /// The Moj Termin type scale: the big time 36, sheet headings 24, screen titles 22 (display family);
@@ -2408,6 +2421,13 @@ mod test {
         assert_eq!(model.search, "beard");
         app.update(Msg::SelectAudience(Audience::Kids), &mut model, &mut cx);
         assert_eq!(model.audience, Audience::Kids);
+    }
+
+    #[test]
+    fn barbershop_theme_carries_the_moj_termin_shapes() {
+        let (app, model) = app();
+        let Widget::Scaffold { theme: Some(Theme { shapes: Some(sh), .. }), .. } = app.view(&model) else { panic!("no shapes") };
+        assert_eq!((sh.card, sh.button, sh.sheet_top), (Some(Radius::Dp(12)), Some(Radius::Pill), Some(Radius::Dp(28))));
     }
 
     #[test]
