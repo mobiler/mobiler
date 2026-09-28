@@ -157,6 +157,7 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 | Toast | `cx.toast(text)` | transient message / snackbar |
 | Device | `cx.device_model(then)` | device/model string |
 | App info | `cx.app_info()` | sync, set by the shell before init: AppInfo { version, build, platform, bundle_id } — the store's version/build number |
+| Appearance | `cx.system_appearance(then) · cx.subscribe_appearance(key, on_event)` | "light" / "dark" — the OS value even when the app forces one; the stream sends the current value, then each change. Pair with with_appearance(Light/Dark/System) |
 | Haptics | `cx.haptic(style)` | light / medium / heavy |
 | Confirm | `cx.confirm(title, message, then) · cx.confirm_with(Confirm::new(t, m).confirm_label(…).cancel_label(…).destructive(), then)` | native dialog; app labels + destructive style; defaults from the scaffold's ShellLabels |
 | Photo | `cx.pick_photo(then)` | system photo picker → local image URI (no permission) |

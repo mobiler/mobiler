@@ -4,7 +4,7 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
-    A11yRole, a11y, with_a11y_hint, with_a11y_role,
+    A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance,
     map, marker_titled, with_markers,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
@@ -160,6 +160,10 @@ pub enum Msg {
 
     /// The device's preferred locale tag (built-in `device` "locale" capability).
     GotDeviceLocale(String),
+    /// Home Light · Dark · System control.
+    SetAppearance(Appearance),
+    /// The OS light/dark setting, from the `appearance` stream (current value, then each change).
+    SystemAppearance(String),
     /// Toggle the "Live" ticker subscription on/off (the streaming primitive demo).
     ToggleLive,
     /// A streamed tick from the `ticker` subscription (the counter value as a string).
@@ -304,8 +308,10 @@ pub struct Model {
     picked_day: Option<u8>,
     /// Profile "Large controls" toggle → `Theme.density = Density::Large`.
     large_controls: bool,
-    /// Home "Light theme" toggle → the palette's light set (dark is the default).
-    light_mode: bool,
+    /// Home Light · Dark · System control → `with_appearance` (Dark is the default; System follows the OS).
+    appearance: Appearance,
+    /// The OS setting as the `appearance` stream last reported it (shown under the control).
+    system_appearance: String,
     /// Bookings "Serbian calendar" toggle → `calendar_in(Locale::SrLatn, …)`, Monday-first September 2026.
     serbian_calendar: bool,
     /// Note text (edited in Profile; saved/loaded via SQLite, dictated via speech).
@@ -424,7 +430,8 @@ impl Default for Model {
             ],
             picked_day: None,
             large_controls: false,
-            light_mode: false,
+            appearance: Appearance::Dark,
+            system_appearance: String::new(),
             serbian_calendar: false,
             note: String::new(),
             saved_note: String::new(),
@@ -871,6 +878,8 @@ impl MobilerApp for FadeHouse {
                 cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.as_text().unwrap_or_default().to_string()));
             }
             Msg::GotDeviceLocale(tag) => model.device_locale = tag,
+            Msg::SetAppearance(a) => model.appearance = a,
+            Msg::SystemAppearance(v) => model.system_appearance = v,
             Msg::ToggleLive => {
                 model.live_on = !model.live_on;
                 if model.live_on {
@@ -1124,6 +1133,8 @@ impl MobilerApp for FadeHouse {
         // Detect the device's preferred locale (built-in `device` capability) so the
         // formatting card can show it — works on iOS, Android, and web.
         cx.device_locale(|r| Msg::GotDeviceLocale(r.as_text().unwrap_or_default().to_string()));
+        // The OS light/dark setting, live (current value first) — shown under Home's appearance control.
+        cx.subscribe_appearance("appearance", |r| Msg::SystemAppearance(r.as_text().unwrap_or_default().to_string()));
         // In-app purchase (`iap` plugin): subscribe to the transactions stream at startup (the single
         // source of truth) + load product metadata for the Store card. No-ops gracefully until
         // `mobiler plugin add iap`. iOS sim-tests against demos/barbershop/iOS/Products.storekit.
@@ -1166,7 +1177,6 @@ impl MobilerApp for FadeHouse {
             }
             InputValue::Bool(on) => match id {
                 "large_controls" => model.large_controls = on,
-                "light_mode" => model.light_mode = on,
                 "serbian_calendar" => model.serbian_calendar = on,
                 _ => {}
             },
@@ -1199,7 +1209,7 @@ impl MobilerApp for FadeHouse {
             Tab::Profile => ("Profile", profile_screen(model)),
         };
         // Themed Scaffold + icon tab bar + a "book now" floating action button.
-        let mut root = with_fab(scaffold(title_text, !model.light_mode, tabs, body), Icon::Calendar, Msg::Book);
+        let mut root = with_fab(with_appearance(scaffold(title_text, true, tabs, body), model.appearance), Icon::Calendar, Msg::Book);
         // The Bookings tab is pull-to-refresh (the app owns `refreshing`).
         if model.tab == Tab::Bookings {
             root = with_refresh(root, model.refreshing, Msg::RefreshBookings);
@@ -1371,7 +1381,13 @@ fn home(model: &Model) -> Widget {
     );
     column(vec![
         // Switches the palette's light/dark set (the Moj Termin design: dark by default).
-        toggle("light_mode", "Light theme", model.light_mode),
+        // The palette's light/dark set: forced, or following the OS (System).
+        segmented(vec![
+            segment("Light", model.appearance == Appearance::Light, Msg::SetAppearance(Appearance::Light)),
+            segment("Dark", model.appearance == Appearance::Dark, Msg::SetAppearance(Appearance::Dark)),
+            segment("System", model.appearance == Appearance::System, Msg::SetAppearance(Appearance::System)),
+        ]),
+        caption(format!("System: {}", if model.system_appearance.is_empty() { "…" } else { model.system_appearance.as_str() })),
         row(vec![
             column(vec![caption("Welcome back"), emphasis("Marcus")]),
             spacer(Spacing::Md),
@@ -2381,9 +2397,14 @@ mod test {
         assert_eq!(p.dark.danger, Some(TonePair::new(Rgb::hex(0x4d2626), Rgb::hex(0xffb4ab))));
         assert_eq!(p.light.on_primary, None);
         let (app, mut model) = app();
-        assert!(matches!(app.view(&model), Widget::Scaffold { dark_mode: true, theme: Some(Theme { palette: Some(_), .. }), .. }));
-        app.input("light_mode", InputValue::Bool(true), &mut model, &mut Cx::<Msg>::default());
-        assert!(matches!(app.view(&model), Widget::Scaffold { dark_mode: false, .. }));
+        assert!(matches!(
+            app.view(&model),
+            Widget::Scaffold { appearance: Some(Appearance::Dark), theme: Some(Theme { palette: Some(_), .. }), .. }
+        ));
+        app.update(Msg::SetAppearance(Appearance::System), &mut model, &mut Cx::<Msg>::default());
+        assert!(matches!(app.view(&model), Widget::Scaffold { appearance: Some(Appearance::System), .. }));
+        app.update(Msg::SystemAppearance("light".into()), &mut model, &mut Cx::<Msg>::default());
+        assert_eq!(model.system_appearance, "light");
     }
 
     #[test]

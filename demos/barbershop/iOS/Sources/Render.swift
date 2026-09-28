@@ -352,14 +352,14 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, let appearance):
         // Theme-as-data: the non-View mapper helpers — spacing(), imageShape(), CardMod,
         // TextStyleMod — read `ActiveTheme.current` (set from the root view in Core.swift, not
         // here) for corner/density/font. `theme` itself still flows into ScaffoldView, which uses
         // it directly only for its own `.tint` and the FAB background.
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
-            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet,
+            darkMode: darkMode, appearance: appearance, theme: theme, fab: fab, sheet: sheet,
             onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, send: send
         ))
     }
@@ -1157,6 +1157,7 @@ private struct ScaffoldView: View {
     let tabs: [SharedTypes.Tab]
     let back: String?
     let darkMode: Bool
+    let appearance: Appearance?
     let theme: Theme?
     let fab: SharedTypes.Fab?
     let sheet: SharedTypes.Sheet?
@@ -1171,8 +1172,25 @@ private struct ScaffoldView: View {
     @State private var prevDepth: UInt32 = 0
     // Regular width (iPad / large landscape) swaps the bottom tab-bar for a side rail.
     @Environment(\.horizontalSizeClass) private var hSize
+    // The live scheme around the scaffold: the OS's under `.system` (no preferredColorScheme then).
+    @Environment(\.colorScheme) private var systemScheme
+
+    // Light/Dark force the mode; System follows the OS; none → dark_mode, as before.
+    private var resolvedDark: Bool {
+        switch appearance {
+        case .some(.light): return false
+        case .some(.dark): return true
+        case .some(.system): return systemScheme == .dark
+        case .none: return darkMode
+        }
+    }
+    private var isSystem: Bool { if case .some(.system) = appearance { return true }; return false }
 
     var body: some View {
+        // Under `.system` the live OS scheme picks the palette set, so an OS flip re-renders this view
+        // and re-resolves it here, before the children render (they read `pal`). Other modes are
+        // resolved from the root in Core.swift (a nested scaffold never overrides it).
+        let _ = { if isSystem { ActivePalette.current = ActiveTheme.current?.palette.map { resolvedDark ? $0.dark : $0.light } } }()
         let useRail = hSize == .regular && !tabs.isEmpty
         Group {
             if useRail {
@@ -1188,7 +1206,6 @@ private struct ScaffoldView: View {
         .background(role(pal?.background, else: .clear).ignoresSafeArea())
         .modifier(PaletteText())
         .environment(\.paletteRoles, pal)
-        .preferredColorScheme(darkMode ? .dark : .light)
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
         .tint(pal?.primary?.color ?? theme?.brandColor)
