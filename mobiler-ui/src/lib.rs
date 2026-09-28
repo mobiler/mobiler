@@ -387,7 +387,9 @@ impl Default for Theme {
     }
 }
 
-/// A corner radius per component. `sheet_top` rounds only the bottom sheet's top corners.
+/// A corner radius per component. `sheet_top` rounds only the bottom sheet's top corners (`Pill` there
+/// is capped at 32 — a dome would clip the sheet's content). `button` also shapes the confirm dialog's
+/// buttons where the shell draws them (web, Android); iOS uses the system alert.
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Shapes {
