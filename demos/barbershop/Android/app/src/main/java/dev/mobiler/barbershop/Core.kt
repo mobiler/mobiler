@@ -218,8 +218,28 @@ class HapticsPlugin(private val context: Context) : MobilerPlugin {
             @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
         val ms = when (op) { "light" -> 10L; "heavy" -> 40L; else -> 20L }
-        vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
-        return PluginResponse(true, "")
+        // Without VIBRATE (it ships commented out in AndroidManifest.xml) a tap is a no-op, not a crash.
+        if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return notGranted()
+        }
+        return try {
+            vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+            PluginResponse(true, "")
+        } catch (e: SecurityException) {
+            notGranted()
+        }
+    }
+
+    private fun notGranted(): PluginResponse {
+        if (!warned) {
+            warned = true
+            Log.w("mobiler", "haptics: android.permission.VIBRATE isn't granted — uncomment it in AndroidManifest.xml; haptic taps are skipped")
+        }
+        return PluginResponse(false, "VIBRATE permission not granted")
+    }
+
+    private companion object {
+        var warned = false
     }
 }
 
