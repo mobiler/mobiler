@@ -200,6 +200,7 @@ import coil3.compose.AsyncImage
 import dev.mobiler.barbershop.ui.theme.FadehouseTheme
 import dev.mobiler.barbershop.ui.theme.LocalPalette
 import dev.mobiler.barbershop.ui.theme.color
+import dev.mobiler.barbershop.ui.theme.applySpec
 import dev.mobiler.barbershop.shared.types.TonePair
 import dev.mobiler.barbershop.shared.types.A11yRole
 import dev.mobiler.barbershop.shared.types.Action
@@ -457,7 +458,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Text -> Text(
             text = widget.content,
             style = typographyFor(widget.style),
-            fontWeight = if (widget.style == ModelTextStyle.EMPHASIS) FontWeight.Medium else null,
+            // Emphasis is Medium unless the type scale sets its weight.
+            fontWeight = if (widget.style == ModelTextStyle.EMPHASIS && activeTheme?.typeScale?.emphasis == null) FontWeight.Medium else null,
             color = colorFor(widget.style),
             modifier = Modifier.padding(vertical = 2.dp),
         )
@@ -1263,7 +1265,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(sheet.title, style = MaterialTheme.typography.titleLarge)
+                        Text(sheet.title, style = activeTheme?.typeScale?.headline?.let { scaled(it, MaterialTheme.typography.titleLarge, true) } ?: MaterialTheme.typography.titleLarge)
                         Render(sheet.child, send)
                     }
                 }
@@ -1290,7 +1292,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         modifier = Modifier.fillMaxSize(),
                         topBar = {
                             CenterAlignedTopAppBar(
-                                title = { Text(widget.title) },
+                                // The type scale's `title` spec, else the app bar's own style.
+                                title = { activeTheme?.typeScale?.title?.let { Text(widget.title, style = scaled(it, MaterialTheme.typography.titleLarge, true)) } ?: Text(widget.title) },
                                 navigationIcon = {
                                     if (back != null) {
                                         IconButton(onClick = { send(Action.Fired(back)) }) {
@@ -1416,13 +1419,33 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 // ---------- Style-token mappings (the only place that decides concrete looks) ----------
 
 @Composable
-private fun typographyFor(style: ModelTextStyle): androidx.compose.ui.text.TextStyle = when (style) {
-    ModelTextStyle.BODY -> MaterialTheme.typography.bodyLarge
-    ModelTextStyle.TITLE -> MaterialTheme.typography.headlineMedium
-    ModelTextStyle.SUBTITLE -> MaterialTheme.typography.titleMedium
-    ModelTextStyle.CAPTION -> MaterialTheme.typography.bodySmall
-    ModelTextStyle.EMPHASIS -> MaterialTheme.typography.bodyLarge
+private fun typographyFor(style: ModelTextStyle): androidx.compose.ui.text.TextStyle {
+    val base = when (style) {
+        ModelTextStyle.BODY -> MaterialTheme.typography.bodyLarge
+        ModelTextStyle.TITLE -> MaterialTheme.typography.headlineMedium
+        ModelTextStyle.SUBTITLE -> MaterialTheme.typography.titleMedium
+        ModelTextStyle.CAPTION -> MaterialTheme.typography.bodySmall
+        ModelTextStyle.EMPHASIS -> MaterialTheme.typography.bodyLarge
+        ModelTextStyle.DISPLAY -> MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold)
+        ModelTextStyle.HEADLINE -> MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
+    }
+    val ts = activeTheme?.typeScale ?: return base
+    val (spec, tight) = when (style) {
+        ModelTextStyle.DISPLAY -> ts.display to true
+        ModelTextStyle.HEADLINE -> ts.headline to true
+        ModelTextStyle.TITLE -> ts.title to true
+        ModelTextStyle.SUBTITLE -> ts.subtitle to false
+        ModelTextStyle.BODY -> ts.body to false
+        ModelTextStyle.EMPHASIS -> ts.emphasis to false
+        ModelTextStyle.CAPTION -> ts.caption to false
+    }
+    return spec?.let { scaled(it, base, tight) } ?: base
 }
+
+/** A type-scale spec applied over `base` (see ui/theme applySpec). */
+@Composable
+private fun scaled(spec: dev.mobiler.barbershop.shared.types.TypeSpec, base: androidx.compose.ui.text.TextStyle, tight: Boolean): androidx.compose.ui.text.TextStyle =
+    applySpec(base, spec, tight, activeTheme?.font == dev.mobiler.barbershop.shared.types.FontFamily.CUSTOM, androidx.compose.ui.platform.LocalContext.current)
 
 @Composable
 private fun colorFor(style: ModelTextStyle): Color = when (style) {

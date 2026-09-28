@@ -14,6 +14,28 @@ private val baseBody = TextStyle(
     letterSpacing = 0.5.sp,
 )
 
+/** A type-scale spec as a Compose TextStyle over `base`: size in sp (follows the system font size),
+ *  weight (clamped, nearest 100), line height (1.25× for display/headline/title — `tight` — else 1.45×)
+ *  and, under FontFamily.CUSTOM, the synced display/body family. */
+fun applySpec(
+    base: androidx.compose.ui.text.TextStyle,
+    spec: dev.mobiler.barbershop.shared.types.TypeSpec,
+    tight: Boolean,
+    custom: Boolean,
+    context: android.content.Context,
+): androidx.compose.ui.text.TextStyle {
+    val w = ((spec.weight.toInt() + 50) / 100 * 100).coerceIn(100, 900)
+    val size = spec.size.toInt()
+    val role = if (spec.family == dev.mobiler.barbershop.shared.types.FamilyRole.DISPLAY) "display" else "body"
+    val family = if (custom) syncedFamily(context, role) else null
+    return base.copy(
+        fontSize = size.sp,
+        fontWeight = FontWeight(w),
+        lineHeight = (size * if (tight) 1.25f else 1.45f).sp,
+        fontFamily = family ?: base.fontFamily,
+    )
+}
+
 /** A synced font role (`mobiler fonts sync` → res/font/mobiler_<role>_<weight>), looked up by name so
  *  the shell compiles without it; null when the app synced none (the system font is used). */
 fun syncedFamily(context: android.content.Context, role: String): FontFamily? =

@@ -1369,6 +1369,8 @@ private fun typographyFor(style: ModelTextStyle): androidx.compose.ui.text.TextS
     ModelTextStyle.SUBTITLE -> MaterialTheme.typography.titleMedium
     ModelTextStyle.CAPTION -> MaterialTheme.typography.bodySmall
     ModelTextStyle.EMPHASIS -> MaterialTheme.typography.bodyLarge
+    ModelTextStyle.DISPLAY -> MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold)
+    ModelTextStyle.HEADLINE -> MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
 }
 
 @Composable
