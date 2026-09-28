@@ -32,9 +32,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub use mobiler_ui::{
     A11yRole, Action, Appearance, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
-    ChartSeries, ChartStyle, ChartTick, ColorRoles, Corner, Density, Fab, FieldKind, FontFamily, Icon,
+    ChartSeries, ChartStyle, ChartTick, ColorRoles, Corner, FamilyRole, Density, Fab, FieldKind, FontFamily, Icon,
     ImageRatio, ImageShape, InputValue, MapMarker, Palette, ProjectColor, Rgb, Rgba, Segment, Sheet, ShellLabels, Spacing, SwipeButton, Tab,
-    TextStyle, Theme, Tone, TonePair, Widget,
+    TextStyle, Theme, Tone, TonePair, TypeScale, TypeSpec, Widget,
 };
 
 // ============================ capabilities ============================
@@ -559,6 +559,13 @@ pub fn subtitle(content: impl Into<String>) -> Widget { styled(content, TextStyl
 pub fn caption(content: impl Into<String>) -> Widget { styled(content, TextStyle::Caption) }
 #[must_use]
 pub fn emphasis(content: impl Into<String>) -> Widget { styled(content, TextStyle::Emphasis) }
+/// The largest text — e.g. an appointment time. Defaults to 36 bold (the display font under
+/// `FontFamily::Custom`); `Theme.type_scale.display` overrides it.
+#[must_use]
+pub fn display(content: impl Into<String>) -> Widget { styled(content, TextStyle::Display) }
+/// A section/sheet heading. Defaults to 24 semibold; `Theme.type_scale.headline` overrides it.
+#[must_use]
+pub fn headline(content: impl Into<String>) -> Widget { styled(content, TextStyle::Headline) }
 
 #[must_use]
 pub fn image(source: impl Into<String>, shape: ImageShape, ratio: ImageRatio) -> Widget {
@@ -1766,6 +1773,13 @@ mod tests {
             ]
         );
         assert!(cx.requests.is_empty());
+    }
+
+    #[test]
+    fn display_and_headline_builders() {
+        assert!(matches!(display("x"), Widget::Text { style: TextStyle::Display, .. }));
+        assert!(matches!(headline("x"), Widget::Text { style: TextStyle::Headline, .. }));
+        let _ = (TypeScale::default(), TypeSpec::new(16, 400, FamilyRole::Body));
     }
 
     #[test]

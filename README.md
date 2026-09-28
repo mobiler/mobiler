@@ -278,6 +278,13 @@ segmented controls, search fields, and bottom sheets — plus native capabilitie
 shell-drawn text (back buttons, "Load more"/"Refresh", confirm/picker defaults, the
 PDF error text and web iframe titles) once, on the scaffold.
 
+A `Theme` can also carry a full **design system**: `palette` (light + dark colour roles — page, cards,
+bars, text, outlines, primary, status pairs), `font: FontFamily::Custom` with your own display and body
+font files (`mobiler.toml` `[fonts]`, synced into every shell by the CLI), and a `type_scale` (size,
+weight and font role per text style, including the `display(...)` / `headline(...)` styles).
+`with_appearance(Light | Dark | System)` follows the phone's light/dark setting live. Anything you
+leave unset keeps the stock look.
+
 **Fade House** ([`demos/barbershop`](demos/barbershop/)) — a barbershop booking demo: a
 brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar
 rail with ratings, and a tap-to-book bottom sheet with a date → time → confirm flow.

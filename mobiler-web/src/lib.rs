@@ -2240,7 +2240,10 @@ fn theme_css(t: &Theme, dark: bool) -> String {
     // Secondary brand color (for the CardStyle::Brand gradient); falls back to the seed.
     let (ar, ag, ab) = t.accent.map_or((r, g, b), |a| (a.r, a.g, a.b));
     // Custom fonts: titles use the display family (falling back to the body stack).
-    let display = if t.font == FontFamily::Custom { "--font-display:\"mobiler-display\", var(--font);" } else { "" };
+    let custom = t.font == FontFamily::Custom;
+    let display = if custom { "--font-display:\"mobiler-display\", var(--font);" } else { "" };
+    // The app's type scale: per-style size/weight/line-height (+ the font role under Custom).
+    let display = format!("{display}{}", t.type_scale.map(|ts| type_scale_css(&ts, custom)).unwrap_or_default());
     let base = format!(
         "--primary:rgb({r},{g},{b});--accent:rgb({r},{g},{b});\
          --accent2:rgb({ar},{ag},{ab});\
@@ -2328,6 +2331,35 @@ fn sync_page_bg(bg: Option<Rgb>) {
     }
 }
 
+/// `--ts-<style>-size/-weight/-lh[/-family]` for each style the scale sets (unset styles emit nothing,
+/// so `mobiler.css`'s current values stay in force). Sizes are rem (size ÷ 16), so browser text-size
+/// settings still scale them; weights are clamped to 100..=900 and rounded to the nearest 100.
+fn type_scale_css(ts: &mobiler_core::TypeScale, custom: bool) -> String {
+    use mobiler_core::FamilyRole;
+    let mut s = String::new();
+    for (name, spec, tight) in [
+        ("display", ts.display, true),
+        ("headline", ts.headline, true),
+        ("title", ts.title, true),
+        ("subtitle", ts.subtitle, false),
+        ("body", ts.body, false),
+        ("emphasis", ts.emphasis, false),
+        ("caption", ts.caption, false),
+    ] {
+        let Some(spec) = spec else { continue };
+        let rem = format!("{:.4}", f32::from(spec.size) / 16.0);
+        let rem = rem.trim_end_matches('0').trim_end_matches('.');
+        let weight = ((u32::from(spec.weight) + 50) / 100 * 100).clamp(100, 900);
+        let lh = if tight { "1.25" } else { "1.45" };
+        s.push_str(&format!("--ts-{name}-size:{rem}rem;--ts-{name}-weight:{weight};--ts-{name}-lh:{lh};"));
+        if custom {
+            let family = if spec.family == FamilyRole::Display { "var(--font-display)" } else { "var(--font)" };
+            s.push_str(&format!("--ts-{name}-family:{family};"));
+        }
+    }
+    s
+}
+
 /// Append `name:rgb(…);` for each name when the role is set.
 fn put_rgb(s: &mut String, names: &[&str], c: Option<Rgb>) {
     if let Some(c) = c {
@@ -2413,6 +2445,8 @@ fn text_class(s: TextStyle) -> &'static str {
         TextStyle::Caption => "t-caption",
         TextStyle::Emphasis => "t-emphasis",
         TextStyle::Body => "t-body",
+        TextStyle::Display => "t-display",
+        TextStyle::Headline => "t-headline",
     }
 }
 
@@ -2976,6 +3010,42 @@ mod palette_tests {
         assert!(css.contains("--font:\"mobiler-body\", system-ui"), "{css}");
         assert!(css.contains("--font-display:\"mobiler-display\", var(--font);"), "{css}");
         assert!(!theme_css(&Theme::default(), false).contains("--font-display"));
+    }
+
+    #[test]
+    fn theme_css_without_scale_is_unchanged() {
+        use mobiler_core::TypeScale;
+        let t = Theme { type_scale: Some(TypeScale::default()), ..Default::default() };
+        assert_eq!(theme_css(&t, false), theme_css(&Theme::default(), false));
+    }
+
+    #[test]
+    fn theme_css_emits_only_set_specs() {
+        use mobiler_core::{FamilyRole, TypeScale, TypeSpec};
+        let ts = TypeScale { display: Some(TypeSpec::new(36, 700, FamilyRole::Display)), ..Default::default() };
+        let css = theme_css(&Theme { type_scale: Some(ts), ..Default::default() }, false);
+        assert!(css.contains("--ts-display-size:2.25rem;--ts-display-weight:700;--ts-display-lh:1.25;"), "{css}");
+        assert!(!css.contains("--ts-body"));
+        assert!(!css.contains("--ts-display-family"), "family only under Custom");
+    }
+
+    #[test]
+    fn custom_font_scale_sets_the_family() {
+        use mobiler_core::{FamilyRole, TypeScale, TypeSpec};
+        let ts = TypeScale { caption: Some(TypeSpec::new(12, 400, FamilyRole::Body)), title: Some(TypeSpec::new(22, 600, FamilyRole::Display)), ..Default::default() };
+        let t = Theme { font: mobiler_core::FontFamily::Custom, type_scale: Some(ts), ..Default::default() };
+        let css = theme_css(&t, false);
+        assert!(css.contains("--ts-caption-size:0.75rem;--ts-caption-weight:400;--ts-caption-lh:1.45;--ts-caption-family:var(--font);"), "{css}");
+        assert!(css.contains("--ts-title-family:var(--font-display);"), "{css}");
+    }
+
+    #[test]
+    fn weights_are_clamped() {
+        use mobiler_core::{FamilyRole, TypeScale, TypeSpec};
+        let ts = TypeScale { body: Some(TypeSpec::new(16, 0, FamilyRole::Body)), title: Some(TypeSpec::new(22, 1000, FamilyRole::Display)), ..Default::default() };
+        let css = theme_css(&Theme { type_scale: Some(ts), ..Default::default() }, false);
+        assert!(css.contains("--ts-body-weight:100;") && css.contains("--ts-title-weight:900;"), "{css}");
+        assert!(css.contains("--ts-title-size:1.375rem;"), "{css}");
     }
 
     #[test]

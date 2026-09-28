@@ -1310,12 +1310,19 @@ private struct TextStyleMod: ViewModifier {
     init(_ s: TextStyle) { style = s }
     // The theme's font design (rounded/serif/mono); `.default` when un-themed.
     private var design: Font.Design { ActiveTheme.current?.fontDesign ?? .default }
+    // Re-render on a text-size change (the Display/Headline sizes are scaled by hand).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     func body(content: Content) -> some View {
+        let _ = dynamicTypeSize
         switch style {
         case .title: return AnyView(content.font(.system(.largeTitle, design: design).bold()))
         case .subtitle: return AnyView(content.font(.system(.title3, design: design).weight(.semibold)))
         case .caption: return AnyView(content.font(.system(.footnote, design: design)).foregroundColor(.secondary))
         case .emphasis: return AnyView(content.font(.system(.body, design: design).weight(.semibold)))
+        // Display/Headline: 36 bold / 24 semibold, scaled like their text styles (Font.system(size:) alone
+        // wouldn't follow Dynamic Type).
+        case .display: return AnyView(content.font(.system(size: UIFontMetrics(forTextStyle: .largeTitle).scaledValue(for: 36), weight: .bold, design: design)))
+        case .headline: return AnyView(content.font(.system(size: UIFontMetrics(forTextStyle: .title2).scaledValue(for: 24), weight: .semibold, design: design)))
         case .body: return AnyView(content.font(.system(.body, design: design)))
         }
     }

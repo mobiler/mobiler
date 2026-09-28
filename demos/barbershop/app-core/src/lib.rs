@@ -4,7 +4,7 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
-    A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance,
+    A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec,
     map, marker_titled, with_markers,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
@@ -1194,6 +1194,7 @@ impl MobilerApp for FadeHouse {
             // Space Grotesk titles + Roboto body, from mobiler.toml [fonts] (synced by the CLI).
             font: FontFamily::Custom,
             palette: Some(moj_termin_palette()),
+            type_scale: Some(moj_termin_type_scale()),
         };
         let tabs = vec![
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),
@@ -1354,6 +1355,20 @@ fn moj_termin_palette() -> Palette {
     Palette { light, dark }
 }
 
+/// The Moj Termin type scale: the big time 36, sheet headings 24, screen titles 22 (display family);
+/// body 16, secondary 14, captions 12 (body family).
+fn moj_termin_type_scale() -> TypeScale {
+    TypeScale {
+        display: Some(TypeSpec::new(36, 700, FamilyRole::Display)),
+        headline: Some(TypeSpec::new(24, 600, FamilyRole::Display)),
+        title: Some(TypeSpec::new(22, 600, FamilyRole::Display)),
+        subtitle: Some(TypeSpec::new(14, 500, FamilyRole::Body)),
+        body: Some(TypeSpec::new(16, 400, FamilyRole::Body)),
+        emphasis: Some(TypeSpec::new(16, 600, FamilyRole::Body)),
+        caption: Some(TypeSpec::new(12, 400, FamilyRole::Body)),
+    }
+}
+
 fn home(model: &Model) -> Widget {
     // Native: nearest-shop (geolocation) + connection status (connectivity).
     let nearby = if model.location.is_empty() && model.signal.is_empty() {
@@ -1389,6 +1404,9 @@ fn home(model: &Model) -> Widget {
             segment("System", model.appearance == Appearance::System, Msg::SetAppearance(Appearance::System)),
         ]),
         caption(format!("System: {}", if model.system_appearance.is_empty() { "…" } else { model.system_appearance.as_str() })),
+        // The type scale's big display time + a headline (the Moj Termin booking screen).
+        headline("Next booking"),
+        display("12:00 – 12:45"),
         row(vec![
             column(vec![caption("Welcome back"), emphasis("Marcus")]),
             spacer(Spacing::Md),
@@ -2389,6 +2407,14 @@ mod test {
         assert_eq!(model.search, "beard");
         app.update(Msg::SelectAudience(Audience::Kids), &mut model, &mut cx);
         assert_eq!(model.audience, Audience::Kids);
+    }
+
+    #[test]
+    fn barbershop_theme_carries_the_moj_termin_type_scale() {
+        let (app, model) = app();
+        let Widget::Scaffold { theme: Some(Theme { type_scale: Some(ts), .. }), .. } = app.view(&model) else { panic!("no type scale") };
+        assert_eq!(ts.display, Some(TypeSpec::new(36, 700, FamilyRole::Display)));
+        assert_eq!(ts.caption, Some(TypeSpec::new(12, 400, FamilyRole::Body)));
     }
 
     #[test]

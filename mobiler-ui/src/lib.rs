@@ -53,7 +53,7 @@ pub enum Action {
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum TextStyle { Body, Title, Subtitle, Caption, Emphasis }
+pub enum TextStyle { Body, Title, Subtitle, Caption, Emphasis, Display, Headline }
 
 /// Button emphasis. `Tonal` is the quieter filled secondary (M3 filled-tonal).
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -361,6 +361,9 @@ pub struct Theme {
     /// Explicit colour roles for light and dark (`dark_mode` picks the set). `None` = the shell's
     /// own colours, exactly as before; a role left `None` inside a set keeps the shell's colour too.
     pub palette: Option<Palette>,
+    /// Per-style size, weight and font role (see [`TypeScale`]). `None`, or a style left `None`, keeps
+    /// the shell's current look for that style.
+    pub type_scale: Option<TypeScale>,
 }
 
 /// `Theme::default()` matches the framework's un-themed look as closely as a theme can
@@ -375,9 +378,46 @@ impl Default for Theme {
             density: Density::Comfortable,
             font: FontFamily::System,
             palette: None,
+            type_scale: None,
         }
     }
 }
+
+/// The app's type scale: one optional [`TypeSpec`] per text style. `title` also sets the scaffold's
+/// top-bar title and `headline` the sheet titles. Sizes are sp/pt/px and still follow the platform's
+/// text-size accessibility setting.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct TypeScale {
+    pub display: Option<TypeSpec>,
+    pub headline: Option<TypeSpec>,
+    pub title: Option<TypeSpec>,
+    pub subtitle: Option<TypeSpec>,
+    pub body: Option<TypeSpec>,
+    pub emphasis: Option<TypeSpec>,
+    pub caption: Option<TypeSpec>,
+}
+
+/// One style's size (sp/pt/px), weight (100..=900, rounded to the nearest 100) and font role.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct TypeSpec {
+    pub size: u8,
+    pub weight: u16,
+    pub family: FamilyRole,
+}
+
+impl TypeSpec {
+    #[must_use]
+    pub const fn new(size: u8, weight: u16, family: FamilyRole) -> Self {
+        Self { size, weight, family }
+    }
+}
+
+/// Which synced font a [`TypeSpec`] uses under `FontFamily::Custom` (otherwise the theme's system font).
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum FamilyRole { Display, Body }
 
 /// A light and a dark set of colour roles — the design's tokens. See [`ColorRoles`].
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -882,6 +922,15 @@ mod tests {
             platform: "ios".to_string(),
             bundle_id: "rs.x".to_string(),
         });
+    }
+
+    #[test]
+    fn type_scale_and_new_styles_round_trip() {
+        let ts = TypeScale { display: Some(TypeSpec::new(36, 700, FamilyRole::Display)), ..Default::default() };
+        round_trips(&Theme { type_scale: Some(ts), ..Default::default() });
+        round_trips(&Widget::Text { content: "12:00".to_string(), style: TextStyle::Display });
+        round_trips(&Widget::Text { content: "Booking".to_string(), style: TextStyle::Headline });
+        assert_eq!(Theme::default().type_scale, None);
     }
 
     #[test]
