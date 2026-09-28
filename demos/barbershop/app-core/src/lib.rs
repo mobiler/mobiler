@@ -1195,6 +1195,7 @@ impl MobilerApp for FadeHouse {
             font: FontFamily::Custom,
             palette: Some(moj_termin_palette()),
             type_scale: Some(moj_termin_type_scale()),
+            shapes: None,
         };
         let tabs = vec![
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),

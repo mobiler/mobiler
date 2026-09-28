@@ -364,6 +364,9 @@ pub struct Theme {
     /// Per-style size, weight and font role (see [`TypeScale`]). `None`, or a style left `None`, keeps
     /// the shell's current look for that style.
     pub type_scale: Option<TypeScale>,
+    /// Per-component corner radii (see [`Shapes`]). `None`, or a component left `None`, keeps the
+    /// shell's current shape for it.
+    pub shapes: Option<Shapes>,
 }
 
 /// `Theme::default()` matches the framework's un-themed look as closely as a theme can
@@ -379,8 +382,34 @@ impl Default for Theme {
             font: FontFamily::System,
             palette: None,
             type_scale: None,
+            shapes: None,
         }
     }
+}
+
+/// A corner radius per component. `sheet_top` rounds only the bottom sheet's top corners.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct Shapes {
+    /// Every card style, including tappable cards.
+    pub card: Option<Radius>,
+    /// Every button style, including toned and `Density::Large` buttons.
+    pub button: Option<Radius>,
+    pub fab: Option<Radius>,
+    pub sheet_top: Option<Radius>,
+    pub chip: Option<Radius>,
+    pub badge: Option<Radius>,
+    /// Text and search fields.
+    pub input: Option<Radius>,
+}
+
+/// A corner radius: `Dp(n)` (dp/pt/px), or `Pill` — fully round (half the component's height), at
+/// any density.
+#[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum Radius {
+    Dp(u8),
+    Pill,
 }
 
 /// The app's type scale: one optional [`TypeSpec`] per text style. `title` also sets the scaffold's
@@ -922,6 +951,13 @@ mod tests {
             platform: "ios".to_string(),
             bundle_id: "rs.x".to_string(),
         });
+    }
+
+    #[test]
+    fn shapes_round_trip() {
+        let shapes = Shapes { card: Some(Radius::Dp(12)), button: Some(Radius::Pill), ..Default::default() };
+        round_trips(&Theme { shapes: Some(shapes), ..Default::default() });
+        assert_eq!(Theme::default().shapes, None);
     }
 
     #[test]
