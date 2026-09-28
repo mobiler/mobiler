@@ -56,7 +56,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(
             Text(label).font(.footnote.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 5)
-                .background(bg).foregroundColor(fg).clipShape(Capsule())
+                .background(bg).foregroundColor(fg).clipShape(ShapeTokens.shape(ShapeTokens.shapes?.badge) ?? AnyShape(Capsule()))
         )
 
     case .colorDot(let color):
@@ -233,8 +233,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 }
                 .background(selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.18)) : role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
                 .foregroundColor(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : role(pal?.onSurface, else: .primary))
-                .overlay(Capsule().stroke(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : .clear))
-                .clipShape(Capsule())
+                .overlay((ShapeTokens.shape(ShapeTokens.shapes?.chip) ?? AnyShape(Capsule())).stroke(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : .clear))
+                .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.chip) ?? AnyShape(Capsule()))
             }.buttonStyle(.plain)
         )
 
@@ -287,7 +287,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
-            .clipShape(Capsule())
+            .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.input) ?? AnyShape(Capsule()))
         )
 
     case .segmented(let segments):
@@ -477,17 +477,42 @@ private struct PaletteText: ViewModifier {
         if let c = pal?.onSurface { content.foregroundColor(c.color) } else { content }
     }
 }
+/// Theme.shapes per component: the set radius as a shape (`Pill` = capsule, `Dp(n)` = n pt), else nil
+/// so the site keeps its own shape.
+enum ShapeTokens {
+    static var shapes: Shapes? { ActiveTheme.current?.shapes }
+    static func shape(_ r: Radius?) -> AnyShape? {
+        switch r {
+        case .none: return nil
+        case .some(.pill): return AnyShape(Capsule())
+        case .some(.dp(let n)): return AnyShape(RoundedRectangle(cornerRadius: CGFloat(n)))
+        }
+    }
+    /// The radius in points for shapes that need a number (Pill → effectively round).
+    static func points(_ r: Radius) -> CGFloat {
+        switch r {
+        case .pill: return 999
+        case .dp(let n): return CGFloat(n)
+        }
+    }
+    static var button: AnyShape { shape(shapes?.button) ?? AnyShape(Capsule()) }
+}
+
 /// Text fields: with a palette's `surface_muted`, a plain field on that fill with an `outline` border
 /// (`.roundedBorder` can't be recoloured); otherwise the system rounded border, as before.
 private struct PaletteFieldStyle: ViewModifier {
     @Environment(\.paletteRoles) private var paletteRoles
     @ViewBuilder func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
-        if let fill = pal?.surfaceMuted {
+        // `.roundedBorder` can't take another radius either: an `input` radius also switches to a plain
+        // field with its own shape.
+        let inputShape = ShapeTokens.shape(ShapeTokens.shapes?.input)
+        if pal?.surfaceMuted != nil || inputShape != nil {
+            let shape = inputShape ?? AnyShape(RoundedRectangle(cornerRadius: 8))
             content.textFieldStyle(.plain)
                 .padding(.horizontal, 10).padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 8).fill(fill.color))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(role(pal?.outline, else: .clear)))
+                .background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemFill))))
+                .overlay(shape.stroke(role(pal?.outline, else: Color.gray.opacity(0.3))))
         } else {
             content.textFieldStyle(.roundedBorder)
         }
@@ -1305,7 +1330,8 @@ private struct ScaffoldView: View {
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(role(pal?.surface, else: Color(.systemBackground)))
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    // Theme.shapes `sheet_top` rounds the top corners only (the bottom keeps 20).
+                    .clipShape(ShapeTokens.shapes?.sheetTop.map { r in AnyShape(UnevenRoundedRectangle(topLeadingRadius: ShapeTokens.points(r), bottomLeadingRadius: 20, bottomTrailingRadius: 20, topTrailingRadius: ShapeTokens.points(r))) } ?? AnyShape(RoundedRectangle(cornerRadius: 20)))
                 }
                 .transition(.opacity)
             }
@@ -1394,7 +1420,7 @@ private struct ScaffoldView: View {
                             .frame(width: 56, height: 56)
                             .background(role(pal?.fab, else: theme?.brandColor ?? .accentColor))
                             .foregroundColor(role(pal?.onFab, else: .white))
-                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.fab) ?? AnyShape(RoundedRectangle(cornerRadius: 18)))
                             .shadow(radius: 6, y: 3)
                     }
                     .padding(18)
@@ -1590,10 +1616,21 @@ private struct ButtonStyleMod: ViewModifier {
     init(_ s: SharedTypes.ButtonStyle, tint: Color = .accentColor) { style = s; self.tint = tint }
     func body(content: Content) -> some View {
         switch style {
-        case .filled: return AnyView(content.buttonStyle(.borderedProminent))
-        case .outlined: return AnyView(content.buttonStyle(.bordered))
+        case .filled: return AnyView(content.buttonStyle(.borderedProminent).modifier(ButtonShapeMod()))
+        case .outlined: return AnyView(content.buttonStyle(.bordered).modifier(ButtonShapeMod()))
         case .text: return AnyView(content.buttonStyle(.borderless))
         case .tonal: return AnyView(content.buttonStyle(TonalButtonStyle(color: tint)))
+        }
+    }
+}
+
+/// A Theme.shapes `button` radius on the system bordered styles; no radius → unchanged.
+private struct ButtonShapeMod: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        switch ShapeTokens.shapes?.button {
+        case .none: content
+        case .some(.pill): content.buttonBorderShape(.capsule)
+        case .some(.dp(let n)): content.buttonBorderShape(.roundedRectangle(radius: CGFloat(n)))
         }
     }
 }
@@ -1607,7 +1644,7 @@ private struct TonalButtonStyle: SwiftUI.ButtonStyle {
             .padding(.horizontal, 14).padding(.vertical, 7)
             .foregroundColor(color)
             .background(color.opacity(0.18))
-            .clipShape(Capsule())
+            .clipShape(ShapeTokens.button)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -1627,9 +1664,9 @@ private struct PaletteButtonStyle: SwiftUI.ButtonStyle {
             .frame(minHeight: large ? 56 : nil)
             .foregroundColor(fg)
             .background(fill)
-            .overlay(Capsule().stroke(stroke, lineWidth: 1))
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            .overlay(ShapeTokens.button.stroke(stroke, lineWidth: 1))
+            .clipShape(ShapeTokens.button)
+            .contentShape(ShapeTokens.button)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -1654,9 +1691,9 @@ private struct LargeButtonStyle: SwiftUI.ButtonStyle {
             .frame(minHeight: 56)
             .foregroundColor(fg)
             .background(fill)
-            .overlay(Capsule().stroke(stroke, lineWidth: 1))
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            .overlay(ShapeTokens.button.stroke(stroke, lineWidth: 1))
+            .clipShape(ShapeTokens.button)
+            .contentShape(ShapeTokens.button)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -1667,7 +1704,7 @@ private struct CardMod: ViewModifier {
     @Environment(\.paletteRoles) private var paletteRoles
     func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
-        let shape = RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14)
+        let shape = ShapeTokens.shape(ShapeTokens.shapes?.card) ?? AnyShape(RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14))
         switch style {
         case .elevated:
             return AnyView(content.background(shape.fill(role(pal?.surface, else: Color(.secondarySystemBackground))))
