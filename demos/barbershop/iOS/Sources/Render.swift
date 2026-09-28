@@ -1205,7 +1205,6 @@ private struct ScaffoldView: View {
         }
         .background(role(pal?.background, else: .clear).ignoresSafeArea())
         .modifier(PaletteText())
-        .environment(\.paletteRoles, pal)
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
         .tint(pal?.primary?.color ?? theme?.brandColor)
@@ -1245,6 +1244,9 @@ private struct ScaffoldView: View {
                 .transition(.opacity)
             }
         }
+        // The palette in the environment for everything above — the sheet overlay included, so a
+        // System OS flip re-renders sheet content too.
+        .environment(\.paletteRoles, pal)
     }
 
     // Top bar + scrollable body, optionally with the phone's bottom tab-bar.

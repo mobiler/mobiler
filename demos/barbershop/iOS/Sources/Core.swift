@@ -185,6 +185,7 @@ final class AppearanceBridge {
     private var registration: (any UITraitChangeRegistration)?
     private weak var registeredScene: UIWindowScene?
     private var last: String?
+    private var activation: NSObjectProtocol?
 
     static func scene() -> UIWindowScene? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -201,16 +202,33 @@ final class AppearanceBridge {
         sinks[id] = sink
         let now = Self.name(Self.osDark())
         sink(now)
-        if registration == nil, let scene = Self.scene() {
-            last = now
-            registeredScene = scene
-            registration = scene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
-                self?.changed(Self.name(scene.traitCollection.userInterfaceStyle == .dark))
+        if last == nil { last = now }
+        registerIfNeeded()
+        if activation == nil {
+            // A scene that (re)activates — first launch, reconnect after a long background, iPad
+            // multi-window — gets the registration, and a change made meanwhile is delivered.
+            activation = NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.registerIfNeeded()
+                    self?.changed(Self.name(Self.osDark()))
+                }
             }
         }
         return id
     }
+    /// Register on the current scene if it isn't the one already registered (none yet, or replaced).
+    private func registerIfNeeded() {
+        guard !sinks.isEmpty, let scene = Self.scene(), scene !== registeredScene else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
+        registeredScene = scene
+        registration = scene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
+            self?.changed(Self.name(scene.traitCollection.userInterfaceStyle == .dark))
+        }
+    }
     private func changed(_ value: String) {
+        // iOS flips traits while it snapshots a backgrounded app for the switcher — ignore those; the
+        // activation observer re-reads the real value when the app comes back.
+        guard UIApplication.shared.applicationState != .background else { return }
         guard value != last else { return }
         last = value
         for sink in sinks.values { sink(value) }
@@ -223,6 +241,8 @@ final class AppearanceBridge {
         registration = nil
         registeredScene = nil
         last = nil
+        if let a = activation { NotificationCenter.default.removeObserver(a) }
+        activation = nil
     }
 }
 

@@ -320,7 +320,7 @@ fun App(core: Core = viewModel()) {
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
     activeTheme = appTheme
     ActiveLabels.current = (view as? Widget.Scaffold)?.labels
-    // With a palette the system-bar icons follow `dark_mode` (the app's own dark flag), not the OS.
+    // With a palette the system-bar icons follow the resolved `dark` (appearance / dark_mode), not the OS.
     // If a palette goes away at runtime, restore the default (OS-following) bars once.
     val hasPalette = appTheme?.palette != null
     val activity = androidx.compose.ui.platform.LocalContext.current as? PaletteActivity

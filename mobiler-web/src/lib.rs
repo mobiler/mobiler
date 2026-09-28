@@ -199,11 +199,17 @@ where
     };
 
     // `Appearance::System` follows the OS: re-render the current view when the OS colour scheme
-    // changes, so the scaffold re-reads it. Page-lifetime listener, like the shell itself.
+    // changes, so the scaffold re-reads it — only when the root actually follows the OS. Page-lifetime
+    // listener, like the shell itself; the closure holds the MediaQueryList so it stays alive.
     if let Some(mql) = dark_query() {
         let core = core.clone();
+        let keep = mql.clone();
         let on_change = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_e: web_sys::Event| {
-            set_view.set(core.view());
+            let _ = &keep;
+            let v = core.view();
+            if matches!(v, Widget::Scaffold { appearance: Some(mobiler_core::Appearance::System), .. }) {
+                set_view.set(v);
+            }
         });
         let _ = mql.add_event_listener_with_callback("change", wasm_bindgen::JsCast::unchecked_ref(on_change.as_ref()));
         on_change.forget();
@@ -2116,6 +2122,9 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
             // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
             let theme_style = theme.as_ref().map(|t| theme_css(t, dark)).unwrap_or_default();
+            // An open confirm copied the scaffold's theme when it opened; keep it in step (e.g. an OS
+            // light/dark flip under `Appearance::System` while it is open).
+            sync_confirm_theme(&theme_style, dark, large);
             // A palette's page background also paints the page behind the scaffold (wide viewports,
             // overscroll): `--bg` on <html> is what `body` reads, and body's background fills the canvas.
             let page_bg = theme.as_ref().and_then(|t| t.palette).and_then(|p| if dark { p.dark } else { p.light }.background);
@@ -2241,6 +2250,25 @@ fn theme_css(t: &Theme, dark: bool) -> String {
         }
         None => base,
     }
+}
+
+/// Re-apply the scaffold's theme (inline vars + dark / Large-density classes) to an open confirm
+/// dialog, which copies them once when it opens (`confirm_modal`).
+fn sync_confirm_theme(style: &str, dark: bool, large: bool) {
+    let Some(scrim) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.query_selector(".confirm-scrim").ok().flatten())
+    else {
+        return;
+    };
+    if style.is_empty() {
+        let _ = scrim.remove_attribute("style");
+    } else {
+        let _ = scrim.set_attribute("style", style);
+    }
+    let classes = scrim.class_list();
+    let _ = classes.toggle_with_force("theme-dark", dark);
+    let _ = classes.toggle_with_force("density-large", large);
 }
 
 /// The OS colour scheme (`prefers-color-scheme: dark`); false where there is no window.
