@@ -159,7 +159,9 @@ class AppearancePlugin(private val app: Application) : MobilerPlugin {
             trySend(PluginResponse(true, last))
             val cb = object : android.content.ComponentCallbacks {
                 override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-                    val now = nightName(newConfig)
+                    // The system configuration, as for the first value (it is already updated when
+                    // Application callbacks run) — not the app's, which could carry an app-level override.
+                    val now = nightName(android.content.res.Resources.getSystem().configuration)
                     if (now != last) { last = now; trySend(PluginResponse(true, now)) }
                 }
                 @Deprecated("Deprecated in Java")
