@@ -506,6 +506,8 @@ enum ToastPlugin {
         let seconds: Double
     }
     var current: Request?
+    /// ScaffoldViews on screen: the timeout runs in `SnackbarView`, so with none there'd be no end.
+    @ObservationIgnored var hosts = 0
     @ObservationIgnored private var answer: ((String) -> Void)?
     @ObservationIgnored private var nextId = 0
 
@@ -538,7 +540,11 @@ enum SnackbarPlugin {
         let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
         let text = obj?["text"] as? String ?? ""
         let action = (obj?["action_label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let seconds: Double = (obj?["duration"] as? String) == "long" ? 10 : 4
+        var seconds: Double = (obj?["duration"] as? String) == "long" ? 10 : 4
+        // VoiceOver needs time to reach the action (Android's M3 host lengthens it the same way).
+        if action != nil && UIAccessibility.isVoiceOverRunning { seconds = max(seconds, 10) }
+        // No scaffold on screen → nothing to show it on, and nothing would ever time it out.
+        if SnackbarHost.shared.hosts == 0 { return PluginResponse(ok: false, output: "timeout") }
         let outcome: String = await withCheckedContinuation { cont in
             SnackbarHost.shared.show(text: text, action: action, seconds: seconds) { cont.resume(returning: $0) }
         }

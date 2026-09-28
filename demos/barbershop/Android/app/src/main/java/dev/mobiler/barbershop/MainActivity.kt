@@ -1298,6 +1298,11 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             }
                         }
                     }
+                    // cx.snackbar needs a composed host to time out; count this one while it's on screen.
+                    DisposableEffect(Unit) {
+                        SnackbarBus.hosts++
+                        onDispose { SnackbarBus.hosts-- }
+                    }
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         // cx.snackbar — M3 stacks it above the bottom bar and the FAB.

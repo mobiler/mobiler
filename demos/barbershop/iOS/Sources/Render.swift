@@ -1311,6 +1311,9 @@ private struct ScaffoldView: View {
         )
         // After each route settles, record its depth for the next transition.
         .task(id: route) { prevDepth = depth }
+        // cx.snackbar draws inside a scaffold; count the ones on screen (see SnackbarHost.hosts).
+        .onAppear { SnackbarHost.shared.hosts += 1 }
+        .onDisappear { SnackbarHost.shared.hosts -= 1 }
         // Modal bottom sheet — a scrim (tap to dismiss) + a panel from the bottom.
         .overlay {
             if let sheet = sheet {
@@ -1432,7 +1435,7 @@ private struct ScaffoldView: View {
             }
             // cx.snackbar — bottom-centre over the body (which ends above the tab bar), lifted above the FAB.
             .overlay(alignment: .bottom) {
-                SnackbarView(brand: theme?.brandColor)
+                SnackbarView(seed: theme?.seed)
                     .padding(.bottom, fab != nil ? 56 + 18 + 12 : 12)
             }
 
@@ -2347,7 +2350,7 @@ struct WebKitWebView: UIViewRepresentable {
 /// The snackbar from `SnackbarHost` (cx.snackbar): inverse colours (on_surface / surface / primary
 /// from the palette), an optional action button, a timer, and a downward swipe to dismiss.
 struct SnackbarView: View {
-    let brand: Color?
+    let seed: Rgb?
     @Environment(\.paletteRoles) private var paletteRoles
 
     var body: some View {
@@ -2362,7 +2365,7 @@ struct SnackbarView: View {
                     if let action = r.action {
                         Button(action) { SnackbarHost.shared.finish("action", id: r.id) }
                             .font(.subheadline.weight(.semibold))
-                            .foregroundColor(role(pal?.primary, else: brand ?? .accentColor))
+                            .foregroundColor(actionColor)
                     }
                 }
                 .padding(.vertical, 12)
@@ -2388,5 +2391,13 @@ struct SnackbarView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: SnackbarHost.shared.current?.id)
+    }
+
+    /// An inverse primary: the brand halfway toward the bar's text colour (the palette's surface, else
+    /// white on the default dark bar), so it reads on the inverted background.
+    private var actionColor: Color {
+        guard let p = pal?.primary ?? seed else { return .accentColor }
+        let toward = pal?.surface.map { (Double($0.r), Double($0.g), Double($0.b)) } ?? (255, 255, 255)
+        return Color(red: (Double(p.r) + toward.0) / 510, green: (Double(p.g) + toward.1) / 510, blue: (Double(p.b) + toward.2) / 510)
     }
 }

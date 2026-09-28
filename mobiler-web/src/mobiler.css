@@ -601,4 +601,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   font-family: var(--font); font-size: 14px; line-height: 1.4; }
 .snackbar-text { flex: 1; }
 .snackbar-action { background: none; border: none; padding: 8px; margin: -8px -8px -8px 0;
-  color: var(--primary); font: inherit; font-weight: 600; cursor: pointer; }
+  color: var(--primary); font: inherit; font-weight: 600; cursor: pointer;
+  /* An inverse primary: the brand colour halfway toward the bar's text colour, so it reads on the
+     inverted background (plain primary on on-surface is ~2:1). */
+  color: color-mix(in srgb, var(--primary) 50%, var(--surface)); }

@@ -1223,6 +1223,14 @@ impl SnackbarAsk {
     }
 }
 
+/// How far above the viewport bottom the snackbar sits: 12px above the highest bottom-anchored piece of
+/// chrome (the FAB, the bottom tab bar), given their rect tops. Only tops in the lower half count — on
+/// a wide screen the tab bar is a left rail with top 0, which must not push the bar off the top.
+fn snackbar_lift(vh: f64, tops: &[f64]) -> f64 {
+    let limit = tops.iter().copied().filter(|t| *t > vh / 2.0).fold(vh, f64::min);
+    (vh - limit).max(0.0) + 12.0
+}
+
 type SnackbarTx = std::rc::Rc<std::cell::RefCell<Option<futures_channel::oneshot::Sender<&'static str>>>>;
 
 /// The snackbar on screen: its element and how to answer it (a newer snackbar answers "replaced").
@@ -1263,7 +1271,8 @@ async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
     }
     let _ = bar.set_attribute("role", "status");
     let _ = bar.set_attribute("aria-live", "polite");
-    text.set_text_content(Some(&ask.text));
+    // The text goes in a moment after the live region is in the DOM: screen readers announce a
+    // polite region's changes, not content it was inserted with.
     let _ = bar.append_child(&text);
     let action = ask.action_label.as_deref().and_then(|label| {
         let b = el("button", "snackbar-action")?;
@@ -1284,8 +1293,14 @@ async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
     // Sit 12px above whatever is lowest on screen of the FAB and the tab bar (or the viewport).
     let vh = window.inner_height().ok().and_then(|h| h.as_f64()).unwrap_or(0.0);
     let top_of = |sel: &str| doc.query_selector(sel).ok().flatten().map(|e| e.get_bounding_client_rect().top());
-    let limit = [top_of(".fab"), top_of(".tabbar")].into_iter().flatten().fold(vh, f64::min);
-    let _ = bar.style().set_property("bottom", &format!("calc({}px + env(safe-area-inset-bottom, 0px))", (vh - limit).max(0.0) + 12.0));
+    let tops: Vec<f64> = [top_of(".fab"), top_of(".tabbar")].into_iter().flatten().collect();
+    let lift = snackbar_lift(vh, &tops);
+    // Only the bare-viewport case needs the safe-area inset; the FAB and tab bar already sit above it.
+    let bottom = if lift > 12.0 { format!("{lift}px") } else { format!("calc({lift}px + env(safe-area-inset-bottom, 0px))") };
+    let _ = bar.style().set_property("bottom", &bottom);
+    let announce = ask.text.clone();
+    let text_el = text.clone();
+    gloo_timers::callback::Timeout::new(100, move || text_el.set_text_content(Some(&announce))).forget();
 
     let (tx, rx) = futures_channel::oneshot::channel::<&'static str>();
     let tx: SnackbarTx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
@@ -3250,5 +3265,16 @@ mod snackbar_tests {
         assert_eq!((b.action_label, b.ms), (None, 4_000));
         assert_eq!(SnackbarAsk::parse(r#"{"text":"x","action_label":""}"#).action_label, None);
         assert_eq!(SnackbarAsk::parse("garbage").ms, 4_000);
+    }
+
+    #[test]
+    fn snackbar_lift_clears_only_bottom_anchored_chrome() {
+        // Phone: FAB top 775, bottom tab bar top 862 → 12px above the FAB.
+        assert_eq!(snackbar_lift(915.0, &[775.0, 862.0]), 915.0 - 775.0 + 12.0);
+        // Wide layout: the tab bar is a left rail (top 0) — ignored, not "above the viewport".
+        assert_eq!(snackbar_lift(900.0, &[0.0]), 12.0);
+        assert_eq!(snackbar_lift(900.0, &[0.0, 760.0]), 900.0 - 760.0 + 12.0);
+        // Nothing on screen → just the gap.
+        assert_eq!(snackbar_lift(900.0, &[]), 12.0);
     }
 }

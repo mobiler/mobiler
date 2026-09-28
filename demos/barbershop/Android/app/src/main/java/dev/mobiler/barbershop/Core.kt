@@ -24,7 +24,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.channels.awaitClose
@@ -302,17 +306,20 @@ class DialogPlugin : MobilerPlugin {
     }
 }
 
-/** The scaffold's snackbar host (MainActivity passes it to the M3 Scaffold). `seq` numbers each show,
- *  so a call whose snackbar was dismissed for a newer one can tell it was replaced. */
+/** The scaffold's snackbar host (MainActivity passes it to the M3 Scaffold). `current` is the show in
+ *  flight (showing, or still waiting on the host's queue), so a newer snackbar can cancel it; `hosts`
+ *  counts the composed Scaffolds — M3 runs the timeout in the host, so with none there'd be no end. */
 object SnackbarBus {
     val state = SnackbarHostState()
-    var seq = 0
+    var current: Job? = null
+    var hosts = 0
 }
 
 /** Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
  *  "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout" | "replaced"
  *  (M3 snackbars aren't swipeable, so there's no "dismissed" here). A newer snackbar replaces a
- *  visible one — M3 would queue it. */
+ *  visible or queued one — M3 would queue it. With no Scaffold on screen it resolves "timeout" at
+ *  once (nothing to show it on). */
 class SnackbarPlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         if (op != "show") return PluginResponse(false, "unknown op '$op'")
@@ -320,13 +327,19 @@ class SnackbarPlugin : MobilerPlugin {
         val label = obj.optString("action_label").ifEmpty { null }
         val duration = if (obj.optString("duration") == "long") SnackbarDuration.Long else SnackbarDuration.Short
         return withContext(Dispatchers.Main) {
-            val mine = ++SnackbarBus.seq
-            SnackbarBus.state.currentSnackbarData?.dismiss() // one at a time: the older call answers "replaced"
-            val result = SnackbarBus.state.showSnackbar(obj.optString("text"), actionLabel = label, duration = duration)
-            when {
-                result == SnackbarResult.ActionPerformed -> PluginResponse(true, "action")
-                SnackbarBus.seq != mine -> PluginResponse(false, "replaced")
-                else -> PluginResponse(false, "timeout")
+            if (SnackbarBus.hosts == 0) return@withContext PluginResponse(false, "timeout")
+            // One at a time: cancelling the older show (on screen, or queued on the host's mutex)
+            // removes it and makes that call answer "replaced".
+            SnackbarBus.current?.cancel()
+            val show = async { SnackbarBus.state.showSnackbar(obj.optString("text"), actionLabel = label, duration = duration) }
+            SnackbarBus.current = show
+            try {
+                if (show.await() == SnackbarResult.ActionPerformed) PluginResponse(true, "action") else PluginResponse(false, "timeout")
+            } catch (e: CancellationException) {
+                if (!isActive) throw e // this call itself was cancelled, not replaced
+                PluginResponse(false, "replaced")
+            } finally {
+                if (SnackbarBus.current === show) SnackbarBus.current = null
             }
         }
     }
