@@ -84,7 +84,7 @@ body {
 .scroller > .scroller-end { flex: 0 0 32px; }
 
 /* Search field — leading magnifier + pill input. */
-.searchfield { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--outline, var(--line)); border-radius: 999px; padding: 8px 14px; }
+.searchfield { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--outline, var(--line)); border-radius: var(--r-input, 999px); padding: 8px 14px; }
 .search-icon { color: var(--muted); }
 .search-input { flex: 1; border: none; background: transparent; outline: none; font: inherit; color: var(--ink); }
 
@@ -112,7 +112,7 @@ body {
 .sheet-scrim { position: fixed; inset: 0; background: var(--scrim, rgba(0,0,0,0.45)); z-index: 20; }
 .sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
-  background: var(--surface); border-radius: 20px 20px 0 0; padding: 12px 18px 28px;
+  background: var(--surface); border-radius: var(--r-sheet-top, 20px) var(--r-sheet-top, 20px) 0 0; padding: 12px 18px 28px;
   box-shadow: 0 -8px 28px rgba(0,0,0,0.28); max-height: 80%; overflow-y: auto;
   animation: sheet-rise 0.24s ease;
 }
@@ -129,7 +129,7 @@ body {
 .confirm-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
 .card {
-  border-radius: var(--radius);
+  border-radius: var(--r-card, var(--radius));
   padding: 14px;
   background: var(--surface);
 }
@@ -201,7 +201,7 @@ body {
 
 .badge {
   display: inline-block;
-  border-radius: 999px;
+  border-radius: var(--r-badge, 999px);
   padding: 4px 12px;
   font-size: 13px;
   font-weight: 600;
@@ -326,7 +326,7 @@ body {
 /* ---- input / actions ---- */
 .btn {
   border: none;
-  border-radius: 999px;
+  border-radius: var(--r-button, 999px);
   padding: 10px 18px;
   font-size: 15px;
   font-weight: 600;
@@ -360,7 +360,7 @@ body {
 
 .chip {
   border: none;
-  border-radius: 999px;
+  border-radius: var(--r-chip, 999px);
   padding: 7px 14px;
   font-size: 14px;
   background: var(--surface-2);
@@ -375,7 +375,7 @@ body {
   width: 100%;
   padding: 11px 13px;
   border: 1px solid var(--outline, var(--line));
-  border-radius: 10px;
+  border-radius: var(--r-input, 10px);
   font-size: 15px;
   background: var(--field-bg, var(--surface));
   color: var(--ink);
@@ -465,7 +465,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 /* Floating action button — raised primary action, pinned bottom-right over the body. */
 .fab {
   position: fixed; right: 18px; bottom: 84px; z-index: 5;
-  width: 56px; height: 56px; border: none; border-radius: 18px;
+  width: 56px; height: 56px; border: none; border-radius: var(--r-fab, 18px);
   background: var(--fab, var(--primary)); color: var(--on-fab, #fff); font-size: 24px; line-height: 1;
   box-shadow: 0 6px 18px rgba(0,0,0,0.28); cursor: pointer;
   display: flex; align-items: center; justify-content: center;

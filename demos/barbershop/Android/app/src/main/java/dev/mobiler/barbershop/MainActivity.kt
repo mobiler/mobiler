@@ -101,6 +101,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -201,6 +202,7 @@ import dev.mobiler.barbershop.ui.theme.FadehouseTheme
 import dev.mobiler.barbershop.ui.theme.LocalPalette
 import dev.mobiler.barbershop.ui.theme.color
 import dev.mobiler.barbershop.ui.theme.applySpec
+import dev.mobiler.barbershop.ui.theme.radiusShape
 import dev.mobiler.barbershop.shared.types.TonePair
 import dev.mobiler.barbershop.shared.types.A11yRole
 import dev.mobiler.barbershop.shared.types.Action
@@ -479,7 +481,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Badge -> {
             val (bg, fg) = toneColors(widget.tone)
             Box(
-                modifier = Modifier.background(color = bg, shape = RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.background(color = bg, shape = shapeOf { it.badge } ?: RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
             ) { Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg) }
         }
 
@@ -976,21 +978,21 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             else Modifier
             val mod = Modifier.fillMaxWidth().then(clickMod)
             when (widget.style) {
-                CardStyle.OUTLINED -> OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
+                CardStyle.OUTLINED -> OutlinedCard(modifier = mod, shape = shapeOf { it.card } ?: CardDefaults.outlinedShape) { CardBody(widget.child, send) }
                 CardStyle.FILLED -> {
                     val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    Card(modifier = mod, colors = colors) { CardBody(widget.child, send) }
+                    Card(modifier = mod, colors = colors, shape = shapeOf { it.card } ?: CardDefaults.shape) { CardBody(widget.child, send) }
                 }
                 CardStyle.ELEVATED -> {
                     val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                    Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                    Card(modifier = mod, elevation = elev, shape = shapeOf { it.card } ?: CardDefaults.shape) { CardBody(widget.child, send) }
                 }
                 CardStyle.BRAND -> {
                     // Brand gradient (seed → accent, via the M3 primary → secondary scheme).
                     val cs = MaterialTheme.colorScheme
                     val grad = Brush.linearGradient(listOf(cs.primary, cs.secondary))
                     val brandMod = Modifier.fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
+                        .clip(shapeOf { it.card } ?: MaterialTheme.shapes.medium)
                         .background(grad)
                         .then(clickMod)
                     Box(modifier = brandMod) {
@@ -1160,6 +1162,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         }
 
         is Widget.Chip -> FilterChip(
+            shape = shapeOf { it.chip } ?: FilterChipDefaults.shape,
             selected = widget.selected,
             onClick = { send(Action.Fired(widget.onPress)) },
             label = { Text(widget.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) },
@@ -1183,6 +1186,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val sync = remember(widget.id) { FieldSync(widget.value) }
             SideEffect { sync.onAppValue(widget.value) }
             OutlinedTextField(
+                shape = shapeOf { it.input } ?: OutlinedTextFieldDefaults.shape,
                 value = sync.field,
                 onValueChange = { sync.onEdit(it) { t -> send(Action.Input(widget.id, InputValue.Text(t))) } },
                 placeholder = { Text(widget.placeholder) },
@@ -1206,7 +1210,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 placeholder = { Text(widget.placeholder) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true,
-                shape = RoundedCornerShape(50),
+                shape = shapeOf { it.input } ?: RoundedCornerShape(50),
                 modifier = Modifier.fillMaxWidth(),
                 colors = paletteFieldColors(),
             )
@@ -1260,7 +1264,10 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             // Modal bottom sheet — present in the tree ⇒ shown (a Popup, so it overlays
             // everything regardless of where it's composed). Scrim/swipe fires on_dismiss.
             widget.sheet?.let { sheet ->
-                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }, scrimColor = LocalPalette.current?.scrim?.color() ?: BottomSheetDefaults.ScrimColor) {
+                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }, shape = activeTheme?.shapes?.sheetTop?.let { r ->
+                    val top = if (r is dev.mobiler.barbershop.shared.types.Radius.Dp) r.value.toInt().dp else 999.dp
+                    RoundedCornerShape(topStart = top, topEnd = top)
+                } ?: BottomSheetDefaults.ExpandedShape, scrimColor = LocalPalette.current?.scrim?.color() ?: BottomSheetDefaults.ScrimColor) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1323,7 +1330,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         },
                         floatingActionButton = {
                             widget.fab?.let { fab ->
-                                FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }) {
+                                FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }, shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.shape) {
                                     Icon(iconFor(fab.icon), contentDescription = null)
                                 }
                             }
@@ -1458,6 +1465,10 @@ private fun colorFor(style: ModelTextStyle): Color = when (style) {
 // null = framework defaults (no visual change). App-global, like dark mode; the SwiftUI
 // shell's `ActiveTheme.current` twin.
 private var activeTheme: ModelTheme? = null
+
+// Theme.shapes per component: the set radius's shape, else null (the call site keeps its default).
+private fun shapeOf(pick: (dev.mobiler.barbershop.shared.types.Shapes) -> dev.mobiler.barbershop.shared.types.Radius?): androidx.compose.ui.graphics.Shape? =
+    activeTheme?.shapes?.let(pick)?.let { radiusShape(it) }
 
 // Under FontFamily.CUSTOM the title slots carry the display family; non-title text that borrows a
 // title slot's size (calendar month, stepper value, gauge %) keeps the body family. Unchanged otherwise.
@@ -1619,6 +1630,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.FILLED -> Button(
             onClick = onClick,
             modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.shape,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
             colors = if (neutral) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = strong, contentColor = onStrong),
             content = content,
@@ -1626,6 +1638,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.TONAL -> FilledTonalButton(
             onClick = onClick,
             modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.filledTonalShape,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
             colors = if (neutral) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.filledTonalButtonColors(containerColor = soft, contentColor = onSoft),
             content = content,
@@ -1633,11 +1646,13 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.OUTLINED -> if (neutral) {
             val pt = LocalPalette.current?.primaryText?.color()
             OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape,
                 colors = if (pt != null) ButtonDefaults.outlinedButtonColors(contentColor = pt) else ButtonDefaults.outlinedButtonColors(), content = content)
         } else {
             OutlinedButton(
                 onClick = onClick,
                 modifier = modifier,
+                shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape,
                 contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = strong),
                 border = BorderStroke(1.dp, strong),
@@ -1647,6 +1662,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.TEXT -> TextButton(
             onClick = onClick,
             modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.TextButtonContentPadding,
             colors = if (neutral) (LocalPalette.current?.primaryText?.color()?.let { ButtonDefaults.textButtonColors(contentColor = it) } ?: ButtonDefaults.textButtonColors()) else ButtonDefaults.textButtonColors(contentColor = strong),
             content = content,
