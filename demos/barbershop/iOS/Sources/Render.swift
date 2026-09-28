@@ -438,6 +438,31 @@ enum CustomFonts {
     }
 }
 
+/// A type-scale spec (`Theme.type_scale`) as a Font: the synced custom family via `Font.custom(…,
+/// relativeTo:)` (follows Dynamic Type), else the system font at a `UIFontMetrics`-scaled size —
+/// `Font.system(size:)` alone wouldn't follow the user's text size.
+enum TypeScaleFonts {
+    static var scale: TypeScale? { ActiveTheme.current?.typeScale }
+    static func weight(_ w: UInt16) -> Font.Weight {
+        switch (min(max(Int(w), 100), 900) + 50) / 100 * 100 {
+        case 100: return .ultraLight
+        case 200: return .thin
+        case 300: return .light
+        case 400: return .regular
+        case 500: return .medium
+        case 600: return .semibold
+        case 700: return .bold
+        case 800: return .heavy
+        default: return .black
+        }
+    }
+    static func font(_ spec: TypeSpec, relativeTo: Font.TextStyle, uiStyle: UIFont.TextStyle, design: Font.Design) -> Font {
+        let family = spec.family == .display ? CustomFonts.display : CustomFonts.body
+        if let f = CustomFonts.font(family, size: CGFloat(spec.size), relativeTo: relativeTo) { return f.weight(weight(spec.weight)) }
+        return .system(size: UIFontMetrics(forTextStyle: uiStyle).scaledValue(for: CGFloat(spec.size)), weight: weight(spec.weight), design: design)
+    }
+}
+
 /// With `FontFamily.custom`, the body family is the default for everything below (buttons, fields,
 /// plain text); otherwise no modifier.
 private struct CustomBodyFont: ViewModifier {
@@ -1270,7 +1295,7 @@ private struct ScaffoldView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Capsule().fill(role(pal?.outlineVariant, else: Color.secondary.opacity(0.4)))
                             .frame(width: 40, height: 4).frame(maxWidth: .infinity)
-                        Text(sheet.title).font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.bold() ?? .title3.bold())
+                        Text(sheet.title).font(TypeScaleFonts.scale?.headline.map { TypeScaleFonts.font($0, relativeTo: .title2, uiStyle: .title2, design: theme?.fontDesign ?? .default) } ?? CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.bold() ?? .title3.bold())
                         render(sheet.child, send)
                     }
                     .padding(20)
@@ -1299,7 +1324,7 @@ private struct ScaffoldView: View {
                     .accessibilityLabel((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back")
                 }
                 Spacer()
-                Text(title).font(CustomFonts.font(CustomFonts.display, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
+                Text(title).font(TypeScaleFonts.scale?.title.map { TypeScaleFonts.font($0, relativeTo: .title2, uiStyle: .title2, design: theme?.fontDesign ?? .default) } ?? CustomFonts.font(CustomFonts.display, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
                 Spacer()
                 // keep the title centered when a back button is present
                 if back != nil { Image(systemName: "chevron.left").hidden() }
@@ -1442,16 +1467,41 @@ private struct TextStyleMod: ViewModifier {
     // The theme's font design (rounded/serif/mono); `.default` when un-themed.
     private var design: Font.Design { ActiveTheme.current?.fontDesign ?? .default }
     @Environment(\.paletteRoles) private var paletteRoles
+    // Re-render on a text-size change (system sizes are scaled by hand for the type scale / new styles).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
+        let _ = dynamicTypeSize
+        // A type-scale spec for this style wins; otherwise the look below, as before.
+        if let spec = specFor(style) {
+            let f = TypeScaleFonts.font(spec.0, relativeTo: spec.1, uiStyle: spec.2, design: design)
+            if case .caption = style { return AnyView(content.font(f).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary))) }
+            return AnyView(content.font(f))
+        }
         switch style {
         // `FontFamily.custom` → the synced display (title/subtitle) or body family at the same size;
         // any other font (or an unsynced role) → the system font, exactly as before.
+        case .display: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 36, relativeTo: .largeTitle)?.bold() ?? .system(size: UIFontMetrics(forTextStyle: .largeTitle).scaledValue(for: 36), weight: .bold, design: design)))
+        case .headline: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 24, relativeTo: .title2)?.weight(.semibold) ?? .system(size: UIFontMetrics(forTextStyle: .title2).scaledValue(for: 24), weight: .semibold, design: design)))
         case .title: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 34, relativeTo: .largeTitle)?.bold() ?? .system(.largeTitle, design: design).bold()))
         case .subtitle: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.weight(.semibold) ?? .system(.title3, design: design).weight(.semibold)))
         case .caption: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 13, relativeTo: .footnote) ?? .system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
         case .emphasis: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body)?.weight(.semibold) ?? .system(.body, design: design).weight(.semibold)))
         case .body: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) ?? .system(.body, design: design)))
+        }
+    }
+
+    /// The scale's spec for a style, with the text style it scales like.
+    private func specFor(_ s: TextStyle) -> (TypeSpec, Font.TextStyle, UIFont.TextStyle)? {
+        guard let ts = TypeScaleFonts.scale else { return nil }
+        switch s {
+        case .display: return ts.display.map { ($0, .largeTitle, .largeTitle) }
+        case .headline: return ts.headline.map { ($0, .title2, .title2) }
+        case .title: return ts.title.map { ($0, .title2, .title2) }
+        case .subtitle: return ts.subtitle.map { ($0, .subheadline, .subheadline) }
+        case .body: return ts.body.map { ($0, .body, .body) }
+        case .emphasis: return ts.emphasis.map { ($0, .body, .body) }
+        case .caption: return ts.caption.map { ($0, .caption, .caption1) }
         }
     }
 }
