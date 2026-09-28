@@ -37,6 +37,9 @@ final class Core: ObservableObject {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
         if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+        // Light/dark is a window-level override set from the root (see applyWindowStyle); the window
+        // exists by the next tick.
+        DispatchQueue.main.async { [weak self] in if let v = self?.view { applyWindowStyle(v) } }
         // The app's own version first, so the core's restore/init already see it (cx.app_info()).
         let info = Bundle.main.infoDictionary
         update(.appInfo(
@@ -61,6 +64,7 @@ final class Core: ObservableObject {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
                 if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+                applyWindowStyle(view)
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.
@@ -146,13 +150,40 @@ func resolvedDark(_ appearance: Appearance?, _ darkMode: Bool) -> Bool {
     }
 }
 
-/// The OS light/dark setting: the active window scene's trait (system-level — SwiftUI's
-/// preferredColorScheme applies below the scene). iOS 17 trait-change registration feeds the stream.
+/// Light/dark for the whole window, from the ROOT view: a scaffold's appearance (System → the OS,
+/// `.unspecified`) or its `dark_mode`; any other root follows the OS. A window-level override (not
+/// SwiftUI's `preferredColorScheme`, which doesn't reliably let go when set back to nil) — and it sits
+/// below the window scene, so the scene's trait always stays the OS value the appearance query reads.
+@MainActor
+func applyWindowStyle(_ view: Widget) {
+    let style: UIUserInterfaceStyle
+    if case let .scaffold(_, _, _, _, darkMode, _, _, _, _, _, _, _, _, appearance) = view {
+        switch appearance {
+        case .some(.system): style = .unspecified
+        case .some(.light): style = .light
+        case .some(.dark): style = .dark
+        case .none: style = darkMode ? .dark : .light
+        }
+    } else {
+        style = .unspecified
+    }
+    for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+        for window in scene.windows where window.overrideUserInterfaceStyle != style {
+            window.overrideUserInterfaceStyle = style
+        }
+    }
+}
+
+/// The OS light/dark setting: the active window scene's trait (system-level — the app's own
+/// light/dark override is set on its windows, below the scene). iOS 17 trait-change registration feeds
+/// the `appearance` stream; every subscription (key) gets its own sink, and the scene registration
+/// lives while at least one is attached.
 @MainActor
 final class AppearanceBridge {
     static let shared = AppearanceBridge()
-    private var sink: (@Sendable (String) -> Void)?
+    private var sinks: [UUID: @Sendable (String) -> Void] = [:]
     private var registration: (any UITraitChangeRegistration)?
+    private weak var registeredScene: UIWindowScene?
     private var last: String?
 
     static func scene() -> UIWindowScene? {
@@ -162,23 +193,35 @@ final class AppearanceBridge {
     static func osDark() -> Bool {
         (scene()?.traitCollection.userInterfaceStyle ?? UITraitCollection.current.userInterfaceStyle) == .dark
     }
-    private func send(_ value: String) {
+    private static func name(_ dark: Bool) -> String { dark ? "dark" : "light" }
+
+    /// Add a subscriber: it gets the current value at once; returns its token for `detach`.
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> UUID {
+        let id = UUID()
+        sinks[id] = sink
+        let now = Self.name(Self.osDark())
+        sink(now)
+        if registration == nil, let scene = Self.scene() {
+            last = now
+            registeredScene = scene
+            registration = scene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
+                self?.changed(Self.name(scene.traitCollection.userInterfaceStyle == .dark))
+            }
+        }
+        return id
+    }
+    private func changed(_ value: String) {
         guard value != last else { return }
         last = value
-        sink?(value)
+        for sink in sinks.values { sink(value) }
     }
-    func attach(_ s: @escaping @Sendable (String) -> Void) {
-        sink = s
-        last = nil
-        send(Self.osDark() ? "dark" : "light")
-        registration = Self.scene()?.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
-            self?.send(scene.traitCollection.userInterfaceStyle == .dark ? "dark" : "light")
-        }
-    }
-    func detach() {
-        if let r = registration { Self.scene()?.unregisterForTraitChanges(r) }
+    /// Remove one subscriber; the scene registration goes with the last one.
+    func detach(_ id: UUID) {
+        sinks[id] = nil
+        guard sinks.isEmpty else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
         registration = nil
-        sink = nil
+        registeredScene = nil
         last = nil
     }
 }
@@ -187,11 +230,11 @@ final class AppearanceBridge {
 enum AppearanceStream {
     static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
-        await MainActor.run { AppearanceBridge.shared.attach(sink) }
+        let id = await MainActor.run { AppearanceBridge.shared.attach(sink) }
         await withTaskCancellationHandler {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
         } onCancel: {
-            Task { @MainActor in AppearanceBridge.shared.detach() }
+            Task { @MainActor in AppearanceBridge.shared.detach(id) }
         }
     }
 }

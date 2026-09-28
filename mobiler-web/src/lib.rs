@@ -356,7 +356,17 @@ fn start_stream<A: WebApp>(
         // change of `prefers-color-scheme`. The listener is removed on unsubscribe (Drop).
         ("appearance", "changes") => {
             let Some(mql) = dark_query() else { return };
-            emit(PluginResponse::text(true, if mql.matches() { "dark" } else { "light" }));
+            // The current value goes out on the next tick — after this handle is in `STREAMS` — so
+            // an app that unsubscribes on that first value really stops (and if it already did, nothing
+            // is sent).
+            {
+                let (key, emit, first) = (call.key.clone(), emit.clone(), if mql.matches() { "dark" } else { "light" });
+                spawn_local(async move {
+                    if STREAMS.with(|m| m.borrow().contains_key(&key)) {
+                        emit(PluginResponse::text(true, first));
+                    }
+                });
+            }
             let onchange = Closure::<dyn FnMut(web_sys::MediaQueryListEvent)>::new(move |e: web_sys::MediaQueryListEvent| {
                 emit(PluginResponse::text(true, if e.matches() { "dark" } else { "light" }));
             });

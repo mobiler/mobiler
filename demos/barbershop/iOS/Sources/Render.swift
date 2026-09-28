@@ -1187,9 +1187,10 @@ private struct ScaffoldView: View {
     private var isSystem: Bool { if case .some(.system) = appearance { return true }; return false }
 
     var body: some View {
-        // Resolve the palette set before the children render (they read `pal`); under `.system` the
-        // live OS scheme decides, so an OS flip re-renders this view and re-resolves it here.
-        let _ = { ActivePalette.current = ActiveTheme.current?.palette.map { resolvedDark ? $0.dark : $0.light } }()
+        // Under `.system` the live OS scheme picks the palette set, so an OS flip re-renders this view
+        // and re-resolves it here, before the children render (they read `pal`). Other modes are
+        // resolved from the root in Core.swift (a nested scaffold never overrides it).
+        let _ = { if isSystem { ActivePalette.current = ActiveTheme.current?.palette.map { resolvedDark ? $0.dark : $0.light } } }()
         let useRail = hSize == .regular && !tabs.isEmpty
         Group {
             if useRail {
@@ -1205,7 +1206,6 @@ private struct ScaffoldView: View {
         .background(role(pal?.background, else: .clear).ignoresSafeArea())
         .modifier(PaletteText())
         .environment(\.paletteRoles, pal)
-        .preferredColorScheme(isSystem ? nil : (resolvedDark ? .dark : .light))
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
         .tint(pal?.primary?.color ?? theme?.brandColor)
