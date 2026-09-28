@@ -8,7 +8,7 @@ use mobiler_core::{
     map, marker_titled, with_markers,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
-    ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
+    ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Snackbar, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
     badge, button, button_with, calendar_in, caption, card, card_button, chip, column, divider, donut_chart,
     email_field, emphasis,
     gauge_chart, grid, icon_button, image, lazy_list, multiline_field, phone_field, progress, rating,
@@ -132,6 +132,9 @@ pub enum Msg {
     PickDay(u8),
     /// Swipe a booking row and tap "Cancel" (`SwipeAction`).
     CancelBooking(u32),
+    /// A cancel snackbar resolved (`cx.snackbar`): `undo` = its Undo was tapped. Carries the booking
+    /// and its old position, so a snackbar replaced by a newer cancel resolves on its own.
+    UndoCancel { undo: bool, index: usize, booking: String },
     /// The destructive "Cancel next booking" button — asks first (`cx.confirm_with`).
     AskCancelNext,
     /// The result of the "Cancel next booking" confirm (`true` = confirmed).
@@ -784,7 +787,14 @@ impl MobilerApp for FadeHouse {
                 let i = i as usize;
                 if i < model.bookings.len() {
                     let b = model.bookings.remove(i);
-                    cx.toast(format!("Cancelled {b}"));
+                    // A snackbar with Undo (cx.snackbar), above the tab bar and the FAB.
+                    let text = format!("Cancelled {b}");
+                    cx.snackbar(Snackbar::new(text).action("Undo"), move |r| Msg::UndoCancel { undo: r.ok, index: i, booking: b });
+                }
+            }
+            Msg::UndoCancel { undo, index, booking } => {
+                if undo {
+                    model.bookings.insert(index.min(model.bookings.len()), booking);
                 }
             }
             // The destructive "Cancel next booking" button asks first, naming the action on the
@@ -2506,6 +2516,35 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn cancelling_a_booking_offers_undo() {
+        let calls = dialog_inputs(Msg::CancelBooking(1));
+        assert_eq!(calls.len(), 1);
+        let (plugin, op, v) = &calls[0];
+        assert_eq!((plugin.as_str(), op.as_str()), ("snackbar", "show"));
+        assert_eq!(v["action_label"], "Undo");
+        assert!(v["text"].as_str().unwrap().starts_with("Cancelled "));
+    }
+
+    #[test]
+    fn undo_restores_the_cancelled_booking_in_place() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        let before = model.bookings.clone();
+        let undo = |undo: bool, index: usize, booking: &str| Msg::UndoCancel { undo, index, booking: booking.to_string() };
+        app.update(Msg::CancelBooking(1), &mut model, &mut cx);
+        assert_eq!(model.bookings.len(), before.len() - 1);
+        app.update(undo(true, 1, &before[1]), &mut model, &mut cx);
+        assert_eq!(model.bookings, before);
+        // Two quick cancels: the first snackbar resolves "replaced" (undo = false) after the second
+        // is shown, and the second's Undo still restores the second booking.
+        app.update(Msg::CancelBooking(0), &mut model, &mut cx);
+        app.update(Msg::CancelBooking(0), &mut model, &mut cx);
+        app.update(undo(false, 0, &before[0]), &mut model, &mut cx);
+        app.update(undo(true, 0, &before[1]), &mut model, &mut cx);
+        assert_eq!(model.bookings, before[1..].to_vec());
     }
 
     #[test]
