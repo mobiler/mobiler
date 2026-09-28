@@ -93,7 +93,7 @@ fn badge_icon_and_avatar_initials_modifiers() {
 ```rust
 #[test]
 fn initials_take_two_characters() {
-    assert_eq!(initials_text("Milan Jovanović"), "Mi");
+    assert_eq!(initials_text("MŽX"), "MŽ"); // a cap, not name parsing: the app passes initials
     assert_eq!(initials_text("MJ"), "MJ");
     assert_eq!(initials_text("Ž"), "Ž");
     assert_eq!(initials_text("👩‍🔧x"), "👩\u{200d}");
