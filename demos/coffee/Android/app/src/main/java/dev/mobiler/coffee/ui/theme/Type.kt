@@ -22,7 +22,7 @@ fun typographyFor(font: ModelFontFamily?): Typography {
         ModelFontFamily.SERIF -> FontFamily.Serif
         ModelFontFamily.MONOSPACE -> FontFamily.Monospace
         // Rounded has no AOSP system equivalent; SansSerif is the closest default.
-        ModelFontFamily.ROUNDED, ModelFontFamily.SYSTEM, null -> FontFamily.Default
+        ModelFontFamily.ROUNDED, ModelFontFamily.SYSTEM, ModelFontFamily.CUSTOM, null -> FontFamily.Default
     }
     return Typography(bodyLarge = baseBody.copy(fontFamily = family))
 }

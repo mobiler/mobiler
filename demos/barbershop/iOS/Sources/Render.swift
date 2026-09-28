@@ -226,9 +226,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             Button(action: { send(.fired(token: onPress)) }) {
                 Group {
                     if large {
-                        Text(label).font(.body).padding(.horizontal, 16).frame(minHeight: 48)
+                        Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body)).padding(.horizontal, 16).frame(minHeight: 48)
                     } else {
-                        Text(label).font(.subheadline).padding(.horizontal, 12).padding(.vertical, 6)
+                        Text(label).font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline)).padding(.horizontal, 12).padding(.vertical, 6)
                     }
                 }
                 .background(selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.18)) : role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
@@ -271,7 +271,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             VStack(alignment: .leading, spacing: 4) {
                 control
                 if let error = error {
-                    Text(error).font(.caption).foregroundColor(.red)
+                    Text(error).font(CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption)).foregroundColor(.red)
                 }
             }
         )
@@ -296,7 +296,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             HStack(spacing: 4) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
                     Button(action: { send(.fired(token: seg.onSelect)) }) {
-                        Text(seg.label).font(large ? Font.body.weight(.semibold) : Font.subheadline.weight(.semibold))
+                        Text(seg.label).font(large ? CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold) : CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: large ? 48 : nil)
                             .padding(.vertical, large ? 0 : 8)
                             .background(seg.selected ? role(pal?.secondaryContainer, else: Color.accentColor) : Color.clear)
@@ -347,7 +347,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(
             HStack(spacing: 12) {
                 Button("−") { send(.fired(token: onDecrement)) }.buttonStyle(.bordered)
-                Text("\(value)").font(.title3)
+                Text("\(value)").font(CustomFonts.bodyOr(.title3, size: 20, relativeTo: .title3))
                 Button("+") { send(.fired(token: onIncrement)) }.buttonStyle(.bordered)
             }
         )
@@ -410,6 +410,42 @@ private func palettePair(_ tone: Tone) -> TonePair? {
     case .neutral: return nil
     }
 }
+/// `FontFamily.custom`: the families `mobiler fonts sync` registered (UIAppFonts + the
+/// MobilerFontDisplay/MobilerFontBody Info.plist keys) — used only if the family actually registered;
+/// otherwise nil and the system font is used, per role.
+enum CustomFonts {
+    static let display: String? = registered("MobilerFontDisplay")
+    static let body: String? = registered("MobilerFontBody")
+    private static func registered(_ key: String) -> String? {
+        guard let family = Bundle.main.infoDictionary?[key] as? String, !family.isEmpty else { return nil }
+        guard !UIFont.fontNames(forFamilyName: family).isEmpty else {
+            print("mobiler: font family \"\(family)\" (\(key)) isn't registered — using the system font. Check mobiler.toml [fonts] and run `mobiler fonts sync`.")
+            return nil
+        }
+        return family
+    }
+    static var active: Bool { if case .some(.custom) = ActiveTheme.current?.font { return true }; return false }
+    /// The custom family at the size of the system style it replaces (`relativeTo` keeps Dynamic Type);
+    /// nil when not `.custom` or the role has no registered family.
+    static func font(_ family: String?, size: CGFloat, relativeTo: Font.TextStyle) -> Font? {
+        guard active, let family else { return nil }
+        return Font.custom(family, size: size, relativeTo: relativeTo)
+    }
+    /// For controls that set their own font: the body family at the system style's size, else exactly
+    /// `system` (so a non-custom theme is unchanged).
+    static func bodyOr(_ system: Font, size: CGFloat, relativeTo: Font.TextStyle) -> Font {
+        font(body, size: size, relativeTo: relativeTo) ?? system
+    }
+}
+
+/// With `FontFamily.custom`, the body family is the default for everything below (buttons, fields,
+/// plain text); otherwise no modifier.
+private struct CustomBodyFont: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if let f = CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) { content.font(f) } else { content }
+    }
+}
+
 /// Body text in the palette's `on_surface`; without that role, no modifier (system label colour).
 private struct PaletteText: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
@@ -448,7 +484,7 @@ extension Theme {
     var cardRadius: CGFloat { switch corner { case .none: 0; case .small: 8; case .medium: 14; case .large: 22 } }
     var imageRadius: CGFloat { switch corner { case .none: 0; case .small: 10; case .medium: 16; case .large: 24 } }
     var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0; case .large: 1.25 } }
-    var fontDesign: Font.Design { switch font { case .system: .default; case .rounded: .rounded; case .serif: .serif; case .monospace: .monospaced } }
+    var fontDesign: Font.Design { switch font { case .system: .default; case .rounded: .rounded; case .serif: .serif; case .monospace: .monospaced; case .custom: .default } }
 }
 
 /// `Density.large` enlarges controls (56pt buttons, 48pt chips/day cells, larger labels). Every use is
@@ -661,7 +697,7 @@ private struct ChartView: View {
             } else {
                 ZStack {
                     circularCanvas
-                    if case .gauge = style { Text("\(gaugePct)%").font(.title2).bold() }
+                    if case .gauge = style { Text("\(gaugePct)%").font(CustomFonts.bodyOr(.title2, size: 22, relativeTo: .title2)).bold() }
                 }.frame(height: 140)
             }
             if legend, !series.isEmpty {
@@ -1020,7 +1056,7 @@ private struct SwipeActionView: View {
                 ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
                     Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
                         Text(a.label)
-                            .font(.subheadline.weight(.semibold))
+                            .font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
                             .foregroundColor(palettePair(a.tone) != nil ? toneColors(a.tone).1 : .white)
                             .frame(width: 76)
                             .frame(maxHeight: .infinity)
@@ -1059,7 +1095,7 @@ private struct CalendarView: View {
         let _ = paletteRoles // re-render on a light/dark palette flip
         let cell: CGFloat = isLargeDensity() ? 48 : 32
         VStack(spacing: 6) {
-            Text(title).font(.headline)
+            Text(title).font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
             LazyVGrid(columns: cols, spacing: 4) {
                 ForEach(Array(weekdayLabels.enumerated()), id: \.offset) { _, w in
                     Text(w).font(.caption2).foregroundColor(.secondary)
@@ -1205,6 +1241,7 @@ private struct ScaffoldView: View {
         }
         .background(role(pal?.background, else: .clear).ignoresSafeArea())
         .modifier(PaletteText())
+        .modifier(CustomBodyFont())
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
         .tint(pal?.primary?.color ?? theme?.brandColor)
@@ -1233,7 +1270,7 @@ private struct ScaffoldView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Capsule().fill(role(pal?.outlineVariant, else: Color.secondary.opacity(0.4)))
                             .frame(width: 40, height: 4).frame(maxWidth: .infinity)
-                        Text(sheet.title).font(.title3.bold())
+                        Text(sheet.title).font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.bold() ?? .title3.bold())
                         render(sheet.child, send)
                     }
                     .padding(20)
@@ -1262,7 +1299,7 @@ private struct ScaffoldView: View {
                     .accessibilityLabel((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back")
                 }
                 Spacer()
-                Text(title).font(.headline)
+                Text(title).font(CustomFonts.font(CustomFonts.display, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
                 Spacer()
                 // keep the title centered when a back button is present
                 if back != nil { Image(systemName: "chevron.left").hidden() }
@@ -1344,7 +1381,7 @@ private struct ScaffoldView: View {
                                 if let icon = tab.icon {
                                     Image(systemName: sfSymbol(icon)).font(.system(size: 20))
                                 }
-                                Text(tab.label).font(isLargeDensity() ? .subheadline : .caption)
+                                Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
                             }
                             .fontWeight(tab.selected ? .semibold : .regular)
                             .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
@@ -1408,11 +1445,13 @@ private struct TextStyleMod: ViewModifier {
     func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
         switch style {
-        case .title: return AnyView(content.font(.system(.largeTitle, design: design).bold()))
-        case .subtitle: return AnyView(content.font(.system(.title3, design: design).weight(.semibold)))
-        case .caption: return AnyView(content.font(.system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
-        case .emphasis: return AnyView(content.font(.system(.body, design: design).weight(.semibold)))
-        case .body: return AnyView(content.font(.system(.body, design: design)))
+        // `FontFamily.custom` → the synced display (title/subtitle) or body family at the same size;
+        // any other font (or an unsynced role) → the system font, exactly as before.
+        case .title: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 34, relativeTo: .largeTitle)?.bold() ?? .system(.largeTitle, design: design).bold()))
+        case .subtitle: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.weight(.semibold) ?? .system(.title3, design: design).weight(.semibold)))
+        case .caption: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 13, relativeTo: .footnote) ?? .system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
+        case .emphasis: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body)?.weight(.semibold) ?? .system(.body, design: design).weight(.semibold)))
+        case .body: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) ?? .system(.body, design: design)))
         }
     }
 }
@@ -1510,7 +1549,7 @@ private struct TonalButtonStyle: SwiftUI.ButtonStyle {
     let color: Color
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
             .padding(.horizontal, 14).padding(.vertical, 7)
             .foregroundColor(color)
             .background(color.opacity(0.18))
@@ -1528,7 +1567,7 @@ private struct PaletteButtonStyle: SwiftUI.ButtonStyle {
     let large: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
             .padding(.horizontal, large ? 24 : 14)
             .padding(.vertical, large ? 0 : 7)
             .frame(minHeight: large ? 56 : nil)
@@ -1556,7 +1595,7 @@ private struct LargeButtonStyle: SwiftUI.ButtonStyle {
             }
         }()
         return configuration.label
-            .font(.body.weight(.semibold))
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
             .padding(.horizontal, 24)
             .frame(minHeight: 56)
             .foregroundColor(fg)

@@ -693,7 +693,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             }
                         }
                         if (style == ChartStyle.GAUGE) {
-                            Text("$gaugePct%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("$gaugePct%", style = bodyFamily(MaterialTheme.typography.titleLarge), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
@@ -868,7 +868,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             repeat(widget.leadingBlanks.toInt()) { cells.add(null) }
             for (d in 1..widget.onDay.size) cells.add(d)
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(widget.title, style = MaterialTheme.typography.titleMedium)
+                Text(widget.title, style = bodyFamily(MaterialTheme.typography.titleMedium))
                 Row(modifier = Modifier.fillMaxWidth()) {
                     widget.weekdayLabels.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center) }
                 }
@@ -1244,7 +1244,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 
         is Widget.Stepper -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { send(Action.Fired(widget.onDecrement)) }) { Text("−") }
-            Text(text = "${widget.value}", style = MaterialTheme.typography.titleMedium)
+            Text(text = "${widget.value}", style = bodyFamily(MaterialTheme.typography.titleMedium))
             OutlinedButton(onClick = { send(Action.Fired(widget.onIncrement)) }) { Text("+") }
         }
 
@@ -1435,6 +1435,12 @@ private fun colorFor(style: ModelTextStyle): Color = when (style) {
 // null = framework defaults (no visual change). App-global, like dark mode; the SwiftUI
 // shell's `ActiveTheme.current` twin.
 private var activeTheme: ModelTheme? = null
+
+// Under FontFamily.CUSTOM the title slots carry the display family; non-title text that borrows a
+// title slot's size (calendar month, stepper value, gauge %) keeps the body family. Unchanged otherwise.
+@Composable
+private fun bodyFamily(style: androidx.compose.ui.text.TextStyle): androidx.compose.ui.text.TextStyle =
+    if (activeTheme?.font == dev.mobiler.barbershop.shared.types.FontFamily.CUSTOM) style.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily) else style
 
 /** The current scaffold's app-wide shell text (ShellLabels), set when App() renders. Core.kt's
  *  dialog/picker plugins read it for their defaults; null ⇒ English/platform defaults. */

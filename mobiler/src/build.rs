@@ -29,6 +29,7 @@ pub fn run(platform: Platform) -> Result<()> {
             pipeline(&project, java_home.as_deref(), true, true, None)
         }
         Platform::Ios => {
+            crate::fonts::sync_for_build(&project.root);
             // iOS builds run the reproducible script (macOS only). The CLI doesn't
             // scaffold an iOS shell yet, so guide the user if it's absent.
             let script = project.root.join("iOS/build-ios.sh");

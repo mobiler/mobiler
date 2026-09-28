@@ -1191,7 +1191,8 @@ impl MobilerApp for FadeHouse {
             accent: Some(Rgb::new(0xE0, 0x6A, 0x2C)), // warm orange — for the brand gradient
             corner: Corner::Medium,
             density: if model.large_controls { Density::Large } else { Density::Comfortable },
-            font: FontFamily::System,
+            // Space Grotesk titles + Roboto body, from mobiler.toml [fonts] (synced by the CLI).
+            font: FontFamily::Custom,
             palette: Some(moj_termin_palette()),
         };
         let tabs = vec![

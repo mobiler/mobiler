@@ -331,11 +331,14 @@ pub enum Corner { None, Small, Medium, Large }
 #[repr(C)]
 pub enum Density { Compact, Comfortable, Large }
 
-/// A finite, cross-platform font family (maps to each platform's nearest system
-/// font design — no bundled font files). `System` ≈ the current look.
+/// A cross-platform font family. `System`/`Rounded`/`Serif`/`Monospace` map to each platform's
+/// nearest system font design. `Custom` = the app's `mobiler.toml` `[fonts]`, synced into the shells
+/// by the CLI (`mobiler fonts sync`, also run by build/dev): the display family for titles and
+/// subtitles, the body family for the rest; a role without files falls back to the system font.
+/// `System` ≈ the current look.
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum FontFamily { System, Rounded, Serif, Monospace }
+pub enum FontFamily { System, Rounded, Serif, Monospace, Custom }
 
 /// App branding as data — the visual twin of `dark_mode`. Set on a [`Widget::Scaffold`]
 /// (`theme: None` = the framework defaults, i.e. no visual change). The shell maps these
@@ -879,6 +882,11 @@ mod tests {
             platform: "ios".to_string(),
             bundle_id: "rs.x".to_string(),
         });
+    }
+
+    #[test]
+    fn custom_font_family_round_trips() {
+        round_trips(&Theme { font: FontFamily::Custom, ..Default::default() });
     }
 
     #[test]

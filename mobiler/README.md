@@ -47,6 +47,7 @@ mobiler plugin list     # list the bundled capability plugins
 mobiler plugin add scanner   # install a plugin into the app
 mobiler upgrade         # pull the latest generic shells + mobiler-core into an existing app
 mobiler display-name "Appointments Admin"   # set the name users see (omit the name to print it)
+mobiler fonts sync      # copy mobiler.toml [fonts] into the shells (build/dev/watch do it too)
 ```
 
 **App display name.** `mobiler new myapp` derives the identifier `Myapp` (Gradle root, Xcode target,
@@ -55,6 +56,25 @@ theme) and uses it as the visible name too. `mobiler new myapp --display-name "M
 system dialogs such as the notification-permission prompt) and iOS `CFBundleDisplayName` (in
 `iOS/project.yml`, which XcodeGen turns into the Info.plist). Identifiers stay unchanged, and
 `mobiler upgrade` keeps the value.
+
+**Custom fonts — `mobiler.toml` `[fonts]`.** List a display family (titles, subtitles, the top-bar and
+sheet titles) and a body family (everything else) as TrueType/OpenType files, and set
+`Theme { font: FontFamily::Custom, .. }`:
+
+```toml
+# mobiler.toml (app root)
+[fonts]
+display = { family = "Space Grotesk", files = ["assets/fonts/SpaceGrotesk-Regular.ttf", "assets/fonts/SpaceGrotesk-SemiBold.ttf"] }
+body    = { family = "Roboto", files = ["assets/fonts/Roboto-Regular.ttf", "assets/fonts/Roboto-Medium.ttf"] }
+```
+
+`mobiler build`, `dev` and `watch` sync them first (or run `mobiler fonts sync`): the files are copied
+into Android `res/font/`, iOS `Sources/Fonts/` (with `UIAppFonts` and the family names in
+`iOS/project.yml`) and, if the app has `web/index.html`, `web/fonts/` with generated `@font-face` rules.
+Commit the copies so plain Gradle/Xcode/trunk builds work too. Each file's weight and family come from
+the font itself. A missing, unreadable or woff/woff2 file is skipped with a warning (the build never
+fails), and a role without usable files falls back to the system font. Text-size accessibility scaling
+still applies.
 
 ## Upgrading an existing app
 
