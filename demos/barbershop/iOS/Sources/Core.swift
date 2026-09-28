@@ -36,7 +36,7 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-        if case let .scaffold(_, _, _, _, dark, theme, _, _, _, _, _, _, labels, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+        if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
         // The app's own version first, so the core's restore/init already see it (cx.app_info()).
         let info = Bundle.main.infoDictionary
         update(.appInfo(
@@ -60,7 +60,7 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-                if case let .scaffold(_, _, _, _, dark, theme, _, _, _, _, _, _, labels, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+                if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.
@@ -134,6 +134,68 @@ enum SystemStream {
     }
 }
 
+/// The scaffold's dark flag outside a view (Core's per-render palette resolution): `.system` reads
+/// the OS via the window scene; ScaffoldView refines it with the live environment scheme.
+@MainActor
+func resolvedDark(_ appearance: Appearance?, _ darkMode: Bool) -> Bool {
+    switch appearance {
+    case .some(.light): return false
+    case .some(.dark): return true
+    case .some(.system): return AppearanceBridge.osDark()
+    case .none: return darkMode
+    }
+}
+
+/// The OS light/dark setting: the active window scene's trait (system-level — SwiftUI's
+/// preferredColorScheme applies below the scene). iOS 17 trait-change registration feeds the stream.
+@MainActor
+final class AppearanceBridge {
+    static let shared = AppearanceBridge()
+    private var sink: (@Sendable (String) -> Void)?
+    private var registration: (any UITraitChangeRegistration)?
+    private var last: String?
+
+    static func scene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
+    static func osDark() -> Bool {
+        (scene()?.traitCollection.userInterfaceStyle ?? UITraitCollection.current.userInterfaceStyle) == .dark
+    }
+    private func send(_ value: String) {
+        guard value != last else { return }
+        last = value
+        sink?(value)
+    }
+    func attach(_ s: @escaping @Sendable (String) -> Void) {
+        sink = s
+        last = nil
+        send(Self.osDark() ? "dark" : "light")
+        registration = Self.scene()?.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
+            self?.send(scene.traitCollection.userInterfaceStyle == .dark ? "dark" : "light")
+        }
+    }
+    func detach() {
+        if let r = registration { Self.scene()?.unregisterForTraitChanges(r) }
+        registration = nil
+        sink = nil
+        last = nil
+    }
+}
+
+/// Built-in `appearance` stream: the OS light/dark setting — the current value first, then each change.
+enum AppearanceStream {
+    static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
+        await MainActor.run { AppearanceBridge.shared.attach(sink) }
+        await withTaskCancellationHandler {
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        } onCancel: {
+            Task { @MainActor in AppearanceBridge.shared.detach() }
+        }
+    }
+}
+
 /// Dispatches the opaque `{plugin, op, input}` envelope by name. Adding a plugin
 /// never touches the wire ABI — only this registry.
 enum Plugins {
@@ -143,6 +205,7 @@ enum Plugins {
         switch plugin {
         case "ticker": await TickerStream.run(input: input, emit: emit)
         case "system": await SystemStream.run(emit: emit)
+        case "appearance": await AppearanceStream.run(emit: emit)
         case "websocket": await WebSocketPlugin.subscribe(op: op, input: input, emit: emit)
         case "geofence": await GeofencePlugin.subscribe(op: op, input: input, emit: emit)
         case "background-fetch": await BackgroundFetchPlugin.subscribe(op: op, input: input, emit: emit)
@@ -314,6 +377,9 @@ enum DevicePlugin {
             return PluginResponse(ok: true, output: "Apple \(d.model) (\(d.systemName) \(d.systemVersion))")
         case "locale":
             return PluginResponse(ok: true, output: Locale.preferredLanguages.first ?? Locale.current.identifier)
+        case "appearance":
+            // The OS setting, whatever the app forces.
+            return PluginResponse(ok: true, output: AppearanceBridge.osDark() ? "dark" : "light")
         default:
             return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }

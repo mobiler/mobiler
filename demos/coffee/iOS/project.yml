@@ -9,7 +9,7 @@ name: Coffee
 options:
   bundleIdPrefix: dev.mobiler.coffee
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 
 packages:
   # The facet-generated ABI types (Widget/Action/Effect/...), emitted by
