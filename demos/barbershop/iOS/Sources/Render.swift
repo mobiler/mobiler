@@ -410,6 +410,34 @@ private func palettePair(_ tone: Tone) -> TonePair? {
     case .neutral: return nil
     }
 }
+/// `FontFamily.custom`: the families `mobiler fonts sync` registered (UIAppFonts + the
+/// MobilerFontDisplay/MobilerFontBody Info.plist keys) — used only if the family actually registered;
+/// otherwise nil and the system font is used, per role.
+enum CustomFonts {
+    static let display: String? = registered("MobilerFontDisplay")
+    static let body: String? = registered("MobilerFontBody")
+    private static func registered(_ key: String) -> String? {
+        guard let family = Bundle.main.infoDictionary?[key] as? String, !family.isEmpty,
+              !UIFont.fontNames(forFamilyName: family).isEmpty else { return nil }
+        return family
+    }
+    static var active: Bool { if case .some(.custom) = ActiveTheme.current?.font { return true }; return false }
+    /// The custom family at the size of the system style it replaces (`relativeTo` keeps Dynamic Type);
+    /// nil when not `.custom` or the role has no registered family.
+    static func font(_ family: String?, size: CGFloat, relativeTo: Font.TextStyle) -> Font? {
+        guard active, let family else { return nil }
+        return Font.custom(family, size: size, relativeTo: relativeTo)
+    }
+}
+
+/// With `FontFamily.custom`, the body family is the default for everything below (buttons, fields,
+/// plain text); otherwise no modifier.
+private struct CustomBodyFont: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if let f = CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) { content.font(f) } else { content }
+    }
+}
+
 /// Body text in the palette's `on_surface`; without that role, no modifier (system label colour).
 private struct PaletteText: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
@@ -448,7 +476,7 @@ extension Theme {
     var cardRadius: CGFloat { switch corner { case .none: 0; case .small: 8; case .medium: 14; case .large: 22 } }
     var imageRadius: CGFloat { switch corner { case .none: 0; case .small: 10; case .medium: 16; case .large: 24 } }
     var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0; case .large: 1.25 } }
-    var fontDesign: Font.Design { switch font { case .system: .default; case .rounded: .rounded; case .serif: .serif; case .monospace: .monospaced } }
+    var fontDesign: Font.Design { switch font { case .system: .default; case .rounded: .rounded; case .serif: .serif; case .monospace: .monospaced; case .custom: .default } }
 }
 
 /// `Density.large` enlarges controls (56pt buttons, 48pt chips/day cells, larger labels). Every use is
@@ -1205,6 +1233,7 @@ private struct ScaffoldView: View {
         }
         .background(role(pal?.background, else: .clear).ignoresSafeArea())
         .modifier(PaletteText())
+        .modifier(CustomBodyFont())
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
         .tint(pal?.primary?.color ?? theme?.brandColor)
@@ -1233,7 +1262,7 @@ private struct ScaffoldView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Capsule().fill(role(pal?.outlineVariant, else: Color.secondary.opacity(0.4)))
                             .frame(width: 40, height: 4).frame(maxWidth: .infinity)
-                        Text(sheet.title).font(.title3.bold())
+                        Text(sheet.title).font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.bold() ?? .title3.bold())
                         render(sheet.child, send)
                     }
                     .padding(20)
@@ -1262,7 +1291,7 @@ private struct ScaffoldView: View {
                     .accessibilityLabel((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back")
                 }
                 Spacer()
-                Text(title).font(.headline)
+                Text(title).font(CustomFonts.font(CustomFonts.display, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
                 Spacer()
                 // keep the title centered when a back button is present
                 if back != nil { Image(systemName: "chevron.left").hidden() }
@@ -1408,11 +1437,13 @@ private struct TextStyleMod: ViewModifier {
     func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
         switch style {
-        case .title: return AnyView(content.font(.system(.largeTitle, design: design).bold()))
-        case .subtitle: return AnyView(content.font(.system(.title3, design: design).weight(.semibold)))
-        case .caption: return AnyView(content.font(.system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
-        case .emphasis: return AnyView(content.font(.system(.body, design: design).weight(.semibold)))
-        case .body: return AnyView(content.font(.system(.body, design: design)))
+        // `FontFamily.custom` → the synced display (title/subtitle) or body family at the same size;
+        // any other font (or an unsynced role) → the system font, exactly as before.
+        case .title: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 34, relativeTo: .largeTitle)?.bold() ?? .system(.largeTitle, design: design).bold()))
+        case .subtitle: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.weight(.semibold) ?? .system(.title3, design: design).weight(.semibold)))
+        case .caption: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 13, relativeTo: .footnote) ?? .system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
+        case .emphasis: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body)?.weight(.semibold) ?? .system(.body, design: design).weight(.semibold)))
+        case .body: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) ?? .system(.body, design: design)))
         }
     }
 }
