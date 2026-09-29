@@ -68,7 +68,13 @@ violated. There are three kinds:
 A decision with nothing to test mechanically (a process rule, say) writes
 `Conformance: none — <why>`, and review enforces it.
 
-**Every invariant test must be proven to fail by a deliberate mutation before it is trusted.**
+**Format.** Each `Conformance:` entry is `path::test_name` (the lint checks that the file contains
+`fn test_name(`), a CI job reference `.github/workflows/<file>.yml job "<name>" …` (the lint checks
+the job name appears in the file), or `none — <why>`.
+
+**Every conformance test written for an ADR must be proven to fail by a deliberate mutation before
+it is trusted.** (The backfilled records also cite older behavioural tests that existed before this
+directory. Those aren't re-proven; see the adaptations below.)
 Record the mutation **in the record itself**, as a short `Mutation proof` note in §4, not only in
 the PR that added the test. A PR lives on GitHub, not in the tree, so a reader of the repo months
 later can't check it. A test that has never been seen to fail turns an open question into false
@@ -80,8 +86,12 @@ assurance, which is worse than no test. The lint that guards the ADR set as a wh
 Most of the first records describe decisions made before this directory existed. Code tells you
 what was decided, never what was rejected. So in §3, every option carries a provenance tag:
 
-- `[recorded: <source>]`: the rationale was written down at the time, in a PR body, a commit
-  message, a spec or plan in `docs/superpowers/`, or the engineering notes. Cite it.
+- `[recorded: <source>]`: the rationale was written down at the time **somewhere a reader can
+  check**: a tracked file (a spec or plan in `docs/superpowers/`, a README), a commit message, or a
+  GitHub PR or issue body. Cite it, and quote it exactly when you quote.
+- `[recorded: maintainer, YYYY-MM-DD, quoted here]`: a maintainer statement that exists nowhere
+  else in the repo (the gitignored engineering notes, a chat, private memory). Quote it verbatim in
+  the record, which then becomes its record.
 - `[reconstructed]`: inferred to be the alternative. Nobody wrote it down.
 
 Never present an inferred alternative as recorded history. The tag tells a reader which rationale to
@@ -103,3 +113,10 @@ trust and which to check.
   backfilled options can be `[recorded]` rather than `[reconstructed]`.
 - The lint and the invariant tests live in the unpublished `xtask` crate, so they never ship to
   crates.io.
+- `Conformance: none — <why>` is allowed for a decision with nothing mechanical to test (a scoping
+  or process rule); review enforces those.
+- `[recorded: …]` may cite specs and plans in `docs/superpowers/` (they record rationale at the
+  time). Maintainer statements that live only outside the repo are quoted in the record, tagged
+  `[recorded: maintainer, date, quoted here]`.
+- Pre-existing behavioural tests cited by the backfilled records (ADR-0001 … ADR-0010) are not
+  re-proven by mutation. Every conformance test written *for* an ADR is.

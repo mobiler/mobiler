@@ -32,9 +32,10 @@ built on it without a new effect or ABI change, and none leaks a running native 
   An ABI change and a coordinated release per capability, against ADR-0002.
 - **Option B — polling via repeated requests** `[reconstructed]`
   Wasteful, laggy, and impossible for push-style sources like BLE notify or WebSocket.
-- **Option C — a keyed streaming primitive with full lifecycle** `[recorded: PR #113; retrofits PR #115 (websocket), #195 (transfers, "ride cx.subscribe — no ABI break")]`
-  Chosen, and shipped with *both* subscribe and unsubscribe in v1. The maintainer's standing rule
-  is that a primitive ships with its full lifecycle.
+- **Option C — a keyed streaming primitive with full lifecycle** `[recorded: PR #113; retrofits PR #115 (websocket) and PR #195 (transfers — "Rides the shipped cx.subscribe/unsubscribe primitive … No PluginCall/PluginResponse struct change")]`
+  Chosen, and shipped with *both* subscribe and unsubscribe in v1. That followed a maintainer rule,
+  quoted here since it exists nowhere else in the repo: a primitive ships with its full lifecycle
+  (subscribe *and* unsubscribe) in its first version.
 
 ## 4. Decision & Rationale for Corroboration
 
@@ -47,3 +48,6 @@ unsubscribe) and `cx.subscribe_appearance` have all since been built on it witho
 - **Negative:** each shell must implement real teardown for every streaming plugin. A shell that
   ignores unsubscribe leaks a sensor or socket, and nothing at the ABI level can catch that.
 - **Negative:** stream payloads share the stringly-typed boundary of ADR-0002.
+- **Negative:** on iOS and Android, unsubscribing stops the native source, but the core-side Crux
+  task isn't aborted through the bincode bridge; it lingers until the process ends (noted in
+  PR #113).

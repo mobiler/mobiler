@@ -47,9 +47,16 @@ result (`HttpOutcome`, `TransferEvent`) encoded into that payload, then:
 Option C. `HttpOutcome` (PR #192) and `TransferEvent` (PR #195) both ride inside `output` as bincode,
 and every other plugin kept compiling.
 
-**Mutation proof:** I added a third field, `pub status: Option<u16>`, to `PluginResponse` (and set it
-in `PluginResponse::text`). `adr_0003_plugin_response_has_exactly_ok_and_output` failed: the
-serialized keys were `["ok", "output", "status"]`, not `["ok", "output"]`. Reverting restored green.
+The test asserts on the **facet shape**, which the Kotlin and Swift types are generated from, not on
+serde output. A field hidden from serde would still widen the shells' ABI.
+
+**Mutation proof:**
+- Adding `pub status: Option<u16>` to `PluginResponse` (set in `PluginResponse::text`) failed
+  `adr_0003_plugin_response_has_exactly_ok_and_output`: `left: ["ok", "output", "status"]`,
+  `right: ["ok", "output"]`.
+- The same field hidden from serde with `#[serde(skip_serializing_if = "Option::is_none",
+  default)]` failed the same way. A serde-key check had passed this one; the reviewer caught it.
+- Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
 

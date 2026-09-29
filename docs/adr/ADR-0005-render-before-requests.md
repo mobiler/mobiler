@@ -1,8 +1,8 @@
-# ADR-0005: An update's `Render` is emitted before its requests, notifications and streams, and shells never block the UI on a plugin call
+# ADR-0005: An update's `Render` is emitted before its requests, notifications and streams, and shells never block the UI on a plugin request
 
 Status:        Accepted
 Date decided:  2026-09-21
-Deciding PRs:  #208
+Deciding PRs:  #208, #209
 Supersedes:    none
 Code anchor:   mobiler-core/src/lib.rs (MobilerShell update → effect order), Android Core.kt (per-request coroutine), shells' plugin dispatch
 Conformance:   mobiler-core/src/lib.rs::shell_renders_before_requests_notifications_and_streams
@@ -30,7 +30,7 @@ awaiting it on the render path), then:
 
 ## 3. Considered Options & Rationale for Refutation
 
-- **Option A — keep the order; tell apps to set "saving" in a separate update** `[recorded: docs/superpowers/specs/2026-09-21-render-first-and-shell-labels-design.md]`
+- **Option A — keep the order; tell apps to set "saving" in a separate update** `[reconstructed]`
   Rejected: every app would pay the complexity, and inline awaiting on Android would still stall.
 - **Option B — render first, requests concurrent** `[recorded: same spec; PR #208]`
   Chosen.
@@ -44,7 +44,12 @@ Option B, shipped as core 0.35.1 / CLI 0.52.1. On the emulator, fast typing kept
 
 - **Positive:** the UI is never stalled by I/O.
 - **Negative:** a request's continuation can arrive after later user input, so an app handling a
-  result must not assume the model is unchanged since it was sent. This is why the snackbar undo
-  carries its own payload (see the snackbar spec).
+  result must not assume the model is unchanged since it was sent. This was already true on iOS and
+  web, which ran each request as its own task; this decision made Android match. The barbershop
+  demo's `Msg::UndoCancel` carries its own booking for this reason.
+- **Negative:** the conformance test covers the core's ordering only. That each shell runs requests
+  independently (Android's per-request coroutine, PR #208) is verified by the device checks recorded
+  in that PR, not by a test. Plugin *notifications* stay inline on Android on purpose (spec,
+  change 2).
 - **Negative:** text fields needed local editing state (`FieldSync` on Android) so a render's echo
   of an older value doesn't overwrite newer keystrokes.

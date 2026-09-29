@@ -2,10 +2,10 @@
 
 Status:        Accepted
 Date decided:  2026-05-25
-Deciding PRs:  none (pre-PR history — commits 7514465 "Prototype: generic mobiler-ui ABI", e72357b "promote mobiler-ui/mobiler-core to root crates")
+Deciding PRs:  none (pre-PR history — commit 7514465 "Prototype: generic mobiler-ui ABI"; e72357b later moved the crates to the root)
 Supersedes:    none
 Code anchor:   mobiler-ui/src/lib.rs (Widget, Action, Theme …), mobiler/templates/{Android,iOS}, demos/*/Android + iOS shells
-Conformance:   mobiler-ui/src/lib.rs tests (round_trips over every ABI type, e.g. shapes_round_trip, steps_round_trip)
+Conformance:   mobiler-ui/src/lib.rs::shapes_round_trip, mobiler-ui/src/lib.rs::steps_round_trip, mobiler-ui/src/lib.rs::extended_fab_round_trips
 
 ## 1. Context (The Problem)
 
@@ -26,9 +26,11 @@ generic `Widget → native view` renderer shared by every app, then:
 
 ### 2.1. Refutation Conditions
 
-- **Condition 1 — the ABI types serialize losslessly.** Every ABI type must round-trip through
+- **Condition 1 — the ABI types serialize losslessly.** The ABI types must round-trip through
   serde, or a shell would read something different from what the core wrote.
-  - **Validation Metric:** `round_trips(...)` tests in `mobiler-ui/src/lib.rs`.
+  - **Validation Metric:** the serde round-trip tests in `mobiler-ui/src/lib.rs` (`round_trips(…)`,
+    e.g. the three cited above). They go through JSON, so they check lossless serde, not the bincode
+    wire; the wire itself is exercised by the shell builds in Condition 2.
 - **Condition 2 — shells compile against the generated types.** A generated Kotlin/Swift type that
   a shell can't consume breaks every app.
   - **Validation Metric:** the CI `Android build (demos/*)`, `iOS build (…)` and
@@ -41,7 +43,7 @@ generic `Widget → native view` renderer shared by every app, then:
   Kotlin and Swift authors.
 - **Option B — a web view everywhere** `[reconstructed]`
   One renderer, but no native widgets, feel or platform capabilities (maps, video, pickers).
-- **Option C — a fixed widget vocabulary with generated platform types** `[recorded: commits 7514465 / e72357b; README "fixed UI ABI"]`
+- **Option C — a fixed widget vocabulary with generated platform types** `[recorded: commit 7514465 ("defines the fixed wire ABI … The shell imports ONLY the ABI types"); README "The fixed UI wire ABI"]`
   Chosen.
 
 ## 4. Decision & Rationale for Corroboration

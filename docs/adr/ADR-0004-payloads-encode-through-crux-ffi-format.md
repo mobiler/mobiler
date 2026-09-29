@@ -33,9 +33,9 @@ only way to encode is the compatible one, and the silent-garbage mistake can't b
 
 - **Option A — call bincode directly (2.x)** `[recorded: docs/superpowers/specs/2026-07-18-mobiler-http-capability-a-design.md]`
   Rejected: varint vs fixint makes the payload undecodable by the generated shell decoders, silently.
-- **Option B — JSON inside `output`** `[reconstructed]`
-  Portable, but the generated shells already carry bincode decoders for the ABI, and JSON would need
-  a second hand-written decoder per payload type on each platform.
+- **Option B — JSON inside `output`** `[recorded: docs/superpowers/specs/2026-07-18-mobiler-http-capability-a-design.md, "Bincode, not JSON-with-base64"]`
+  Rejected: encoding the envelope as JSON would send the body back through base64, defeating the
+  reason `output` became bytes.
 - **Option C — crux's own FFI bincode format** `[recorded: same spec; PR #192]`
   Chosen.
 
@@ -44,9 +44,18 @@ only way to encode is the compatible one, and the silent-garbage mistake can't b
 Option C. `http.rs` documents why at the call site. Payload types (`HttpOutcome`, `TransferEvent`)
 are registered with typegen so the shells get matching decoders.
 
-**Mutation proof:** I added `bincode = "2"` under `[dependencies]` in `mobiler-core/Cargo.toml`.
-`adr_0004_no_library_crate_depends_on_bincode_directly` failed, naming `mobiler-core/Cargo.toml`.
-Reverting restored green.
+The test reads `cargo metadata`, so it sees a dependency however it's declared: by package name,
+including renamed and target-specific declarations. It counts only normal dependencies; a test-only
+`bincode` is allowed.
+
+**Mutation proof:** each of these failed `adr_0004_no_library_crate_depends_on_bincode_directly`
+(`ADR-0004: depends on bincode directly: ["mobiler-core"]`):
+- `bincode = "2"` under `[dependencies]`;
+- a `[dependencies.bincode]` table;
+- a renamed `bc = { package = "bincode", version = "2" }`.
+
+The same `bincode = "2"` in `mobiler-web/Cargo.toml` failed too (`["mobiler-web"]`). A
+`[dev-dependencies.bincode]` passed, as intended. Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
 

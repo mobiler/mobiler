@@ -1,8 +1,8 @@
 # ADR-0009: A release publishes the libraries first; template shell code that uses new ABI lands in the CLI PR only after those libraries are live on crates.io
 
 Status:        Accepted
-Date decided:  2026-09-27
-Deciding PRs:  #218, #219
+Date decided:  2026-06-04
+Deciding PRs:  #102, #104 (first recorded instance); re-affirmed by #218 → #219 after #218 went red
 Supersedes:    none
 Code anchor:   mobiler/templates/**, mobiler/templates/shared/Cargo.toml.tmpl (the pinned mobiler-core), .github/workflows/ci.yml (scaffold + build (template, Android))
 Conformance:   .github/workflows/ci.yml job "scaffold + build (template, Android)" (scaffolds from the template and builds against the *published* core)
@@ -11,8 +11,10 @@ Conformance:   .github/workflows/ci.yml job "scaffold + build (template, Android
 
 The template's `shared` crate pins a **published** `mobiler-core`, because a scaffolded app has no
 path dependency. CI's template lane scaffolds a fresh app and builds it. So template code using a
-new ABI item fails CI until that item is on crates.io. PR #218 went red exactly this way ("Unresolved
-reference 'AppInfo'") when the template change rode with the library change.
+new ABI item fails CI until that item is on crates.io. The split into two PRs was already practised
+by June 2026 (PR #102 left the template untouched so the lane "stays green against published
+`mobiler-core 0.17`", and #104 then propagated it). PR #218 broke the pattern, went red with an
+unresolved reference to the new `AppInfo` type, and the rule was written down again.
 
 ## 2. Hypothesis
 
@@ -27,14 +29,16 @@ core pin bump and CLI bump), then:
 - **Condition 1 — the template builds against the published core.** The CI template lane, which
   resolves the pinned version from crates.io, must be green on the CLI PR.
   - **Validation Metric:** `scaffold + build (template, Android)` in `.github/workflows/ci.yml`.
+    This lane covers Android only. The iOS template is covered indirectly, through the demo iOS
+    shells that are kept identical to it and built by the `iOS build (…)` lanes.
 
 ## 3. Considered Options & Rationale for Refutation
 
-- **Option A — one PR with libraries and template together** `[recorded: PR #218 went red; memory note "template shell lands after publish"]`
+- **Option A — one PR with libraries and template together** `[recorded: PR #102 body ("template untouched so the scaffold + build (template, Android) lane stays green against published mobiler-core 0.17"); PR #218 body ("The template shells follow in the CLI PR: the scaffold lane builds the template against the *published* core") and its commit 1007550 ("hold the template shells' AppInfo send for the CLI PR")]`
   Rejected: the template lane can't pass before publish.
 - **Option B — point the template at a path or git dependency during development** `[reconstructed]`
   Rejected: the lane would stop testing what users actually get.
-- **Option C — libraries, publish, then CLI** `[recorded: PRs #218 → publish → #219; every release since, e.g. #241 → publish → #242]`
+- **Option C — libraries, publish, then CLI** `[recorded: PRs #102 → #104 (2026-06-04), and the same shape in #42, #72/#84/#88; #218 → publish → #219; #241 → publish → #242]`
   Chosen.
 
 ## 4. Decision & Rationale for Corroboration

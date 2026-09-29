@@ -2,24 +2,34 @@
 //!
 //! - Files are `ADR-NNNN-slug.md`, numbered from 0001 with no gaps or duplicates, and each title
 //!   carries its own number.
-//! - Every record has the header fields (`Status`, `Date decided` as `YYYY-MM-DD`, `Deciding PRs`,
-//!   `Supersedes`, `Code anchor`, `Conformance`) and the five numbered sections.
-//! - `Status` uses the vocabulary; `Superseded by ADR-NNNN` names an existing record.
-//! - `index.md` has exactly one row per record, with the same status and date.
-//! - Every file a `Conformance:` entry cites exists.
+//! - Every record has the header fields (`Status`, `Date decided` as a real `YYYY-MM-DD`, `Deciding
+//!   PRs`, `Supersedes`, `Code anchor`, `Conformance`) and the five numbered sections.
+//! - `Status` uses the vocabulary; `Superseded by ADR-NNNN` and `Supersedes: ADR-NNNN` name other,
+//!   existing records.
+//! - `index.md` has exactly one row per record, with the same status, date and superseded-by.
+//! - Every `Conformance:` entry resolves: `path::test` → the file contains `fn test(`; a CI job
+//!   reference → the job name appears in the workflow file; or `none — <why>`.
 //!
 //! Mutation proof (this guard belongs to the ADR set as a whole, so its proof lives here):
 //! - Renaming `ADR-0010-…` to `ADR-0011-…` failed `numbering_is_contiguous_from_one` ("gap or
-//!   duplicate: expected ADR-0010, found ADR-0011-app-constraints-are-opt-in-plugins.md").
+//!   duplicate: expected ADR-0010, found ADR-0011-app-constraints-are-opt-in-plugins.md"), and the
+//!   index and well-formed checks with it.
 //! - Deleting the ADR-0007 row from `index.md` failed `index_matches_the_records` ("ADR-0007
 //!   missing from index.md").
 //! - Changing ADR-0005's `Status:` to `Approved` failed `every_record_is_well_formed`
 //!   ("ADR-0005: unknown status `Approved`").
+//! - Renaming the test `shell_renders_before_requests_notifications_and_streams` in
+//!   `mobiler-core/src/lib.rs` failed `conformance_entries_resolve` ("ADR-0005: Conformance cites
+//!   `shell_renders_before_requests_notifications_and_streams`, which isn't a fn in
+//!   mobiler-core/src/lib.rs").
+//! - Setting ADR-0004's `Date decided:` to `2026-13-45` failed `every_record_is_well_formed`
+//!   ("ADR-0004: `Date decided:` must be a real YYYY-MM-DD").
+//!
 //! Each was reverted and the suite went green again.
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const HEADERS: [&str; 6] = ["Status:", "Date decided:", "Deciding PRs:", "Supersedes:", "Code anchor:", "Conformance:"];
 const SECTIONS: [&str; 5] = ["## 1.", "## 2.", "## 3.", "## 4.", "## 5."];
@@ -56,9 +66,19 @@ fn header<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     text.lines().find_map(|l| l.strip_prefix(key)).map(str::trim)
 }
 
+/// A real calendar-ish date: YYYY-MM-DD with month 1–12 and day 1–31.
 fn is_date(s: &str) -> bool {
-    let b = s.as_bytes();
-    s.len() == 10 && b[4] == b'-' && b[7] == b'-' && s.chars().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 || parts[0].len() != 4 || parts[1].len() != 2 || parts[2].len() != 2 {
+        return false;
+    }
+    let num = |p: &str| p.parse::<u32>().ok();
+    matches!((num(parts[0]), num(parts[1]), num(parts[2])), (Some(_), Some(m), Some(d)) if (1..=12).contains(&m) && (1..=31).contains(&d))
+}
+
+/// `ADR-NNNN` → NNNN, for a reference to another record.
+fn adr_ref(s: &str) -> Option<u32> {
+    s.strip_prefix("ADR-").filter(|n| n.len() == 4).and_then(|n| n.parse().ok())
 }
 
 #[test]
@@ -82,16 +102,23 @@ fn every_record_is_well_formed() {
             let v = header(&r.text, h).unwrap_or_else(|| panic!("{id}: missing header `{h}`"));
             assert!(!v.is_empty(), "{id}: empty header `{h}`");
         }
-        assert!(is_date(header(&r.text, "Date decided:").unwrap()), "{id}: `Date decided:` must be YYYY-MM-DD");
+        assert!(is_date(header(&r.text, "Date decided:").unwrap()), "{id}: `Date decided:` must be a real YYYY-MM-DD");
         let status = header(&r.text, "Status:").unwrap();
         let ok = match status {
             "Accepted" | "Accepted (blocked)" | "Deprecated" => true,
             s => s
-                .strip_prefix("Superseded by ADR-")
-                .and_then(|n| n.parse::<u32>().ok())
+                .strip_prefix("Superseded by ")
+                .and_then(adr_ref)
                 .is_some_and(|n| numbers.contains(&n) && n != r.number),
         };
         assert!(ok, "{id}: unknown status `{status}`");
+        let supersedes = header(&r.text, "Supersedes:").unwrap();
+        if supersedes != "none" {
+            for item in supersedes.split(", ") {
+                let n = adr_ref(item).unwrap_or_else(|| panic!("{id}: `Supersedes:` must be `none` or ADR-NNNN, got `{item}`"));
+                assert!(numbers.contains(&n) && n != r.number, "{id}: supersedes {item}, which doesn't exist");
+            }
+        }
         for s in SECTIONS {
             assert!(r.text.lines().any(|l| l.starts_with(s)), "{id}: missing section `{s}`");
         }
@@ -101,33 +128,68 @@ fn every_record_is_well_formed() {
 #[test]
 fn index_matches_the_records() {
     let index = fs::read_to_string(root().join("docs/adr/index.md")).expect("read index.md");
-    let mut rows: BTreeMap<u32, (String, String)> = BTreeMap::new();
+    let mut rows: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
     for line in index.lines().filter(|l| l.starts_with("| ADR-")) {
-        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
         // | ADR-NNNN | decision | status | decided | superseded by |
-        let n: u32 = cells[1].trim_start_matches("ADR-").parse().expect("index number");
-        assert!(rows.insert(n, (cells[3].to_string(), cells[4].to_string())).is_none(), "ADR-{n:04} listed twice in index.md");
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        assert!(cells.len() == 7, "index.md: malformed row (want 5 columns): {line}");
+        let n = adr_ref(cells[1]).unwrap_or_else(|| panic!("index.md: bad record number `{}`", cells[1]));
+        let row = (cells[3].to_string(), cells[4].to_string(), cells[5].to_string());
+        assert!(rows.insert(n, row).is_none(), "ADR-{n:04} listed twice in index.md");
     }
     for r in records() {
         let id = format!("ADR-{:04}", r.number);
-        let (status, date) = rows.remove(&r.number).unwrap_or_else(|| panic!("{id} missing from index.md"));
-        assert_eq!(status, header(&r.text, "Status:").unwrap(), "{id}: index status differs from the record");
+        let (status, date, superseded_by) = rows.remove(&r.number).unwrap_or_else(|| panic!("{id} missing from index.md"));
+        let rec_status = header(&r.text, "Status:").unwrap();
+        assert_eq!(status, rec_status, "{id}: index status differs from the record");
         assert_eq!(date, header(&r.text, "Date decided:").unwrap(), "{id}: index date differs from the record");
+        let want = rec_status.strip_prefix("Superseded by ").unwrap_or("—");
+        assert_eq!(superseded_by, want, "{id}: index `Superseded by` differs from the record's status");
     }
     assert!(rows.is_empty(), "index.md lists records that don't exist: {:?}", rows.keys().collect::<Vec<_>>());
 }
 
-#[test]
-fn conformance_paths_exist() {
-    for r in records() {
-        let conf = header(&r.text, "Conformance:").unwrap();
-        if conf.starts_with("none") {
+/// Split a `Conformance:` value on ", " — but not inside a quoted CI job name (which may contain one).
+fn split_entries(conf: &str) -> Vec<String> {
+    let (mut out, mut cur, mut quoted) = (Vec::new(), String::new(), false);
+    let chars: Vec<char> = conf.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            quoted = !quoted;
+        }
+        if !quoted && c == ',' && chars.get(i + 1) == Some(&' ') {
+            out.push(std::mem::take(&mut cur));
+            i += 2;
             continue;
         }
-        for item in conf.split(", ") {
-            let path = item.split(|c: char| c == ' ').next().unwrap().split("::").next().unwrap();
-            if path.contains('/') {
-                assert!(Path::new(&root().join(path)).exists(), "ADR-{:04}: Conformance cites `{path}`, which doesn't exist", r.number);
+        cur.push(c);
+        i += 1;
+    }
+    out.push(cur);
+    out
+}
+
+#[test]
+fn conformance_entries_resolve() {
+    for r in records() {
+        let id = format!("ADR-{:04}", r.number);
+        let conf = header(&r.text, "Conformance:").unwrap();
+        if conf.starts_with("none — ") {
+            continue;
+        }
+        for item in split_entries(conf) {
+            let item = item.as_str();
+            if let Some((path, test)) = item.split_once("::") {
+                let file = fs::read_to_string(root().join(path)).unwrap_or_else(|_| panic!("{id}: Conformance cites `{path}`, which doesn't exist"));
+                assert!(file.contains(&format!("fn {test}(")), "{id}: Conformance cites `{test}`, which isn't a fn in {path}");
+            } else if let Some((path, rest)) = item.split_once(" job \"") {
+                let job = rest.split('"').next().unwrap_or_default();
+                let file = fs::read_to_string(root().join(path)).unwrap_or_else(|_| panic!("{id}: Conformance cites `{path}`, which doesn't exist"));
+                assert!(file.contains(job), "{id}: Conformance cites CI job `{job}`, which isn't in {path}");
+            } else {
+                panic!("{id}: Conformance entry `{item}` must be `path::test`, `<workflow> job \"<name>\"`, or `none — <why>`");
             }
         }
     }

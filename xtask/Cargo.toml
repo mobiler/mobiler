@@ -17,3 +17,5 @@ serde_json = "1"
 # against the real types.
 [dev-dependencies]
 mobiler-core = { path = "../mobiler-core" }
+# ADR-0003 asserts on the facet shape the shells are generated from (same pin as mobiler-core).
+facet = "=0.44"

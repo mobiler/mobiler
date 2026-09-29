@@ -5,7 +5,7 @@ Date decided:  2026-05-25
 Deciding PRs:  none (pre-PR history — commit 2442688 "Prototype: request/response capabilities")
 Supersedes:    none
 Code anchor:   mobiler-core/src/lib.rs (PluginCall, PluginNotify, PluginResponse, Cx::plugin / notify / subscribe), shell plugin registries (Core.kt, Core.swift, mobiler-web perform)
-Conformance:   mobiler-core/src/lib.rs tests plugin_response_carries_bytes_and_converts_text, cx_confirm_serializes_title_message_and_routes_ok, cx_snackbar_sends_a_snackbar_show_request
+Conformance:   mobiler-core/src/lib.rs::plugin_response_carries_bytes_and_converts_text, mobiler-core/src/lib.rs::cx_confirm_serializes_title_message_and_routes_ok, mobiler-core/src/lib.rs::cx_snackbar_sends_a_snackbar_show_request
 
 ## 1. Context (The Problem)
 
@@ -32,6 +32,8 @@ then:
     plain `plugin/op/input` calls, e.g. `cx_snackbar_sends_a_snackbar_show_request` in
     `mobiler-core/src/lib.rs`.
 - **Condition 2 — the response stays uniform.** See ADR-0003.
+- **Condition 3 — a missing plugin answers `ok: false`.** Not tested; verified by reading the three
+  shells' dispatch (Android `Core.kt`, iOS `Core.swift`, `mobiler-web`) on 2026-09-29.
 
 ## 3. Considered Options & Rationale for Refutation
 

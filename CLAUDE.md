@@ -36,10 +36,14 @@ provenance tags for rationale written from history.
 
 ## Tests
 
-- `cargo test --workspace` runs everything, including `xtask/tests/`:
-  - `adr_docs.rs` keeps the ADR set well-formed (numbering, headers, status, index).
+- `cargo test --workspace` runs the root workspace (the CLI, `mobiler-ui`, `mobiler-core`, `xtask`).
+  `mobiler-web` and each demo are separate workspaces, tested on their own and in CI.
+- The ADR checks live in `xtask/tests/`:
+  - `adr_docs.rs` keeps the ADR set well-formed (numbering, headers, status, index, and that every
+    cited conformance test exists).
   - `adr_conformance.rs` asserts that decisions with a mechanical invariant still hold.
-- **A conformance test must be proven to fail by a deliberate mutation before it is trusted.**
+- **A conformance test written for an ADR must be proven to fail by a deliberate mutation before it
+  is trusted.**
   Record the mutation in the owning ADR (a `Mutation proof` note in §4), not only in the PR. A test
   that has never been seen to fail is decoration.
 
