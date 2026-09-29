@@ -23,6 +23,9 @@ enum SqlitePlugin {
             return PluginResponse(ok: false, output: msg)
         }
         defer { sqlite3_close(db) }
+        // Each call opens its own connection, so two writes emitted in one update cycle race on the
+        // file lock. Wait (up to 5s) for a concurrent writer instead of failing with SQLITE_BUSY.
+        sqlite3_busy_timeout(db, 5000)
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
