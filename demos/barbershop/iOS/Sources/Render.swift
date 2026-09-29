@@ -497,9 +497,12 @@ private struct CustomBodyFont: ViewModifier {
 }
 
 /// Body text in the palette's `on_surface`; without that role, no modifier (system label colour).
+/// The colour is an input (not read from `pal` inside): a modifier with no changing inputs isn't
+/// re-evaluated, so a Light/Dark switch kept the previous set's text colour.
 private struct PaletteText: ViewModifier {
+    let ink: Rgb?
     @ViewBuilder func body(content: Content) -> some View {
-        if let c = pal?.onSurface { content.foregroundColor(c.color) } else { content }
+        if let c = ink { content.foregroundColor(c.color) } else { content }
     }
 }
 /// Theme.shapes per component: the set radius as a shape (`Pill` = capsule, `Dp(n)` = n pt), else nil
@@ -775,7 +778,9 @@ private struct ChartView: View {
         return Int((min(mag(0) / (g <= 0 ? 1e-6 : g), 1) * 100).rounded())
     }
 
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         VStack(spacing: 4) {
             if isCartesian {
                 HStack(spacing: 4) {
@@ -1237,7 +1242,9 @@ private struct RatingView: View {
     let max: UInt8
     let onRate: [String]?
     let send: (Action) -> Void
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         HStack(spacing: 2) {
             ForEach(1...Int(max), id: \.self) { i in
                 let threshold = UInt32(i) * 10
@@ -1349,7 +1356,7 @@ private struct ScaffoldView: View {
             }
         }
         .background(role(pal?.background, else: .clear).ignoresSafeArea())
-        .modifier(PaletteText())
+        .modifier(PaletteText(ink: pal?.onSurface))
         .modifier(CustomBodyFont())
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
         // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
