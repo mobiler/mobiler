@@ -5,7 +5,7 @@
 
 use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
-    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns,
+    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns, steps,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Snackbar, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
@@ -1267,6 +1267,9 @@ fn booking_sheet(s: &Service, user_rating: u32, client: &str) -> Widget {
         row(vec![emphasis(format!("Client: {client}")), button("Change", ButtonStyle::Text, Msg::PickClient)])
     };
     column(vec![
+        // Where the user is in the flow. The indicator speaks "Step 2 of 3" itself; a visible caption
+        // saying the same would be read twice.
+        steps(3, 2),
         row(vec![
             image(s.image, ImageShape::Rounded, ImageRatio::Square),
             column(vec![title(s.name), text(s.price), rating(tenths(s.rating), 5)]),
@@ -2536,6 +2539,13 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn booking_sheet_shows_step_two_of_three() {
+        let (_, model) = app();
+        let j = serde_json::to_string(&booking_sheet(&model.services[0], 0, "")).unwrap();
+        assert!(j.contains(r#""Steps":{"total":3,"current":2}"#), "{j}");
     }
 
     #[test]

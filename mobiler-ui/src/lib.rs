@@ -564,6 +564,9 @@ pub struct ShellLabels {
     pub pdf_title: Option<String>,
     /// Web WebView iframe title (accessibility).
     pub web_title: Option<String>,
+    /// The step indicator's spoken text ([`Widget::Steps`]), with `{current}` / `{total}`
+    /// placeholders: `"Korak {current} od {total}"`. Default `"Step {current} of {total}"`.
+    pub step_of: Option<String>,
 }
 
 impl ShellLabels {
@@ -614,6 +617,11 @@ impl ShellLabels {
     #[must_use]
     pub fn web_title(mut self, l: impl Into<String>) -> Self {
         self.web_title = Some(l.into());
+        self
+    }
+    #[must_use]
+    pub fn step_of(mut self, l: impl Into<String>) -> Self {
+        self.step_of = Some(l.into());
         self
     }
 }
@@ -939,6 +947,9 @@ pub enum Widget {
         /// `Some` overrides `dark_mode` (see [`Appearance`]); `None` = `dark_mode` decides.
         appearance: Option<Appearance>,
     },
+    /// A step indicator for a multi-step flow: `total` equal segments, the first `current` filled.
+    /// Spoken as one element, "Step 2 of 3" (or [`ShellLabels::step_of`]), never as a percentage.
+    Steps { total: u8, current: u8 },
 }
 
 #[cfg(test)]
@@ -968,6 +979,11 @@ mod tests {
             platform: "ios".to_string(),
             bundle_id: "rs.x".to_string(),
         });
+    }
+
+    #[test]
+    fn steps_round_trip() {
+        round_trips(&Widget::Steps { total: 3, current: 2 });
     }
 
     #[test]
