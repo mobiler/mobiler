@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler"
-version = "0.57.1"
+version = "0.58.0"
 dependencies = [
  "anyhow",
  "clap",

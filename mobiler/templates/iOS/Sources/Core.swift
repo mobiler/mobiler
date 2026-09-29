@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SharedTypes
 import UIKit
 import PhotosUI
@@ -36,7 +37,10 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-        if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
+        if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+        // Light/dark is a window-level override set from the root (see applyWindowStyle); the window
+        // exists by the next tick.
+        DispatchQueue.main.async { [weak self] in if let v = self?.view { applyWindowStyle(v) } }
         // The app's own version first, so the core's restore/init already see it (cx.app_info()).
         let info = Bundle.main.infoDictionary
         update(.appInfo(
@@ -60,7 +64,8 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-                if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
+                if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+                applyWindowStyle(view)
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.
@@ -134,6 +139,127 @@ enum SystemStream {
     }
 }
 
+/// The scaffold's dark flag outside a view (Core's per-render palette resolution): `.system` reads
+/// the OS via the window scene; ScaffoldView refines it with the live environment scheme.
+@MainActor
+func resolvedDark(_ appearance: Appearance?, _ darkMode: Bool) -> Bool {
+    switch appearance {
+    case .some(.light): return false
+    case .some(.dark): return true
+    case .some(.system): return AppearanceBridge.osDark()
+    case .none: return darkMode
+    }
+}
+
+/// Light/dark for the whole window, from the ROOT view: a scaffold's appearance (System → the OS,
+/// `.unspecified`) or its `dark_mode`; any other root follows the OS. A window-level override (not
+/// SwiftUI's `preferredColorScheme`, which doesn't reliably let go when set back to nil) — and it sits
+/// below the window scene, so the scene's trait always stays the OS value the appearance query reads.
+@MainActor
+func applyWindowStyle(_ view: Widget) {
+    let style: UIUserInterfaceStyle
+    if case let .scaffold(_, _, _, _, darkMode, _, _, _, _, _, _, _, _, appearance, _) = view {
+        switch appearance {
+        case .some(.system): style = .unspecified
+        case .some(.light): style = .light
+        case .some(.dark): style = .dark
+        case .none: style = darkMode ? .dark : .light
+        }
+    } else {
+        style = .unspecified
+    }
+    for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+        for window in scene.windows where window.overrideUserInterfaceStyle != style {
+            window.overrideUserInterfaceStyle = style
+        }
+    }
+}
+
+/// The OS light/dark setting: the active window scene's trait (system-level — the app's own
+/// light/dark override is set on its windows, below the scene). iOS 17 trait-change registration feeds
+/// the `appearance` stream; every subscription (key) gets its own sink, and the scene registration
+/// lives while at least one is attached.
+@MainActor
+final class AppearanceBridge {
+    static let shared = AppearanceBridge()
+    private var sinks: [UUID: @Sendable (String) -> Void] = [:]
+    private var registration: (any UITraitChangeRegistration)?
+    private weak var registeredScene: UIWindowScene?
+    private var last: String?
+    private var activation: NSObjectProtocol?
+
+    static func scene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
+    static func osDark() -> Bool {
+        (scene()?.traitCollection.userInterfaceStyle ?? UITraitCollection.current.userInterfaceStyle) == .dark
+    }
+    private static func name(_ dark: Bool) -> String { dark ? "dark" : "light" }
+
+    /// Add a subscriber: it gets the current value at once; returns its token for `detach`.
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> UUID {
+        let id = UUID()
+        sinks[id] = sink
+        let now = Self.name(Self.osDark())
+        sink(now)
+        if last == nil { last = now }
+        registerIfNeeded()
+        if activation == nil {
+            // A scene that (re)activates — first launch, reconnect after a long background, iPad
+            // multi-window — gets the registration, and a change made meanwhile is delivered.
+            activation = NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.registerIfNeeded()
+                    self?.changed(Self.name(Self.osDark()))
+                }
+            }
+        }
+        return id
+    }
+    /// Register on the current scene if it isn't the one already registered (none yet, or replaced).
+    private func registerIfNeeded() {
+        guard !sinks.isEmpty, let scene = Self.scene(), scene !== registeredScene else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
+        registeredScene = scene
+        registration = scene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
+            self?.changed(Self.name(scene.traitCollection.userInterfaceStyle == .dark))
+        }
+    }
+    private func changed(_ value: String) {
+        // iOS flips traits while it snapshots a backgrounded app for the switcher — ignore those; the
+        // activation observer re-reads the real value when the app comes back.
+        guard UIApplication.shared.applicationState != .background else { return }
+        guard value != last else { return }
+        last = value
+        for sink in sinks.values { sink(value) }
+    }
+    /// Remove one subscriber; the scene registration goes with the last one.
+    func detach(_ id: UUID) {
+        sinks[id] = nil
+        guard sinks.isEmpty else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
+        registration = nil
+        registeredScene = nil
+        last = nil
+        if let a = activation { NotificationCenter.default.removeObserver(a) }
+        activation = nil
+    }
+}
+
+/// Built-in `appearance` stream: the OS light/dark setting — the current value first, then each change.
+enum AppearanceStream {
+    static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
+        let id = await MainActor.run { AppearanceBridge.shared.attach(sink) }
+        await withTaskCancellationHandler {
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        } onCancel: {
+            Task { @MainActor in AppearanceBridge.shared.detach(id) }
+        }
+    }
+}
+
 /// Dispatches the opaque `{plugin, op, input}` envelope by name. Adding a plugin
 /// never touches the wire ABI — only this registry.
 enum Plugins {
@@ -143,6 +269,7 @@ enum Plugins {
         switch plugin {
         case "ticker": await TickerStream.run(input: input, emit: emit)
         case "system": await SystemStream.run(emit: emit)
+        case "appearance": await AppearanceStream.run(emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break
         }
@@ -156,6 +283,7 @@ enum Plugins {
         case "share": return await SharePlugin.handle(op: op, input: input)
         case "browser": return await BrowserPlugin.handle(op: op, input: input)
         case "toast": return await ToastPlugin.handle(op: op, input: input)
+        case "snackbar": return await SnackbarPlugin.handle(op: op, input: input)
         case "device": return await DevicePlugin.handle(op: op, input: input)
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
@@ -270,12 +398,17 @@ enum SharePlugin {
 /// Open a URL externally (Safari / the default handler).
 @MainActor
 enum BrowserPlugin {
-    static func handle(op: String, input: String) -> PluginResponse {
+    /// Honest result (cx.open_url_then): iOS reports whether an app took the link — e.g. `tel:` on
+    /// an iPad without calling answers `ok: false`.
+    static func handle(op: String, input: String) async -> PluginResponse {
         guard let url = URL(string: input) else {
             return PluginResponse(ok: false, output: "invalid url")
         }
-        UIApplication.shared.open(url)
-        return PluginResponse(ok: true, output: "")
+        let opened = await UIApplication.shared.open(url)
+        if opened { return PluginResponse(ok: true, output: "opened") }
+        // A declined confirmation (the tel: "Call …?" prompt) also reports false; only say nothing
+        // can open it when that is actually true.
+        return PluginResponse(ok: false, output: UIApplication.shared.canOpenURL(url) ? "cancelled" : "no app can open this link")
     }
 }
 
@@ -289,6 +422,9 @@ enum DevicePlugin {
             return PluginResponse(ok: true, output: "Apple \(d.model) (\(d.systemName) \(d.systemVersion))")
         case "locale":
             return PluginResponse(ok: true, output: Locale.preferredLanguages.first ?? Locale.current.identifier)
+        case "appearance":
+            // The OS setting, whatever the app forces.
+            return PluginResponse(ok: true, output: AppearanceBridge.osDark() ? "dark" : "light")
         default:
             return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
@@ -336,6 +472,63 @@ enum ToastPlugin {
         UIView.animate(withDuration: 0.2) { label.alpha = 1 }
         UIView.animate(withDuration: 0.3, delay: 2.3) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
         return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// The snackbar on screen, drawn by `ScaffoldView` (`SnackbarView`). `nonisolated(unsafe)` like
+/// `ActiveTheme`: only ever touched on the main thread, from the plugin and the view.
+@Observable final class SnackbarHost {
+    nonisolated(unsafe) static let shared = SnackbarHost()
+    struct Request: Identifiable {
+        let id: Int
+        let text: String
+        let action: String?
+        let seconds: Double
+    }
+    var current: Request?
+    /// ScaffoldViews on screen: the timeout runs in `SnackbarView`, so with none there'd be no end.
+    @ObservationIgnored var hosts = 0
+    @ObservationIgnored private var answer: ((String) -> Void)?
+    @ObservationIgnored private var nextId = 0
+
+    /// Show a snackbar; a visible one answers "replaced" first (one at a time).
+    func show(text: String, action: String?, seconds: Double, answer: @escaping (String) -> Void) {
+        finish("replaced")
+        nextId += 1
+        current = Request(id: nextId, text: text, action: action, seconds: seconds)
+        self.answer = answer
+    }
+
+    /// Resolve and hide the visible snackbar — only if it's still request `id`, when one is given
+    /// (a late timer or swipe must not close a newer snackbar).
+    func finish(_ outcome: String, id: Int? = nil) {
+        guard let cur = current, id == nil || id == cur.id else { return }
+        let a = answer
+        answer = nil
+        current = nil
+        a?(outcome)
+    }
+}
+
+/// Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+/// "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout", "dismissed"
+/// (swiped down) or "replaced" (a newer snackbar).
+@MainActor
+enum SnackbarPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "show" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        let text = obj?["text"] as? String ?? ""
+        let action = (obj?["action_label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        var seconds: Double = (obj?["duration"] as? String) == "long" ? 10 : 4
+        // VoiceOver needs time to reach the action (Android's M3 host lengthens it the same way).
+        if action != nil && UIAccessibility.isVoiceOverRunning { seconds = max(seconds, 10) }
+        // No scaffold on screen → nothing to show it on, and nothing would ever time it out.
+        if SnackbarHost.shared.hosts == 0 { return PluginResponse(ok: false, output: "timeout") }
+        let outcome: String = await withCheckedContinuation { cont in
+            SnackbarHost.shared.show(text: text, action: action, seconds: seconds) { cont.resume(returning: $0) }
+        }
+        return PluginResponse(ok: outcome == "action", output: outcome)
     }
 }
 

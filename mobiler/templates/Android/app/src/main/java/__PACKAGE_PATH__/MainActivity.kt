@@ -10,7 +10,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.ComponentActivity as PaletteActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -39,6 +43,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.layout.height
@@ -57,12 +62,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
@@ -94,11 +101,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -108,6 +117,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.NavigationRailDefaults
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -117,6 +133,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -165,6 +182,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
@@ -180,6 +200,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -188,6 +209,13 @@ import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
+import {{PACKAGE}}.ui.theme.LocalPalette
+import {{PACKAGE}}.ui.theme.color
+import {{PACKAGE}}.ui.theme.applySpec
+import {{PACKAGE}}.ui.theme.radiusShape
+import {{PACKAGE_SHARED_TYPES}}.TonePair
+import {{PACKAGE_SHARED_TYPES}}.Appearance
 import {{PACKAGE}}.ui.theme.{{NAME}}Theme
 import {{PACKAGE_SHARED_TYPES}}.A11yRole
 import {{PACKAGE_SHARED_TYPES}}.Action
@@ -291,12 +319,38 @@ fun App(core: Core = viewModel()) {
     // Brand color, corner radius (Cards via MaterialTheme.shapes), and font flow through
     // MaterialTheme automatically. Density (spacing) + image-corner aren't MaterialTheme knobs,
     // so the non-composable mapper helpers (spacingFor/shapeFor) read them from `activeTheme`.
-    val dark = (view as? Widget.Scaffold)?.darkMode ?: isSystemInDarkTheme()
+    val osDark = isSystemInDarkTheme()
+    // Appearance: Light/Dark force the mode, System follows the OS (recomposes on its change); none →
+    // dark_mode, as before. A non-Scaffold root follows the OS, as before.
+    val dark = (view as? Widget.Scaffold)?.let { sc ->
+        when (sc.appearance) {
+            Appearance.LIGHT -> false
+            Appearance.DARK -> true
+            Appearance.SYSTEM -> osDark
+            null -> sc.darkMode
+        }
+    } ?: osDark
     val appTheme = (view as? Widget.Scaffold)?.theme
     // Stash the active theme before rendering (app-global, like dark mode; render runs on the
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
     activeTheme = appTheme
     ActiveLabels.current = (view as? Widget.Scaffold)?.labels
+    // With a palette the system-bar icons follow the resolved `dark` (appearance / dark_mode), not the OS.
+    // If a palette goes away at runtime, restore the default (OS-following) bars once.
+    val hasPalette = appTheme?.palette != null
+    val activity = androidx.compose.ui.platform.LocalContext.current as? PaletteActivity
+    var paletteBars by remember { mutableStateOf(false) }
+    LaunchedEffect(dark, hasPalette, activity) {
+        if (hasPalette) {
+            val t = android.graphics.Color.TRANSPARENT
+            val style = if (dark) SystemBarStyle.dark(t) else SystemBarStyle.light(t, t)
+            activity?.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            paletteBars = true
+        } else if (paletteBars) {
+            activity?.enableEdgeToEdge()
+            paletteBars = false
+        }
+    }
     {{NAME}}Theme(darkTheme = dark, theme = appTheme) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (view is Widget.Scaffold) {
@@ -344,11 +398,12 @@ private fun ConfirmDialog(req: ConfirmRequest) {
             TextButton(
                 onClick = { req.answer(true) },
                 modifier = buttonModifier,
+                shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
                 colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
             ) { Text(req.confirmLabel, fontSize = labelSize) }
         },
         dismissButton = {
-            TextButton(onClick = { req.answer(false) }, modifier = buttonModifier) { Text(req.cancelLabel, fontSize = labelSize) }
+            TextButton(onClick = { req.answer(false) }, modifier = buttonModifier, shape = shapeOf { it.button } ?: ButtonDefaults.textShape) { Text(req.cancelLabel, fontSize = labelSize) }
         },
     )
 }
@@ -418,7 +473,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Text -> Text(
             text = widget.content,
             style = typographyFor(widget.style),
-            fontWeight = if (widget.style == ModelTextStyle.EMPHASIS) FontWeight.Medium else null,
+            // Emphasis is Medium unless the type scale sets its weight.
+            fontWeight = if (widget.style == ModelTextStyle.EMPHASIS && activeTheme?.typeScale?.emphasis == null) FontWeight.Medium else null,
             color = colorFor(widget.style),
             modifier = Modifier.padding(vertical = 2.dp),
         )
@@ -438,8 +494,19 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Badge -> {
             val (bg, fg) = toneColors(widget.tone)
             Box(
-                modifier = Modifier.background(color = bg, shape = RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
-            ) { Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg) }
+                modifier = Modifier.background(color = bg, shape = shapeOf { it.badge } ?: RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                val icon = widget.icon
+                if (icon == null) {
+                    Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg)
+                } else {
+                    // with_icon: the status reads without its colour; the icon is decorative.
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(iconFor(icon), contentDescription = null, modifier = Modifier.size(14.dp), tint = fg)
+                        Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg)
+                    }
+                }
+            }
         }
 
         is Widget.ColorDot -> Box(
@@ -447,19 +514,56 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         )
 
         is Widget.Avatar -> Box {
-            AsyncImage(
-                model = widget.source,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(48.dp).clip(CircleShape),
-            )
+            val d = (widget.size?.toInt() ?: 48).dp
+            val initials = widget.initials
+            if (initials == null) {
+                AsyncImage(
+                    model = widget.source,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(d).clip(CircleShape),
+                )
+            } else if (widget.source.isEmpty()) {
+                AvatarInitials(initials, d)
+            } else {
+                // with_initials: drawn when the image fails to load; a loaded image wins.
+                SubcomposeAsyncImage(
+                    model = widget.source,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(d).clip(CircleShape),
+                    // Loading: the plain placeholder (as on iOS); failed: the initials.
+                    loading = { Box(Modifier.size(d).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))) },
+                    error = { AvatarInitials(initials, d) },
+                )
+            }
             widget.status?.let { st ->
-                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(toneColors(st).first))
+                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(if (tonePair(LocalPalette.current, st) != null) toneColors(st).second else toneColors(st).first))
+            }
+        }
+
+        is Widget.Steps -> {
+            val total = widget.total.toInt()
+            val current = minOf(widget.current.toInt(), total)
+            if (total > 0) {
+                val tpl = ActiveLabels.current?.stepOf?.takeIf { it.isNotEmpty() } ?: "Step {current} of {total}"
+                val spoken = tpl.replace("{current}", "$current").replace("{total}", "$total")
+                val on = LocalPalette.current?.primary?.color() ?: MaterialTheme.colorScheme.primary
+                // Unfilled segments carry the step count, so they use the outline colour (~3:1).
+                val off = LocalPalette.current?.outline?.color() ?: MaterialTheme.colorScheme.outline
+                // One element named by the step text (the optional caption is part of it); no progress
+                // range, so TalkBack never reads a percentage.
+                Column(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (widget.caption) Text(spoken, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        repeat(total) { i -> Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(50)).background(if (i < current) on else off)) }
+                    }
+                }
             }
         }
 
         is Widget.Rating -> Row(verticalAlignment = Alignment.CenterVertically) {
-            val tint = MaterialTheme.colorScheme.primary
+            val tint = LocalPalette.current?.primaryText?.color() ?: MaterialTheme.colorScheme.primary
             val onRate = widget.onRate
             for (i in 1..widget.max.toInt()) {
                 val threshold = (i * 10).toUInt()
@@ -490,7 +594,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         }
         is Widget.Skeleton -> Box(
             modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp)
-                .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                .clip(RoundedCornerShape(8.dp)).background(LocalPalette.current?.surfaceMuted?.color() ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
         )
         is Widget.Chart -> {
             // Multi-series chart: cartesian (bar/line/stacked) with optional y-axis + legend, or
@@ -499,6 +603,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val series = widget.series
             val style = widget.style
             val primary = MaterialTheme.colorScheme.primary
+            val primaryText = LocalPalette.current?.primaryText?.color()
             val trackColor = MaterialTheme.colorScheme.surfaceVariant
             val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
             val palette = listOf(
@@ -509,7 +614,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 val c = series.getOrNull(i)?.color
                 return when {
                     c != null -> Color(c.r.toInt(), c.g.toInt(), c.b.toInt())
-                    i == 0 -> primary
+                    i == 0 -> primaryText ?: primary
                     else -> palette[(i - 1) % palette.size]
                 }
             }
@@ -653,7 +758,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             }
                         }
                         if (style == ChartStyle.GAUGE) {
-                            Text("$gaugePct%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("$gaugePct%", style = bodyFamily(MaterialTheme.typography.titleLarge), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
@@ -828,7 +933,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             repeat(widget.leadingBlanks.toInt()) { cells.add(null) }
             for (d in 1..widget.onDay.size) cells.add(d)
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(widget.title, style = MaterialTheme.typography.titleMedium)
+                Text(widget.title, style = bodyFamily(MaterialTheme.typography.titleMedium))
                 Row(modifier = Modifier.fillMaxWidth()) {
                     widget.weekdayLabels.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center) }
                 }
@@ -876,12 +981,14 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             Box(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
                     actions.forEach { a ->
-                        val (_, fg) = toneColors(a.tone)
+                        val (bgSoft, fg) = toneColors(a.tone)
+                        // A palette pair: container behind on-container; otherwise the strong colour + white.
+                        val pal = tonePair(LocalPalette.current, a.tone) != null
                         Box(
-                            modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(fg)
+                            modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(if (pal) bgSoft else fg)
                                 .clickable { send(Action.Fired(a.onTap)); offsetX = 0f },
                             contentAlignment = Alignment.Center,
-                        ) { Text(a.label, color = Color.White, style = MaterialTheme.typography.labelMedium) }
+                        ) { Text(a.label, color = if (pal) fg else Color.White, style = MaterialTheme.typography.labelMedium) }
                     }
                 }
                 Box(
@@ -932,25 +1039,47 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             else Modifier
             val mod = Modifier.fillMaxWidth().then(clickMod)
             when (widget.style) {
-                CardStyle.OUTLINED -> OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
+                CardStyle.OUTLINED -> OutlinedCard(modifier = mod, shape = shapeOf { it.card } ?: CardDefaults.outlinedShape) { CardBody(widget.child, send) }
                 CardStyle.FILLED -> {
                     val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    Card(modifier = mod, colors = colors) { CardBody(widget.child, send) }
+                    Card(modifier = mod, colors = colors, shape = shapeOf { it.card } ?: CardDefaults.shape) { CardBody(widget.child, send) }
                 }
                 CardStyle.ELEVATED -> {
                     val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                    Card(modifier = mod, elevation = elev) { CardBody(widget.child, send) }
+                    Card(modifier = mod, elevation = elev, shape = shapeOf { it.card } ?: CardDefaults.shape) { CardBody(widget.child, send) }
+                }
+                CardStyle.DASHED -> {
+                    // No fill; a 1.5dp dashed outline (dash 6 / gap 4) in the palette's outline, inset by
+                    // half the stroke so the clip doesn't cut it.
+                    val shape = shapeOf { it.card } ?: CardDefaults.outlinedShape
+                    val color = LocalPalette.current?.outline?.color() ?: MaterialTheme.colorScheme.outline
+                    val dashMod = Modifier.fillMaxWidth().clip(shape).then(clickMod).drawBehind {
+                        val w = 1.5.dp.toPx()
+                        translate(w / 2, w / 2) {
+                            drawOutline(
+                                shape.createOutline(Size(size.width - w, size.height - w), layoutDirection, this),
+                                color,
+                                style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))),
+                            )
+                        }
+                    }
+                    // Content colour as on the outlined card, whatever the surroundings (e.g. inside a Brand card).
+                    Box(modifier = dashMod) {
+                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onSurface?.color() ?: MaterialTheme.colorScheme.onSurface)) {
+                            CardBody(widget.child, send)
+                        }
+                    }
                 }
                 CardStyle.BRAND -> {
                     // Brand gradient (seed → accent, via the M3 primary → secondary scheme).
                     val cs = MaterialTheme.colorScheme
                     val grad = Brush.linearGradient(listOf(cs.primary, cs.secondary))
                     val brandMod = Modifier.fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
+                        .clip(shapeOf { it.card } ?: MaterialTheme.shapes.medium)
                         .background(grad)
                         .then(clickMod)
                     Box(modifier = brandMod) {
-                        CompositionLocalProvider(LocalContentColor provides Color.White) { CardBody(widget.child, send) }
+                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onPrimary?.color() ?: Color.White)) { CardBody(widget.child, send) }
                     }
                 }
             }
@@ -972,7 +1101,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Grid -> BoxWithConstraints {
             // Column count follows the available width: 2 on a phone, more on a
             // tablet (the web/iOS twin of auto-fill / adaptive grids).
-            val cols = maxOf(2, (maxWidth.value / 190f).toInt())
+            // with_columns: exactly that many (1-4) at every width.
+            val cols = widget.columns?.toInt()?.coerceIn(1, 4) ?: maxOf(2, (maxWidth.value / 190f).toInt())
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 widget.children.chunked(cols).forEach { rowItems ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1114,10 +1244,14 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         }
 
         is Widget.Chip -> FilterChip(
+            shape = shapeOf { it.chip } ?: FilterChipDefaults.shape,
             selected = widget.selected,
             onClick = { send(Action.Fired(widget.onPress)) },
             label = { Text(widget.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) },
             modifier = if (isLarge) Modifier.height(48.dp) else Modifier,
+            colors = LocalPalette.current?.surfaceMuted?.let { FilterChipDefaults.filterChipColors(containerColor = it.color()) } ?: FilterChipDefaults.filterChipColors(),
+            border = LocalPalette.current?.outline?.let { FilterChipDefaults.filterChipBorder(enabled = true, selected = widget.selected, borderColor = it.color()) }
+                ?: FilterChipDefaults.filterChipBorder(enabled = true, selected = widget.selected),
         )
 
         is Widget.TextField -> {
@@ -1134,6 +1268,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val sync = remember(widget.id) { FieldSync(widget.value) }
             SideEffect { sync.onAppValue(widget.value) }
             OutlinedTextField(
+                shape = shapeOf { it.input } ?: OutlinedTextFieldDefaults.shape,
                 value = sync.field,
                 onValueChange = { sync.onEdit(it) { t -> send(Action.Input(widget.id, InputValue.Text(t))) } },
                 placeholder = { Text(widget.placeholder) },
@@ -1144,6 +1279,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 isError = widget.error != null,
                 supportingText = widget.error?.let { msg -> { Text(msg) } },
                 modifier = Modifier.fillMaxWidth(),
+                colors = paletteFieldColors(),
             )
         }
 
@@ -1156,8 +1292,9 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 placeholder = { Text(widget.placeholder) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true,
-                shape = RoundedCornerShape(50),
+                shape = shapeOf { it.input } ?: RoundedCornerShape(50),
                 modifier = Modifier.fillMaxWidth(),
+                colors = paletteFieldColors(),
             )
         }
 
@@ -1195,7 +1332,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 
         is Widget.Stepper -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { send(Action.Fired(widget.onDecrement)) }) { Text("−") }
-            Text(text = "${widget.value}", style = MaterialTheme.typography.titleMedium)
+            Text(text = "${widget.value}", style = bodyFamily(MaterialTheme.typography.titleMedium))
             OutlinedButton(onClick = { send(Action.Fired(widget.onIncrement)) }) { Text("+") }
         }
 
@@ -1209,12 +1346,16 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             // Modal bottom sheet — present in the tree ⇒ shown (a Popup, so it overlays
             // everything regardless of where it's composed). Scrim/swipe fires on_dismiss.
             widget.sheet?.let { sheet ->
-                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }) {
+                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }, shape = activeTheme?.shapes?.sheetTop?.let { r ->
+                    // Pill is capped at 32dp: a dome would clip the sheet's content.
+                    val top = if (r is {{PACKAGE_SHARED_TYPES}}.Radius.Dp) r.value.toInt().dp else 32.dp
+                    RoundedCornerShape(topStart = top, topEnd = top)
+                } ?: BottomSheetDefaults.ExpandedShape, scrimColor = LocalPalette.current?.scrim?.color() ?: BottomSheetDefaults.ScrimColor) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(sheet.title, style = MaterialTheme.typography.titleLarge)
+                        Text(sheet.title, style = activeTheme?.typeScale?.headline?.let { scaled(it, MaterialTheme.typography.titleLarge, true) } ?: MaterialTheme.typography.titleLarge)
                         Render(sheet.child, send)
                     }
                 }
@@ -1225,33 +1366,68 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 val wide = maxWidth >= 600.dp && widget.tabs.isNotEmpty()
                 Row(modifier = Modifier.fillMaxSize()) {
                     if (wide) {
-                        NavigationRail {
+                        NavigationRail(containerColor = LocalPalette.current?.surfaceBar?.color() ?: NavigationRailDefaults.ContainerColor) {
                             widget.tabs.forEach { t ->
                                 NavigationRailItem(
                                     selected = t.selected,
                                     onClick = { send(Action.Fired(t.onSelect)) },
                                     label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
                                     icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
+                                    colors = LocalPalette.current?.primaryText?.color()?.let { NavigationRailItemDefaults.colors(selectedTextColor = it) } ?: NavigationRailItemDefaults.colors(),
                                 )
                             }
                         }
                     }
+                    // cx.snackbar needs a composed host to time out; count this one while it's on screen.
+                    DisposableEffect(Unit) {
+                        SnackbarBus.hosts++
+                        onDispose {
+                            SnackbarBus.hosts--
+                            // The last host went: nothing would time the snackbar out any more. Its call
+                            // answers "timeout" (a dismiss, unlike a replace).
+                            if (SnackbarBus.hosts == 0) SnackbarBus.state.currentSnackbarData?.dismiss()
+                        }
+                    }
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
+                        // cx.snackbar — M3 stacks it above the bottom bar and the FAB.
+                        snackbarHost = { SnackbarHost(SnackbarBus.state) },
                         topBar = {
                             CenterAlignedTopAppBar(
-                                title = { Text(widget.title) },
+                                // The type scale's `title` spec, else the app bar's own style.
+                                title = { activeTheme?.typeScale?.title?.let { Text(widget.title, style = scaled(it, MaterialTheme.typography.titleLarge, true)) } ?: Text(widget.title) },
                                 navigationIcon = {
                                     if (back != null) {
                                         IconButton(onClick = { send(Action.Fired(back)) }) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back")
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back",
+                                                tint = LocalPalette.current?.primaryText?.color() ?: LocalContentColor.current)
                                         }
                                     }
                                 },
-                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = LocalPalette.current?.surfaceBar?.color() ?: MaterialTheme.colorScheme.surface),
                             )
                         },
                         bottomBar = {
+                          Column {
+                            val pinned = widget.bottomBar.orEmpty()
+                            if (pinned.isNotEmpty()) {
+                                // with_bottom_bar: the screen's main actions above the tabs. M3 lifts the FAB and
+                                // snackbar above this slot. Without bottom tabs it clears the system bar and
+                                // rises with the keyboard (the tabs themselves stay behind the keyboard).
+                                val barInsets = if (!wide && widget.tabs.isNotEmpty()) Modifier else Modifier.navigationBarsPadding().imePadding()
+                                Surface(color = LocalPalette.current?.surfaceBar?.color() ?: MaterialTheme.colorScheme.surfaceContainer) {
+                                    Column(barInsets) {
+                                        HorizontalDivider(color = LocalPalette.current?.outlineVariant?.color() ?: MaterialTheme.colorScheme.outlineVariant)
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            pinned.forEach { child -> Box(Modifier.weight(1f)) { Render(child, send) } }
+                                        }
+                                    }
+                                }
+                            }
                             if (!wide && widget.tabs.isNotEmpty()) {
                                 NavigationBar {
                                     widget.tabs.forEach { t ->
@@ -1260,15 +1436,36 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             onClick = { send(Action.Fired(t.onSelect)) },
                                             label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
                                             icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
+                                            // M3 colours the selected label with `secondary` (the brand accent); a palette uses primary_text.
+                                            colors = LocalPalette.current?.primaryText?.color()?.let { NavigationBarItemDefaults.colors(selectedTextColor = it) } ?: NavigationBarItemDefaults.colors(),
                                         )
                                     }
                                 }
                             }
+                          }
                         },
                         floatingActionButton = {
                             widget.fab?.let { fab ->
-                                FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }) {
-                                    Icon(iconFor(fab.icon), contentDescription = null)
+                                val label = fab.label
+                                if (label != null) {
+                                    // Extended FAB (with_extended_fab): icon + label; the label is the spoken name.
+                                    ExtendedFloatingActionButton(
+                                        onClick = { send(Action.Fired(fab.onPress)) },
+                                        // M3 clears its label's semantics (inside the expand animation), which left the
+                                        // button unnamed for TalkBack; name it by the label.
+                                        // Capped like web/iOS so a very long label ellipsizes on screen instead of
+                                        // pushing the FAB's leading edge off it.
+                                        modifier = Modifier
+                                            .semantics { contentDescription = label }
+                                            .widthIn(max = LocalConfiguration.current.screenWidthDp.dp - 32.dp),
+                                        icon = { Icon(iconFor(fab.icon), contentDescription = null) },
+                                        text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.extendedFabShape,
+                                    )
+                                } else {
+                                    FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }, shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.shape) {
+                                        Icon(iconFor(fab.icon), contentDescription = null)
+                                    }
                                 }
                             }
                         },
@@ -1363,13 +1560,33 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 // ---------- Style-token mappings (the only place that decides concrete looks) ----------
 
 @Composable
-private fun typographyFor(style: ModelTextStyle): androidx.compose.ui.text.TextStyle = when (style) {
-    ModelTextStyle.BODY -> MaterialTheme.typography.bodyLarge
-    ModelTextStyle.TITLE -> MaterialTheme.typography.headlineMedium
-    ModelTextStyle.SUBTITLE -> MaterialTheme.typography.titleMedium
-    ModelTextStyle.CAPTION -> MaterialTheme.typography.bodySmall
-    ModelTextStyle.EMPHASIS -> MaterialTheme.typography.bodyLarge
+private fun typographyFor(style: ModelTextStyle): androidx.compose.ui.text.TextStyle {
+    val base = when (style) {
+        ModelTextStyle.BODY -> MaterialTheme.typography.bodyLarge
+        ModelTextStyle.TITLE -> MaterialTheme.typography.headlineMedium
+        ModelTextStyle.SUBTITLE -> MaterialTheme.typography.titleMedium
+        ModelTextStyle.CAPTION -> MaterialTheme.typography.bodySmall
+        ModelTextStyle.EMPHASIS -> MaterialTheme.typography.bodyLarge
+        ModelTextStyle.DISPLAY -> MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold)
+        ModelTextStyle.HEADLINE -> MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
+    }
+    val ts = activeTheme?.typeScale ?: return base
+    val (spec, tight) = when (style) {
+        ModelTextStyle.DISPLAY -> ts.display to true
+        ModelTextStyle.HEADLINE -> ts.headline to true
+        ModelTextStyle.TITLE -> ts.title to true
+        ModelTextStyle.SUBTITLE -> ts.subtitle to false
+        ModelTextStyle.BODY -> ts.body to false
+        ModelTextStyle.EMPHASIS -> ts.emphasis to false
+        ModelTextStyle.CAPTION -> ts.caption to false
+    }
+    return spec?.let { scaled(it, base, tight) } ?: base
 }
+
+/** A type-scale spec applied over `base` (see ui/theme applySpec). */
+@Composable
+private fun scaled(spec: {{PACKAGE_SHARED_TYPES}}.TypeSpec, base: androidx.compose.ui.text.TextStyle, tight: Boolean): androidx.compose.ui.text.TextStyle =
+    applySpec(base, spec, tight, activeTheme?.font == {{PACKAGE_SHARED_TYPES}}.FontFamily.CUSTOM, androidx.compose.ui.platform.LocalContext.current)
 
 @Composable
 private fun colorFor(style: ModelTextStyle): Color = when (style) {
@@ -1382,6 +1599,16 @@ private fun colorFor(style: ModelTextStyle): Color = when (style) {
 // null = framework defaults (no visual change). App-global, like dark mode; the SwiftUI
 // shell's `ActiveTheme.current` twin.
 private var activeTheme: ModelTheme? = null
+
+// Theme.shapes per component: the set radius's shape, else null (the call site keeps its default).
+private fun shapeOf(pick: ({{PACKAGE_SHARED_TYPES}}.Shapes) -> {{PACKAGE_SHARED_TYPES}}.Radius?): androidx.compose.ui.graphics.Shape? =
+    activeTheme?.shapes?.let(pick)?.let { radiusShape(it) }
+
+// Under FontFamily.CUSTOM the title slots carry the display family; non-title text that borrows a
+// title slot's size (calendar month, stepper value, gauge %) keeps the body family. Unchanged otherwise.
+@Composable
+private fun bodyFamily(style: androidx.compose.ui.text.TextStyle): androidx.compose.ui.text.TextStyle =
+    if (activeTheme?.font == {{PACKAGE_SHARED_TYPES}}.FontFamily.CUSTOM) style.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily) else style
 
 /** The current scaffold's app-wide shell text (ShellLabels), set when App() renders. Core.kt's
  *  dialog/picker plugins read it for their defaults; null ⇒ English/platform defaults. */
@@ -1427,6 +1654,22 @@ private fun spacingFor(size: Spacing): Dp {
     return (base * densityScale).dp
 }
 
+/** An avatar's initials (the first two characters) on the secondary container, 40% of the diameter. */
+@Composable
+private fun AvatarInitials(initials: String, d: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier.size(d).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            // Two code points, not UTF-16 units (which could split an emoji); like web.
+            initials.codePoints().limit(2).toArray().let { String(it, 0, it.size) },
+            style = MaterialTheme.typography.bodyLarge.copy(fontSize = (d.value * 0.4f).sp, fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
+}
+
 private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.ImageVector = when (icon) {
     WidgetIcon.DELETE -> Icons.Default.Delete
     WidgetIcon.ADD -> Icons.Default.Add
@@ -1459,17 +1702,21 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.PHOTO -> Icons.Default.Image
     WidgetIcon.PLAY -> Icons.Default.PlayArrow
     WidgetIcon.SCISSORS -> Icons.Default.ContentCut
+    WidgetIcon.DONEALL -> Icons.Default.DoneAll
 }
 
 @Composable
 private fun iconTintFor(icon: WidgetIcon): Color = when (icon) {
-    WidgetIcon.STAR -> MaterialTheme.colorScheme.primary
+    WidgetIcon.STAR -> LocalPalette.current?.primaryText?.color() ?: MaterialTheme.colorScheme.primary
     else -> LocalContentColor.current
 }
 
 @Composable
 private fun toneColors(tone: Tone): Pair<Color, Color> {
     val cs = MaterialTheme.colorScheme
+    val pal = LocalPalette.current
+    tonePair(pal, tone)?.let { return it.container.color() to it.onContainer.color() }
+    if (pal != null && tone == Tone.NEUTRAL) return (pal.surfaceMuted?.color() ?: cs.surfaceVariant) to (pal.onSurfaceVariant?.color() ?: cs.onSurfaceVariant)
     return when (tone) {
         Tone.NEUTRAL -> cs.surfaceVariant to cs.onSurfaceVariant
         Tone.SUCCESS -> Color(0xFF2E7D32).copy(alpha = 0.15f) to Color(0xFF2E7D32)
@@ -1483,6 +1730,8 @@ private fun toneColors(tone: Tone): Pair<Color, Color> {
 @Composable
 private fun toneStrong(tone: Tone): Pair<Color, Color> {
     val cs = MaterialTheme.colorScheme
+    // A palette pair flips for fills: on-container fill, container text.
+    tonePair(LocalPalette.current, tone)?.let { return it.onContainer.color() to it.container.color() }
     return when (tone) {
         Tone.NEUTRAL -> cs.primary to cs.onPrimary
         Tone.SUCCESS -> Color(0xFF2E7D32) to Color.White
@@ -1490,6 +1739,22 @@ private fun toneStrong(tone: Tone): Pair<Color, Color> {
         Tone.DANGER -> cs.error to cs.onError
         Tone.INFO -> cs.tertiary to cs.onTertiary
     }
+}
+
+// The palette's container/on-container pair for a tone (null: no palette, NEUTRAL, or unset).
+private fun tonePair(roles: {{PACKAGE_SHARED_TYPES}}.ColorRoles?, tone: Tone): TonePair? = when (tone) {
+    Tone.SUCCESS -> roles?.success
+    Tone.WARNING -> roles?.warning
+    Tone.DANGER -> roles?.danger
+    Tone.INFO -> roles?.info
+    Tone.NEUTRAL -> null
+}
+
+// Text-field fill from the palette's `surface_muted` (the M3 default colours otherwise).
+@Composable
+private fun paletteFieldColors(): TextFieldColors {
+    val muted = LocalPalette.current?.surfaceMuted?.color() ?: return OutlinedTextFieldDefaults.colors()
+    return OutlinedTextFieldDefaults.colors(focusedContainerColor = muted, unfocusedContainerColor = muted)
 }
 
 // Widget.Button. A NEUTRAL tone keeps each M3 button's default colors (an un-toned button renders
@@ -1516,6 +1781,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.FILLED -> Button(
             onClick = onClick,
             modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.shape,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
             colors = if (neutral) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = strong, contentColor = onStrong),
             content = content,
@@ -1523,16 +1789,21 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.TONAL -> FilledTonalButton(
             onClick = onClick,
             modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.filledTonalShape,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
             colors = if (neutral) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.filledTonalButtonColors(containerColor = soft, contentColor = onSoft),
             content = content,
         )
         ButtonStyle.OUTLINED -> if (neutral) {
-            OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding, content = content)
+            val pt = LocalPalette.current?.primaryText?.color()
+            OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape,
+                colors = if (pt != null) ButtonDefaults.outlinedButtonColors(contentColor = pt) else ButtonDefaults.outlinedButtonColors(), content = content)
         } else {
             OutlinedButton(
                 onClick = onClick,
                 modifier = modifier,
+                shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape,
                 contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = strong),
                 border = BorderStroke(1.dp, strong),
@@ -1542,8 +1813,9 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         ButtonStyle.TEXT -> TextButton(
             onClick = onClick,
             modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.TextButtonContentPadding,
-            colors = if (neutral) ButtonDefaults.textButtonColors() else ButtonDefaults.textButtonColors(contentColor = strong),
+            colors = if (neutral) (LocalPalette.current?.primaryText?.color()?.let { ButtonDefaults.textButtonColors(contentColor = it) } ?: ButtonDefaults.textButtonColors()) else ButtonDefaults.textButtonColors(contentColor = strong),
             content = content,
         )
     }

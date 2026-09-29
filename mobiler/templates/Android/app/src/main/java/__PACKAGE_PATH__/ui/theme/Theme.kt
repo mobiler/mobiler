@@ -3,6 +3,7 @@ package {{PACKAGE}}.ui.theme
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
@@ -10,10 +11,15 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import {{PACKAGE_SHARED_TYPES}}.Corner
+import {{PACKAGE_SHARED_TYPES}}.ColorRoles
+import {{PACKAGE_SHARED_TYPES}}.Rgb
+import {{PACKAGE_SHARED_TYPES}}.Rgba
 import {{PACKAGE_SHARED_TYPES}}.Theme as ModelTheme
 
 private val DarkColorScheme = darkColorScheme(
@@ -27,6 +33,56 @@ private val LightColorScheme = lightColorScheme(
     secondary = PurpleGrey40,
     tertiary = Pink40,
 )
+
+/** The active palette set (light or dark by `darkTheme`); null = no palette, every widget keeps its colours. */
+val LocalPalette = staticCompositionLocalOf<ColorRoles?> { null }
+fun Rgb.color() = Color(r.toInt(), g.toInt(), b.toInt())
+fun Rgba.color() = Color(r.toInt(), g.toInt(), b.toInt(), a.toInt())
+
+/** Every M3 slot a palette role maps to; an unset role keeps `base`'s slot. Cards, sheets and dialogs
+ *  read the surfaceContainer* slots by default, the FAB reads primaryContainer. */
+private fun paletteScheme(base: ColorScheme, p: ColorRoles): ColorScheme {
+    val surface = p.surface?.color()
+    return base.copy(
+        background = p.background?.color() ?: base.background,
+        onBackground = p.onSurface?.color() ?: base.onBackground,
+        surface = surface ?: base.surface,
+        onSurface = p.onSurface?.color() ?: base.onSurface,
+        surfaceVariant = p.surfaceMuted?.color() ?: base.surfaceVariant,
+        onSurfaceVariant = p.onSurfaceVariant?.color() ?: base.onSurfaceVariant,
+        surfaceContainerLowest = surface ?: base.surfaceContainerLowest,
+        surfaceContainerLow = surface ?: base.surfaceContainerLow,
+        // surfaceContainer is the bar slot (NavigationBar) — M3 menus/dropdowns read it too, so they
+        // take surface_bar as well, which suits them (a raised surface in the bar's tone).
+        surfaceContainer = p.surfaceBar?.color() ?: base.surfaceContainer,
+        surfaceContainerHigh = surface ?: base.surfaceContainerHigh,
+        surfaceContainerHighest = surface ?: base.surfaceContainerHighest,
+        outline = p.outline?.color() ?: base.outline,
+        outlineVariant = p.outlineVariant?.color() ?: base.outlineVariant,
+        primary = p.primary?.color() ?: base.primary,
+        onPrimary = p.onPrimary?.color() ?: base.onPrimary,
+        secondaryContainer = p.secondaryContainer?.color() ?: base.secondaryContainer,
+        onSecondaryContainer = p.onSecondaryContainer?.color() ?: base.onSecondaryContainer,
+        primaryContainer = p.fab?.color() ?: base.primaryContainer,
+        onPrimaryContainer = p.onFab?.color() ?: base.onPrimaryContainer,
+        error = p.danger?.onContainer?.color() ?: base.error,
+        onError = p.danger?.container?.color() ?: base.onError,
+        errorContainer = p.danger?.container?.color() ?: base.errorContainer,
+        onErrorContainer = p.danger?.onContainer?.color() ?: base.onErrorContainer,
+        // The snackbar's inverse slots: on_surface background, surface text, primary action.
+        inverseSurface = p.onSurface?.color() ?: base.inverseSurface,
+        inverseOnSurface = surface ?: base.inverseOnSurface,
+        // An inverse primary: the brand halfway toward the snackbar text colour, so the action reads
+        // on the inverted background (plain primary on on-surface is ~2:1).
+        inversePrimary = p.primary?.color()?.let { androidx.compose.ui.graphics.lerp(it, surface ?: base.surface, 0.5f) } ?: base.inversePrimary,
+    )
+}
+
+/** A Theme.shapes radius: `Pill` = fully round (half the height, at any density), `Dp(n)` = n dp. */
+fun radiusShape(r: {{PACKAGE_SHARED_TYPES}}.Radius): androidx.compose.ui.graphics.Shape = when (r) {
+    is {{PACKAGE_SHARED_TYPES}}.Radius.Pill -> RoundedCornerShape(percent = 50)
+    is {{PACKAGE_SHARED_TYPES}}.Radius.Dp -> RoundedCornerShape(r.value.toInt().dp)
+}
 
 /// Maps a model `Corner` to a Material3 `Shapes` set (small/medium/large component corners).
 private fun shapesFor(corner: Corner): Shapes {
@@ -53,14 +109,17 @@ fun {{NAME}}Theme(
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val roles = theme?.palette?.let { if (darkTheme) it.dark else it.light }
     val colorScheme = when {
         // A brand theme wins: build a scheme seeded from its color, no dynamic override.
         theme != null -> {
             val seed = Color(theme.seed.r.toInt(), theme.seed.g.toInt(), theme.seed.b.toInt())
             // Optional accent seeds M3 secondary/tertiary (drives CardStyle.BRAND gradients); falls back to the seed.
-            val accent = theme.accent?.let { Color(it.r.toInt(), it.g.toInt(), it.b.toInt()) } ?: seed
+            // Without an app accent a palette's primary ends the Brand gradient (else the seed, as before).
+            val accent = theme.accent?.let { Color(it.r.toInt(), it.g.toInt(), it.b.toInt()) } ?: roles?.primary?.color() ?: seed
             val base = if (darkTheme) DarkColorScheme else LightColorScheme
-            base.copy(primary = seed, secondary = accent, tertiary = accent)
+            val themed = base.copy(primary = seed, secondary = accent, tertiary = accent)
+            roles?.let { paletteScheme(themed, it) } ?: themed
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
@@ -69,10 +128,12 @@ fun {{NAME}}Theme(
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = typographyFor(theme?.font),
-        shapes = theme?.let { shapesFor(it.corner) } ?: Shapes(),
-        content = content,
-    )
+    CompositionLocalProvider(LocalPalette provides roles) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = typographyFor(theme?.font, LocalContext.current),
+            shapes = theme?.let { shapesFor(it.corner) } ?: Shapes(),
+            content = content,
+        )
+    }
 }
