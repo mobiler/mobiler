@@ -41,6 +41,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.layout.height
@@ -536,6 +537,21 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
             widget.status?.let { st ->
                 Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(if (tonePair(LocalPalette.current, st) != null) toneColors(st).second else toneColors(st).first))
+            }
+        }
+
+        is Widget.Steps -> {
+            val total = widget.total.toInt()
+            val current = minOf(widget.current.toInt(), total)
+            if (total > 0) {
+                val tpl = ActiveLabels.current?.stepOf?.takeIf { it.isNotEmpty() } ?: "Step {current} of {total}"
+                val spoken = tpl.replace("{current}", "$current").replace("{total}", "$total")
+                val on = LocalPalette.current?.primary?.color() ?: MaterialTheme.colorScheme.primary
+                val off = MaterialTheme.colorScheme.surfaceVariant
+                // One element named by the step text; no progress range, so TalkBack never reads a percentage.
+                Row(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(total) { i -> Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(50)).background(if (i < current) on else off)) }
+                }
             }
         }
 

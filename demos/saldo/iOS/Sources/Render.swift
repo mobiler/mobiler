@@ -86,6 +86,21 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             markers: markers, interactive: interactive, send: send
         ).frame(minHeight: 240))
 
+    case .steps(let total, let current):
+        // One element spoken as the step text, never as a percentage.
+        let t = Int(total), c = min(Int(current), Int(total))
+        if t == 0 { return AnyView(EmptyView()) }
+        let tpl = (ActiveLabels.current?.stepOf).flatMap { $0.isEmpty ? nil : $0 } ?? "Step {current} of {total}"
+        let spoken = tpl.replacingOccurrences(of: "{current}", with: "\(c)").replacingOccurrences(of: "{total}", with: "\(t)")
+        return AnyView(HStack(spacing: 4) {
+            ForEach(0..<t, id: \.self) { i in
+                Capsule().fill(i < c ? (ActiveTheme.current?.brandColor ?? .accentColor) : Color(.systemFill)).frame(height: 4)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken))
+
     case .rating(let value, let max, let onRate):
         return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
 
