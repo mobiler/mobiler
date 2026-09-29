@@ -1000,7 +1000,16 @@ pub fn stack(align: BoxAlign, scrim: bool, children: Vec<Widget>) -> Widget {
     Widget::Box { children, align, scrim }
 }
 #[must_use]
-pub fn grid(children: Vec<Widget>) -> Widget { Widget::Grid { children } }
+pub fn grid(children: Vec<Widget>) -> Widget { Widget::Grid { children, columns: None } }
+/// Give a `Grid` exactly `columns` equal columns (clamped to 1–4) at every width, instead of the
+/// adaptive 2-on-a-phone rule: `with_columns(grid(slots), 3)`. No-op on any other widget.
+#[must_use]
+pub fn with_columns(widget: Widget, columns: u8) -> Widget {
+    match widget {
+        Widget::Grid { children, .. } => Widget::Grid { children, columns: Some(columns.clamp(1, 4)) },
+        other => other,
+    }
+}
 /// A two-pane master-detail layout ([`Widget::Split`]). Side-by-side on a wide screen (tablet /
 /// landscape); one pane on a phone — `primary` until `show_detail` (the app sets it on selection),
 /// then `detail` with a back chevron firing `on_back`. On wide, `detail` should show a placeholder
@@ -1969,6 +1978,15 @@ mod tests {
     }
 
     #[test]
+    fn with_columns_sets_clamps_and_ignores_other_widgets() {
+        assert!(matches!(with_columns(grid(vec![]), 3), Widget::Grid { columns: Some(3), .. }));
+        assert!(matches!(with_columns(grid(vec![]), 0), Widget::Grid { columns: Some(1), .. }));
+        assert!(matches!(with_columns(grid(vec![]), 9), Widget::Grid { columns: Some(4), .. }));
+        assert!(matches!(grid(vec![]), Widget::Grid { columns: None, .. }));
+        assert!(matches!(with_columns(text("x"), 3), Widget::Text { .. }));
+    }
+
+    #[test]
     fn badge_icon_and_avatar_initials_modifiers() {
         assert!(matches!(with_icon(badge("ok", Tone::Success), Icon::Check), Widget::Badge { icon: Some(Icon::Check), .. }));
         assert!(matches!(badge("ok", Tone::Success), Widget::Badge { icon: None, .. }));
@@ -2041,7 +2059,7 @@ mod tests {
     fn layout_and_content_builders_produce_their_variants() {
         assert!(matches!(row(vec![text("a")]), Widget::Row { children } if children.len() == 1));
         assert!(matches!(column(vec![]), Widget::Column { children } if children.is_empty()));
-        assert!(matches!(grid(vec![text("a"), text("b")]), Widget::Grid { children } if children.len() == 2));
+        assert!(matches!(grid(vec![text("a"), text("b")]), Widget::Grid { children, .. } if children.len() == 2));
         assert!(matches!(divider(), Widget::Divider));
         assert!(matches!(bar_chart(vec![1.0, 2.0], vec![]), Widget::Chart { style: ChartStyle::Bar, series, .. } if series[0].values.len() == 2));
         assert!(matches!(line_chart(vec![1.0], vec![]), Widget::Chart { style: ChartStyle::Line, .. }));

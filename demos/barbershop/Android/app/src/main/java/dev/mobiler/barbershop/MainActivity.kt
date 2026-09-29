@@ -179,6 +179,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
@@ -1022,6 +1025,28 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
                     Card(modifier = mod, elevation = elev, shape = shapeOf { it.card } ?: CardDefaults.shape) { CardBody(widget.child, send) }
                 }
+                CardStyle.DASHED -> {
+                    // No fill; a 1.5dp dashed outline (dash 6 / gap 4) in the palette's outline, inset by
+                    // half the stroke so the clip doesn't cut it.
+                    val shape = shapeOf { it.card } ?: CardDefaults.outlinedShape
+                    val color = LocalPalette.current?.outline?.color() ?: MaterialTheme.colorScheme.outline
+                    val dashMod = Modifier.fillMaxWidth().clip(shape).then(clickMod).drawBehind {
+                        val w = 1.5.dp.toPx()
+                        translate(w / 2, w / 2) {
+                            drawOutline(
+                                shape.createOutline(Size(size.width - w, size.height - w), layoutDirection, this),
+                                color,
+                                style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))),
+                            )
+                        }
+                    }
+                    // Content colour as on the outlined card, whatever the surroundings (e.g. inside a Brand card).
+                    Box(modifier = dashMod) {
+                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onSurface?.color() ?: MaterialTheme.colorScheme.onSurface)) {
+                            CardBody(widget.child, send)
+                        }
+                    }
+                }
                 CardStyle.BRAND -> {
                     // Brand gradient (seed → accent, via the M3 primary → secondary scheme).
                     val cs = MaterialTheme.colorScheme
@@ -1053,7 +1078,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Grid -> BoxWithConstraints {
             // Column count follows the available width: 2 on a phone, more on a
             // tablet (the web/iOS twin of auto-fill / adaptive grids).
-            val cols = maxOf(2, (maxWidth.value / 190f).toInt())
+            // with_columns: exactly that many (1-4) at every width.
+            val cols = widget.columns?.toInt()?.coerceIn(1, 4) ?: maxOf(2, (maxWidth.value / 190f).toInt())
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 widget.children.chunked(cols).forEach { rowItems ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

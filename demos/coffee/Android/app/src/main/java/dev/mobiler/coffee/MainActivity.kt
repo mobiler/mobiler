@@ -933,7 +933,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             else Modifier
             val mod = Modifier.fillMaxWidth().then(clickMod)
             when (widget.style) {
-                CardStyle.OUTLINED -> OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
+                CardStyle.OUTLINED, CardStyle.DASHED -> OutlinedCard(modifier = mod) { CardBody(widget.child, send) }
                 CardStyle.FILLED -> {
                     val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     Card(modifier = mod, colors = colors) { CardBody(widget.child, send) }

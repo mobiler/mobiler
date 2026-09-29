@@ -62,7 +62,9 @@ pub enum ButtonStyle { Filled, Outlined, Text, Tonal }
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub enum CardStyle { Elevated, Outlined, Filled, Brand }
+/// `Dashed`: no fill and a dashed outline ("empty, you can fill this"). BREAKING (Moj Termin design
+/// release): appended, so exhaustive matches need the case.
+pub enum CardStyle { Elevated, Outlined, Filled, Brand, Dashed }
 
 /// Accessibility role for [`Widget::A11y`] — the control type announced to a screen reader. Maps
 /// best-effort per platform: iOS accessibility traits, Android semantics role / `heading()`, web ARIA role.
@@ -865,7 +867,9 @@ pub enum Widget {
     /// and the rest render on top in light content.
     Box { children: Vec<Widget>, align: BoxAlign, scrim: bool },
     /// Fixed 2-column grid; children flow left-to-right, top-to-bottom.
-    Grid { children: Vec<Widget> },
+    /// `columns`: exactly that many equal columns (1–4) at every width; `None` = the adaptive grid
+    /// (2 on a phone, more on a tablet). BREAKING (Moj Termin design release): `columns` was added.
+    Grid { children: Vec<Widget>, columns: Option<u8> },
     /// Horizontally scrolling row. `edge_fade` fades the trailing edge (plus trailing room so the
     /// last item clears the fade at scroll-end) to hint there is more to scroll.
     Scroller { children: Vec<Widget>, edge_fade: bool },
@@ -964,6 +968,12 @@ mod tests {
             platform: "ios".to_string(),
             bundle_id: "rs.x".to_string(),
         });
+    }
+
+    #[test]
+    fn grid_columns_and_dashed_card_round_trip() {
+        round_trips(&Widget::Grid { children: vec![], columns: Some(3) });
+        round_trips(&Widget::Card { child: Box::new(Widget::Spacer { size: Spacing::Md }), style: CardStyle::Dashed, on_press: None, on_long_press: None });
     }
 
     #[test]

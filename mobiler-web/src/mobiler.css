@@ -144,6 +144,8 @@ body {
 }
 .card-elevated { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
 .card-outlined { background: transparent; border: 1px solid var(--line); }
+/* Dashed (CardStyle::Dashed): no fill, a dashed outline — "empty, you can fill this". */
+.card-dashed { background: transparent; border: 1.5px dashed var(--outline, var(--line)); }
 .card-filled { background: var(--surface-2); }
 /* Brand gradient card (promo banner) — fills seed → accent. */
 .card-brand { background: linear-gradient(135deg, var(--primary), var(--accent2)); color: var(--pal-on-primary, #fff); border: none; }
@@ -160,6 +162,8 @@ body {
 }
 /* `.card-tappable`'s `color: inherit` outranks `.card-brand`'s text colour; a palette's on_primary wins back. */
 .card-brand.card-tappable { color: var(--pal-on-primary, inherit); }
+/* `.card-tappable`'s `border: none` would drop the dashed outline, which is the whole card. */
+.card-dashed.card-tappable { border: 1.5px dashed var(--outline, var(--line)); }
 
 /* Z-stack. Scrim variant: bg image sets the size; overlay + content layer on top. */
 .box { position: relative; }

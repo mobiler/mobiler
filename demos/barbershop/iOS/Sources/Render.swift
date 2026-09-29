@@ -128,7 +128,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(VStack(alignment: .leading, spacing: isLargeDensity() ? 12 : 6) { childViews(children, send) })
 
     case .card(let child, let style, let onPress, let onLongPress):
-        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)))
+        // contentShape: the whole card takes the tap, not just its drawn content — an outlined or dashed
+        // card has no fill, so its padding and blank space would otherwise be dead.
+        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)).contentShape(Rectangle()))
         var view = body
         if let token = onPress {
             view = AnyView(Button(action: { send(.fired(token: token)) }) { body }.buttonStyle(.plain))
@@ -162,9 +164,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             ZStack(alignment: boxAlign(align)) { childViews(children, send) }
         )
 
-    case .grid(let children):
+    case .grid(let children, let columns):
         // Column count adapts to width: 2 on a phone (compact), more on iPad.
-        return AnyView(GridView(children: children, send: send))
+        return AnyView(GridView(children: children, columns: columns, send: send))
 
     case .scroller(let children, let edgeFade):
         if !edgeFade {
@@ -628,10 +630,12 @@ private final class MarkerAnnotation: MKPointAnnotation {
 /// the iOS twin of the web shell's `auto-fill` grid and Android's width-derived count.
 private struct GridView: View {
     let children: [SharedTypes.Widget]
+    /// with_columns: exactly that many (1-4) at every width; nil = 2 on a phone, 4 on iPad.
+    let columns: UInt8?
     let send: (Action) -> Void
     @Environment(\.horizontalSizeClass) private var hSize
     var body: some View {
-        let cols = hSize == .regular ? 4 : 2
+        let cols = columns.map { Int(min(max($0, 1), 4)) } ?? (hSize == .regular ? 4 : 2)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: cols), spacing: 12) {
             childViews(children, send)
         }
@@ -1761,6 +1765,9 @@ private struct CardMod: ViewModifier {
             return AnyView(content.background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemBackground)))))
         case .outlined:
             return AnyView(content.overlay(shape.stroke(role(pal?.outlineVariant, else: Color.gray.opacity(0.3)))))
+        case .dashed:
+            // No fill; a 1.5pt dashed outline (dash 6 / gap 4) in the palette's outline.
+            return AnyView(content.overlay(shape.stroke(role(pal?.outline, else: Color.gray.opacity(0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))))
         case .brand:
             let t = ActiveTheme.current
             let grad = LinearGradient(
