@@ -934,6 +934,11 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             other => PluginResponse::text(false, format!("unknown datetime op '{other}'")),
         };
     }
+    if call.plugin == "browser" && call.op == "open" {
+        // cx.open_url_then: a blocked pop-up (window.open → null) is the one failure a page can see.
+        let opened = web_sys::window().and_then(|w| w.open_with_url_and_target(&call.input, "_blank").ok().flatten()).is_some();
+        return PluginResponse::text(opened, if opened { "opened" } else { "blocked" });
+    }
     if call.plugin == "snackbar" && call.op == "show" {
         let outcome = show_snackbar(SnackbarAsk::parse(&call.input)).await;
         return PluginResponse::text(outcome == "action", outcome);

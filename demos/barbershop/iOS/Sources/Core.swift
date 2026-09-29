@@ -423,12 +423,14 @@ enum SharePlugin {
 /// Open a URL externally (Safari / the default handler).
 @MainActor
 enum BrowserPlugin {
-    static func handle(op: String, input: String) -> PluginResponse {
+    /// Honest result (cx.open_url_then): iOS reports whether an app took the link — e.g. `tel:` on
+    /// an iPad without calling answers `ok: false`.
+    static func handle(op: String, input: String) async -> PluginResponse {
         guard let url = URL(string: input) else {
             return PluginResponse(ok: false, output: "invalid url")
         }
-        UIApplication.shared.open(url)
-        return PluginResponse(ok: true, output: "")
+        let opened = await UIApplication.shared.open(url)
+        return PluginResponse(ok: opened, output: opened ? "opened" : "no app can open this link")
     }
 }
 

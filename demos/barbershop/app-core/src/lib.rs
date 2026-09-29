@@ -111,6 +111,13 @@ pub enum Msg {
     EmailShop,
     /// Call the shop via the system dialer (`composer` plugin).
     CallShop,
+    /// The pinned bar's "Call": `tel:` through `cx.open_url_then`, which reports when nothing can
+    /// place calls (a tablet, an emulator without a dialer).
+    DialShop,
+    /// `DialShop`'s result (`true` = a dialer took it).
+    Dialed(bool),
+    /// A result the app doesn't act on (an action-less snackbar closing).
+    Dismissed,
     /// Speak the next-booking summary aloud (`tts` plugin).
     SpeakBooking,
     /// Ask for an App Store / Play review (`review` plugin).
@@ -718,6 +725,13 @@ impl MobilerApp for FadeHouse {
                     })
                 });
             }
+            Msg::Dismissed => {}
+            Msg::DialShop => cx.open_url_then("tel:+15551234567", |r| Msg::Dialed(r.ok)),
+            Msg::Dialed(ok) => {
+                if !ok {
+                    cx.snackbar(Snackbar::new("This device can't place calls"), |_| Msg::Dismissed);
+                }
+            }
             Msg::CallShop => {
                 let input = serde_json::json!({ "number": "+15551234567" }).to_string();
                 cx.plugin("composer", "call", input, |r| {
@@ -1240,7 +1254,7 @@ impl MobilerApp for FadeHouse {
                 let wide = ButtonOpts::default().wide();
                 root = with_bottom_bar(root, vec![
                     button_with("Book", ButtonStyle::Filled, Msg::OpenService(i), wide),
-                    button_with("Call", ButtonStyle::Tonal, Msg::CallShop, wide),
+                    button_with("Call", ButtonStyle::Tonal, Msg::DialShop, wide),
                 ]);
             }
         }
@@ -2550,6 +2564,15 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn dialing_without_a_dialer_says_so() {
+        let calls = dialog_inputs(Msg::DialShop);
+        assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("browser", "open"));
+        let failed = dialog_inputs(Msg::Dialed(false));
+        assert_eq!(failed[0].0, "snackbar");
+        assert!(dialog_inputs(Msg::Dialed(true)).is_empty());
     }
 
     #[test]
