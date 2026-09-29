@@ -934,6 +934,8 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             other => PluginResponse::text(false, format!("unknown datetime op '{other}'")),
         };
     }
+    // Keep this branch await-free and ahead of any branch that awaits: window.open must run in the
+    // click's task, or pop-up blockers treat it as unrequested and a real tap reads as "blocked".
     if call.plugin == "browser" && call.op == "open" {
         // cx.open_url_then: a blocked pop-up (window.open → null) is the one failure a page can see.
         let opened = web_sys::window().and_then(|w| w.open_with_url_and_target(&call.input, "_blank").ok().flatten()).is_some();

@@ -34,3 +34,14 @@ snackbar, "This device can't place calls".
 - **Android AVD:** this image has a dialer, so "Call" opens it (`ok: true`). The no-handler path was
   AVD-verified with 0.57.1.
 - **iOS:** CI compile only.
+
+## After review (2026-09-29)
+
+- iOS: a declined confirmation (the `tel:` "Call …?" prompt) also reports `false`, so on `false`
+  the shell asks `canOpenURL`. Can open → `"cancelled"`; can't → `"no app can open this link"`.
+  `tel` and `sms` are declared in `LSApplicationQueriesSchemes` (template at release).
+- The demo branches on the reason: `"cancelled"` → nothing; `"blocked"` → "Allow pop-ups to place
+  calls"; anything else → "This device can't place calls".
+- Web: the request branch must stay await-free (`window.open` in the click's task).
+- **Needs a device check before release:** iPhone Cancel on the Call prompt → no snackbar; iPad
+  without calling → the snackbar.

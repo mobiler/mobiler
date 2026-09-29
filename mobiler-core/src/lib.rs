@@ -231,7 +231,8 @@ impl<E> Cx<E> {
 
     /// Like [`open_url`](Self::open_url), but `then` learns whether it opened: `ok: true` when the
     /// system handed the link to an app; `ok: false` with a reason (`"no app can open this link"`,
-    /// `"invalid url"`, `"blocked"`) otherwise — e.g. `tel:` on a device without a dialer:
+    /// `"invalid url"`, `"blocked"` — a web pop-up blocker —, `"cancelled"` — the user declined the
+    /// system's confirmation) otherwise — e.g. `tel:` on a device without a dialer:
     /// `cx.open_url_then("tel:+381601234567", |r| Msg::Dialed(r.ok))`. A browser can't tell whether
     /// the desktop can place a call, so on web `ok` only means the link was handed off.
     pub fn open_url_then(&mut self, url: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {

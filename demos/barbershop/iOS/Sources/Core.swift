@@ -430,7 +430,10 @@ enum BrowserPlugin {
             return PluginResponse(ok: false, output: "invalid url")
         }
         let opened = await UIApplication.shared.open(url)
-        return PluginResponse(ok: opened, output: opened ? "opened" : "no app can open this link")
+        if opened { return PluginResponse(ok: true, output: "opened") }
+        // A declined confirmation (the tel: "Call …?" prompt) also reports false; only say nothing
+        // can open it when that is actually true.
+        return PluginResponse(ok: false, output: UIApplication.shared.canOpenURL(url) ? "cancelled" : "no app can open this link")
     }
 }
 
