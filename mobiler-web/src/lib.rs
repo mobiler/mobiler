@@ -1302,7 +1302,7 @@ async fn show_snackbar(ask: SnackbarAsk) -> &'static str {
         move || {
             let vh = window.inner_height().ok().and_then(|h| h.as_f64()).unwrap_or(0.0);
             let top_of = |sel: &str| doc.query_selector(sel).ok().flatten().map(|e| e.get_bounding_client_rect().top());
-            let tops: Vec<f64> = [top_of(".fab"), top_of(".tabbar")].into_iter().flatten().collect();
+            let tops: Vec<f64> = [top_of(".fab"), top_of(".bottombar"), top_of(".tabbar")].into_iter().flatten().collect();
             let lift = snackbar_lift(vh, &tops);
             // Only the bare-viewport case needs the safe-area inset; the FAB and tab bar sit above it.
             let bottom = if lift > 12.0 { format!("{lift}px") } else { format!("calc({lift}px + env(safe-area-inset-bottom, 0px))") };
@@ -2270,7 +2270,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance, bottom_bar: _ } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance, bottom_bar } => {
             // ACTIVE_LABELS is stashed once at the root render closure (from the root widget's
             // own `labels`), not here — a Scaffold nested in a sheet, body or Split must not
             // overwrite the root's labels. This arm's own aria-label reads below still see the
@@ -2353,14 +2353,24 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let dark = resolve_dark(*appearance, *dark_mode);
             let custom_font = theme.as_ref().is_some_and(|t| t.font == FontFamily::Custom);
             let type_scale = theme.as_ref().is_some_and(|t| t.type_scale.is_some());
+            // with_bottom_bar: the screen's main actions pinned above the tab bar (none/empty = no bar).
+            let bar_children = bottom_bar.as_ref().filter(|b| !b.is_empty());
             let class = format!(
-                "scaffold{}{}{}{}{}",
+                "scaffold{}{}{}{}{}{}",
                 if dark { " theme-dark" } else { "" },
                 if large { " density-large" } else { "" },
                 if custom_font { " font-custom" } else { "" },
                 if type_scale { " type-scale" } else { "" },
                 if fill_index.is_some() { " scaffold-fill" } else { "" },
+                if bar_children.is_some() { " has-bottombar" } else { "" },
             );
+            let bar = bar_children.map(|kids| {
+                let cells = kids.iter().map(|k| view! { <div class="bottombar-cell">{render(k, send)}</div> }).collect::<Vec<_>>();
+                // The FAB and the bar's sticky offset need the rendered heights: measure after this
+                // render and publish them on <html> (which a re-render doesn't replace).
+                gloo_timers::callback::Timeout::new(0, publish_bottom_heights).forget();
+                view! { <div class="bottombar">{cells}</div> }
+            });
             // Pull-to-refresh — web has no pull gesture, so expose a top-bar refresh button +
             // an indeterminate bar at the top of the body while `refreshing`.
             let refresh_aria = shell_label(|l| l.refresh.clone(), "Refresh");
@@ -2406,6 +2416,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                         {refresh_btn}
                     </div>
                     <div class=body_class data-route=route.clone()>{refresh_bar}{body}</div>
+                    {bar}
                     {fab_btn}
                     {tabbar}
                     {sheet_overlay}
@@ -2517,6 +2528,20 @@ fn theme_css(t: &Theme, dark: bool) -> String {
             format!("{base}{typography}{shapes}{accent2}{}{color_scheme}", palette_css(roles))
         }
         None => format!("{base}{typography}{shapes}"),
+    }
+}
+
+/// Publish the rendered bottom bar's and tab bar's heights as `--bottombar-h` / `--tabbar-h` on
+/// `<html>`: the bar sticks just above a bottom tab bar, and the FAB floats above the bar.
+fn publish_bottom_heights() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Some(root) = doc.document_element().and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok()) else { return };
+    let height = |sel: &str| doc.query_selector(sel).ok().flatten().map(|e| e.get_bounding_client_rect().height());
+    if let Some(h) = height(".bottombar") {
+        let _ = root.style().set_property("--bottombar-h", &format!("{h}px"));
+    }
+    if let Some(h) = height(".tabbar") {
+        let _ = root.style().set_property("--tabbar-h", &format!("{h}px"));
     }
 }
 
