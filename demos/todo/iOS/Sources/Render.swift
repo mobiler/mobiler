@@ -158,7 +158,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             ZStack(alignment: boxAlign(align)) { childViews(children, send) }
         )
 
-    case .grid(let children):
+    case .grid(let children, _):
         // Column count adapts to width: 2 on a phone (compact), more on iPad.
         return AnyView(GridView(children: children, send: send))
 
@@ -1430,7 +1430,7 @@ private struct CardMod: ViewModifier {
                 .shadow(color: .black.opacity(0.08), radius: 4, y: 2))
         case .filled:
             return AnyView(content.background(shape.fill(Color(.tertiarySystemBackground))))
-        case .outlined:
+        case .outlined, .dashed:
             return AnyView(content.overlay(shape.stroke(Color.gray.opacity(0.3))))
         case .brand:
             let t = ActiveTheme.current
