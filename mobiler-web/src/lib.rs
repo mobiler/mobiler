@@ -1963,6 +1963,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 view! { <div class=format!("box {acls}")>{kids}</div> }.into_any()
             }
         }
+        Widget::Steps { .. } => view! { <span></span> }.into_any(),
         Widget::Grid { children, columns } => {
             let kids = render_all(children, send);
             match columns {

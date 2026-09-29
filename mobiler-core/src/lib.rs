@@ -999,6 +999,22 @@ pub fn with_long_press<E: Serialize>(widget: Widget, on_long_press: E) -> Widget
 pub fn stack(align: BoxAlign, scrim: bool, children: Vec<Widget>) -> Widget {
     Widget::Box { children, align, scrim }
 }
+/// A step indicator: `total` equal segments with the first `current` filled (`current` is clamped
+/// to `total`), spoken as "Step 2 of 3" in the root scaffold's [`ShellLabels::step_of`] language:
+/// `steps(3, 2)`.
+#[must_use]
+pub fn steps(total: u8, current: u8) -> Widget {
+    Widget::Steps { total, current: current.min(total) }
+}
+
+/// The step indicator's spoken text: `template`'s `{current}` / `{total}` filled in; a missing or
+/// empty template is `"Step {current} of {total}"`. (Shells use this, or its native twin.)
+#[must_use]
+pub fn step_text(template: Option<&str>, current: u8, total: u8) -> String {
+    let t = template.filter(|t| !t.is_empty()).unwrap_or("Step {current} of {total}");
+    t.replace("{current}", &current.to_string()).replace("{total}", &total.to_string())
+}
+
 #[must_use]
 pub fn grid(children: Vec<Widget>) -> Widget { Widget::Grid { children, columns: None } }
 /// Give a `Grid` exactly `columns` equal columns (clamped to 1–4) at every width, instead of the
@@ -1975,6 +1991,16 @@ mod tests {
         cx.confirm_with(Confirm::new("T", "M").confirm_label("Go"), |_| Ev::Tap);
         let v: serde_json::Value = serde_json::from_str(&cx.requests.pop().unwrap().0.input).unwrap();
         assert!(v.get("cancel_label").is_none() && v.get("destructive").is_none());
+    }
+
+    #[test]
+    fn steps_builder_clamps_and_step_text_fills_the_template() {
+        assert!(matches!(steps(3, 2), Widget::Steps { total: 3, current: 2 }));
+        assert!(matches!(steps(3, 9), Widget::Steps { total: 3, current: 3 }));
+        assert_eq!(step_text(None, 2, 3), "Step 2 of 3");
+        assert_eq!(step_text(Some(""), 2, 3), "Step 2 of 3");
+        assert_eq!(step_text(Some("Korak {current} od {total}"), 2, 3), "Korak 2 od 3");
+        assert_eq!(ShellLabels::new().step_of("Korak {current} od {total}").step_of.as_deref(), Some("Korak {current} od {total}"));
     }
 
     #[test]
