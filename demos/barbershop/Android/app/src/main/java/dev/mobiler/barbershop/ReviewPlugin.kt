@@ -9,7 +9,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Free bundled plugin: request the Play in-app review flow (no permission). op "request" →
- *  "requested" (or "unavailable" if not a Play install — the API no-ops gracefully). */
+ *  ok "requested" once the flow ran (Play never says whether the card showed), or ok=false
+ *  "unavailable" when Play can't start it (e.g. no or outdated Play Store) — ADR-0013. */
 class ReviewPlugin(private val application: Application) : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         if (op != "request") return PluginResponse(false, "unknown op '$op'")
@@ -22,9 +23,12 @@ class ReviewPlugin(private val application: Application) : MobilerPlugin {
                 manager.requestReviewFlow().addOnCompleteListener { task ->
                     if (task.isSuccessful) {
                         manager.launchReviewFlow(activity, task.result)
-                            .addOnCompleteListener { done(PluginResponse(true, "requested")) }
+                            .addOnCompleteListener { launch ->
+                                done(if (launch.isSuccessful) PluginResponse(true, "requested")
+                                     else PluginResponse(false, "unavailable"))
+                            }
                     } else {
-                        done(PluginResponse(true, "unavailable"))
+                        done(PluginResponse(false, "unavailable"))
                     }
                 }
             }
