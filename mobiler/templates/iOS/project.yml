@@ -9,7 +9,7 @@ name: {{NAME}}
 options:
   bundleIdPrefix: {{PACKAGE}}
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 
 packages:
   # The facet-generated ABI types (Widget/Action/Effect/...), emitted by
@@ -45,6 +45,11 @@ targets:
         # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
         # the "Missing export compliance" question.
         ITSAppUsesNonExemptEncryption: false
+        # cx.open_url_then: canOpenURL may only ask about declared schemes. It tells "no app can open
+        # tel:/sms:" apart from "the user cancelled the Call prompt".
+        LSApplicationQueriesSchemes:
+          - tel
+          - sms
         # Deep links: register the app's custom URL scheme (default = the bundle id) so
         # `{{PACKAGE}}://…` opens the app — delivered to the core via the built-in `system` stream.
         # (Universal/App Links over https additionally need an associated-domains entitlement + a
