@@ -2534,14 +2534,29 @@ fn theme_css(t: &Theme, dark: bool) -> String {
 /// Publish the rendered bottom bar's and tab bar's heights as `--bottombar-h` / `--tabbar-h` on
 /// `<html>`: the bar sticks just above a bottom tab bar, and the FAB floats above the bar.
 fn publish_bottom_heights() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(root) = doc.document_element().and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok()) else { return };
-    let height = |sel: &str| doc.query_selector(sel).ok().flatten().map(|e| e.get_bounding_client_rect().height());
-    if let Some(h) = height(".bottombar") {
-        let _ = root.style().set_property("--bottombar-h", &format!("{h}px"));
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let Some(window) = web_sys::window() else { return };
+    let Some(doc) = window.document() else { return };
+    let Some(root) = doc.document_element().and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) else { return };
+    // The root scaffold's own bars (a nested scaffold's don't count).
+    let pick = |sel: &str| doc.query_selector(sel).ok().flatten();
+    if let Some(bar) = pick(".scaffold.has-bottombar > .bottombar") {
+        let _ = root.style().set_property("--bottombar-h", &format!("{}px", bar.get_bounding_client_rect().height()));
     }
-    if let Some(h) = height(".tabbar") {
-        let _ = root.style().set_property("--tabbar-h", &format!("{h}px"));
+    // On a wide screen the tab bar is the side rail (a column, full height): it isn't under the bar,
+    // and its height would push the bar up once the window narrows again.
+    if let Some(tabs) = pick(".scaffold.has-bottombar > .tabbar") {
+        let rail = window.get_computed_style(&tabs).ok().flatten().and_then(|c| c.get_property_value("flex-direction").ok()).as_deref() == Some("column");
+        if !rail {
+            let _ = root.style().set_property("--tabbar-h", &format!("{}px", tabs.get_bounding_client_rect().height()));
+        }
+    }
+    // Re-measure on resize / rotation (installed once).
+    thread_local! { static RESIZE_HOOKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+    if !RESIZE_HOOKED.with(|h| h.replace(true)) {
+        let on_resize = Closure::<dyn FnMut()>::new(publish_bottom_heights);
+        let _ = window.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
+        on_resize.forget();
     }
 }
 

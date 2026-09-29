@@ -33,7 +33,9 @@ content, and a long booking means scrolling to reach the most-used action.
    - The FAB and the snackbar float above the bar. An open sheet covers it: native modal sheets do
      this, and on web the sheet's z-index is above the bar.
    - On web's wide layout (tabs as a left rail), the bar spans the body column at its bottom.
-4. **Keyboard: the bar rises with the keyboard** (the platform default on both).
+4. **Keyboard: the bar rises with the keyboard** on iOS (the keyboard safe area lifts the VStack)
+   and on Android when there are no bottom tabs. With tabs, Android keeps it with the tab bar behind
+   the keyboard, as tabs behave today (clarified after review).
    - iOS: bottom-inset content stays above the keyboard.
    - Android: an edge-to-edge window with IME padding on the bottom bar area.
    - Web: the bar is `position: sticky; bottom: 0` inside the scaffold, so it follows the visual

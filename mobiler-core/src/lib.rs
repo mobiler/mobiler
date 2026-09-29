@@ -1348,8 +1348,9 @@ pub fn with_extended_fab<E: Serialize>(widget: Widget, icon: Icon, label: impl I
 }
 
 /// Pin a screen's main actions (one or two buttons, equal widths) in a bar above the tabs and the
-/// system navigation; the body ends above it, the FAB and snackbar float above it, a sheet covers
-/// it, and it rises with the keyboard. Empty = no bar. No-op on any other widget — drive it from
+/// system navigation; the body ends above it, the FAB and snackbar float above it, and a sheet
+/// covers it. With the keyboard up it rises above it on iOS, and on Android when the screen has no
+/// bottom tabs (with tabs, the bar stays with the tab bar behind the keyboard). Empty = no bar. No-op on any other widget — drive it from
 /// `view` like `with_sheet`: `with_bottom_bar(root, vec![button_with("Završi", .., ButtonOpts::default().wide()), ..])`
 /// — `wide` buttons fill their equal cells on every shell.
 #[must_use]

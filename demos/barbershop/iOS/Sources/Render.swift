@@ -1511,7 +1511,8 @@ private struct ScaffoldView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(role(pal?.surfaceBar, else: Color(.systemBackground)))
+                // Without tabs below it, the bar's fill runs under the home indicator (as the tabs' does).
+                .background(role(pal?.surfaceBar, else: Color(.systemBackground)).ignoresSafeArea(edges: .bottom))
             }
 
             if showBottomTabs && !tabs.isEmpty {

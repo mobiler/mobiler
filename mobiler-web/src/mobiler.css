@@ -496,7 +496,9 @@ textarea.field { resize: vertical; font-family: inherit; }
 .scaffold:has(.tabbar) > .bottombar { bottom: var(--tabbar-h, 57px); }
 .bottombar-cell { flex: 1; min-width: 0; }
 .bottombar-cell > .btn { width: 100%; }
-.has-bottombar .fab { bottom: calc(84px + var(--bottombar-h, 70px)); }
+.has-bottombar > .fab { bottom: calc(84px + var(--bottombar-h, 70px)); }
+/* No tab bar under the pinned bar: the FAB sits just above the bar. */
+.has-bottombar:not(:has(> .tabbar)) > .fab { bottom: calc(24px + var(--bottombar-h, 70px)); }
 /* FontFamily::Custom (CLI-synced web/fonts/fonts.css): the body family for the scaffold, the display
    family for titles. Only under .font-custom — other theme fonts keep their current rendering. */
 .scaffold.font-custom, .confirm-scrim.font-custom .confirm-card { font-family: var(--font); }
@@ -578,7 +580,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   /* A pinned bottom bar belongs to the body column, under it (the rail spans all rows). */
   .scaffold:has(.tabbar):has(.bottombar) { grid-template-rows: auto 1fr auto; grid-template-areas: "rail topbar" "rail body" "rail bar"; }
   .scaffold:has(.tabbar) > .bottombar { grid-area: bar; bottom: 0; }
-  .scaffold:has(.tabbar).has-bottombar .fab { bottom: calc(24px + var(--bottombar-h, 70px)); }
+  .scaffold:has(.tabbar).has-bottombar > .fab { bottom: calc(24px + var(--bottombar-h, 70px)); }
   .scaffold:has(.tabbar) > .tabbar {
     grid-area: rail;
     flex-direction: column;
