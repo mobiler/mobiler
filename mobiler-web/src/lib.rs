@@ -110,13 +110,20 @@ fn inject_hls_support() {
 }
 
 /// MapLibre-GL bootstrap for [`Widget::Map`]. A self-contained script (mirrors `inject_hls_support`):
-/// lazily loads maplibre-gl (JS + CSS) from a CDN the first time a `.mobiler-map` div appears, then for
-/// each one inits a `maplibregl.Map` from its `data-*` attributes (center/zoom/style/markers/interactive)
-/// and wires taps. The Rust render arm re-creates the map div on every `update`, so a `MutationObserver`
-/// also REMOVES the map (`.remove()`) when its node is dropped — no leaked WebGL contexts. Map/marker
-/// taps are reported to the core by writing `"tap|lat,lng"` / `"marker|id"` into the hidden sibling
-/// `.mobiler-map-sink` input and firing its `input` event, which the render arm's `on:input` forwards as
-/// `Action::Input`. Inert (and the CDN is never fetched) until a `Map` widget appears.
+/// lazily loads maplibre-gl (JS + CSS) from a CDN the first time a `.mobiler-map` div appears, then
+/// creates a `maplibregl.Map` in an inner element it owns and wires taps. The map follows the app's
+/// camera (`data-center`/`data-zoom`), markers and `interactive` only when those values change
+/// (ADR-0026), so a user's pan or zoom survives unrelated re-renders:
+/// - an update usually patches the same div in place, changing its `data-*` attributes; an
+///   attribute observer applies what changed;
+/// - when the surrounding tree changes, the div is replaced; the map is kept in a registry keyed by
+///   the widget's `id`, and the new div adopts it (its inner element is moved in).
+///
+/// A map whose inner element is no longer in the document after the current task is `.remove()`d,
+/// so no WebGL context leaks. Map/marker taps are reported to the core by writing `"tap|lat,lng"` /
+/// `"marker|id"` into the hidden sibling `.mobiler-map-sink` input of the current div and firing its
+/// `input` event, which the render arm's `on:input` forwards as `Action::Input`. Inert (and the CDN
+/// is never fetched) until a `Map` widget appears.
 fn inject_maplibre_support() {
     const BOOTSTRAP: &str = r#"(function(){
   function ensureML(cb){
@@ -132,36 +139,73 @@ fn inject_maplibre_support() {
     var sink=el.parentElement&&el.parentElement.querySelector('.mobiler-map-sink');
     if(sink){sink.value=payload;sink.dispatchEvent(new Event('input',{bubbles:true}));}
   }
+  var HANDLERS=['scrollZoom','boxZoom','dragRotate','dragPan','keyboard','doubleClickZoom','touchZoomRotate'];
+  var maps=window.__mobilerMaps=window.__mobilerMaps||{};
+  var anon=0;
+  function apply(e,el){
+    var center=el.getAttribute('data-center')||'0,0',zoom=el.getAttribute('data-zoom')||'2';
+    if(e.camera!==center+'@'+zoom){
+      e.camera=center+'@'+zoom;
+      var c=center.split(',');
+      e.map.jumpTo({center:[parseFloat(c[1])||0,parseFloat(c[0])||0],zoom:parseFloat(zoom)||2});
+    }
+    var inter=el.getAttribute('data-interactive')!=='false';
+    if(e.interactive!==inter){
+      e.interactive=inter;
+      HANDLERS.forEach(function(h){if(e.map[h]){if(inter){e.map[h].enable();}else{e.map[h].disable();}}});
+    }
+    var mj=el.getAttribute('data-markers')||'[]';
+    if(e.markersJson!==mj){
+      e.markersJson=mj;
+      e.markers.forEach(function(m){m.remove();});e.markers=[];
+      var list=[];try{list=JSON.parse(mj);}catch(_){}
+      list.forEach(function(mk){
+        var m=new maplibregl.Marker().setLngLat([mk.lng,mk.lat]);
+        if(mk.title){m.setPopup(new maplibregl.Popup({offset:24}).setText(mk.title));}
+        m.addTo(e.map);
+        m.getElement().addEventListener('click',function(ev){ev.stopPropagation();emit(e.host,'marker|'+mk.id);});
+        e.markers.push(m);
+      });
+    }
+  }
+  function adopt(e,el){el.appendChild(e.inner);e.host=el;e.map.resize();apply(e,el);}
   function init(el){
     if(el.__mobilerMap){return;}el.__mobilerMap=true;
+    var key=el.getAttribute('data-map-id')||('anon'+(anon++));
+    if(maps[key]){return adopt(maps[key],el);}
     ensureML(function(){
+      // A re-render may have replaced this div while maplibre-gl loaded; the live div wins.
+      if(!el.isConnected){return;}
+      if(maps[key]){return adopt(maps[key],el);}
       try{
-        var c=(el.getAttribute('data-center')||'0,0').split(',');
-        var center=[parseFloat(c[1])||0,parseFloat(c[0])||0];
-        var zoom=parseFloat(el.getAttribute('data-zoom'))||2;
+        var inner=document.createElement('div');inner.style.width='100%';inner.style.height='100%';
+        el.appendChild(inner);
         var style=el.getAttribute('data-style')||'https://tiles.openfreemap.org/styles/liberty';
-        var interactive=el.getAttribute('data-interactive')!=='false';
-        var map=new maplibregl.Map({container:el,style:style,center:center,zoom:zoom,interactive:interactive});
-        el.__mobilerMapInstance=map;
-        map.on('click',function(e){emit(el,'tap|'+e.lngLat.lat.toFixed(6)+','+e.lngLat.lng.toFixed(6));});
-        var markers=[];try{markers=JSON.parse(el.getAttribute('data-markers')||'[]');}catch(_){}
-        markers.forEach(function(mk){
-          var m=new maplibregl.Marker().setLngLat([mk.lng,mk.lat]);
-          if(mk.title){m.setPopup(new maplibregl.Popup({offset:24}).setText(mk.title));}
-          m.addTo(map);
-          m.getElement().addEventListener('click',function(ev){ev.stopPropagation();emit(el,'marker|'+mk.id);});
-        });
+        var map=new maplibregl.Map({container:inner,style:style,center:[0,0],zoom:2});
+        var entry={map:map,inner:inner,host:el,markers:[]};
+        maps[key]=entry;
+        map.on('click',function(ev){emit(entry.host,'tap|'+ev.lngLat.lat.toFixed(6)+','+ev.lngLat.lng.toFixed(6));});
+        apply(entry,el);
       }catch(_){}
     });
   }
+  function sweep(){
+    Object.keys(maps).forEach(function(k){
+      var e=maps[k];
+      if(!e.inner.isConnected){try{e.map.remove();}catch(_){}delete maps[k];}
+    });
+  }
   function scan(root){if(root&&root.querySelectorAll){root.querySelectorAll('.mobiler-map[data-map]').forEach(init);}}
-  new MutationObserver(function(muts){muts.forEach(function(m){
+  new MutationObserver(function(muts){var removed=false;muts.forEach(function(m){
+    if(m.type==='attributes'){
+      var t=m.target,k=t.getAttribute('data-map-id');
+      if(k&&maps[k]&&maps[k].host===t){apply(maps[k],t);}
+      return;
+    }
     m.addedNodes.forEach(function(n){if(n.nodeType===1){if(n.matches&&n.matches('.mobiler-map[data-map]')){init(n);}scan(n);}});
-    m.removedNodes.forEach(function(n){if(n.nodeType===1){
-      if(n.__mobilerMapInstance){try{n.__mobilerMapInstance.remove();}catch(_){}}
-      if(n.querySelectorAll){n.querySelectorAll('.mobiler-map').forEach(function(x){if(x.__mobilerMapInstance){try{x.__mobilerMapInstance.remove();}catch(_){}}});}
-    }});
-  });}).observe(document.documentElement,{childList:true,subtree:true});
+    if(m.removedNodes.length){removed=true;}
+  });if(removed){setTimeout(sweep,0);}}).observe(document.documentElement,{childList:true,subtree:true,
+    attributes:true,attributeFilter:['data-center','data-zoom','data-markers','data-interactive']});
   scan(document);
 })();"#;
     let document = leptos::prelude::document();
@@ -1708,6 +1752,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                     <div
                         class="mobiler-map"
                         data-map="1"
+                        data-map-id=id.clone()
                         data-center=center
                         data-zoom=zoom.to_string()
                         data-style=style

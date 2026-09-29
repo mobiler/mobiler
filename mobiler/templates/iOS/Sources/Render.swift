@@ -579,7 +579,8 @@ private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Act
 /// `Widget::Map` on iOS — MapKit (`MKMapView`) via UIViewRepresentable. The app drives the camera
 /// (center/zoom → region span) + markers; a tap reports coordinates and selecting a marker reports its
 /// id, both via `Action::Input` ("{id}.tap" / "{id}.marker"). `style_url` is MapLibre-only → ignored
-/// here (MapKit uses Apple Maps).
+/// here (MapKit uses Apple Maps). The camera and markers are applied only when the app's values change
+/// (ADR-0026), so a user's pan or zoom survives unrelated re-renders.
 private struct MapWidgetView: UIViewRepresentable {
     let id: String
     let centerLat: Double
@@ -604,24 +605,37 @@ private struct MapWidgetView: UIViewRepresentable {
         context.coordinator.parent = self
         mv.isScrollEnabled = interactive
         mv.isZoomEnabled = interactive
-        // zoom level → span in degrees (≈ 360 / 2^zoom), clamped to a sane range.
-        let span = min(180.0, max(0.001, 360.0 / pow(2.0, zoom)))
-        let region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
-            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
-        )
-        mv.setRegion(region, animated: false)
-        mv.removeAnnotations(mv.annotations)
-        for mk in markers {
-            let a = MarkerAnnotation(markerId: mk.id)
-            a.coordinate = CLLocationCoordinate2D(latitude: mk.lat, longitude: mk.lng)
-            a.title = mk.title
-            mv.addAnnotation(a)
+        let c = context.coordinator
+        let camera = [centerLat, centerLng, zoom]
+        if c.appliedCamera != camera {
+            c.appliedCamera = camera
+            // zoom level → span in degrees (≈ 360 / 2^zoom), clamped to a sane range.
+            let span = min(180.0, max(0.001, 360.0 / pow(2.0, zoom)))
+            let region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
+                span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
+            )
+            mv.setRegion(region, animated: false)
+        }
+        let markersKey = markers.map { "\($0.id)|\($0.lat)|\($0.lng)|\($0.title ?? "")" }.joined(separator: "\n")
+        if c.appliedMarkers != markersKey {
+            c.appliedMarkers = markersKey
+            mv.removeAnnotations(mv.annotations)
+            for mk in markers {
+                let a = MarkerAnnotation(markerId: mk.id)
+                a.coordinate = CLLocationCoordinate2D(latitude: mk.lat, longitude: mk.lng)
+                a.title = mk.title
+                mv.addAnnotation(a)
+            }
         }
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
         var parent: MapWidgetView
+        /// What was last applied from the app, so a re-render with the same values leaves the user's
+        /// pan/zoom and the marker selection alone. `nil` until the first update.
+        var appliedCamera: [Double]?
+        var appliedMarkers: String?
         init(_ p: MapWidgetView) { parent = p }
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {

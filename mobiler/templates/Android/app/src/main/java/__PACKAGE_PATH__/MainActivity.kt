@@ -2072,27 +2072,33 @@ private fun MapWidget(
         org.maplibre.android.MapLibre.getInstance(context)
         org.maplibre.android.maps.MapView(context)
     }
+    // What was last applied from the app (ADR-0026): a re-render with the same values leaves the
+    // user's pan/zoom and the markers alone. `latest` is read by the tap listener and by the style,
+    // which loads asynchronously and may finish after later updates.
+    val applied = remember { MapApplied() }
+    applied.latestId = id
+    applied.latestSend = send
+    applied.latestMarkers = markers
     DisposableEffect(Unit) {
         mapView.onCreate(null); mapView.onStart(); mapView.onResume()
         onDispose { mapView.onPause(); mapView.onStop(); mapView.onDestroy() }
     }
-    fun featureCollection() = org.maplibre.geojson.FeatureCollection.fromFeatures(
-        markers.map { mk ->
+    fun featureCollection(list: List<MapMarker>) = org.maplibre.geojson.FeatureCollection.fromFeatures(
+        list.map { mk ->
             org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(mk.lng, mk.lat))
                 .also { it.addStringProperty("mid", mk.id) }
         },
     )
+    fun markersKey(list: List<MapMarker>) = list.joinToString("\n") { "${it.id}|${it.lat}|${it.lng}|${it.title ?: ""}" }
     AndroidView(
         modifier = Modifier.fillMaxWidth().height(240.dp),
         factory = {
             mapView.apply {
                 getMapAsync { map ->
-                    map.uiSettings.setAllGesturesEnabled(interactive)
-                    map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
-                        .target(org.maplibre.android.geometry.LatLng(centerLat, centerLng)).zoom(zoom).build()
                     val style = styleUrl ?: "https://tiles.openfreemap.org/styles/liberty"
                     map.setStyle(org.maplibre.android.maps.Style.Builder().fromUri(style)) { s ->
-                        s.addSource(org.maplibre.android.style.sources.GeoJsonSource("mobiler-markers", featureCollection()))
+                        applied.markers = markersKey(applied.latestMarkers)
+                        s.addSource(org.maplibre.android.style.sources.GeoJsonSource("mobiler-markers", featureCollection(applied.latestMarkers)))
                         s.addLayer(
                             org.maplibre.android.style.layers.CircleLayer("mobiler-markers-layer", "mobiler-markers").withProperties(
                                 org.maplibre.android.style.layers.PropertyFactory.circleRadius(7f),
@@ -2106,15 +2112,43 @@ private fun MapWidget(
                         val pt = map.projection.toScreenLocation(latLng)
                         val hits = map.queryRenderedFeatures(pt, "mobiler-markers-layer")
                         val mid = hits.firstOrNull()?.getStringProperty("mid")
+                        val mapId = applied.latestId
                         if (mid != null) {
-                            send(Action.Input("$id.marker", InputValue.Text(mid)))
+                            applied.latestSend(Action.Input("$mapId.marker", InputValue.Text(mid)))
                         } else {
-                            send(Action.Input("$id.tap", InputValue.Text("${latLng.latitude},${latLng.longitude}")))
+                            applied.latestSend(Action.Input("$mapId.tap", InputValue.Text("${latLng.latitude},${latLng.longitude}")))
                         }
                         true
                     }
                 }
             }
         },
+        update = { mv ->
+            mv.getMapAsync { map ->
+                map.uiSettings.setAllGesturesEnabled(interactive)
+                val camera = listOf(centerLat, centerLng, zoom)
+                if (applied.camera != camera) {
+                    applied.camera = camera
+                    map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                        .target(org.maplibre.android.geometry.LatLng(centerLat, centerLng)).zoom(zoom).build()
+                }
+                // Before the style loads there is no source yet; the style callback adds the latest markers.
+                val key = markersKey(markers)
+                val source = map.style?.getSourceAs<org.maplibre.android.style.sources.GeoJsonSource>("mobiler-markers")
+                if (source != null && applied.markers != key) {
+                    applied.markers = key
+                    source.setGeoJson(featureCollection(markers))
+                }
+            }
+        },
     )
+}
+
+/** Per-map state for [MapWidget]: what was last applied from the app, and the latest app values. */
+private class MapApplied {
+    var camera: List<Double>? = null
+    var markers: String? = null
+    var latestId: String = ""
+    var latestSend: (Action) -> Unit = {}
+    var latestMarkers: List<MapMarker> = emptyList()
 }
