@@ -1040,7 +1040,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             )
                         }
                     }
-                    Box(modifier = dashMod) { CardBody(widget.child, send) }
+                    // Content colour as on the outlined card, whatever the surroundings (e.g. inside a Brand card).
+                    Box(modifier = dashMod) {
+                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onSurface?.color() ?: MaterialTheme.colorScheme.onSurface)) {
+                            CardBody(widget.child, send)
+                        }
+                    }
                 }
                 CardStyle.BRAND -> {
                     // Brand gradient (seed → accent, via the M3 primary → secondary scheme).

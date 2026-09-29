@@ -128,7 +128,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(VStack(alignment: .leading, spacing: isLargeDensity() ? 12 : 6) { childViews(children, send) })
 
     case .card(let child, let style, let onPress, let onLongPress):
-        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)))
+        // contentShape: the whole card takes the tap, not just its drawn content — an outlined or dashed
+        // card has no fill, so its padding and blank space would otherwise be dead.
+        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)).contentShape(Rectangle()))
         var view = body
         if let token = onPress {
             view = AnyView(Button(action: { send(.fired(token: token)) }) { body }.buttonStyle(.plain))
