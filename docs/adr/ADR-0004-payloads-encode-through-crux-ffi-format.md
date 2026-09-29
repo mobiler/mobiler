@@ -45,8 +45,9 @@ Option C. `http.rs` documents why at the call site. Payload types (`HttpOutcome`
 are registered with typegen so the shells get matching decoders.
 
 The test reads `cargo metadata`, so it sees a dependency however it's declared: by package name,
-including renamed and target-specific declarations. It counts only normal dependencies; a test-only
-`bincode` is allowed.
+including renamed and target-specific declarations. It counts only normal dependencies: a test-only
+or build-time `bincode` is allowed, since neither can encode a payload at runtime. It checks the three
+library crates by name, so a new library crate must be added to the test.
 
 **Mutation proof:** each of these failed `adr_0004_no_library_crate_depends_on_bincode_directly`
 (`ADR-0004: depends on bincode directly: ["mobiler-core"]`):

@@ -90,8 +90,9 @@ what was decided, never what was rejected. So in §3, every option carries a pro
   check**: a tracked file (a spec or plan in `docs/superpowers/`, a README), a commit message, or a
   GitHub PR or issue body. Cite it, and quote it exactly when you quote.
 - `[recorded: maintainer, YYYY-MM-DD, quoted here]`: a maintainer statement that exists nowhere
-  else in the repo (the gitignored engineering notes, a chat, private memory). Quote it verbatim in
-  the record, which then becomes its record.
+  else in the repo (the gitignored engineering notes, a chat, private memory). Quote it verbatim
+  right after the tag; the record then becomes its record. Use `YYYY-MM` when only the month is
+  known.
 - `[reconstructed]`: inferred to be the alternative. Nobody wrote it down.
 
 Never present an inferred alternative as recorded history. The tag tells a reader which rationale to

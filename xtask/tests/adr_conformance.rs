@@ -17,8 +17,11 @@ fn adr_0003_plugin_response_has_exactly_ok_and_output() {
     let Type::User(UserType::Struct(st)) = <mobiler_core::PluginResponse as Facet>::SHAPE.ty else {
         panic!("ADR-0003: PluginResponse is no longer a struct");
     };
-    let names: Vec<&str> = st.fields.iter().map(|f| f.name).collect();
+    let fields: Vec<(&str, String)> = st.fields.iter().map(|f| (f.name, f.shape().to_string())).collect();
+    let names: Vec<&str> = fields.iter().map(|(n, _)| *n).collect();
     assert_eq!(names, ["ok", "output"], "ADR-0003: PluginResponse gained or lost a field");
+    assert_eq!(fields[0].1, "bool", "ADR-0003: `ok` changed type");
+    assert!(fields[1].1.starts_with("Vec<u8"), "ADR-0003: `output` changed type: {}", fields[1].1);
 }
 
 /// Normal (non-dev, non-build) dependencies named `bincode` — by package name, so a renamed or

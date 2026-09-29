@@ -23,7 +23,7 @@ Two different kinds of builder are involved, and they can't make the same promis
   field (ADR-0008), the value's bytes necessarily change. What can stay the same is what it
   *renders*: the new field is left at its no-op default. PR #102 is the example: `Widget::TextField`
   gained `kind` and `error`, and `text_field(id, ph, value)` kept its signature while leaving them
-  at `Plain` / `None`, so existing screens rendered exactly as before.
+  at `FieldKind::Text` / `None`, so existing screens rendered exactly as before.
 
 ## 2. Hypothesis
 

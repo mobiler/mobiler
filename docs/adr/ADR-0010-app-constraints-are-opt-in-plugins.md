@@ -30,7 +30,7 @@ runs `mobiler plugin add x`) rather than as a capability the framework lacks, th
 
 ## 3. Considered Options & Rationale for Refutation
 
-- **Option A — leave the capability out because the driver app forbids it** `[recorded: maintainer, 2026-06, quoted here, not otherwise in the repo — "mobiler as framework should support IAP since some other apps can use it if they wish"]`
+- **Option A — leave the capability out because the driver app forbids it** `[recorded: maintainer, 2026-06, quoted here]` "mobiler as framework should support IAP since some other apps can use it if they wish"
   Rejected: it makes one app's policy everyone's limitation.
 - **Option B — ship it built in, on by default** `[reconstructed]`
   Rejected: a compliance-sensitive app would then have to strip it out.

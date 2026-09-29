@@ -56,6 +56,9 @@ serde output. A field hidden from serde would still widen the shells' ABI.
   `right: ["ok", "output"]`.
 - The same field hidden from serde with `#[serde(skip_serializing_if = "Option::is_none",
   default)]` failed the same way. A serde-key check had passed this one; the reviewer caught it.
+- Changing `output` to `String` stops at compile time: `mobiler-core`'s own constructors no longer
+  build, so the change never reaches the test's type assertion (`ok` is `bool`, `output` is
+  `Vec<u8>`). That assertion is a backstop for a change that also updates the constructors.
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)

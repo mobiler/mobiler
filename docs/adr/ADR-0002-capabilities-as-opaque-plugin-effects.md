@@ -32,8 +32,9 @@ then:
     plain `plugin/op/input` calls, e.g. `cx_snackbar_sends_a_snackbar_show_request` in
     `mobiler-core/src/lib.rs`.
 - **Condition 2 — the response stays uniform.** See ADR-0003.
-- **Condition 3 — a missing plugin answers `ok: false`.** Not tested; verified by reading the three
-  shells' dispatch (Android `Core.kt`, iOS `Core.swift`, `mobiler-web`) on 2026-09-29.
+- **Condition 3 — a missing plugin answers `ok: false`** for a request (a stream on a missing plugin
+  simply emits nothing on Android). Not tested; verified by reading the three shells' dispatch
+  (Android `Core.kt`, iOS `Core.swift`, `mobiler-web`) on 2026-09-29.
 
 ## 3. Considered Options & Rationale for Refutation
 

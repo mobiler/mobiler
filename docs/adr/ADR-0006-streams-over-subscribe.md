@@ -33,9 +33,7 @@ built on it without a new effect or ABI change, and none leaks a running native 
 - **Option B — polling via repeated requests** `[reconstructed]`
   Wasteful, laggy, and impossible for push-style sources like BLE notify or WebSocket.
 - **Option C — a keyed streaming primitive with full lifecycle** `[recorded: PR #113; retrofits PR #115 (websocket) and PR #195 (transfers — "Rides the shipped cx.subscribe/unsubscribe primitive … No PluginCall/PluginResponse struct change")]`
-  Chosen, and shipped with *both* subscribe and unsubscribe in v1. That followed a maintainer rule,
-  quoted here since it exists nowhere else in the repo: a primitive ships with its full lifecycle
-  (subscribe *and* unsubscribe) in its first version.
+  Chosen, and shipped with *both* subscribe and unsubscribe in v1 `[recorded: PR #113 body, "Lifecycle (per the review of the plan) — unsubscribe is in v1"]`. The plan had proposed deferring unsubscribe; the maintainer asked `[recorded: maintainer, 2026-06-05, quoted here]` "why do we defer this part?", and it went into v1.
 
 ## 4. Decision & Rationale for Corroboration
 
@@ -49,5 +47,5 @@ unsubscribe) and `cx.subscribe_appearance` have all since been built on it witho
   ignores unsubscribe leaks a sensor or socket, and nothing at the ABI level can catch that.
 - **Negative:** stream payloads share the stringly-typed boundary of ADR-0002.
 - **Negative:** on iOS and Android, unsubscribing stops the native source, but the core-side Crux
-  task isn't aborted through the bincode bridge; it lingers until the process ends (noted in
-  PR #113).
+  task isn't aborted through the bincode bridge. PR #113 deferred that abort as "an efficiency note,
+  not a correctness gap".

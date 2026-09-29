@@ -20,10 +20,21 @@
 //!   ("ADR-0005: unknown status `Approved`").
 //! - Renaming the test `shell_renders_before_requests_notifications_and_streams` in
 //!   `mobiler-core/src/lib.rs` failed `conformance_entries_resolve` ("ADR-0005: Conformance cites
-//!   `shell_renders_before_requests_notifications_and_streams`, which isn't a fn in
+//!   `shell_renders_before_requests_notifications_and_streams`, which isn't a #[test] fn in
 //!   mobiler-core/src/lib.rs").
 //! - Setting ADR-0004's `Date decided:` to `2026-13-45` failed `every_record_is_well_formed`
 //!   ("ADR-0004: `Date decided:` must be a real YYYY-MM-DD").
+//!
+//! - Renaming that test and keeping its old name in a `//` comment failed the same way ("… which
+//!   isn't a #[test] fn …"); so did removing its `#[test]` attribute.
+//! - Renaming the CI job `scaffold + build (template, Android)` and keeping the old name in a YAML
+//!   comment failed `conformance_entries_resolve` ("… which isn't a `name:` in
+//!   .github/workflows/ci.yml").
+//! - `Date decided: 2026-02-31` failed ("must be a real YYYY-MM-DD").
+//! - Marking ADR-0005 `Superseded by ADR-0009` without ADR-0009 naming it in `Supersedes:` failed
+//!   ("superseded by ADR-0009, whose `Supersedes:` doesn't name it").
+//! - An extra `|ADR-0099 | …` index row (no space after the pipe) failed `index_matches_the_records`
+//!   ("index.md lists records that don't exist: [99]").
 //!
 //! Each was reverted and the suite went green again.
 
@@ -62,18 +73,29 @@ fn records() -> Vec<Record> {
     out
 }
 
+/// A header field, read only from the header block (before `## 1.`), so a line in the body can't
+/// stand in for it.
 fn header<'a>(text: &'a str, key: &str) -> Option<&'a str> {
-    text.lines().find_map(|l| l.strip_prefix(key)).map(str::trim)
+    text.lines().take_while(|l| !l.starts_with("## 1.")).find_map(|l| l.strip_prefix(key)).map(str::trim)
 }
 
-/// A real calendar-ish date: YYYY-MM-DD with month 1–12 and day 1–31.
+/// A real calendar date, YYYY-MM-DD (days per month, leap years included).
 fn is_date(s: &str) -> bool {
     let parts: Vec<&str> = s.split('-').collect();
     if parts.len() != 3 || parts[0].len() != 4 || parts[1].len() != 2 || parts[2].len() != 2 {
         return false;
     }
     let num = |p: &str| p.parse::<u32>().ok();
-    matches!((num(parts[0]), num(parts[1]), num(parts[2])), (Some(_), Some(m), Some(d)) if (1..=12).contains(&m) && (1..=31).contains(&d))
+    let (Some(y), Some(m), Some(d)) = (num(parts[0]), num(parts[1]), num(parts[2])) else { return false };
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=days).contains(&d)
 }
 
 /// `ADR-NNNN` → NNNN, for a reference to another record.
@@ -112,6 +134,12 @@ fn every_record_is_well_formed() {
                 .is_some_and(|n| numbers.contains(&n) && n != r.number),
         };
         assert!(ok, "{id}: unknown status `{status}`");
+        // A record marked superseded must be named in its successor's `Supersedes:`.
+        if let Some(succ) = status.strip_prefix("Superseded by ").and_then(adr_ref) {
+            let succ_rec = recs.iter().find(|x| x.number == succ).expect("successor exists");
+            let back = header(&succ_rec.text, "Supersedes:").unwrap_or_default();
+            assert!(back.split(", ").any(|x| adr_ref(x) == Some(r.number)), "{id}: superseded by ADR-{succ:04}, whose `Supersedes:` doesn't name it");
+        }
         let supersedes = header(&r.text, "Supersedes:").unwrap();
         if supersedes != "none" {
             for item in supersedes.split(", ") {
@@ -129,7 +157,7 @@ fn every_record_is_well_formed() {
 fn index_matches_the_records() {
     let index = fs::read_to_string(root().join("docs/adr/index.md")).expect("read index.md");
     let mut rows: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
-    for line in index.lines().filter(|l| l.starts_with("| ADR-")) {
+    for line in index.lines().filter(|l| l.trim_start().trim_start_matches('|').trim_start().starts_with("ADR-")) {
         // | ADR-NNNN | decision | status | decided | superseded by |
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();
         assert!(cells.len() == 7, "index.md: malformed row (want 5 columns): {line}");
@@ -147,6 +175,16 @@ fn index_matches_the_records() {
         assert_eq!(superseded_by, want, "{id}: index `Superseded by` differs from the record's status");
     }
     assert!(rows.is_empty(), "index.md lists records that don't exist: {:?}", rows.keys().collect::<Vec<_>>());
+}
+
+/// Whether `file` declares `fn name(` on a code line (not a comment) under a `#[test]` attribute.
+fn is_test_fn(file: &str, name: &str) -> bool {
+    let lines: Vec<&str> = file.lines().collect();
+    lines.iter().enumerate().any(|(i, l)| {
+        let t = l.trim_start();
+        (t.starts_with(&format!("fn {name}(")) || t.starts_with(&format!("pub fn {name}(")))
+            && lines[..i].iter().rev().map(|p| p.trim()).take_while(|p| p.starts_with("#[") || p.starts_with("///") || p.is_empty()).any(|p| p == "#[test]")
+    })
 }
 
 /// Split a `Conformance:` value on ", " — but not inside a quoted CI job name (which may contain one).
@@ -183,11 +221,12 @@ fn conformance_entries_resolve() {
             let item = item.as_str();
             if let Some((path, test)) = item.split_once("::") {
                 let file = fs::read_to_string(root().join(path)).unwrap_or_else(|_| panic!("{id}: Conformance cites `{path}`, which doesn't exist"));
-                assert!(file.contains(&format!("fn {test}(")), "{id}: Conformance cites `{test}`, which isn't a fn in {path}");
+                assert!(is_test_fn(&file, test), "{id}: Conformance cites `{test}`, which isn't a #[test] fn in {path}");
             } else if let Some((path, rest)) = item.split_once(" job \"") {
                 let job = rest.split('"').next().unwrap_or_default();
                 let file = fs::read_to_string(root().join(path)).unwrap_or_else(|_| panic!("{id}: Conformance cites `{path}`, which doesn't exist"));
-                assert!(file.contains(job), "{id}: Conformance cites CI job `{job}`, which isn't in {path}");
+                let named = file.lines().map(str::trim).any(|l| l.strip_prefix("name:").is_some_and(|n| n.trim().trim_matches('"') == job));
+                assert!(named, "{id}: Conformance cites CI job `{job}`, which isn't a `name:` in {path}");
             } else {
                 panic!("{id}: Conformance entry `{item}` must be `path::test`, `<workflow> job \"<name>\"`, or `none — <why>`");
             }

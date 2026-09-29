@@ -43,7 +43,7 @@ generic `Widget → native view` renderer shared by every app, then:
   Kotlin and Swift authors.
 - **Option B — a web view everywhere** `[reconstructed]`
   One renderer, but no native widgets, feel or platform capabilities (maps, video, pickers).
-- **Option C — a fixed widget vocabulary with generated platform types** `[recorded: commit 7514465 ("defines the fixed wire ABI … The shell imports ONLY the ABI types"); README "The fixed UI wire ABI"]`
+- **Option C — a fixed widget vocabulary with generated platform types** `[recorded: commit 7514465 ("defines the fixed wire ABI … The shell (Core.kt + MainActivity) imports ONLY the ABI types"); README "The fixed UI wire ABI"]`
   Chosen.
 
 ## 4. Decision & Rationale for Corroboration

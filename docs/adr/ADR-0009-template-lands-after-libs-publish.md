@@ -1,8 +1,8 @@
 # ADR-0009: A release publishes the libraries first; template shell code that uses new ABI lands in the CLI PR only after those libraries are live on crates.io
 
 Status:        Accepted
-Date decided:  2026-06-04
-Deciding PRs:  #102, #104 (first recorded instance); re-affirmed by #218 → #219 after #218 went red
+Date decided:  2026-05-31
+Deciding PRs:  #28 → #29 (first instance); reason first stated in #102 → #103 (publish) → #104; re-affirmed by #218 → #219 after #218 went red
 Supersedes:    none
 Code anchor:   mobiler/templates/**, mobiler/templates/shared/Cargo.toml.tmpl (the pinned mobiler-core), .github/workflows/ci.yml (scaffold + build (template, Android))
 Conformance:   .github/workflows/ci.yml job "scaffold + build (template, Android)" (scaffolds from the template and builds against the *published* core)
@@ -11,15 +11,16 @@ Conformance:   .github/workflows/ci.yml job "scaffold + build (template, Android
 
 The template's `shared` crate pins a **published** `mobiler-core`, because a scaffolded app has no
 path dependency. CI's template lane scaffolds a fresh app and builds it. So template code using a
-new ABI item fails CI until that item is on crates.io. The split into two PRs was already practised
-by June 2026 (PR #102 left the template untouched so the lane "stays green against published
-`mobiler-core 0.17`", and #104 then propagated it). PR #218 broke the pattern, went red with an
+new ABI item fails CI until that item is on crates.io. The split was already practised from May 2026: PR #28 shipped
+the theme ABI and was published, and #29 then "wires that published ABI" into the template. PR #102
+later stated the reason: it left the template untouched so the lane "stays green against published
+`mobiler-core 0.17`", #103 bumped the versions for publish, and #104 propagated it. PR #218 broke the pattern, went red with an
 unresolved reference to the new `AppInfo` type, and the rule was written down again.
 
 ## 2. Hypothesis
 
-If every release is two PRs (libraries and demo shells first, then publish, then the template port,
-core pin bump and CLI bump), then:
+If every release runs libraries first (and their publish), then a CLI PR (the template port, the core
+pin bump and the CLI bump), then:
 
 - the template lane always builds against what a real user would download;
 - the CLI never ships a template referencing unpublished ABI.
@@ -38,7 +39,7 @@ core pin bump and CLI bump), then:
   Rejected: the template lane can't pass before publish.
 - **Option B — point the template at a path or git dependency during development** `[reconstructed]`
   Rejected: the lane would stop testing what users actually get.
-- **Option C — libraries, publish, then CLI** `[recorded: PRs #102 → #104 (2026-06-04), and the same shape in #42, #72/#84/#88; #218 → publish → #219; #241 → publish → #242]`
+- **Option C — libraries, publish, then CLI** `[recorded: PR #29 body ("PR A (#28) shipped the Theme ABI … and published … This PR wires that published ABI"), 2026-05-31; the same shape in #42, #72/#84/#88, #102 → #103 → #104; #218 → publish → #219; #241 → publish → #242]`
   Chosen.
 
 ## 4. Decision & Rationale for Corroboration
