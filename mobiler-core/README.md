@@ -42,7 +42,14 @@ pub type App = MobilerShell<Counter>;
 - **Navigation** — a core-owned `Nav<Route>` stack + `nav_scaffold`.
 - **Theme-as-data** — dark mode, brand color, corner radius, and a `Density`
   (Compact/Comfortable/Large — `Large` scales up control sizing and spacing for touch)
-  all flow through the `Widget` tree.
+  all flow through the `Widget` tree, plus a design system's tokens: a light/dark `Palette` of
+  colour roles, `with_appearance` (Light/Dark/System), custom fonts (`FontFamily::Custom` +
+  `mobiler fonts sync`), a per-style `TypeScale`, and per-component corner `Shapes`.
+- **Feedback & actions** — `cx.snackbar` (with an optional Undo), an extended FAB
+  (`with_extended_fab`), a pinned bottom bar for a screen's main actions (`with_bottom_bar`),
+  a step indicator (`steps` / `with_step_caption`), status badges with icons (`with_icon`),
+  initials avatars (`with_initials`), fixed grid columns (`with_columns`), dashed cards, and
+  `cx.open_url_then` (did the link open?).
 - **Charts** — typed builders for data viz: `bar_chart`/`line_chart`, multi-series
   `chart`/`stacked_bar_chart`/`pct_stacked_bar_chart`, `pie_chart`/`donut_chart`, fitness-style
   `rings_chart`, a `gauge_chart`, and `region_chart` (variable-width coverage-gap bands).
@@ -61,9 +68,17 @@ scaffolds a project wired to this crate and a generic native shell.
 
 ## Upgrading
 
-**Breaking in mobiler-ui 0.29 / mobiler-core 0.40:** `Theme` gained `palette` (and further
-design-release fields follow). Code that lists every field in a `Theme { … }` literal no longer
-compiles. Write `Theme { seed, ..Default::default() }` and set only what you need.
+**Breaking in mobiler-ui 0.29 / mobiler-core 0.40** (the design release — additive in spirit,
+but new fields on existing types):
+
+- `Theme` gained `palette`, `type_scale` and `shapes`: write `Theme { seed, ..Default::default() }`
+  instead of listing every field.
+- New fields on existing widgets break full literals and exhaustive patterns: `Scaffold`
+  (`appearance`, `bottom_bar`), `Fab.label`, `Badge.icon`, `Avatar.{initials, size}`,
+  `Grid.columns`; new variants `TextStyle::{Display, Headline}`, `FontFamily::Custom`,
+  `CardStyle::Dashed`, `Icon::DoneAll`, `Widget::Steps`. Build widgets through the builders
+  (`scaffold`, `with_fab`, `badge`, `avatar`, `grid`, …) and match with `..`.
+- Custom native shells must handle the new cases; `mobiler upgrade --apply` updates generated ones.
 
 ## License
 
