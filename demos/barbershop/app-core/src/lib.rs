@@ -1267,8 +1267,8 @@ fn booking_sheet(s: &Service, user_rating: u32, client: &str) -> Widget {
         row(vec![emphasis(format!("Client: {client}")), button("Change", ButtonStyle::Text, Msg::PickClient)])
     };
     column(vec![
-        // Where the user is in the flow: segments + text (steps is spoken as "Step 2 of 3").
-        caption("Step 2 of 3"),
+        // Where the user is in the flow. The indicator speaks "Step 2 of 3" itself; a visible caption
+        // saying the same would be read twice.
         steps(3, 2),
         row(vec![
             image(s.image, ImageShape::Rounded, ImageRatio::Square),

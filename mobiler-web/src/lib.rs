@@ -1975,8 +1975,8 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 .map(|i| view! { <span class=if i < current { "step step-on" } else { "step" }></span> })
                 .collect::<Vec<_>>();
             view! {
-                <div class="steps" role="progressbar" aria-valuemin="1" aria-valuemax=total.to_string()
-                    aria-valuenow=current.to_string() aria-valuetext=spoken>{segs}</div>
+                <div class="steps" role="progressbar" aria-valuemin="0" aria-valuemax=total.to_string()
+                    aria-valuenow=current.to_string() aria-valuetext=spoken.clone() aria-label=spoken>{segs}</div>
             }
             .into_any()
         }

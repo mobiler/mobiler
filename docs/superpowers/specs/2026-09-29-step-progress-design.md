@@ -26,7 +26,8 @@ percentage.
    - Any "Korak 2 od 3" text is the app's own `text(..)`.
 3. **Accessibility.** The indicator is one element whose spoken text is the step string; no
    percentage anywhere.
-   - Web: `role="progressbar"`, `aria-valuemin=1`, `aria-valuemax=total`, `aria-valuenow=current`
+   - Web: `role="progressbar"`, `aria-valuemin=0` (after review: `steps(3, 0)` is valid) plus
+     `aria-label` with the same text, `aria-valuemax=total`, `aria-valuenow=current`
      and `aria-valuetext` set to the string.
    - Android: `semantics { contentDescription = text }` on the row, with no `progressBarRangeInfo`.
    - iOS: `.accessibilityElement(children: .ignore).accessibilityLabel(text)`.

@@ -1001,7 +1001,8 @@ pub fn stack(align: BoxAlign, scrim: bool, children: Vec<Widget>) -> Widget {
 }
 /// A step indicator: `total` equal segments with the first `current` filled (`current` is clamped
 /// to `total`), spoken as "Step 2 of 3" in the root scaffold's [`ShellLabels::step_of`] language:
-/// `steps(3, 2)`.
+/// `steps(3, 2)`. It speaks the step itself, so a visible "Step 2 of 3" text next to it is read
+/// twice by screen readers.
 #[must_use]
 pub fn steps(total: u8, current: u8) -> Widget {
     Widget::Steps { total, current: current.min(total) }
