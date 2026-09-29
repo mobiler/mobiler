@@ -1963,9 +1963,17 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 view! { <div class=format!("box {acls}")>{kids}</div> }.into_any()
             }
         }
-        Widget::Grid { children, .. } => {
+        Widget::Grid { children, columns } => {
             let kids = render_all(children, send);
-            view! { <div class="grid">{kids}</div> }.into_any()
+            match columns {
+                // with_columns: exactly n equal tracks at every width (minmax(0, 1fr) keeps them equal
+                // even when a tile's content is wider).
+                Some(n) => {
+                    let style = format!("grid-template-columns:repeat({},minmax(0,1fr))", (*n).clamp(1, 4));
+                    view! { <div class="grid" style=style>{kids}</div> }.into_any()
+                }
+                None => view! { <div class="grid">{kids}</div> }.into_any(),
+            }
         }
         Widget::Scroller { children, edge_fade } => {
             let kids = render_all(children, send);
