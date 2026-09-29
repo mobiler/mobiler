@@ -1260,7 +1260,7 @@ pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bo
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1, labels: None, appearance: None }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1, labels: None, appearance: None, bottom_bar: None }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -1269,7 +1269,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2, labels: None, appearance: None }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2, labels: None, appearance: None, bottom_bar: None }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -1304,6 +1304,7 @@ where
         depth: nav.depth(),
         labels: None,
         appearance: None,
+        bottom_bar: None,
     }
 }
 
@@ -1312,7 +1313,7 @@ where
 /// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
 pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1327,6 +1328,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
             depth,
             labels,
             appearance,
+            bottom_bar,
         },
         other => other,
     }
@@ -1345,9 +1347,25 @@ pub fn with_extended_fab<E: Serialize>(widget: Widget, icon: Icon, label: impl I
     set_fab(widget, Fab { icon, on_press: tok(on_press), label: Some(label.into()) })
 }
 
+/// Pin a screen's main actions (one or two buttons, equal widths) in a bar above the tabs and the
+/// system navigation; the body ends above it, the FAB and snackbar float above it, and a sheet
+/// covers it. With the keyboard up it rises above it on iOS, and on Android when the screen has no
+/// bottom tabs (with tabs, the bar stays with the tab bar behind the keyboard). Empty = no bar. No-op on any other widget — drive it from
+/// `view` like `with_sheet`: `with_bottom_bar(root, vec![button_with("Završi", .., ButtonOpts::default().wide()), ..])`
+/// — `wide` buttons fill their equal cells on every shell.
+#[must_use]
+pub fn with_bottom_bar(widget: Widget, children: Vec<Widget>) -> Widget {
+    match widget {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar: Some(children) }
+        }
+        other => other,
+    }
+}
+
 fn set_fab(widget: Widget, fab: Fab) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, appearance, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1362,6 +1380,7 @@ fn set_fab(widget: Widget, fab: Fab) -> Widget {
             depth,
             labels,
             appearance,
+            bottom_bar,
         },
         other => other,
     }
@@ -1371,7 +1390,7 @@ fn set_fab(widget: Widget, fab: Fab) -> Widget {
 /// the model: `with_sheet(scaffold(...), title, sheet_body, Msg::CloseSheet)`.
 pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child: Widget, on_dismiss: E) -> Widget {
     match widget {
-        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, labels, appearance, .. } => Widget::Scaffold {
+        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
             title: t,
             body,
             tabs,
@@ -1386,6 +1405,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
             depth,
             labels,
             appearance,
+            bottom_bar,
         },
         other => other,
     }
@@ -1396,7 +1416,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
 /// when the async reload completes (the shell shows a spinner while true). No-op on other widgets.
 pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, labels, appearance, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1411,6 +1431,7 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
             depth,
             labels,
             appearance,
+            bottom_bar,
         },
         // Pull-to-refresh on a LazyList's top — same API as on a Scaffold. Leaves the load-more
         // fields intact.
@@ -1435,8 +1456,8 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
 #[must_use]
 pub fn with_labels(widget: Widget, labels: ShellLabels) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, appearance, .. } => {
-            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: Some(labels), appearance }
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, appearance, bottom_bar, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: Some(labels), appearance, bottom_bar }
         }
         other => other,
     }
@@ -1447,8 +1468,8 @@ pub fn with_labels(widget: Widget, labels: ShellLabels) -> Widget {
 #[must_use]
 pub fn with_appearance(widget: Widget, appearance: Appearance) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, .. } => {
-            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance: Some(appearance) }
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, bottom_bar, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance: Some(appearance), bottom_bar }
         }
         other => other,
     }
@@ -2009,6 +2030,23 @@ mod tests {
         assert!(matches!(steps(3, 2), Widget::Steps { caption: false, .. }));
         assert!(matches!(with_step_caption(steps(3, 2)), Widget::Steps { total: 3, current: 2, caption: true }));
         assert!(matches!(with_step_caption(text("x")), Widget::Text { .. }));
+    }
+
+    #[test]
+    fn with_bottom_bar_sets_and_every_scaffold_builder_keeps_it() {
+        let bar = vec![text("A"), text("B")];
+        let s = with_bottom_bar(scaffold("T", false, vec![], text("x")), bar.clone());
+        assert!(matches!(&s, Widget::Scaffold { bottom_bar: Some(b), .. } if b.len() == 2));
+        assert!(matches!(with_bottom_bar(text("x"), bar.clone()), Widget::Text { .. }));
+        assert!(matches!(scaffold("T", false, vec![], text("x")), Widget::Scaffold { bottom_bar: None, .. }));
+        let keep = |w: Widget| matches!(w, Widget::Scaffold { bottom_bar: Some(_), .. });
+        assert!(keep(with_fab(s.clone(), Icon::Add, Ev::Tap)));
+        assert!(keep(with_extended_fab(s.clone(), Icon::Add, "x", Ev::Tap)));
+        assert!(keep(with_sheet(s.clone(), "t", text("s"), Ev::Tap)));
+        assert!(keep(with_refresh(s.clone(), false, Ev::Tap)));
+        assert!(keep(with_theme(s.clone(), Theme::default())));
+        assert!(keep(with_labels(s.clone(), ShellLabels::new())));
+        assert!(keep(with_appearance(s.clone(), Appearance::System)));
     }
 
     #[test]

@@ -37,7 +37,7 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-        if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+        if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
         // Light/dark is a window-level override set from the root (see applyWindowStyle); the window
         // exists by the next tick.
         DispatchQueue.main.async { [weak self] in if let v = self?.view { applyWindowStyle(v) } }
@@ -64,7 +64,7 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-                if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+                if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
                 applyWindowStyle(view)
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
@@ -158,7 +158,7 @@ func resolvedDark(_ appearance: Appearance?, _ darkMode: Bool) -> Bool {
 @MainActor
 func applyWindowStyle(_ view: Widget) {
     let style: UIUserInterfaceStyle
-    if case let .scaffold(_, _, _, _, darkMode, _, _, _, _, _, _, _, _, appearance) = view {
+    if case let .scaffold(_, _, _, _, darkMode, _, _, _, _, _, _, _, _, appearance, _) = view {
         switch appearance {
         case .some(.system): style = .unspecified
         case .some(.light): style = .light

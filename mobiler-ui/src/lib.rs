@@ -946,6 +946,10 @@ pub enum Widget {
         labels: Option<ShellLabels>,
         /// `Some` overrides `dark_mode` (see [`Appearance`]); `None` = `dark_mode` decides.
         appearance: Option<Appearance>,
+        /// A screen's main actions pinned above the tabs and the system navigation (equal-width
+        /// row); the body ends above it. `None` / empty = no bar. BREAKING (Moj Termin design
+        /// release): appended — full `Scaffold` literals and patterns need it.
+        bottom_bar: Option<Vec<Widget>>,
     },
     /// A step indicator for a multi-step flow: `total` equal segments, the first `current` filled.
     /// Spoken as one element, "Step 2 of 3" (or [`ShellLabels::step_of`]), never as a percentage.
@@ -1100,6 +1104,7 @@ mod tests {
             depth: 2,
             labels: None,
             appearance: None,
+            bottom_bar: None,
         });
         // Themed scaffold — all four theme knobs must round-trip.
         round_trips(&Widget::Scaffold {
@@ -1124,6 +1129,7 @@ mod tests {
             depth: 1,
             labels: None,
             appearance: None,
+            bottom_bar: Some(vec![Widget::Divider]),
         });
         // Themed scaffold with Density::Large — the big-touch-target density must round-trip.
         round_trips(&Widget::Scaffold {
@@ -1148,6 +1154,7 @@ mod tests {
             depth: 1,
             labels: None,
             appearance: None,
+            bottom_bar: None,
         });
         // Labelled scaffold — every ShellLabels field must round-trip.
         round_trips(&Widget::Scaffold {
@@ -1176,6 +1183,7 @@ mod tests {
                     .web_title("Stranica"),
             ),
             appearance: Some(Appearance::System),
+            bottom_bar: None,
         });
     }
 }
