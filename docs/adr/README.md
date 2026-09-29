@@ -120,5 +120,5 @@ trust and which to check.
 - `[recorded: …]` may cite specs and plans in `docs/superpowers/` (they record rationale at the
   time). Maintainer statements that live only outside the repo are quoted in the record, tagged
   `[recorded: maintainer, date, quoted here]`.
-- Pre-existing behavioural tests cited by the backfilled records (ADR-0001 … ADR-0010) are not
-  re-proven by mutation. Every conformance test written *for* an ADR is.
+- Pre-existing behavioural tests and CI jobs cited by the backfilled records (ADR-0001 …
+  ADR-0022) are not re-proven by mutation. Every conformance test written *for* an ADR is.

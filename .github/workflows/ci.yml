@@ -130,8 +130,9 @@ jobs:
   # The iOS shell only builds on macOS (uniffi Swift FFI + xcodebuild). Build each
   # demo for the simulator — no signing, no booted sim — so a shell or build-ios.sh
   # regression is caught for free, without the rented Mac. (macOS runners are arm64,
-  # so the sim slice is aarch64-apple-ios-sim / arm64.) The iOS shell is kept
-  # byte-identical across templates/iOS and the demos, so this guards the template too.
+  # so the sim slice is aarch64-apple-ios-sim / arm64.) Render.swift is kept byte-identical
+  # between templates/iOS and demos/barbershop (the reference shells, ADR-0015), so the
+  # barbershop leg guards the template's renderer. The other demos may lag behind.
   ios:
     name: iOS build (${{ matrix.app }})
     runs-on: macos-latest
@@ -167,8 +168,9 @@ jobs:
       # Behavioral UI test on a booted simulator (only coffee carries the CoffeeUITests
       # target). Drives the generic shell with real taps to guard tap-routing
       # regressions — e.g. the build-4 bug where the hero image swallowed the in-body
-      # "← Back" button's tap — which compile-only builds can't catch. The shell is
-      # byte-identical across demos + the template, so testing coffee guards them all.
+      # "← Back" button's tap — which compile-only builds can't catch. Coffee's shell
+      # may lag the template (barbershop is the reference, ADR-0015), so this guards
+      # tap routing in the shared renderer code, not every release's shell changes.
       # MUST run before the device build below: that step rebuilds the Rust staticlib
       # (generated/lib/libshared.a) for the *device* slice, which would then fail to link
       # against this simulator test build ("built for iOS, linking for iOS-simulator").
@@ -192,8 +194,9 @@ jobs:
   # Scaffold a fresh app with `mobiler new` and build it for Android. The demos are
   # older/customized, so this is the only thing that compiles the *template* Android
   # shell (Core.kt + its plugin registry) against the published core — catching
-  # template drift (e.g. a broken DialogPlugin). The template iOS shell is covered
-  # by the iOS lane (the demos' Core.swift is kept identical to it).
+  # template drift (e.g. a broken DialogPlugin). The template iOS shell has no lane of
+  # its own: the iOS lane's barbershop leg compiles an identical Render.swift, but
+  # barbershop's Core.swift differs (extra plugins, older comments), so review covers it.
   scaffold:
     name: scaffold + build (template, Android)
     runs-on: ubuntu-latest
