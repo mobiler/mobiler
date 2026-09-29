@@ -1001,11 +1001,21 @@ pub fn stack(align: BoxAlign, scrim: bool, children: Vec<Widget>) -> Widget {
 }
 /// A step indicator: `total` equal segments with the first `current` filled (`current` is clamped
 /// to `total`), spoken as "Step 2 of 3" in the root scaffold's [`ShellLabels::step_of`] language:
-/// `steps(3, 2)`. It speaks the step itself, so a visible "Step 2 of 3" text next to it is read
-/// twice by screen readers.
+/// `steps(3, 2)`. It speaks the step itself: to also show the text, use [`with_step_caption`]
+/// rather than a separate `text`, which screen readers would read a second time.
 #[must_use]
 pub fn steps(total: u8, current: u8) -> Widget {
-    Widget::Steps { total, current: current.min(total) }
+    Widget::Steps { total, current: current.min(total), caption: false }
+}
+
+/// Show the step text ("Korak 2 od 3", from [`ShellLabels::step_of`]) above a `steps` bar, as part
+/// of the same single accessibility element: `with_step_caption(steps(3, 2))`. No-op elsewhere.
+#[must_use]
+pub fn with_step_caption(widget: Widget) -> Widget {
+    match widget {
+        Widget::Steps { total, current, .. } => Widget::Steps { total, current, caption: true },
+        other => other,
+    }
 }
 
 /// The step indicator's spoken text: `template`'s `{current}` / `{total}` filled in; a missing or
@@ -1995,9 +2005,16 @@ mod tests {
     }
 
     #[test]
+    fn with_step_caption_turns_the_caption_on() {
+        assert!(matches!(steps(3, 2), Widget::Steps { caption: false, .. }));
+        assert!(matches!(with_step_caption(steps(3, 2)), Widget::Steps { total: 3, current: 2, caption: true }));
+        assert!(matches!(with_step_caption(text("x")), Widget::Text { .. }));
+    }
+
+    #[test]
     fn steps_builder_clamps_and_step_text_fills_the_template() {
-        assert!(matches!(steps(3, 2), Widget::Steps { total: 3, current: 2 }));
-        assert!(matches!(steps(3, 9), Widget::Steps { total: 3, current: 3 }));
+        assert!(matches!(steps(3, 2), Widget::Steps { total: 3, current: 2, .. }));
+        assert!(matches!(steps(3, 9), Widget::Steps { total: 3, current: 3, .. }));
         assert_eq!(step_text(None, 2, 3), "Step 2 of 3");
         assert_eq!(step_text(Some(""), 2, 3), "Step 2 of 3");
         assert_eq!(step_text(Some("Korak {current} od {total}"), 2, 3), "Korak 2 od 3");

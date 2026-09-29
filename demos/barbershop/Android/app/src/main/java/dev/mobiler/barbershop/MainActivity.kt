@@ -547,10 +547,15 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 val tpl = ActiveLabels.current?.stepOf?.takeIf { it.isNotEmpty() } ?: "Step {current} of {total}"
                 val spoken = tpl.replace("{current}", "$current").replace("{total}", "$total")
                 val on = LocalPalette.current?.primary?.color() ?: MaterialTheme.colorScheme.primary
-                val off = MaterialTheme.colorScheme.surfaceVariant
-                // One element named by the step text; no progress range, so TalkBack never reads a percentage.
-                Row(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    repeat(total) { i -> Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(50)).background(if (i < current) on else off)) }
+                // Unfilled segments carry the step count, so they use the outline colour (~3:1).
+                val off = LocalPalette.current?.outline?.color() ?: MaterialTheme.colorScheme.outline
+                // One element named by the step text (the optional caption is part of it); no progress
+                // range, so TalkBack never reads a percentage.
+                Column(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (widget.caption) Text(spoken, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        repeat(total) { i -> Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(50)).background(if (i < current) on else off)) }
+                    }
                 }
             }
         }

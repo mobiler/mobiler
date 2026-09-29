@@ -949,7 +949,8 @@ pub enum Widget {
     },
     /// A step indicator for a multi-step flow: `total` equal segments, the first `current` filled.
     /// Spoken as one element, "Step 2 of 3" (or [`ShellLabels::step_of`]), never as a percentage.
-    Steps { total: u8, current: u8 },
+    /// `caption` also shows that text above the bar, still as the same single element.
+    Steps { total: u8, current: u8, caption: bool },
 }
 
 #[cfg(test)]
@@ -983,7 +984,7 @@ mod tests {
 
     #[test]
     fn steps_round_trip() {
-        round_trips(&Widget::Steps { total: 3, current: 2 });
+        round_trips(&Widget::Steps { total: 3, current: 2, caption: true });
     }
 
     #[test]
