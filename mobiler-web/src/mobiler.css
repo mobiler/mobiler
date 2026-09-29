@@ -627,3 +627,8 @@ textarea.field { resize: vertical; font-family: inherit; }
 
 /* A badge's status icon (with_icon): before the label, decorative. */
 .badge-icon { display: inline-block; font-size: 14px; line-height: 1; margin-inline-end: 4px; }
+
+/* Step indicator (steps): equal segments, the first `current` filled. */
+.steps { display: flex; gap: 4px; width: 100%; }
+.step { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-2); }
+.step-on { background: var(--primary); }

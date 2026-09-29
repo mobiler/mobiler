@@ -1963,7 +1963,23 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 view! { <div class=format!("box {acls}")>{kids}</div> }.into_any()
             }
         }
-        Widget::Steps { .. } => view! { <span></span> }.into_any(),
+        Widget::Steps { total, current } => {
+            let (total, current) = (*total, (*current).min(*total));
+            if total == 0 {
+                return view! { <span></span> }.into_any();
+            }
+            // One element spoken as the step text (aria-valuetext), never as a percentage.
+            let template = shell_label(|l| l.step_of.clone(), "");
+            let spoken = mobiler_core::step_text(Some(&template), current, total);
+            let segs = (0..total)
+                .map(|i| view! { <span class=if i < current { "step step-on" } else { "step" }></span> })
+                .collect::<Vec<_>>();
+            view! {
+                <div class="steps" role="progressbar" aria-valuemin="1" aria-valuemax=total.to_string()
+                    aria-valuenow=current.to_string() aria-valuetext=spoken>{segs}</div>
+            }
+            .into_any()
+        }
         Widget::Grid { children, columns } => {
             let kids = render_all(children, send);
             match columns {
