@@ -68,9 +68,10 @@ violated. There are three kinds:
 A decision with nothing to test mechanically (a process rule, say) writes
 `Conformance: none — <why>`, and review enforces it.
 
-**Format.** Each `Conformance:` entry is `path::test_name` (the lint checks that the file contains
-`fn test_name(`), a CI job reference `.github/workflows/<file>.yml job "<name>" …` (the lint checks
-the job name appears in the file), or `none — <why>`.
+**Format.** Each `Conformance:` entry is `path::test_name` (the lint checks that the file has a
+`#[test]` fn of that name, in code, not a comment), a CI job reference
+`.github/workflows/<file>.yml job "<name>" …` (the lint checks a job's `name:` line matches), or
+`none — <why>`.
 
 **Every conformance test written for an ADR must be proven to fail by a deliberate mutation before
 it is trusted.** (The backfilled records also cite older behavioural tests that existed before this
