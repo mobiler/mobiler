@@ -1255,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler-web"
-version = "0.40.0"
+version = "0.40.1"
 dependencies = [
  "console_error_panic_hook",
  "crux_core",
