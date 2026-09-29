@@ -36,7 +36,7 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-        if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
+        if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels, _, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
         // The app's own version first, so the core's restore/init already see it (cx.app_info()).
         let info = Bundle.main.infoDictionary
         update(.appInfo(
@@ -60,7 +60,7 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-                if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
+                if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels, _, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.

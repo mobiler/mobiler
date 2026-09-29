@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity as PaletteActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -1408,6 +1410,26 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             )
                         },
                         bottomBar = {
+                          Column {
+                            val pinned = widget.bottomBar.orEmpty()
+                            if (pinned.isNotEmpty()) {
+                                // with_bottom_bar: the screen's main actions above the tabs. M3 lifts the FAB and
+                                // snackbar above this slot. Without bottom tabs it clears the system bar and
+                                // rises with the keyboard (the tabs themselves stay behind the keyboard).
+                                val barInsets = if (!wide && widget.tabs.isNotEmpty()) Modifier else Modifier.navigationBarsPadding().imePadding()
+                                Surface(color = LocalPalette.current?.surfaceBar?.color() ?: MaterialTheme.colorScheme.surfaceContainer) {
+                                    Column(barInsets) {
+                                        HorizontalDivider(color = LocalPalette.current?.outlineVariant?.color() ?: MaterialTheme.colorScheme.outlineVariant)
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            pinned.forEach { child -> Box(Modifier.weight(1f)) { Render(child, send) } }
+                                        }
+                                    }
+                                }
+                            }
                             if (!wide && widget.tabs.isNotEmpty()) {
                                 NavigationBar {
                                     widget.tabs.forEach { t ->
@@ -1422,6 +1444,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     }
                                 }
                             }
+                          }
                         },
                         floatingActionButton = {
                             widget.fab?.let { fab ->

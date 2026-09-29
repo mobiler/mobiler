@@ -5,7 +5,7 @@
 
 use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
-    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns, steps, with_step_caption,
+    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns, steps, with_step_caption, with_bottom_bar,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Snackbar, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
@@ -1232,6 +1232,17 @@ impl MobilerApp for FadeHouse {
         // The Bookings tab is pull-to-refresh (the app owns `refreshing`).
         if model.tab == Tab::Bookings {
             root = with_refresh(root, model.refreshing, Msg::RefreshBookings);
+        }
+        // A selected service pins its main actions at the bottom (with_bottom_bar): within thumb
+        // reach however long the detail is. Wide buttons fill their equal cells on every shell.
+        if model.tab == Tab::Services {
+            if let Some(i) = model.selected_service {
+                let wide = ButtonOpts::default().wide();
+                root = with_bottom_bar(root, vec![
+                    button_with("Book", ButtonStyle::Filled, Msg::OpenService(i), wide),
+                    button_with("Call", ButtonStyle::Tonal, Msg::CallShop, wide),
+                ]);
+            }
         }
         // Tapping a service opens a booking bottom sheet (Sheet).
         if let Some(s) = model.open_service.and_then(|i| model.services.get(i)) {
@@ -2539,6 +2550,19 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn service_detail_pins_book_and_call() {
+        let (app, mut model) = app();
+        model.tab = Tab::Services;
+        assert!(matches!(app.view(&model), Widget::Scaffold { bottom_bar: None, .. }));
+        model.selected_service = Some(0);
+        let v = app.view(&model);
+        let Widget::Scaffold { bottom_bar: Some(bar), .. } = &v else { panic!("no bottom bar") };
+        let j = serde_json::to_string(bar).unwrap();
+        assert_eq!(bar.len(), 2);
+        assert!(j.contains(r#""label":"Book""#) && j.contains(r#""label":"Call""#), "{j}");
     }
 
     #[test]

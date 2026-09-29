@@ -377,7 +377,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, let appearance):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, let appearance, let bottomBar):
         // Theme-as-data: the non-View mapper helpers — spacing(), imageShape(), CardMod,
         // TextStyleMod — read `ActiveTheme.current` (set from the root view in Core.swift, not
         // here) for corner/density/font. `theme` itself still flows into ScaffoldView, which uses
@@ -385,7 +385,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
             darkMode: darkMode, appearance: appearance, theme: theme, fab: fab, sheet: sheet,
-            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, send: send
+            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, bottomBar: bottomBar, send: send
         ))
     }
 }
@@ -1304,6 +1304,8 @@ private struct ScaffoldView: View {
     let refreshing: Bool
     let route: String
     let depth: UInt32
+    /// with_bottom_bar: the screen's main actions, pinned between the body and the tabs.
+    let bottomBar: [SharedTypes.Widget]?
     let send: (Action) -> Void
 
     // Remember the depth of the previous route so a route change knows its
@@ -1496,6 +1498,20 @@ private struct ScaffoldView: View {
             .overlay(alignment: .bottom) {
                 SnackbarView(seed: theme?.seed)
                     .padding(.bottom, fab != nil ? 56 + 18 + 12 : 12)
+            }
+
+            // with_bottom_bar: pinned above the tabs; the body (with the FAB and snackbar overlays)
+            // ends above it, and the keyboard safe area lifts it with the keyboard.
+            if let bar = bottomBar, !bar.isEmpty {
+                PaletteDivider()
+                HStack(spacing: 12) {
+                    ForEach(Array(bar.enumerated()), id: \.offset) { _, w in
+                        render(w, send).frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(role(pal?.surfaceBar, else: Color(.systemBackground)))
             }
 
             if showBottomTabs && !tabs.isEmpty {
