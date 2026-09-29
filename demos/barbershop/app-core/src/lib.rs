@@ -5,7 +5,7 @@
 
 use mobiler_core::{
     A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
-    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar,
+    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Snackbar, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
@@ -1681,6 +1681,14 @@ fn bookings_screen(model: &Model) -> Widget {
         subtitle("Status"),
         row(vec![with_icon(badge("Confirmed", Tone::Success), Icon::Check), with_icon(badge("Pending", Tone::Warning), Icon::Clock)]),
         row(vec![with_icon(badge("Finished", Tone::Info), Icon::DoneAll), with_icon(badge("No-show", Tone::Danger), Icon::Close)]),
+        // Free slots as tiles, exactly three per row (with_columns), and a free gap in the day as a
+        // dashed card ("empty, you can fill this") that starts a booking.
+        subtitle("Free times"),
+        with_columns(
+            grid(["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"].into_iter().map(|t| card(text(t), CardStyle::Outlined)).collect()),
+            3,
+        ),
+        card_button(text("Free 12:45 – 13:30 · 45 min · + Book"), CardStyle::Dashed, Msg::Book),
         // A client without a photo: initials in a 40 circle (with_initials / with_avatar_size).
         card(row(vec![with_avatar_size(with_initials(avatar(""), "MJ"), 40), text("Milan Jovanović")]), CardStyle::Outlined),
         // Main action: wide + icon. Secondary: tonal. Destructive: danger tone (outlined + filled).
@@ -2528,6 +2536,15 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn bookings_show_a_three_column_grid_and_a_dashed_free_slot() {
+        let (_, model) = app();
+        let j = serde_json::to_string(&bookings_screen(&model)).unwrap();
+        assert!(j.contains(r#""columns":3"#), "{j}");
+        assert!(j.contains(r#""style":"Dashed""#));
+        assert!(j.contains("09:00") && j.contains("11:30"));
     }
 
     #[test]
