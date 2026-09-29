@@ -1963,7 +1963,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 view! { <div class=format!("box {acls}")>{kids}</div> }.into_any()
             }
         }
-        Widget::Grid { children } => {
+        Widget::Grid { children, .. } => {
             let kids = render_all(children, send);
             view! { <div class="grid">{kids}</div> }.into_any()
         }
@@ -2721,6 +2721,7 @@ fn card_class(s: CardStyle) -> &'static str {
         CardStyle::Outlined => "card-outlined",
         CardStyle::Filled => "card-filled",
         CardStyle::Brand => "card-brand",
+        CardStyle::Dashed => "card-dashed",
     }
 }
 
