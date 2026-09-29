@@ -111,6 +111,13 @@ pub enum Msg {
     EmailShop,
     /// Call the shop via the system dialer (`composer` plugin).
     CallShop,
+    /// The pinned bar's "Call": `tel:` through `cx.open_url_then`, which reports when nothing can
+    /// place calls (a tablet, an emulator without a dialer).
+    DialShop,
+    /// `DialShop`'s result: whether a dialer took it, and the shell's reason when not.
+    Dialed(bool, String),
+    /// A result the app doesn't act on (an action-less snackbar closing).
+    Dismissed,
     /// Speak the next-booking summary aloud (`tts` plugin).
     SpeakBooking,
     /// Ask for an App Store / Play review (`review` plugin).
@@ -718,6 +725,19 @@ impl MobilerApp for FadeHouse {
                     })
                 });
             }
+            Msg::Dismissed => {}
+            Msg::DialShop => cx.open_url_then("tel:+15551234567", |r| Msg::Dialed(r.ok, r.as_text().unwrap_or_default().to_string())),
+            Msg::Dialed(ok, reason) => {
+                // Say why only when it's the device (or the browser), not when the user cancelled.
+                let text = match (ok, reason.as_str()) {
+                    (true, _) | (false, "cancelled") => None,
+                    (false, "blocked") => Some("Allow pop-ups to place calls"),
+                    (false, _) => Some("This device can't place calls"),
+                };
+                if let Some(t) = text {
+                    cx.snackbar(Snackbar::new(t), |_| Msg::Dismissed);
+                }
+            }
             Msg::CallShop => {
                 let input = serde_json::json!({ "number": "+15551234567" }).to_string();
                 cx.plugin("composer", "call", input, |r| {
@@ -1240,7 +1260,7 @@ impl MobilerApp for FadeHouse {
                 let wide = ButtonOpts::default().wide();
                 root = with_bottom_bar(root, vec![
                     button_with("Book", ButtonStyle::Filled, Msg::OpenService(i), wide),
-                    button_with("Call", ButtonStyle::Tonal, Msg::CallShop, wide),
+                    button_with("Call", ButtonStyle::Tonal, Msg::DialShop, wide),
                 ]);
             }
         }
@@ -2550,6 +2570,17 @@ mod test {
         assert_eq!(model.bookings.len(), before);
         app.update(Msg::CancelNextAnswered(true), &mut model, &mut cx);
         assert_eq!(model.bookings.len(), before - 1);
+    }
+
+    #[test]
+    fn dialing_without_a_dialer_says_so() {
+        let calls = dialog_inputs(Msg::DialShop);
+        assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("browser", "open"));
+        let text = |ok: bool, why: &str| dialog_inputs(Msg::Dialed(ok, why.into())).first().map(|c| c.2["text"].as_str().unwrap_or("").to_string());
+        assert_eq!(text(false, "no app can open this link").as_deref(), Some("This device can't place calls"));
+        assert_eq!(text(false, "blocked").as_deref(), Some("Allow pop-ups to place calls"));
+        assert_eq!(text(false, "cancelled"), None); // the user said no — nothing to explain
+        assert_eq!(text(true, "opened"), None);
     }
 
     #[test]

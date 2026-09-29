@@ -229,6 +229,16 @@ impl<E> Cx<E> {
         self.notify("browser", "open", url);
     }
 
+    /// Like [`open_url`](Self::open_url), but `then` learns whether it opened: `ok: true` when the
+    /// system handed the link to an app; `ok: false` with a reason (`"no app can open this link"`,
+    /// `"invalid url"`, `"blocked"` — a web pop-up blocker —, `"cancelled"` — the user declined the
+    /// system's confirmation) otherwise — e.g. `tel:` on a device without a dialer:
+    /// `cx.open_url_then("tel:+381601234567", |r| Msg::Dialed(r.ok))`. A browser can't tell whether
+    /// the desktop can place a call, so on web `ok` only means the link was handed off.
+    pub fn open_url_then(&mut self, url: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.plugin("browser", "open", url, then);
+    }
+
     /// Show a transient toast / snackbar with `text` (built-in `toast` capability).
     pub fn toast(&mut self, text: impl Into<String>) {
         self.notify("toast", "show", text);
@@ -2030,6 +2040,17 @@ mod tests {
         assert!(matches!(steps(3, 2), Widget::Steps { caption: false, .. }));
         assert!(matches!(with_step_caption(steps(3, 2)), Widget::Steps { total: 3, current: 2, caption: true }));
         assert!(matches!(with_step_caption(text("x")), Widget::Text { .. }));
+    }
+
+    #[test]
+    fn open_url_then_is_a_request_and_open_url_stays_a_notification() {
+        let mut cx = Cx::<Ev>::default();
+        cx.open_url("https://x");
+        assert!(cx.requests.is_empty() && cx.notifications.len() == 1);
+        cx.open_url_then("tel:+381601234567", |r| if r.ok { Ev::Tap } else { Ev::Open(0) });
+        let (call, then) = cx.requests.pop().unwrap();
+        assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("browser", "open", "tel:+381601234567"));
+        assert!(matches!(then(PluginResponse::text(false, "no app can open this link")), Ev::Open(0)));
     }
 
     #[test]
