@@ -1514,6 +1514,8 @@ dependencies = [
 name = "xtask"
 version = "0.0.0"
 dependencies = [
+ "facet",
+ "mobiler-core",
  "serde",
  "serde_json",
 ]
