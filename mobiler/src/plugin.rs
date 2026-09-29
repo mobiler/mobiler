@@ -357,14 +357,18 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
         // Each (shipped, on-disk) pair; `None` on disk = missing from the app.
         let files: Vec<(PathBuf, Option<String>, Option<String>)> = paths
             .iter()
-            .map(|(rel, dst)| (dst.clone(), src.read_text(rel).ok().map(|t| substitute(&t, subs)), fs::read_to_string(dst).ok()))
+            .map(|(rel, dst)| {
+                let shipped = src.read_text(rel).ok().map(|t| substitute(&t, subs));
+                (dst.clone(), shipped, fs::read_to_string(dst).ok())
+            })
             .collect();
         candidates.push((name, files));
     }
 
     // Some alternatives register identical lines too (`geolocation` / `geolocation-fused`), so both
     // look registered. Where registered plugins claim the same file, the app's copy decides: only
-    // the variant whose shipped body it is closest to counts as installed, fresh or stale.
+    // the variant whose shipped body shares the most lines with it counts as installed, fresh or
+    // stale. A tie (a copy rewritten beyond both) beats neither, so both are judged as before.
     // Both variants are compared against the same on-disk files, so a count of matching lines ranks them.
     let closeness = |files: &[(PathBuf, Option<String>, Option<String>)], shared: &[&PathBuf]| -> usize {
         files
@@ -400,8 +404,7 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
     drifted
 }
 
-/// How many of `on_disk`'s lines also appear in `shipped` — how close an app's copy of a plugin
-/// source is to one shipped variant.
+/// How many of the app's lines (`on_disk`) also appear in one shipped variant's body.
 fn lines_in_common(shipped: &str, on_disk: &str) -> usize {
     let shipped: std::collections::HashSet<&str> = shipped.lines().collect();
     on_disk.lines().filter(|l| shipped.contains(l)).count()
