@@ -406,18 +406,18 @@ impl Default for Model {
             audience: Audience::Men,
             search: String::new(),
             services: vec![
-                Service { name: "Classic Cut", price: "$28", rating: "4.9", category: "Hair", image: "https://loremflickr.com/400/400/haircut?lock=1" },
-                Service { name: "Skin Fade", price: "$32", rating: "4.8", category: "Hair", image: "https://loremflickr.com/400/400/barber?lock=2" },
-                Service { name: "Beard Trim", price: "$18", rating: "4.7", category: "Beard", image: "https://loremflickr.com/400/400/beard?lock=3" },
-                Service { name: "Hot Towel Shave", price: "$24", rating: "4.9", category: "Beard", image: "https://loremflickr.com/400/400/shave?lock=4" },
-                Service { name: "Cut + Beard", price: "$42", rating: "5.0", category: "Combo", image: "https://loremflickr.com/400/400/grooming?lock=5" },
-                Service { name: "Kids Cut", price: "$20", rating: "4.6", category: "Hair", image: "https://loremflickr.com/400/400/kidshaircut?lock=6" },
+                Service { name: "Classic Cut", price: "$28", rating: "4.9", category: "Hair", image: "https://picsum.photos/seed/haircut-1/400/400" },
+                Service { name: "Skin Fade", price: "$32", rating: "4.8", category: "Hair", image: "https://picsum.photos/seed/barber-2/400/400" },
+                Service { name: "Beard Trim", price: "$18", rating: "4.7", category: "Beard", image: "https://picsum.photos/seed/beard-3/400/400" },
+                Service { name: "Hot Towel Shave", price: "$24", rating: "4.9", category: "Beard", image: "https://picsum.photos/seed/shave-4/400/400" },
+                Service { name: "Cut + Beard", price: "$42", rating: "5.0", category: "Combo", image: "https://picsum.photos/seed/grooming-5/400/400" },
+                Service { name: "Kids Cut", price: "$20", rating: "4.6", category: "Hair", image: "https://picsum.photos/seed/kidshaircut-6/400/400" },
             ],
             barbers: vec![
-                Barber { name: "Marco", specialty: "Fades & tapers", rating: "4.9", image: "https://loremflickr.com/200/200/barber,man?lock=11" },
-                Barber { name: "Dev", specialty: "Beard sculpting", rating: "4.8", image: "https://loremflickr.com/200/200/man,beard?lock=12" },
-                Barber { name: "Iris", specialty: "Classic cuts", rating: "5.0", image: "https://loremflickr.com/200/200/hairstylist?lock=13" },
-                Barber { name: "Theo", specialty: "Hot shaves", rating: "4.7", image: "https://loremflickr.com/200/200/barbershop?lock=14" },
+                Barber { name: "Marco", specialty: "Fades & tapers", rating: "4.9", image: "https://picsum.photos/seed/barber-11/200/200" },
+                Barber { name: "Dev", specialty: "Beard sculpting", rating: "4.8", image: "https://picsum.photos/seed/man-12/200/200" },
+                Barber { name: "Iris", specialty: "Classic cuts", rating: "5.0", image: "https://picsum.photos/seed/hairstylist-13/200/200" },
+                Barber { name: "Theo", specialty: "Hot shaves", rating: "4.7", image: "https://picsum.photos/seed/barbershop-14/200/200" },
             ],
             open_service: None,
             selected_service: None,
@@ -1301,10 +1301,10 @@ fn booking_sheet(s: &Service, user_rating: u32, client: &str) -> Widget {
         // Where the user is in the flow: the caption and segments are one element, spoken once as
         // "Step 2 of 3" (with_step_caption, not a separate text).
         with_step_caption(steps(3, 2)),
-        row(vec![
-            image(s.image, ImageShape::Rounded, ImageRatio::Square),
-            column(vec![title(s.name), text(s.price), rating(tenths(s.rating), 5)]),
-        ]),
+        // The service photo as a wide banner above its details (in a row, a full-width image
+        // pushed the name and price off the edge).
+        image(s.image, ImageShape::Rounded, ImageRatio::Wide),
+        row(vec![title(s.name), text(s.price), rating(tenths(s.rating), 5)]),
         spacer(Spacing::Sm),
         client_line,
         spacer(Spacing::Sm),
