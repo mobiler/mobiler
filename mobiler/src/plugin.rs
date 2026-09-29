@@ -337,7 +337,11 @@ fn registered(root: &Path, subs: &Subs, m: &Manifest) -> bool {
 ///
 /// Best-effort: an unreadable manifest or source is skipped rather than failing the upgrade.
 pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
-    let mut drifted = Vec::new();
+    // "Installed" = registered on every platform it declares. Source files alone can't tell:
+    // alternative plugins share file names (`push` and `push-firebase-only` both ship
+    // PushPlugin.kt), so file presence would report the one that isn't installed — and
+    // re-adding it would collide with the one that is.
+    let mut candidates = Vec::new();
     for name in bundled_names() {
         let Ok(src) = resolve_source(&name) else { continue };
         let Ok(manifest) = src
@@ -347,25 +351,60 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
             continue;
         };
         let paths = installed_paths(root, subs, &manifest);
-        // "Installed" = registered on every platform it declares. Source files alone can't tell:
-        // alternative plugins share file names (`push` and `push-firebase-only` both ship
-        // PushPlugin.kt), so file presence would report the one that isn't installed — and
-        // re-adding it would collide with the one that is.
         if paths.is_empty() || !registered(root, subs, &manifest) {
             continue;
         }
-        let stale = paths.iter().any(|(rel, dst)| match (src.read_text(rel), fs::read_to_string(dst)) {
-            (Ok(shipped), Ok(on_disk)) => substitute(&shipped, subs) != on_disk,
+        // Each (shipped, on-disk) pair; `None` on disk = missing from the app.
+        let files: Vec<(PathBuf, Option<String>, Option<String>)> = paths
+            .iter()
+            .map(|(rel, dst)| (dst.clone(), src.read_text(rel).ok().map(|t| substitute(&t, subs)), fs::read_to_string(dst).ok()))
+            .collect();
+        candidates.push((name, files));
+    }
+
+    // Some alternatives register identical lines too (`geolocation` / `geolocation-fused`), so both
+    // look registered. Where registered plugins claim the same file, the app's copy decides: only
+    // the variant whose shipped body it is closest to counts as installed, fresh or stale.
+    // Both variants are compared against the same on-disk files, so a count of matching lines ranks them.
+    let closeness = |files: &[(PathBuf, Option<String>, Option<String>)], shared: &[&PathBuf]| -> usize {
+        files
+            .iter()
+            .filter(|(dst, _, _)| shared.contains(&dst))
+            .map(|(_, shipped, on_disk)| match (shipped, on_disk) {
+                (Some(shipped), Some(on_disk)) => lines_in_common(shipped, on_disk),
+                _ => 0,
+            })
+            .sum()
+    };
+    let mut drifted = Vec::new();
+    for (name, files) in &candidates {
+        let beaten = candidates.iter().any(|(other, other_files)| {
+            let shared: Vec<&PathBuf> =
+                files.iter().map(|(d, _, _)| d).filter(|d| other_files.iter().any(|(o, _, _)| o == *d)).collect();
+            other != name && !shared.is_empty() && closeness(other_files, &shared) > closeness(files, &shared)
+        });
+        if beaten {
+            continue;
+        }
+        let stale = files.iter().any(|(_, shipped, on_disk)| match (shipped, on_disk) {
+            (Some(shipped), Some(on_disk)) => shipped != on_disk,
             // A source this CLI ships that is missing from the app is itself drift (a release
             // that adds a second file to an existing plugin).
-            (Ok(_), Err(_)) => true,
+            (Some(_), None) => true,
             _ => false,
         });
         if stale {
-            drifted.push(name);
+            drifted.push(name.clone());
         }
     }
     drifted
+}
+
+/// How many of `on_disk`'s lines also appear in `shipped` — how close an app's copy of a plugin
+/// source is to one shipped variant.
+fn lines_in_common(shipped: &str, on_disk: &str) -> usize {
+    let shipped: std::collections::HashSet<&str> = shipped.lines().collect();
+    on_disk.lines().filter(|l| shipped.contains(l)).count()
 }
 
 fn report(res: Insert, what: &str) {
@@ -726,6 +765,27 @@ mod test {
         assert!(report.contains(&"push".to_string()), "the installed plugin is reported: {report:?}");
         assert!(!report.contains(&"push-firebase-only".to_string()), "the alternative is not: {report:?}");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `geolocation` and `geolocation-fused` register the SAME lines and share both file names, so
+    /// registration can't tell them apart. The installed file's content must: only the variant whose
+    /// shipped body the app's copy is closest to counts as installed, fresh or stale.
+    #[test]
+    fn drifted_tells_variants_with_identical_registrations_apart() {
+        for (installed, other) in [("geolocation", "geolocation-fused"), ("geolocation-fused", "geolocation")] {
+            let root = skeleton();
+            let subs = Subs::from_app_root(&root).unwrap();
+            add_at(&root, installed).unwrap();
+            assert!(drifted(&root, &subs).is_empty(), "fresh {installed} → nothing drifted: {:?}", drifted(&root, &subs));
+
+            let kt = root.join("Android/app/src/main/java/dev/mobiler/demo/GeolocationPlugin.kt");
+            let stale = fs::read_to_string(&kt).unwrap().replace("package dev.mobiler.demo", "package dev.mobiler.demo\n// older version");
+            fs::write(&kt, stale).unwrap();
+            let report = drifted(&root, &subs);
+            assert!(report.contains(&installed.to_string()), "stale {installed} is reported: {report:?}");
+            assert!(!report.contains(&other.to_string()), "{other} is not installed, so not reported: {report:?}");
+            let _ = fs::remove_dir_all(&root);
+        }
     }
 
     #[test]

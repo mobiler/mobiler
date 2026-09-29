@@ -143,6 +143,7 @@ enum Plugins {
         switch plugin {
         case "ticker": await TickerStream.run(input: input, emit: emit)
         case "system": await SystemStream.run(emit: emit)
+        case "websocket": await WebSocketPlugin.subscribe(op: op, input: input, emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break
         }
