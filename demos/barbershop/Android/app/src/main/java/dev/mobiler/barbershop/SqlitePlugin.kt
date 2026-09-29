@@ -20,6 +20,9 @@ class SqlitePlugin(private val application: Application) : MobilerPlugin {
         val args = Array(argsArr?.length() ?: 0) { argsArr!!.getString(it) }
         return try {
             application.openOrCreateDatabase("mobiler.db", Context.MODE_PRIVATE, null).use { db ->
+                // Each call opens its own connection, so two writes emitted in one update cycle race
+                // on the file lock. Wait (up to 5s) for a concurrent writer instead of failing.
+                db.execSQL("PRAGMA busy_timeout=5000")
                 when (op) {
                     "exec" -> {
                         db.execSQL(sql, args)
