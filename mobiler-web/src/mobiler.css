@@ -630,5 +630,8 @@ textarea.field { resize: vertical; font-family: inherit; }
 
 /* Step indicator (steps): equal segments, the first `current` filled. */
 .steps { display: flex; gap: 4px; width: 100%; }
-.step { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-2); }
+/* Unfilled segments in the outline colour: they carry the step count, so they need ~3:1 contrast. */
+.step { flex: 1; height: 4px; border-radius: 2px; background: var(--outline, var(--line)); }
+.steps-wrap { width: 100%; }
+.steps-caption { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .step-on { background: var(--primary); }

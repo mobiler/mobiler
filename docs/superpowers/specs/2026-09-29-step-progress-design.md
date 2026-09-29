@@ -75,3 +75,14 @@ it.
 - **Android (AVD, foreground app checked before every action):** a node with the content-desc
   "Step 2 of 3"; a screenshot shows 3 segments, 2 filled.
 - **iOS:** CI compile only.
+
+## Follow-up (approved 2026-09-29)
+
+- **Caption.** `Steps.caption: bool` + `with_step_caption(steps(..))` shows the step text above the
+  bar. It's part of the same single accessibility element (web `aria-hidden` caption inside the
+  progressbar; Android inside the cleared Column; iOS inside the ignored VStack), so it's spoken once.
+- **Contrast.** Unfilled segments use the palette's `outline` (web `--outline`, else `--line`;
+  Android / iOS `outline`, else the platform outline / systemGray3). They carry the step count, so
+  they need about 3:1. The Moj Termin **dark** palette's `outline` #6a6462 is 2.18:1 and `primary`
+  #1f8276 is 2.72:1 on the dark surface #2e3434. Suggested palette values: `outline` #817a78 (3.01:1)
+  and `primary` #218a7d (3.02:1). That's for the design team.

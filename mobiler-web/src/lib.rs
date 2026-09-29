@@ -1963,20 +1963,25 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                 view! { <div class=format!("box {acls}")>{kids}</div> }.into_any()
             }
         }
-        Widget::Steps { total, current } => {
+        Widget::Steps { total, current, caption } => {
             let (total, current) = (*total, (*current).min(*total));
             if total == 0 {
                 return view! { <span></span> }.into_any();
             }
-            // One element spoken as the step text (aria-valuetext), never as a percentage.
+            // One element spoken as the step text (aria-label / aria-valuetext), never as a
+            // percentage; the optional visible caption is the same text, hidden from assistive tech.
             let template = shell_label(|l| l.step_of.clone(), "");
             let spoken = mobiler_core::step_text(Some(&template), current, total);
             let segs = (0..total)
                 .map(|i| view! { <span class=if i < current { "step step-on" } else { "step" }></span> })
                 .collect::<Vec<_>>();
+            let cap = caption.then(|| view! { <div class="steps-caption" aria-hidden="true">{spoken.clone()}</div> });
             view! {
-                <div class="steps" role="progressbar" aria-valuemin="0" aria-valuemax=total.to_string()
-                    aria-valuenow=current.to_string() aria-valuetext=spoken.clone() aria-label=spoken>{segs}</div>
+                <div class="steps-wrap" role="progressbar" aria-valuemin="0" aria-valuemax=total.to_string()
+                    aria-valuenow=current.to_string() aria-valuetext=spoken.clone() aria-label=spoken>
+                    {cap}
+                    <div class="steps">{segs}</div>
+                </div>
             }
             .into_any()
         }

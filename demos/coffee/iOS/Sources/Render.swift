@@ -86,18 +86,22 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             markers: markers, interactive: interactive, send: send
         ).frame(minHeight: 240))
 
-    case .steps(let total, let current):
-        // One element spoken as the step text, never as a percentage.
+    case .steps(let total, let current, let caption):
+        // One element spoken as the step text (the optional caption is part of it), never as a
+        // percentage. Unfilled segments use the outline colour: they carry the step count.
         let t = Int(total), c = min(Int(current), Int(total))
         if t == 0 { return AnyView(EmptyView()) }
         let tpl = (ActiveLabels.current?.stepOf).flatMap { $0.isEmpty ? nil : $0 } ?? "Step {current} of {total}"
         let spoken = tpl.replacingOccurrences(of: "{current}", with: "\(c)").replacingOccurrences(of: "{total}", with: "\(t)")
-        return AnyView(HStack(spacing: 4) {
-            ForEach(0..<t, id: \.self) { i in
-                Capsule().fill(i < c ? (ActiveTheme.current?.brandColor ?? .accentColor) : Color(.systemFill)).frame(height: 4)
+        return AnyView(VStack(alignment: .leading, spacing: 6) {
+            if caption { Text(spoken).font(.caption).foregroundColor(.secondary) }
+            HStack(spacing: 4) {
+                ForEach(0..<t, id: \.self) { i in
+                    Capsule().fill(i < c ? (ActiveTheme.current?.brandColor ?? .accentColor) : Color(.systemGray3)).frame(height: 4)
+                }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken))
 
