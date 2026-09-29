@@ -119,6 +119,8 @@ fn inject_hls_support() {
 /// - when the surrounding tree changes, the div is replaced; the map is kept in a registry keyed by
 ///   the widget's `id`, and the new div adopts it (its inner element is moved in).
 ///
+/// Map ids should be unique on screen: two live maps with one id share one map.
+///
 /// A map whose inner element is no longer in the document after the current task is `.remove()`d,
 /// so no WebGL context leaks. Map/marker taps are reported to the core by writing `"tap|lat,lng"` /
 /// `"marker|id"` into the hidden sibling `.mobiler-map-sink` input of the current div and firing its
@@ -139,7 +141,7 @@ fn inject_maplibre_support() {
     var sink=el.parentElement&&el.parentElement.querySelector('.mobiler-map-sink');
     if(sink){sink.value=payload;sink.dispatchEvent(new Event('input',{bubbles:true}));}
   }
-  var HANDLERS=['scrollZoom','boxZoom','dragRotate','dragPan','keyboard','doubleClickZoom','touchZoomRotate'];
+  var HANDLERS=['scrollZoom','boxZoom','dragRotate','dragPan','keyboard','doubleClickZoom','touchZoomRotate','touchPitch'];
   var maps=window.__mobilerMaps=window.__mobilerMaps||{};
   var anon=0;
   function apply(e,el){
@@ -147,7 +149,8 @@ fn inject_maplibre_support() {
     if(e.camera!==center+'@'+zoom){
       e.camera=center+'@'+zoom;
       var c=center.split(',');
-      e.map.jumpTo({center:[parseFloat(c[1])||0,parseFloat(c[0])||0],zoom:parseFloat(zoom)||2});
+      var z=parseFloat(zoom);
+      e.map.jumpTo({center:[parseFloat(c[1])||0,parseFloat(c[0])||0],zoom:isNaN(z)?2:z});
     }
     var inter=el.getAttribute('data-interactive')!=='false';
     if(e.interactive!==inter){
@@ -168,15 +171,16 @@ fn inject_maplibre_support() {
       });
     }
   }
-  function adopt(e,el){el.appendChild(e.inner);e.host=el;e.map.resize();apply(e,el);}
+  function adopt(e,el,key){el.appendChild(e.inner);e.host=el;el.__mobilerMapKey=key;e.map.resize();apply(e,el);}
   function init(el){
     if(el.__mobilerMap){return;}el.__mobilerMap=true;
     var key=el.getAttribute('data-map-id')||('anon'+(anon++));
-    if(maps[key]){return adopt(maps[key],el);}
+    el.__mobilerMapKey=key;
+    if(maps[key]){return adopt(maps[key],el,key);}
     ensureML(function(){
       // A re-render may have replaced this div while maplibre-gl loaded; the live div wins.
       if(!el.isConnected){return;}
-      if(maps[key]){return adopt(maps[key],el);}
+      if(maps[key]){return adopt(maps[key],el,key);}
       try{
         var inner=document.createElement('div');inner.style.width='100%';inner.style.height='100%';
         el.appendChild(inner);
@@ -198,14 +202,19 @@ fn inject_maplibre_support() {
   function scan(root){if(root&&root.querySelectorAll){root.querySelectorAll('.mobiler-map[data-map]').forEach(init);}}
   new MutationObserver(function(muts){var removed=false;muts.forEach(function(m){
     if(m.type==='attributes'){
-      var t=m.target,k=t.getAttribute('data-map-id');
-      if(k&&maps[k]&&maps[k].host===t){apply(maps[k],t);}
+      // An update patched a live map's div in place. It may now be a different map (another id in
+      // the same tree position): re-key the entry so later lookups find it, then apply the values.
+      var t=m.target,k=t.__mobilerMapKey,e=k&&maps[k];
+      if(!e||e.host!==t){return;}
+      var nk=t.getAttribute('data-map-id')||k;
+      if(nk!==k&&!maps[nk]){delete maps[k];maps[nk]=e;t.__mobilerMapKey=nk;}
+      apply(e,t);
       return;
     }
     m.addedNodes.forEach(function(n){if(n.nodeType===1){if(n.matches&&n.matches('.mobiler-map[data-map]')){init(n);}scan(n);}});
     if(m.removedNodes.length){removed=true;}
   });if(removed){setTimeout(sweep,0);}}).observe(document.documentElement,{childList:true,subtree:true,
-    attributes:true,attributeFilter:['data-center','data-zoom','data-markers','data-interactive']});
+    attributes:true,attributeFilter:['data-map-id','data-center','data-zoom','data-markers','data-interactive']});
   scan(document);
 })();"#;
     let document = leptos::prelude::document();

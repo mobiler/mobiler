@@ -616,6 +616,11 @@ private struct MapWidgetView: UIViewRepresentable {
                 span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
             )
             mv.setRegion(region, animated: false)
+            // The first update can run before SwiftUI sizes the view, and MapKit fits a region to
+            // the view's bounds: apply it once more after layout.
+            if mv.bounds.isEmpty {
+                DispatchQueue.main.async { mv.setRegion(region, animated: false) }
+            }
         }
         let markersKey = markers.map { "\($0.id)|\($0.lat)|\($0.lng)|\($0.title ?? "")" }.joined(separator: "\n")
         if c.appliedMarkers != markersKey {
