@@ -26,7 +26,7 @@ Msg::Frame(r) => {
 - **Android:** OkHttp `WebSocket` (already a shell dependency — no extra Gradle dep); the streaming
   side is a `callbackFlow` over the `WebSocketListener`, torn down on `awaitClose`.
 - **iOS:** `URLSessionWebSocketTask` (system framework — no package); the stream loops `receive()`
-  and is cancelled via `withTaskCancellationHandler` on unsubscribe. iOS 16 target ✓.
+  and is cancelled via `withTaskCancellationHandler` on unsubscribe. iOS 17 target ✓.
 - **Web:** the shell opens a browser `WebSocket` and streams its `onmessage` frames (handled in the
   web shell's `start_stream`).
 - One connection per app (the plugin instance is a registry singleton). Testable against any echo

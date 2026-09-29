@@ -56,7 +56,7 @@ cx.unsubscribe("up");
 - **iOS:** `URLSessionUploadTask(fromFile:)` / `URLSessionDownloadTask`, both driven by a
   `URLSessionTaskDelegate`/`URLSessionDownloadDelegate` (`didSendBodyData`/`didWriteData` →
   progress; completion → `Done`). A finished download's temp file is moved to `dest`, overwriting.
-  System framework — no package. iOS 16 target ✓.
+  System framework — no package. iOS 17 target ✓.
 - **Web:** see the published `mobiler-web` shell (Release A/B) — XHR for upload progress, `fetch` +
   `ReadableStream` for download progress, handing back a `blob:` handle.
 - One `URLSession`/OkHttp `Call` per transfer (not a shared connection, unlike `websocket`) — each
