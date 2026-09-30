@@ -27,13 +27,13 @@ enum IapPlugin {
 
     static func subscribe(op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
-        await IapStore.shared.attach(sink)
+        guard let id = await IapStore.shared.attach(sink) else { return }
         await withTaskCancellationHandler {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         } onCancel: {
-            Task { @MainActor in IapStore.shared.detach() }
+            Task { @MainActor in IapStore.shared.detach(id) }
         }
     }
 }
@@ -43,6 +43,7 @@ final class IapStore {
     static let shared = IapStore()
 
     private var sink: (@Sendable (String) -> Void)?
+    private var sinkId = 0
     private var buffer: [String] = []
     private var products: [String: Product] = [:]          // cached for purchase()
     private var unfinished: [String: Transaction] = [:]     // parked by id, so finish() has the real object
@@ -51,14 +52,21 @@ final class IapStore {
 
     // --- stream wiring (called by the plugin's subscribe) ---
 
-    func attach(_ sink: @escaping @Sendable (String) -> Void) {
+    /// Returns a token for `detach`, or nil if the subscribing task was already cancelled (a
+    /// late attach must not replace a newer subscription's sink). A later attach replaces this one.
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> Int? {
+        guard !Task.isCancelled else { return nil }
+        sinkId += 1
         self.sink = sink
         for payload in buffer { sink(payload) }
         buffer.removeAll()
         startUpdatesListener()  // idempotent
+        return sinkId
     }
 
-    func detach() { sink = nil }  // keep the updates listener running; its emits buffer until re-attach
+    /// Clears the sink only if `id` is still the attached one (ADR-0034). The updates listener keeps
+    /// running; its emits buffer until re-attach.
+    func detach(_ id: Int) { if id == sinkId { sink = nil } }
 
     private func startUpdatesListener() {
         guard updatesTask == nil else { return }
