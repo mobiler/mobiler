@@ -24,18 +24,21 @@ enum FirebasePushPlugin {
     // also reach the stream. Park until cancelled, then detach.
     static func subscribe(op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
-        await MainActor.run {
-            PushBridge.shared.attach(sink)
+        let attached: Int? = await MainActor.run { () -> Int? in
+            // A subscription cancelled before this hop never attaches (ADR-0034).
+            guard !Task.isCancelled else { return nil }
             FCMDelegate.shared.refreshSink = sink
+            return PushBridge.shared.attach(sink)
         }
+        guard let id = attached else { return }
         await withTaskCancellationHandler {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         } onCancel: {
             Task { @MainActor in
-                PushBridge.shared.detach()
-                FCMDelegate.shared.refreshSink = nil
+                // Only the live subscription's teardown clears the token-refresh sink too.
+                if PushBridge.shared.detach(id) { FCMDelegate.shared.refreshSink = nil }
             }
         }
     }

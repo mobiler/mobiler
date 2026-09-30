@@ -189,6 +189,21 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
     let manifest: Manifest = toml::from_str(&src.read_text("mobiler-plugin.toml")?)
         .context("parsing mobiler-plugin.toml")?;
 
+    // The push plugins call `PushBridge.detach(id)`, which lives in the app's App.swift, not in the
+    // plugin. Check before writing anything: an App.swift that predates it wouldn't compile.
+    if let Some(i) = &manifest.ios {
+        let needs_new_bridge =
+            i.sources.iter().any(|rel| src.read_text(rel).is_ok_and(|t| t.contains("PushBridge.shared.detach(id)")));
+        let app_swift = fs::read_to_string(root.join("iOS/Sources/App.swift")).unwrap_or_default();
+        if needs_new_bridge && app_swift.contains("final class PushBridge") && !app_swift.contains("func detach(_ id: Int)") {
+            bail!(
+                "`{}` needs a newer iOS/Sources/App.swift (PushBridge.detach(_:)). Run `mobiler upgrade --apply` first, then re-run `mobiler plugin add {}`.",
+                manifest.name,
+                manifest.name
+            );
+        }
+    }
+
     println!("Installing plugin `{}`{}", manifest.name, fmt_summary(&manifest.summary));
     let mut notes: Vec<String> = Vec::new();
 
@@ -468,7 +483,9 @@ fn line_has_marker(line: &str, marker: &str) -> bool {
 /// a token boundary), with the marker's indentation. Idempotent: skip if `needle` is already present.
 fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Result<Insert> {
     let content = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    if content.contains(needle) {
+    // Only live lines count: a template's commented-out opt-in line (ADR-0035) must not stop the
+    // plugin that needs it from inserting the real one.
+    if without_comments(path, &content).contains(needle) {
         return Ok(Insert::AlreadyPresent);
     }
     let Some(marker_line) = content.lines().find(|l| line_has_marker(l, marker)) else {
@@ -479,6 +496,28 @@ fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Resu
     let updated = content.replacen(&anchor, &format!("{indent}{payload}\n{anchor}"), 1);
     fs::write(path, updated).with_context(|| format!("writing {}", path.display()))?;
     Ok(Insert::Inserted)
+}
+
+/// `content` with its comments removed, by file type: `<!-- … -->` blocks in XML (they can span
+/// lines), whole-line `#` comments in YAML and whole-line `//` comments elsewhere. Only whole lines
+/// are dropped outside XML, so a `//` inside a URL or string is never cut.
+fn without_comments(path: &Path, content: &str) -> String {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("xml") => {
+            let mut out = String::with_capacity(content.len());
+            let mut rest = content;
+            while let Some(start) = rest.find("<!--") {
+                out.push_str(&rest[..start]);
+                rest = rest[start..].find("-->").map_or("", |end| &rest[start + end + 3..]);
+            }
+            out.push_str(rest);
+            out
+        }
+        ext => {
+            let prefix = if matches!(ext, Some("yml" | "yaml")) { "#" } else { "//" };
+            content.lines().filter(|l| !l.trim_start().starts_with(prefix)).collect::<Vec<_>>().join("\n")
+        }
+    }
 }
 
 /// Insert or MERGE an array-valued Info.plist key. If the key already exists — whether inline
@@ -789,6 +828,51 @@ mod test {
             assert!(!report.contains(&other.to_string()), "{other} is not installed, so not reported: {report:?}");
             let _ = fs::remove_dir_all(&root);
         }
+    }
+
+    /// The push plugins call `PushBridge.detach(id)`, which lives in the app's App.swift. An app
+    /// whose App.swift predates it must be told to upgrade before anything is written, or its Swift
+    /// fails to compile with no hint why.
+    #[test]
+    fn add_push_to_an_app_with_an_old_push_bridge_asks_for_upgrade_first() {
+        let root = skeleton();
+        fs::write(
+            root.join("iOS/Sources/App.swift"),
+            "final class PushBridge {\n    func attach(_ sink: @escaping @Sendable (String) -> Void) {}\n    func detach() { sink = nil }\n}\n// mobiler:app-launch\n",
+        )
+        .unwrap();
+        for name in ["push", "push-firebase-only"] {
+            let err = add_at(&root, name).expect_err("an old PushBridge must stop the install").to_string();
+            assert!(err.contains("mobiler upgrade"), "{name}: {err}");
+            assert!(!root.join("iOS/Sources/PushPlugin.swift").exists() && !root.join("iOS/Sources/FirebasePushPlugin.swift").exists());
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A key the template leaves commented out (opt-in, ADR-0035) is not "already present": the
+    /// plugin that needs it must still insert the live line.
+    #[test]
+    fn insert_before_ignores_commented_out_keys() {
+        let dir = std::env::temp_dir().join(format!("mobiler-commented-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let yml = dir.join("project.yml");
+        fs::write(&yml, "    info:\n        # NSCameraUsageDescription: \"Take photos.\"\n        # mobiler:info-plist\n").unwrap();
+        let line = "NSCameraUsageDescription: \"Scan codes.\"";
+        assert!(matches!(insert_before(&yml, "# mobiler:info-plist", line, "NSCameraUsageDescription").unwrap(), Insert::Inserted));
+        assert!(read(&dir, "project.yml").contains(&format!("        {line}\n        # mobiler:info-plist")));
+        // A live key is still detected, so re-adding stays a no-op.
+        assert!(matches!(insert_before(&yml, "# mobiler:info-plist", line, "NSCameraUsageDescription").unwrap(), Insert::AlreadyPresent));
+
+        let xml = dir.join("AndroidManifest.xml");
+        fs::write(
+            &xml,
+            "<manifest>\n    <!-- Uncomment to enable haptics:\n    <uses-permission android:name=\"android.permission.VIBRATE\" /> -->\n    <!-- mobiler:permissions -->\n</manifest>\n",
+        )
+        .unwrap();
+        let perm = "<uses-permission android:name=\"android.permission.VIBRATE\" />";
+        assert!(matches!(insert_before(&xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::Inserted));
+        assert!(matches!(insert_before(&xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::AlreadyPresent));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

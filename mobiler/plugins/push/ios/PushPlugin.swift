@@ -27,13 +27,14 @@ enum PushPlugin {
     // subscription's Task is cancelled (cx.unsubscribe), then detach.
     static func subscribe(op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
-        await MainActor.run { PushBridge.shared.attach(sink) }
+        let attached: Int? = await MainActor.run { Task.isCancelled ? nil : PushBridge.shared.attach(sink) }
+        guard let id = attached else { return }
         await withTaskCancellationHandler {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         } onCancel: {
-            Task { @MainActor in PushBridge.shared.detach() }
+            Task { @MainActor in PushBridge.shared.detach(id) }
         }
     }
 

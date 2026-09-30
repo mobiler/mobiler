@@ -111,6 +111,7 @@ final class PushBridge {
 
     private var tokenWaiters: [(Result<String, Error>) -> Void] = []
     private var sink: (@Sendable (String) -> Void)?
+    private var pushSinkId = 0
     private var buffer: [String] = []
     // Taps are user actions, so a handful is plenty; the bound only guards against a runaway backlog.
     private let maxBuffered = 32
@@ -130,12 +131,27 @@ final class PushBridge {
         }
     }
 
-    func attach(_ sink: @escaping @Sendable (String) -> Void) {
+    /// Returns a token for `detach(_:)`. A later attach replaces this sink.
+    @discardableResult
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> Int {
+        pushSinkId += 1
         self.sink = sink
         for payload in buffer { sink(payload) }
         buffer.removeAll()
+        return pushSinkId
     }
 
+    /// Clears the sink only if `id` is still the attached one, so a stale unsubscribe can't
+    /// silence the live subscription (ADR-0034). Returns whether it cleared.
+    @discardableResult
+    func detach(_ id: Int) -> Bool {
+        guard id == pushSinkId else { return false }
+        sink = nil
+        return true
+    }
+
+    /// Unconditional; kept so push plugin bodies from before `detach(_:)` still compile. Re-add the
+    /// plugin (`mobiler plugin add push`) to get the guarded path.
     func detach() { sink = nil }
 
     // --- called by the AppDelegate ---

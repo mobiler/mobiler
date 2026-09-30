@@ -25,13 +25,13 @@ enum BackgroundFetchPlugin {
     // Streaming entrypoint (cx.subscribe): attach a sink; buffered fetch events flush on attach.
     static func subscribe(op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
-        await MainActor.run { BackgroundFetchBridge.shared.attach(sink) }
+        guard let id = await MainActor.run(body: { BackgroundFetchBridge.shared.attach(sink) }) else { return }
         await withTaskCancellationHandler {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         } onCancel: {
-            Task { @MainActor in BackgroundFetchBridge.shared.detach() }
+            Task { @MainActor in BackgroundFetchBridge.shared.detach(id) }
         }
     }
 
@@ -55,6 +55,7 @@ final class BackgroundFetchBridge {
     static let shared = BackgroundFetchBridge()
 
     private var sink: (@Sendable (String) -> Void)?
+    private var sinkId = 0
     private let bufferKey = "mobiler.bgfetch.buffer"   // [String] of pending event JSON
     private let labelKey = "mobiler.bgfetch.label"     // app's opaque id echoed in events
     private let intervalKey = "mobiler.bgfetch.interval"
@@ -106,14 +107,21 @@ final class BackgroundFetchBridge {
 
     // --- stream sink (buffer-and-flush) ---
 
-    func attach(_ sink: @escaping @Sendable (String) -> Void) {
+    /// Returns a token for `detach`, or nil if the subscribing task was already cancelled (a
+    /// late attach must not replace a newer subscription's sink). A later attach replaces this one.
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> Int? {
+        guard !Task.isCancelled else { return nil }
+        sinkId += 1
         self.sink = sink
         let buf = UserDefaults.standard.stringArray(forKey: bufferKey) ?? []
         for payload in buf { sink(payload) }
         UserDefaults.standard.removeObject(forKey: bufferKey)
+        return sinkId
     }
 
-    func detach() { sink = nil }
+    /// Clears the sink only if `id` is still the attached one, so a stale unsubscribe can't
+    /// silence the live subscription (ADR-0034).
+    func detach(_ id: Int) { if id == sinkId { sink = nil } }
 
     private func emit(_ payload: String) {
         if let sink {
