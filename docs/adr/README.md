@@ -121,4 +121,4 @@ trust and which to check.
   time). Maintainer statements that live only outside the repo are quoted in the record, tagged
   `[recorded: maintainer, date, quoted here]`.
 - Pre-existing behavioural tests and CI jobs cited by the backfilled records (ADR-0001 …
-  ADR-0034) are not re-proven by mutation. Every conformance test written *for* an ADR is.
+  ADR-0036) are not re-proven by mutation. Every conformance test written *for* an ADR is.
