@@ -116,6 +116,21 @@ version; where Android itself only has a feature on newer versions, older phones
 | `Video` picture-in-picture | Not available | Auto-entering PiP (12+) |
 | `sqlite` | The phone's own SQLite: 3.18 on Android 8.0, 3.19 on 8.1, 3.22 on 9–10, 3.28 on 11 | Newer SQL (e.g. UPSERT needs 3.24, `RETURNING` 3.35): use `INSERT OR REPLACE` and friends to stay portable |
 
+## Debugging a text field on Android
+
+If a `text_field` / `search_field` shows text you didn't expect, turn on the field log, restart the
+app, and reproduce:
+
+```bash
+adb shell setprop log.tag.MobilerField DEBUG   # off again: … MobilerField INFO
+adb logcat -s MobilerField
+```
+
+Each keystroke logs the edit the field received, each render logs the value the app sent, and an
+`adopt` line marks the field taking the app's value. When scripting input with `adb shell input
+text`, wait until the keyboard is shown (`adb shell dumpsys input_method | grep mInputShown=true`)
+before typing: a key injected while the keyboard is still starting can be delivered twice.
+
 ## Plugins
 
 Advanced native capabilities install as **droppable plugins** — one command, no framework code or
