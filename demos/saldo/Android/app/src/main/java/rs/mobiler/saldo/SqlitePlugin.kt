@@ -22,7 +22,10 @@ class SqlitePlugin(private val application: Application) : MobilerPlugin {
             application.openOrCreateDatabase("mobiler.db", Context.MODE_PRIVATE, null).use { db ->
                 // Each call opens its own connection, so two writes emitted in one update cycle race
                 // on the file lock. Wait (up to 5s) for a concurrent writer instead of failing.
-                db.execSQL("PRAGMA busy_timeout=5000")
+                // PRAGMA busy_timeout returns a row, and execSQL refuses statements that return rows
+                // ("Queries can be performed using SQLiteDatabase query or rawQuery methods only"),
+                // which failed every call; it runs as a query.
+                db.rawQuery("PRAGMA busy_timeout=5000", null).use { it.moveToFirst() }
                 when (op) {
                     "exec" -> {
                         db.execSQL(sql, args)
