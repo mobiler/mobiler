@@ -1,19 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Backup and device-transfer rules for Android 12+. mobiler_secure.xml (the securestore plugin)
+   is excluded from both: its values are encrypted with a key in this device's Android Keystore,
+   which neither a backup nor a transfer carries. Everything else is included, including
+   cx.save's state (mobiler.xml); that is plaintext, so keep secrets in securestore.
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="mobiler_secure.xml"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="mobiler_secure.xml"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

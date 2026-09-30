@@ -1,5 +1,12 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+// The Rust targets the core is built for (see shared/build.gradle.kts), as Android ABIs. The APK
+// ships only these, which also drops stale slices (mips, armeabi) that dependencies bundle.
+val rustTargets = (findProperty("mobilerRustTargets") as String?)
+    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+    ?: listOf("arm64", "x86_64")
+val abiForRustTarget = mapOf("arm64" to "arm64-v8a", "arm" to "armeabi-v7a", "x86_64" to "x86_64", "x86" to "x86")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -19,6 +26,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        ndk {
+            abiFilters += rustTargets.mapNotNull { abiForRustTarget[it] }
+        }
     }
 
     buildTypes {

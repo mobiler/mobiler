@@ -209,6 +209,10 @@ impl<E> Cx<E> {
     }
 
     /// Persist `data` (handed back to [`MobilerApp::restore`] on next startup).
+    ///
+    /// The shell stores it as **plaintext** (UserDefaults, SharedPreferences, localStorage), and on
+    /// Android it is included in Auto Backup. Keep secrets (tokens, keys) in the `securestore`
+    /// plugin instead (ADR-0031, ADR-0037).
     pub fn save(&mut self, data: impl Into<String>) {
         self.notify("storage", "save", data);
     }
