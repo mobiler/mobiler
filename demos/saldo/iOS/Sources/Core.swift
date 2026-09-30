@@ -125,7 +125,10 @@ enum TickerStream {
 enum SystemStream {
     static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
-        let id = await MainActor.run { SystemBridge.shared.attach(sink) }
+        // A subscription cancelled before its hop to the main actor never attaches, so it can't
+        // replace a newer subscription's sink.
+        let attached: Int? = await MainActor.run { Task.isCancelled ? nil : SystemBridge.shared.attach(sink) }
+        guard let id = attached else { return }
         await withTaskCancellationHandler {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
         } onCancel: {
