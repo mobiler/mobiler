@@ -189,6 +189,21 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
     let manifest: Manifest = toml::from_str(&src.read_text("mobiler-plugin.toml")?)
         .context("parsing mobiler-plugin.toml")?;
 
+    // The push plugins call `PushBridge.detach(id)`, which lives in the app's App.swift, not in the
+    // plugin. Check before writing anything: an App.swift that predates it wouldn't compile.
+    if let Some(i) = &manifest.ios {
+        let needs_new_bridge =
+            i.sources.iter().any(|rel| src.read_text(rel).is_ok_and(|t| t.contains("PushBridge.shared.detach(id)")));
+        let app_swift = fs::read_to_string(root.join("iOS/Sources/App.swift")).unwrap_or_default();
+        if needs_new_bridge && app_swift.contains("final class PushBridge") && !app_swift.contains("func detach(_ id: Int)") {
+            bail!(
+                "`{}` needs a newer iOS/Sources/App.swift (PushBridge.detach(_:)). Run `mobiler upgrade --apply` first, then re-run `mobiler plugin add {}`.",
+                manifest.name,
+                manifest.name
+            );
+        }
+    }
+
     println!("Installing plugin `{}`{}", manifest.name, fmt_summary(&manifest.summary));
     let mut notes: Vec<String> = Vec::new();
 
@@ -813,6 +828,25 @@ mod test {
             assert!(!report.contains(&other.to_string()), "{other} is not installed, so not reported: {report:?}");
             let _ = fs::remove_dir_all(&root);
         }
+    }
+
+    /// The push plugins call `PushBridge.detach(id)`, which lives in the app's App.swift. An app
+    /// whose App.swift predates it must be told to upgrade before anything is written, or its Swift
+    /// fails to compile with no hint why.
+    #[test]
+    fn add_push_to_an_app_with_an_old_push_bridge_asks_for_upgrade_first() {
+        let root = skeleton();
+        fs::write(
+            root.join("iOS/Sources/App.swift"),
+            "final class PushBridge {\n    func attach(_ sink: @escaping @Sendable (String) -> Void) {}\n    func detach() { sink = nil }\n}\n// mobiler:app-launch\n",
+        )
+        .unwrap();
+        for name in ["push", "push-firebase-only"] {
+            let err = add_at(&root, name).expect_err("an old PushBridge must stop the install").to_string();
+            assert!(err.contains("mobiler upgrade"), "{name}: {err}");
+            assert!(!root.join("iOS/Sources/PushPlugin.swift").exists() && !root.join("iOS/Sources/FirebasePushPlugin.swift").exists());
+        }
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// A key the template leaves commented out (opt-in, ADR-0035) is not "already present": the
