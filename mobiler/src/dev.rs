@@ -55,10 +55,19 @@ pub fn pipeline(
         )
     })?;
 
+    // Pick the device first, so the APK carries only its Rust target (one cargo cross-build per
+    // edit-run instead of two). No device, or --no-install: gradle's default (arm64 + x86_64).
+    let (adb, serial, device_target) = pick_device(no_install, device)?;
+    let target_dir = cargo_target_dir(&project.root)?;
+
     stage("Building Android APK (gradle :app:assembleDebug)", || {
         let mut cmd = Command::new(project.root.join("Android/gradlew"));
         cmd.args(["-p", "Android", "--no-daemon", ":app:assembleDebug"])
+            .arg(format!("-PmobilerCargoTargetDir={}", target_dir.display()))
             .current_dir(&project.root);
+        if let Some(t) = device_target {
+            cmd.arg(format!("-PmobilerRustTargets={t}"));
+        }
         if let Some(jh) = java_home {
             cmd.env("JAVA_HOME", jh);
         }
@@ -83,15 +92,26 @@ pub fn pipeline(
     if !apk.exists() {
         bail!("expected APK at {} but it was not produced", apk.display());
     }
+    let stale = stale_libraries(&project.root.join("Android/shared/build/rustJniLibs/android"), &target_dir, "debug");
+    if !stale.is_empty() {
+        bail!(
+            "the APK's Rust core doesn't match what cargo just built ({}): gradle packaged a stale \
+             libshared.so. Check that nothing overrides cargo's target dir for the gradle run \
+             (cargo reports {}).",
+            stale.join(", "),
+            target_dir.display()
+        );
+    }
     println!("  APK: {}", apk.display());
 
     if no_install {
         return Ok(());
     }
 
-    let adb = locate_adb()?;
-    let env_serial = env::var("ANDROID_SERIAL").ok();
-    let Some(serial) = select_device(device, env_serial.as_deref(), &adb_devices(&adb)?)? else {
+    let Some(adb) = adb else {
+        bail!("adb not found. Install the Android SDK platform-tools, or run with --no-install.");
+    };
+    let Some(serial) = serial else {
         println!();
         println!(
             "No Android device connected. Skipping install + launch.\n  \
@@ -276,6 +296,89 @@ fn adb_devices(adb: &Path) -> Result<Vec<String>> {
 
 // -------------------- helpers --------------------
 
+/// adb, the chosen device's serial, and that device's Rust target. All None with --no-install.
+fn pick_device(no_install: bool, device: Option<&str>) -> Result<(Option<PathBuf>, Option<String>, Option<&'static str>)> {
+    let adb = if no_install { None } else { locate_adb().ok() };
+    let serial = match &adb {
+        Some(adb) => {
+            let env_serial = env::var("ANDROID_SERIAL").ok();
+            select_device(device, env_serial.as_deref(), &adb_devices(adb)?)?
+        }
+        None => None,
+    };
+    let target = match (&adb, &serial) {
+        (Some(adb), Some(serial)) => device_abi(adb, serial).and_then(|abi| rust_target_for_abi(&abi)),
+        _ => None,
+    };
+    Ok((adb, serial, target))
+}
+
+/// cargo's own target directory for this workspace: honours `CARGO_TARGET_DIR` and a
+/// `build.target-dir` in cargo's config, which the gradle plugin can't see by itself.
+fn cargo_target_dir(root: &Path) -> Result<PathBuf> {
+    let out = Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .current_dir(root)
+        .output()
+        .context("running cargo metadata")?;
+    if !out.status.success() {
+        bail!("cargo metadata failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout).context("parsing cargo metadata")?;
+    meta["target_directory"]
+        .as_str()
+        .map(PathBuf::from)
+        .context("cargo metadata has no target_directory")
+}
+
+/// The device's primary ABI (`arm64-v8a`, `x86_64`, …), or None if adb can't tell.
+fn device_abi(adb: &Path, serial: &str) -> Option<String> {
+    let out = Command::new(adb).args(["-s", serial, "shell", "getprop", "ro.product.cpu.abi"]).output().ok()?;
+    let abi = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!abi.is_empty()).then_some(abi)
+}
+
+/// The rust-android-gradle target name for an Android ABI.
+fn rust_target_for_abi(abi: &str) -> Option<&'static str> {
+    match abi {
+        "arm64-v8a" => Some("arm64"),
+        "armeabi-v7a" => Some("arm"),
+        "x86_64" => Some("x86_64"),
+        "x86" => Some("x86"),
+        _ => None,
+    }
+}
+
+/// The Rust triple cargo builds for an Android ABI directory.
+fn triple_for_abi(abi: &str) -> Option<&'static str> {
+    match abi {
+        "arm64-v8a" => Some("aarch64-linux-android"),
+        "armeabi-v7a" => Some("armv7-linux-androideabi"),
+        "x86_64" => Some("x86_64-linux-android"),
+        "x86" => Some("i686-linux-android"),
+        _ => None,
+    }
+}
+
+/// ABIs whose packaged `libshared.so` (under `packaged`, one dir per ABI) differs from what cargo
+/// built into `target_dir/<triple>/<profile>/`. A mismatch means gradle copied an old library.
+fn stale_libraries(packaged: &Path, target_dir: &Path, profile: &str) -> Vec<String> {
+    let Ok(dirs) = fs::read_dir(packaged) else { return Vec::new() };
+    let mut stale = Vec::new();
+    for dir in dirs.flatten() {
+        let abi = dir.file_name().to_string_lossy().to_string();
+        let Some(triple) = triple_for_abi(&abi) else { continue };
+        let built = target_dir.join(triple).join(profile).join("libshared.so");
+        match (fs::read(dir.path().join("libshared.so")), fs::read(&built)) {
+            (Ok(p), Ok(b)) if p == b => {}
+            (Err(_), _) => {}
+            _ => stale.push(abi),
+        }
+    }
+    stale.sort();
+    stale
+}
+
 fn stage<F>(label: &str, run: F) -> Result<()>
 where
     F: FnOnce() -> Result<Output>,
@@ -323,6 +426,36 @@ fn tail(s: &str, n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stale_libraries_names_every_abi_whose_packaged_core_differs_from_cargos() {
+        let dir = std::env::temp_dir().join(format!("mobiler-stale-{}", std::process::id()));
+        let packaged = dir.join("rustJniLibs/android");
+        let target = dir.join("target");
+        for (abi, triple, packaged_bytes, built_bytes) in [
+            ("arm64-v8a", "aarch64-linux-android", b"new".as_slice(), Some(b"new".as_slice())),
+            ("x86_64", "x86_64-linux-android", b"old".as_slice(), Some(b"new".as_slice())),
+            ("x86", "i686-linux-android", b"old".as_slice(), None),
+        ] {
+            std::fs::create_dir_all(packaged.join(abi)).unwrap();
+            std::fs::write(packaged.join(abi).join("libshared.so"), packaged_bytes).unwrap();
+            if let Some(b) = built_bytes {
+                let out = target.join(triple).join("debug");
+                std::fs::create_dir_all(&out).unwrap();
+                std::fs::write(out.join("libshared.so"), b).unwrap();
+            }
+        }
+        // x86_64 was built but gradle packaged an older copy; x86 was never built this run.
+        assert_eq!(super::stale_libraries(&packaged, &target, "debug"), ["x86", "x86_64"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn device_abis_map_to_rust_targets() {
+        assert_eq!(super::rust_target_for_abi("arm64-v8a"), Some("arm64"));
+        assert_eq!(super::rust_target_for_abi("x86_64"), Some("x86_64"));
+        assert_eq!(super::rust_target_for_abi("riscv64"), None);
+    }
+
     use super::select_device;
 
     fn devices(list: &[&str]) -> Vec<String> {

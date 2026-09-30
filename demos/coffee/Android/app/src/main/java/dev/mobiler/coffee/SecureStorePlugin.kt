@@ -15,17 +15,24 @@ import org.json.JSONObject
 // Pair with the `biometric` plugin (gate a get behind an authenticate in your Rust core).
 class SecureStorePlugin(private val application: android.app.Application) : MobilerPlugin {
     private val prefs by lazy {
-        val masterKey = MasterKey.Builder(application)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            application,
-            "mobiler_secure",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+        try {
+            open()
+        } catch (e: Exception) {
+            // The file can't be decrypted: its Keystore key is gone (a copy restored from a backup
+            // or moved to another device, or a reset Keystore). Those values are unreadable
+            // anywhere, so start an empty store instead of failing every call.
+            application.deleteSharedPreferences("mobiler_secure")
+            open()
+        }
     }
+
+    private fun open() = EncryptedSharedPreferences.create(
+        application,
+        "mobiler_secure",
+        MasterKey.Builder(application).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    )
 
     override suspend fun handle(op: String, input: String): PluginResponse {
         val obj = runCatching { JSONObject(input) }.getOrNull()

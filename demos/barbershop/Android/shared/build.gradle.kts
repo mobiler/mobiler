@@ -53,9 +53,17 @@ extensions.configure<CargoExtension>("cargo") {
     // Build the workspace root, with `--package shared`.
     module = "../.."
     libname = "shared"
-    profile = "debug"
-    // POC: emulator (x86_64) only. Add "arm64" when shipping to real devices.
-    targets = listOf("x86_64")
+    // An optimized core for release builds (assembleRelease / bundleRelease); a debug one, which
+    // builds faster, otherwise.
+    profile = if (gradle.startParameter.taskNames.any { it.contains("Release") }) "release" else "debug"
+    // Real phones (arm64) and the emulator (x86_64). `mobiler dev` passes only the connected
+    // device's target (-PmobilerRustTargets=…) so the edit-run loop builds one.
+    targets = (findProperty("mobilerRustTargets") as String?)
+        ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        ?: listOf("arm64", "x86_64")
+    // Where cargo writes. The mobiler CLI passes cargo's own answer (-PmobilerCargoTargetDir), so a
+    // `build.target-dir` in cargo's config can't leave a stale library in the APK.
+    (findProperty("mobilerCargoTargetDir") as String?)?.let { targetDirectory = it }
     extraCargoBuildArguments = listOf("--package", "shared", "--features", "uniffi")
     cargoCommand = System.getProperty("user.home") + "/.cargo/bin/cargo"
     rustcCommand = System.getProperty("user.home") + "/.cargo/bin/rustc"
