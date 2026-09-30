@@ -7,7 +7,7 @@
 //! **3-way merge** (`base → your file → new template`, via `diffy`): framework changes apply, your
 //! edits and plugin injections are preserved, and only genuinely overlapping edits become a
 //! conflict (written as `<file>.mobiler-new` with `<<<<<<<`/`>>>>>>>` markers — never auto-applied).
-//! A clean merge is written in place with `--apply` (saving `<file>.mobiler-bak`), or offered as
+//! A clean merge is written in place with `--apply` (saving the old file under `.mobiler/backup/`), or offered as
 //! `<file>.mobiler-new` by default. Apps scaffolded before baselines existed have no ancestor, so
 //! those files fall back to a conservative 2-way reconcile (anchor-aware splice / sidecar) and get
 //! a baseline written so the *next* upgrade is a real 3-way merge.
@@ -270,7 +270,7 @@ fn three_way(
             Ok(true)
         }
         Ok(merged) if apply => {
-            write_sidecar(dst, "mobiler-bak", current.as_bytes())?;
+            write_backup(dst, current.as_bytes())?;
             fs::write(dst, &merged).with_context(|| format!("writing {}", dst.display()))?;
             report.updated.push(rel_disp.to_string());
             Ok(true)
@@ -332,7 +332,7 @@ fn two_way(
     shell_write(dst, current, &desired, apply, rel_disp, report)
 }
 
-/// Write a shell file: overwrite in place (saving `.mobiler-bak`) with `--apply`, else offer it as
+/// Write a shell file: overwrite in place (saving a backup under `.mobiler/backup/`) with `--apply`, else offer it as
 /// `.mobiler-new`. Returns whether the on-disk file now holds `desired`.
 fn shell_write(
     dst: &Path,
@@ -343,7 +343,7 @@ fn shell_write(
     report: &mut Report,
 ) -> Result<bool> {
     if apply {
-        write_sidecar(dst, "mobiler-bak", current)?;
+        write_backup(dst, current)?;
         fs::write(dst, desired).with_context(|| format!("writing {}", dst.display()))?;
         report.updated.push(rel_disp.to_string());
         Ok(true)
@@ -453,6 +453,22 @@ fn merge_anchors(new_tmpl: &str, current: &str) -> String {
 }
 
 /// Write `<dst>.<suffix>` next to `dst` (e.g. `Render.swift.mobiler-new`).
+/// Save the file's previous content before `--apply` overwrites it: under the app's
+/// `.mobiler/backup/`, at the same relative path, so no stray file lands in the source tree (a
+/// `res/xml/x.xml.mobiler-bak` fails Android's resource merge). Outside an app (no `.mobiler/`
+/// above it), it falls back to `<file>.mobiler-bak` next to the file.
+fn write_backup(dst: &Path, bytes: &[u8]) -> Result<()> {
+    let app_root = dst.ancestors().skip(1).find(|a| a.join(".mobiler").is_dir());
+    let backup = match app_root.and_then(|root| dst.strip_prefix(root).ok().map(|rel| (root, rel))) {
+        Some((root, rel)) => root.join(".mobiler/backup").join(rel),
+        None => return write_sidecar(dst, "mobiler-bak", bytes),
+    };
+    if let Some(parent) = backup.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::write(&backup, bytes).with_context(|| format!("writing {}", backup.display()))
+}
+
 fn write_sidecar(dst: &Path, suffix: &str, bytes: &[u8]) -> Result<()> {
     let side = PathBuf::from(format!("{}.{suffix}", dst.display()));
     fs::write(&side, bytes).with_context(|| format!("writing {}", side.display()))?;
@@ -496,7 +512,7 @@ impl Report {
             println!("  + added   {a}");
         }
         for u in &self.updated {
-            println!("  ~ updated {u}  (.mobiler-bak saved)");
+            println!("  ~ updated {u}  (previous version in .mobiler/backup/)");
         }
         for c in &self.changed {
             println!("  ~ changed {c}  -> {c}.mobiler-new");
@@ -555,14 +571,14 @@ impl Report {
             } else {
                 println!(
                     "Review the {} .mobiler-new shell file(s) and merge, or re-run with `--apply` \
-                     to overwrite in place (a .mobiler-bak is saved).",
+                     to overwrite in place (previous versions go to .mobiler/backup/).",
                     self.changed.len()
                 );
             }
         }
         if !self.updated.is_empty() {
             println!(
-                "Overwrote {} shell file(s); your previous versions are saved as *.mobiler-bak.",
+                "Overwrote {} shell file(s); your previous versions are saved under .mobiler/backup/.",
                 self.updated.len()
             );
         }
@@ -784,10 +800,12 @@ mod test {
         let new = read(&root, "rust-toolchain.toml.mobiler-new");
         assert!(new.contains("toolchain"), "the new template was written as .mobiler-new");
 
-        // --apply: overwrite + back up the old content.
+        // --apply: overwrite + back up the old content, outside the source tree: a stray file next
+        // to a resource (e.g. res/xml/x.xml.mobiler-bak) fails Android's resource merge.
         upgrade_at(&root, true).unwrap();
         assert_eq!(read(&root, "rust-toolchain.toml"), new, "apply installed the new template");
-        assert_eq!(read(&root, "rust-toolchain.toml.mobiler-bak"), "OLD\n", "old content backed up");
+        assert_eq!(read(&root, ".mobiler/backup/rust-toolchain.toml"), "OLD\n", "old content backed up");
+        assert!(!root.join("rust-toolchain.toml.mobiler-bak").exists(), "no backup next to the file");
         let _ = fs::remove_dir_all(&root);
     }
 

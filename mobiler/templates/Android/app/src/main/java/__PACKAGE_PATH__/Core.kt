@@ -639,7 +639,15 @@ class Core(application: Application) : AndroidViewModel(application) {
             Log.w("Mobiler", "plugin '$plugin' not available in this build")
             return PluginResponse(false, "plugin '$plugin' not available in this build")
         }
-        return p.handle(op, input)
+        // A plugin that throws (e.g. a permission this Android version lacks) answers ok:false
+        // instead of crashing the app (ADR-0013, ADR-0039). Cancellation still propagates.
+        return try {
+            p.handle(op, input)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            PluginResponse(false, "plugin '$plugin' failed: ${e.message ?: e.javaClass.simpleName}")
+        }
     }
 
     /** Streaming dispatch (cx.subscribe): the named plugin's event Flow, or an empty

@@ -4,7 +4,8 @@
 mobiler plugin add push-firebase-only
 ```
 
-> ⚠️ **Experimental — not yet device-tested**, and **mutually exclusive with the `push` plugin** (install
+> ⚠️ **Experimental on iOS** (Android shares `push`'s FCM code, validated end to end on the Android emulator
+> in September 2026), and **mutually exclusive with the `push` plugin** (install
 > one or the other; both register `case "push"`, which collides at build). Mobiler itself is experimental.
 
 The **Firebase-only** alternative to [`push`](../push/README.md). Where `push` uses **native APNs on

@@ -353,7 +353,7 @@ dependency. `mobiler upgrade` pulls them in, from the app root:
 cargo install mobiler   # get the newer CLI first
 cd myapp
 mobiler upgrade         # 3-way merge; review results as *.mobiler-new
-mobiler upgrade --apply # …or write the merged shells in place (a *.mobiler-bak is saved)
+mobiler upgrade --apply # …or write the merged shells in place (old versions go to .mobiler/backup/)
 ```
 
 **True 3-way merge.** `mobiler new` snapshots the pristine shells into `.mobiler/base/` (the merge
@@ -362,7 +362,7 @@ and the new template — exactly like `git merge`. Framework improvements apply 
 plugin injections are preserved; only genuinely overlapping changes become a conflict, written as
 `<file>.mobiler-new` with `<<<<<<<`/`>>>>>>>` markers (never auto-applied). It **never** touches your
 Rust app code (`shared/src/`). It also bumps your `mobiler-core` dependency. By default a clean merge
-is offered as `<file>.mobiler-new`; `--apply` writes it in place after saving a `.mobiler-bak`. Commit
+is offered as `<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit
 `.mobiler/` so the baseline (and version stamp) travel with the repo. Apps scaffolded before baselines
 existed fall back to a conservative reconcile and get a baseline written for next time.
 

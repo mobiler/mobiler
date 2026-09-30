@@ -16,6 +16,9 @@ permissions = [
     "android.permission.BLUETOOTH_SCAN",
     "android.permission.BLUETOOTH_CONNECT",
     "android.permission.ACCESS_FINE_LOCATION",
+    # Android 8–11 (API 26–30) use the legacy pair instead of SCAN/CONNECT (ADR-0039).
+    "android.permission.BLUETOOTH;maxSdkVersion=30",
+    "android.permission.BLUETOOTH_ADMIN;maxSdkVersion=30",
 ]
 
 [ios]

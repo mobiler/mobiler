@@ -6,6 +6,7 @@
 # collaborators upgrade cleanly too).
 *.mobiler-new
 *.mobiler-bak
+.mobiler/backup/
 
 # Android
 /Android/.gradle/

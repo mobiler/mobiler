@@ -86,7 +86,7 @@ the updates in for you, from the app root:
 cargo install mobiler   # get the new CLI first
 cd myapp
 mobiler upgrade         # 3-way merge; review results as *.mobiler-new
-mobiler upgrade --apply # …or write the merged shells in place (a *.mobiler-bak is saved)
+mobiler upgrade --apply # …or write the merged shells in place (old versions go to .mobiler/backup/)
 ```
 
 It does a **true 3-way merge**. `mobiler new` snapshots the pristine shells into `.mobiler/base/`
@@ -95,9 +95,26 @@ template per file — like `git merge`. Framework improvements apply **and** you
 injections survive; only overlapping changes become a conflict (written as `<file>.mobiler-new`
 with `<<<<<<<`/`>>>>>>>` markers, never auto-applied). It bumps your `mobiler-core` dependency and
 never touches your Rust app code (`shared/src/`). By default a clean merge is offered as
-`<file>.mobiler-new`; `--apply` writes it in place after saving a `.mobiler-bak`. Commit `.mobiler/`
+`<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit `.mobiler/`
 (the baseline + version stamp). Apps scaffolded before baselines existed fall back to a conservative
 reconcile and get a baseline for next time.
+
+## Android versions
+
+Apps run on **Android 8.0 (API 26) and newer** (ADR-0039). Everything works on every supported
+version; where Android itself only has a feature on newer versions, older phones get this:
+
+| Feature | Android 8.0+ | Only on newer Android |
+|---|---|---|
+| Back button / gesture | Works everywhere (Compose `BackHandler`) | The predictive-back animation isn't enabled by the shell on any version |
+| App language | Set by the app itself (`ShellLabels`, your own strings) on every version | Android's per-app language setting (13+) isn't used |
+| Photo picker (`cx.pick_photo`) | The system file picker | The system photo picker (Android 11+ with current updates) |
+| Notification permission (push, notifications, geofence) | No prompt: notifications need no runtime grant | The runtime prompt (13+) |
+| `biometric` | Any enrolled biometric, or the device PIN/pattern, on 8–10 | Strong biometrics or the device credential (11+) |
+| `bluetooth` | The legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` permissions (declared up to 11) | `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` (12+) |
+| `geolocation` | The last known location, which can be empty without a recent fix | A fresh current location (11+) |
+| `Video` picture-in-picture | Not available | Auto-entering PiP (12+) |
+| `sqlite` | The phone's own SQLite: 3.18 on Android 8, 3.22 on 9–10, 3.28 on 11 | Newer SQL (e.g. UPSERT needs 3.24, `RETURNING` 3.35): use `INSERT OR REPLACE` and friends to stay portable |
 
 ## Plugins
 

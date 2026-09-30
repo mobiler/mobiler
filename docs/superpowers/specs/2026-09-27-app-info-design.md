@@ -110,3 +110,10 @@ Each shell sends `AppInfo` once, before the existing `Restore`/`Start`:
 - An async `device.app_info` op.
 - A web version manifest.
 - System appearance, which is a separate request: `docs/system-appearance.md`.
+
+## Amendment (2026-09-30)
+
+The Android minimum is now API 26 (ADR-0039), so the note above that `longVersionCode` "needs no
+compatibility shim" no longer holds: Core.kt reads `longVersionCode` on API 28+ and `versionCode`
+below, and uses `PackageInfoFlags` only on API 33+.
+

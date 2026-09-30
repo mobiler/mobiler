@@ -22,9 +22,16 @@ class BiometricPlugin(private val application: android.app.Application) : Mobile
         val activity = MobilerActivity.current?.get() as? FragmentActivity
             ?: return PluginResponse(false, "no FragmentActivity")
 
+        // BIOMETRIC_STRONG | DEVICE_CREDENTIAL is only supported from Android 11 (API 30); on
+        // Android 8–10 ask for any biometric or the device credential instead (ADR-0039).
+        val allowedAuthenticators = if (android.os.Build.VERSION.SDK_INT >= 30) {
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        } else {
+            BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        }
         // Surface a clear reason when auth can't even be attempted.
         val canAuth = BiometricManager.from(application).canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            allowedAuthenticators
         )
         if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
             return PluginResponse(false, "biometric unavailable ($canAuth)")
@@ -46,7 +53,7 @@ class BiometricPlugin(private val application: android.app.Application) : Mobile
             val info = BiometricPrompt.PromptInfo.Builder()
                 .setTitle(title)
                 .setAllowedAuthenticators(
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                    allowedAuthenticators
                 )
                 .build()
             // BiometricPrompt must be driven on the main thread.
