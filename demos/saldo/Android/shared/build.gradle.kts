@@ -53,9 +53,18 @@ extensions.configure<CargoExtension>("cargo") {
     // Build the workspace root, with `--package shared`.
     module = "../.."
     libname = "shared"
-    profile = "debug"
-    // POC: emulator (x86_64) only. Add "arm64" when shipping to real devices.
-    targets = listOf("x86_64")
+    // One Rust profile per gradle run: `release` when a release task is requested
+    // (assembleRelease, bundleRelease, installRelease), `debug` otherwise, which builds faster.
+    // A combined run (`./gradlew build`, `assemble`) builds every variant with a debug core, so
+    // build a release on its own, or force it with -PmobilerRustProfile=release.
+    profile = (findProperty("mobilerRustProfile") as String?)
+        ?: if (gradle.startParameter.taskNames.any { it.contains("Release") }) "release" else "debug"
+    // Real phones (arm64) and the emulator (x86_64); 32-bit armeabi-v7a devices aren't built for.
+    // `mobiler dev` passes only the connected device's target (-PmobilerRustTargets=…) so the
+    // edit-run loop builds one.
+    targets = (findProperty("mobilerRustTargets") as String?)
+        ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        ?: listOf("arm64", "x86_64")
     extraCargoBuildArguments = listOf("--package", "shared", "--features", "uniffi")
     cargoCommand = System.getProperty("user.home") + "/.cargo/bin/cargo"
     rustcCommand = System.getProperty("user.home") + "/.cargo/bin/rustc"

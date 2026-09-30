@@ -225,16 +225,35 @@ class HapticsPlugin(private val context: Context) : MobilerPlugin {
         } else {
             @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
-        val ms = when (op) { "light" -> 10L; "heavy" -> 40L; else -> 20L }
         // Without VIBRATE (it ships commented out in AndroidManifest.xml) a tap is a no-op, not a crash.
         if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             return notGranted()
         }
         return try {
-            vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrator.vibrate(effect(vibrator, op))
             PluginResponse(true, "")
         } catch (e: SecurityException) {
             notGranted()
+        }
+    }
+
+    // The phone's own tuned click effect when it has one (Android 10+ knows it; 11+ can say so). A
+    // phone without tuned effects (e.g. a Samsung A32) plays a click as a ~20 ms pulse, too short
+    // to feel, so it gets a longer one-shot pulse instead. Android scales both by the user's
+    // touch-vibration setting, which is deliberately respected.
+    private fun effect(vibrator: Vibrator, op: String): VibrationEffect {
+        val id = when (op) {
+            "light" -> VibrationEffect.EFFECT_TICK
+            "heavy" -> VibrationEffect.EFFECT_HEAVY_CLICK
+            else -> VibrationEffect.EFFECT_CLICK
+        }
+        val tuned = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            vibrator.areAllEffectsSupported(id) == Vibrator.VIBRATION_EFFECT_SUPPORT_YES
+        return if (tuned) {
+            VibrationEffect.createPredefined(id)
+        } else {
+            val ms = when (op) { "light" -> 30L; "heavy" -> 80L; else -> 50L }
+            VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)
         }
     }
 
