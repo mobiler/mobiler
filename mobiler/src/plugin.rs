@@ -366,7 +366,8 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
                 (dst.clone(), shipped, fs::read_to_string(dst).ok())
             })
             .collect();
-        candidates.push((name, files));
+        let missing_permission = missing_permissions(root, &manifest);
+        candidates.push((name, files, missing_permission));
     }
 
     // Some alternatives register identical lines too (`geolocation` / `geolocation-fused`), so both
@@ -385,8 +386,8 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
             .sum()
     };
     let mut drifted = Vec::new();
-    for (name, files) in &candidates {
-        let beaten = candidates.iter().any(|(other, other_files)| {
+    for (name, files, missing_permission) in &candidates {
+        let beaten = candidates.iter().any(|(other, other_files, _)| {
             let shared: Vec<&PathBuf> =
                 files.iter().map(|(d, _, _)| d).filter(|d| other_files.iter().any(|(o, _, _)| o == *d)).collect();
             other != name && !shared.is_empty() && closeness(other_files, &shared) > closeness(files, &shared)
@@ -401,11 +402,22 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
             (Some(_), None) => true,
             _ => false,
         });
-        if stale {
+        // A permission the plugin now declares but the app's manifest lacks (bluetooth's legacy pair
+        // for Android 8–11) is drift too: re-adding the plugin inserts it.
+        if stale || *missing_permission {
             drifted.push(name.clone());
         }
     }
     drifted
+}
+
+/// Whether the app's manifest lacks (as a live line) a permission this plugin declares.
+fn missing_permissions(root: &Path, manifest: &Manifest) -> bool {
+    let Some(a) = &manifest.android else { return false };
+    let path = root.join("Android/app/src/main/AndroidManifest.xml");
+    let Ok(content) = fs::read_to_string(&path) else { return false };
+    let live = without_comments(&path, &content);
+    a.permissions.iter().any(|p| !live.contains(&format!("android:name=\"{}\"", permission_line(p).0)))
 }
 
 /// How many of the app's lines (`on_disk`) also appear in one shipped variant's body.
@@ -908,6 +920,26 @@ mod test {
             );
         }
         assert!(manifest.contains("<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\" />"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A plugin whose manifest gained a permission (bluetooth's legacy pair for Android 8–11) is
+    /// drifted even when its sources didn't change: re-adding it is how the app gets the line.
+    #[test]
+    fn drifted_reports_a_plugin_missing_a_declared_permission() {
+        let root = skeleton();
+        let subs = Subs::from_app_root(&root).unwrap();
+        add_at(&root, "bluetooth").unwrap();
+        assert!(!drifted(&root, &subs).contains(&"bluetooth".to_string()), "fresh install is clean");
+        let manifest = root.join("Android/app/src/main/AndroidManifest.xml");
+        let without = fs::read_to_string(&manifest)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.contains("android.permission.BLUETOOTH_ADMIN"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&manifest, without).unwrap();
+        assert!(drifted(&root, &subs).contains(&"bluetooth".to_string()), "a missing permission is drift");
         let _ = fs::remove_dir_all(&root);
     }
 

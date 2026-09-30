@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -646,14 +647,34 @@ class Core(application: Application) : AndroidViewModel(application) {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            PluginResponse(false, "plugin '$plugin' failed: ${e.message ?: e.javaClass.simpleName}")
+            pluginFailed(plugin, e)
+        } catch (e: LinkageError) {
+            // A newer API this Android version lacks (NoSuchMethodError, NoClassDefFoundError, …).
+            pluginFailed(plugin, e)
         }
     }
+
+    private fun pluginFailed(plugin: String, e: Throwable) =
+        PluginResponse(false, "plugin '$plugin' failed: ${e.message ?: e.javaClass.simpleName}")
 
     /** Streaming dispatch (cx.subscribe): the named plugin's event Flow, or an empty
      *  flow if it isn't registered / isn't streaming-capable. */
     private fun dispatchStream(plugin: String, op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> {
         val p = plugins[plugin] ?: return kotlinx.coroutines.flow.emptyFlow()
-        return p.subscribe(op, input)
+        // As for requests: a stream that throws (or can't even start) ends with one ok:false event
+        // instead of crashing the app. Cancellation still propagates.
+        val flow = try {
+            p.subscribe(op, input)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return kotlinx.coroutines.flow.flowOf(pluginFailed(plugin, e))
+        } catch (e: LinkageError) {
+            return kotlinx.coroutines.flow.flowOf(pluginFailed(plugin, e))
+        }
+        return flow.catch { e ->
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            emit(pluginFailed(plugin, e))
+        }
     }
 }

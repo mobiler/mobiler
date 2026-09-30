@@ -106,6 +106,8 @@ struct Report {
     /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
     /// automatically (they may carry user edits) — reported so the mismatch is not silent.
     plugins: Vec<String>,
+    /// The app root, so `--apply` backups go to `<root>/.mobiler/backup/` (None: next to the file).
+    app_root: Option<PathBuf>,
     stamp: Option<(Option<String>, String)>,
 }
 
@@ -121,7 +123,7 @@ fn upgrade_at(root: &Path, apply: bool) -> Result<Report> {
         bail!("run `mobiler upgrade` from a Mobiler app root (the dir with Android/, iOS/, shared/)");
     }
     let subs = Subs::from_app_root(root)?;
-    let mut report = Report::default();
+    let mut report = Report { app_root: Some(root.to_path_buf()), ..Report::default() };
     bump_core_dep(root, &mut report)?;
     sync_dir(&TEMPLATES, root, &subs, apply, &mut report)?;
     report.plugins = crate::plugin::drifted(root, &subs);
@@ -270,7 +272,7 @@ fn three_way(
             Ok(true)
         }
         Ok(merged) if apply => {
-            write_backup(dst, current.as_bytes())?;
+            write_backup(report.app_root.as_deref(), dst, current.as_bytes())?;
             fs::write(dst, &merged).with_context(|| format!("writing {}", dst.display()))?;
             report.updated.push(rel_disp.to_string());
             Ok(true)
@@ -343,7 +345,7 @@ fn shell_write(
     report: &mut Report,
 ) -> Result<bool> {
     if apply {
-        write_backup(dst, current)?;
+        write_backup(report.app_root.as_deref(), dst, current)?;
         fs::write(dst, desired).with_context(|| format!("writing {}", dst.display()))?;
         report.updated.push(rel_disp.to_string());
         Ok(true)
@@ -452,23 +454,21 @@ fn merge_anchors(new_tmpl: &str, current: &str) -> String {
     merged
 }
 
-/// Write `<dst>.<suffix>` next to `dst` (e.g. `Render.swift.mobiler-new`).
 /// Save the file's previous content before `--apply` overwrites it: under the app's
 /// `.mobiler/backup/`, at the same relative path, so no stray file lands in the source tree (a
-/// `res/xml/x.xml.mobiler-bak` fails Android's resource merge). Outside an app (no `.mobiler/`
-/// above it), it falls back to `<file>.mobiler-bak` next to the file.
-fn write_backup(dst: &Path, bytes: &[u8]) -> Result<()> {
-    let app_root = dst.ancestors().skip(1).find(|a| a.join(".mobiler").is_dir());
-    let backup = match app_root.and_then(|root| dst.strip_prefix(root).ok().map(|rel| (root, rel))) {
-        Some((root, rel)) => root.join(".mobiler/backup").join(rel),
-        None => return write_sidecar(dst, "mobiler-bak", bytes),
+/// `res/xml/x.xml.mobiler-bak` fails Android's resource merge). A later `--apply` overwrites it.
+fn write_backup(app_root: Option<&Path>, dst: &Path, bytes: &[u8]) -> Result<()> {
+    let Some((root, rel)) = app_root.and_then(|root| dst.strip_prefix(root).ok().map(|rel| (root, rel))) else {
+        return write_sidecar(dst, "mobiler-bak", bytes);
     };
+    let backup = root.join(".mobiler/backup").join(rel);
     if let Some(parent) = backup.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     fs::write(&backup, bytes).with_context(|| format!("writing {}", backup.display()))
 }
 
+/// Write `<dst>.<suffix>` next to `dst` (e.g. `Render.swift.mobiler-new`).
 fn write_sidecar(dst: &Path, suffix: &str, bytes: &[u8]) -> Result<()> {
     let side = PathBuf::from(format!("{}.{suffix}", dst.display()));
     fs::write(&side, bytes).with_context(|| format!("writing {}", side.display()))?;

@@ -363,7 +363,8 @@ plugin injections are preserved; only genuinely overlapping changes become a con
 `<file>.mobiler-new` with `<<<<<<<`/`>>>>>>>` markers (never auto-applied). It **never** touches your
 Rust app code (`shared/src/`). It also bumps your `mobiler-core` dependency. By default a clean merge
 is offered as `<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit
-`.mobiler/` so the baseline (and version stamp) travel with the repo. Apps scaffolded before baselines
+`.mobiler/` so the baseline (and version stamp) travel with the repo; `.mobiler/backup/` is skipped by the
+template's `.gitignore`. Apps scaffolded before baselines
 existed fall back to a conservative reconcile and get a baseline written for next time.
 
 ### Breaking changes in your app code

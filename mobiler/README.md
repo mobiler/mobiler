@@ -96,7 +96,7 @@ injections survive; only overlapping changes become a conflict (written as `<fil
 with `<<<<<<<`/`>>>>>>>` markers, never auto-applied). It bumps your `mobiler-core` dependency and
 never touches your Rust app code (`shared/src/`). By default a clean merge is offered as
 `<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit `.mobiler/`
-(the baseline + version stamp). Apps scaffolded before baselines existed fall back to a conservative
+(the baseline + version stamp), except `.mobiler/backup/`, which the template's `.gitignore` skips. Apps scaffolded before baselines existed fall back to a conservative
 reconcile and get a baseline for next time.
 
 ## Android versions
@@ -114,7 +114,7 @@ version; where Android itself only has a feature on newer versions, older phones
 | `bluetooth` | The legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` permissions (declared up to 11) | `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` (12+) |
 | `geolocation` | The last known location, which can be empty without a recent fix | A fresh current location (11+) |
 | `Video` picture-in-picture | Not available | Auto-entering PiP (12+) |
-| `sqlite` | The phone's own SQLite: 3.18 on Android 8, 3.22 on 9–10, 3.28 on 11 | Newer SQL (e.g. UPSERT needs 3.24, `RETURNING` 3.35): use `INSERT OR REPLACE` and friends to stay portable |
+| `sqlite` | The phone's own SQLite: 3.18 on Android 8.0, 3.19 on 8.1, 3.22 on 9–10, 3.28 on 11 | Newer SQL (e.g. UPSERT needs 3.24, `RETURNING` 3.35): use `INSERT OR REPLACE` and friends to stay portable |
 
 ## Plugins
 

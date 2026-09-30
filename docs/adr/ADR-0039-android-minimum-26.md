@@ -76,8 +76,13 @@ all 31 plugins found three such gaps, fixed in the same PR:
 - `sqlite` uses the phone's own SQLite (3.18 on Android 8), so SQL features follow the OS. Saldo's
   settings UPSERT (needs 3.24) became `INSERT OR REPLACE`.
 
-The shells' plugin dispatch now catches an exception from `handle` and answers `ok: false`, so a gap
-nobody has found yet degrades instead of crashing the app. The CLI README's "Android versions"
+The shells' plugin dispatch now catches what a plugin throws, on both paths: a request answers
+`ok: false`, and a stream ends with one `ok: false` event. That includes `LinkageError`
+(`NoSuchMethodError`, `NoClassDefFoundError`), what calling a newer API on an older Android throws.
+So a gap nobody has found yet degrades instead of crashing the app, as long as it throws inside the
+plugin's call or flow; an exception in a platform callback the plugin registers is not covered.
+`mobiler upgrade`'s drift report also names a plugin whose declared permissions are missing from the
+app's manifest, so an existing app with `bluetooth` is told to re-add it. The CLI README's "Android versions"
 table lists what older phones get. `mobiler upgrade` carries the new value into
 existing apps through the merge of `build.gradle.kts` (ADR-0012).
 

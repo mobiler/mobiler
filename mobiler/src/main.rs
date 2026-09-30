@@ -91,8 +91,8 @@ enum Command {
     /// Non-destructive by default (writes `<file>.mobiler-new`); `--apply` overwrites in place
     /// (saving the old file under `.mobiler/backup/`). Never touches your Rust app code or plugin-patched files.
     Upgrade {
-        /// Overwrite changed shell files in place instead of writing `.mobiler-new` (a
-        /// the old version of each is saved under `.mobiler/backup/` first).
+        /// Overwrite changed shell files in place instead of writing `.mobiler-new` (the
+        /// old version of each is saved under `.mobiler/backup/` first).
         #[arg(long)]
         apply: bool,
     },

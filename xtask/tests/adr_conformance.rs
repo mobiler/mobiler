@@ -122,7 +122,16 @@ fn adr_0038_cleartext_is_debug_only_and_local() {
 /// and of every demo.
 #[test]
 fn adr_0039_android_minimum_is_api_26() {
-    let shells = ["mobiler/templates/Android", "demos/barbershop/Android", "demos/coffee/Android", "demos/saldo/Android", "demos/todo/Android", "demos/fullstack-todo/mobile/Android"];
+    // Every Android shell: the template's, and any demo's (found, so a new demo can't escape).
+    let mut shells = vec!["mobiler/templates/Android".to_string()];
+    for demo in std::fs::read_dir(root().join("demos")).expect("demos/").flatten() {
+        for android in [demo.path().join("Android"), demo.path().join("mobile/Android")] {
+            if android.join("app/build.gradle.kts").exists() {
+                shells.push(android.strip_prefix(root()).unwrap().display().to_string());
+            }
+        }
+    }
+    assert!(shells.len() >= 6, "ADR-0039: expected the template and the demos' shells, found {shells:?}");
     for (shell, module) in shells.iter().flat_map(|s| ["app", "shared"].map(|m| (s, m))) {
         let gradle = read(&format!("{shell}/{module}/build.gradle.kts"));
         let min: Vec<&str> = gradle
