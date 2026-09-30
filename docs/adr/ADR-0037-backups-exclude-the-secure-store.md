@@ -21,8 +21,10 @@ Two of those files are the framework's:
   device's Android Keystore. A backup never carries Keystore keys, so a restored copy can't be
   decrypted. `EncryptedSharedPreferences.create` then threw on every call to the plugin.
 
-The appointments team raised both in its field notes (their `docs/mobiler-feedback.md`, §3):
-plaintext state in cloud backups, and a manifest that opts into backup without saying so.
+The appointments team raised the first in its field notes (malimlindoo/appointments@4a9d4972, docs/mobiler-feedback.md §3, a private repo, so quoted
+here): an app that keeps tokens in `cx.save` "puts refresh tokens in plaintext **and** has them
+swept into Google cloud backup, restorable onto a different device." The second, the secure
+store's missing key, was found while fixing it.
 
 ## 2. Hypothesis
 
@@ -46,15 +48,19 @@ everything else, and `securestore` starts an empty store when its file can't be 
 
 ## 3. Considered Options & Rationale for Refutation
 
-- **Option A — keep the empty sample rules (back up everything)** `[recorded: appointments docs/mobiler-feedback.md §3]`
-  The state before this record. A restored secure store is unreadable and crashed the plugin.
+- **Option A — keep the empty sample rules (back up everything)** `[recorded: malimlindoo/appointments@4a9d4972, docs/mobiler-feedback.md §3, quoted above]`
+  The state before this record. It also restores the secure store onto devices whose Keystore
+  can't read it `[reconstructed: found while writing this record]`.
 - **Option B — `allowBackup="false"`** `[reconstructed]`
   Safe for secrets, but every app would lose its data on a new phone, including the local-first
   apps this framework is used for (Saldo keeps its ledger in SQLite).
-- **Option C — also exclude `mobiler.xml` (`cx.save`)** `[reconstructed]`
-  More private by default, but `cx.save` is the app's restorable state by design (ADR-0031). Its
-  doc comment now says it is plaintext and backed up; an app that keeps anything sensitive there is
-  told to use `securestore`, or can add one line to its rules.
+- **Option C — also exclude `mobiler.xml` (`cx.save`)** `[recorded: malimlindoo/appointments@4a9d4972, docs/mobiler-feedback.md §3, quoted here]`
+  The appointments team's preferred fix: "Better: have the scaffold ship `data_extraction_rules.xml`
+  that excludes the `mobiler` shared-prefs domain by default, so the unsafe combination is not the
+  default." Rejected here `[reconstructed]`: `cx.save` is the app's restorable state by design
+  (ADR-0031), and excluding it would lose every app's state on a new phone. Their minimum fix, "a
+  warning in `cx.save`'s doc comment pointing at `securestore`", is adopted. An app can still add
+  the one exclude line to its own rules.
 - **Option D — exclude only the secure store** `[reconstructed]`
   Chosen: the one file that cannot survive a restore.
 
@@ -81,8 +87,11 @@ the plaintext storage and Auto Backup. The demos carry the same rule files.
   re-enrol biometrics) after a restore or transfer.
 - **Negative:** `cx.save`'s state is still plaintext in the user's backup. That is a documented
   default, not a guarantee; an app that ignores the doc comment leaks what it saves.
-- **Negative:** the recovery wipes the secure store whenever it can't be opened, including after
-  a Keystore reset on the same device. The values were unreadable either way, but the app only
-  notices by finding them empty.
+- **Negative:** the recovery wipes the secure store when its keysets can't be decrypted or
+  parsed, including after a Keystore reset on the same device. The values were unreadable either
+  way, but the app only notices by finding them empty. A `KeyStoreException`, which can be
+  transient, is not treated this way: it propagates and nothing is wiped.
+- **Negative:** this decides against the stricter default the appointments team asked for (Option
+  C). An app that ignores `cx.save`'s doc comment still puts what it saves into the user's backup.
 - **Negative:** the rules are template files. An existing app gets them through
   `mobiler upgrade`; one that edited its own rule files gets a `.mobiler-new` to merge by hand.

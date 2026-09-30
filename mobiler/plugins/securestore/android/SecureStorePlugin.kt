@@ -17,13 +17,22 @@ class SecureStorePlugin(private val application: android.app.Application) : Mobi
     private val prefs by lazy {
         try {
             open()
-        } catch (e: Exception) {
-            // The file can't be decrypted: its Keystore key is gone (a copy restored from a backup
-            // or moved to another device, or a reset Keystore). Those values are unreadable
-            // anywhere, so start an empty store instead of failing every call.
-            application.deleteSharedPreferences("mobiler_secure")
-            open()
+        } catch (e: java.security.KeyStoreException) {
+            // The Keystore itself failed, which can be transient: never wipe secrets for it.
+            throw e
+        } catch (e: java.security.GeneralSecurityException) {
+            recreate()
+        } catch (e: java.io.IOException) {
+            recreate()
         }
+    }
+
+    // The file's keysets can't be decrypted or parsed: its Keystore key is gone (a copy restored
+    // from a backup or moved to another device). Those values are unreadable anywhere, so start an
+    // empty store instead of failing every call (ADR-0037).
+    private fun recreate(): android.content.SharedPreferences {
+        application.deleteSharedPreferences("mobiler_secure")
+        return open()
     }
 
     private fun open() = EncryptedSharedPreferences.create(

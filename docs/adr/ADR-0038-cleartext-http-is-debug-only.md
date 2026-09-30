@@ -13,8 +13,8 @@ Android blocks plain `http://` by default. During development an app talks to a 
 developer's machine: `http://10.0.2.2:<port>` from the emulator, or `localhost`. The scaffold
 offered no way to allow that. The only worked example, the fullstack-todo demo, set
 `android:usesCleartextTraffic="true"` in its *main* manifest, which allows plain HTTP to every host
-in release builds too. The appointments team flagged it (their `docs/mobiler-feedback.md`, §2),
-noting the demo is what people copy.
+in release builds too. The appointments team flagged it (malimlindoo/appointments@4a9d4972, docs/mobiler-feedback.md §2, a private repo, so quoted
+here): "anyone copying the demo ships a release APK permitting plaintext HTTP."
 
 ## 2. Hypothesis
 
@@ -23,7 +23,8 @@ security config permitting cleartext only to `10.0.2.2`, `localhost` and `127.0.
 manifest sets nothing, then:
 
 - a new app reaches a local dev server over HTTP in debug builds with no edits;
-- a release build can't send cleartext to any host, whatever the app's code does;
+- a release build keeps Android's HTTPS-only policy (enforced for the platform HTTP stack, OkHttp
+  and WebView, which the shell's `http` capability uses);
 - adding a LAN address for a real phone is one line in a debug-only file.
 
 ### 2.1. Refutation Conditions
@@ -37,12 +38,14 @@ manifest sets nothing, then:
 
 ## 3. Considered Options & Rationale for Refutation
 
-- **Option A — `usesCleartextTraffic="true"` in the main manifest** `[recorded: appointments docs/mobiler-feedback.md §2; demos/fullstack-todo before this record]`
+- **Option A — `usesCleartextTraffic="true"` in the main manifest** `[recorded: malimlindoo/appointments@4a9d4972, docs/mobiler-feedback.md §2; demos/fullstack-todo before this record]`
   Rejected: it ships to release builds and allows every host.
-- **Option B — no allowance; each app works it out** `[recorded: appointments docs/mobiler-feedback.md §2]`
+- **Option B — no allowance; each app works it out** `[recorded: malimlindoo/appointments@4a9d4972, docs/mobiler-feedback.md §2]`
   The scaffold's state before this record. Every app hits the block on its first local request.
-- **Option C — a debug-only overlay for the local dev hosts** `[reconstructed]`
-  Chosen. Gradle merges `src/debug/` only into debug builds.
+- **Option C — a debug-only overlay for the local dev hosts** `[recorded: malimlindoo/appointments@4a9d4972, docs/mobiler-feedback.md §2, quoted here]`
+  The team's suggested fix: "have `mobiler new` generate exactly that debug-source-set overlay
+  (ideally a debug-only `network_security_config.xml` with `10.0.2.2` + `localhost` allowlisted,
+  rather than a blanket allow)." Chosen. Gradle merges `src/debug/` only into debug builds.
 
 ## 4. Decision & Rationale for Corroboration
 
@@ -61,8 +64,10 @@ fullstack-todo demo moved its allowance into the same overlay, since its core ta
 
 ## 5. Consequences (Positive and Negative Predictions)
 
-- **Positive:** local development works out of the box, and a release build is HTTPS-only by
-  construction.
+- **Positive:** local development works out of the box, and a release build keeps the platform's
+  HTTPS-only policy.
+- **Negative:** the policy binds the platform network stacks, not raw sockets or an HTTP client
+  inside the Rust core, and a dependency's manifest could still merge `usesCleartextTraffic` in.
 - **Negative:** a real phone on the LAN needs its dev machine's address added by hand to the debug
   config. The file's comment says so.
 - **Negative:** a debug build still talks plain HTTP to the dev hosts, so debug builds must not
