@@ -60,10 +60,14 @@ pub fn pipeline(
     let (adb, serial, device_target) = pick_device(no_install, device)?;
     let target_dir = cargo_target_dir(&project.root)?;
 
+    let gradle_started = std::time::SystemTime::now();
     stage("Building Android APK (gradle :app:assembleDebug)", || {
         let mut cmd = Command::new(project.root.join("Android/gradlew"));
         cmd.args(["-p", "Android", "--no-daemon", ":app:assembleDebug"])
-            .arg(format!("-PmobilerCargoTargetDir={}", target_dir.display()))
+            // cargo and the rust-android plugin both honour CARGO_TARGET_DIR over cargo's config,
+            // so pinning it to cargo's own answer makes the plugin copy what cargo just built,
+            // even with a `build.target-dir` in cargo's config and an un-upgraded shell.
+            .env("CARGO_TARGET_DIR", &target_dir)
             .current_dir(&project.root);
         if let Some(t) = device_target {
             cmd.arg(format!("-PmobilerRustTargets={t}"));
@@ -92,7 +96,7 @@ pub fn pipeline(
     if !apk.exists() {
         bail!("expected APK at {} but it was not produced", apk.display());
     }
-    check_packaged_core(project, &target_dir, device_target)?;
+    check_packaged_core(project, &target_dir, gradle_started)?;
     println!("  APK: {}", apk.display());
 
     if no_install {
@@ -288,20 +292,14 @@ fn adb_devices(adb: &Path) -> Result<Vec<String>> {
 // -------------------- helpers --------------------
 
 /// Fail if the APK's Rust core isn't what cargo just built.
-fn check_packaged_core(project: &Project, target_dir: &Path, device_target: Option<&str>) -> Result<()> {
-    // Only the ABIs built this run: the plugin never cleans its output dir, so folders from
-    // earlier builds (another target, a release build) linger there, outside this APK.
-    let built_abis: Vec<&str> = match device_target {
-        Some(t) => abi_for_rust_target(t).into_iter().collect(),
-        None => vec!["arm64-v8a", "x86_64"],
-    };
+fn check_packaged_core(project: &Project, target_dir: &Path, gradle_started: std::time::SystemTime) -> Result<()> {
     let packaged = project.root.join("Android/shared/build/rustJniLibs/android");
-    let stale = stale_libraries(&packaged, target_dir, "debug", &built_abis);
+    let stale = stale_libraries(&packaged, target_dir, "debug", gradle_started);
     if !stale.is_empty() {
         bail!(
             "the APK's Rust core doesn't match what cargo just built ({}): gradle packaged a stale \
-             libshared.so. If this project predates it, run `mobiler upgrade --apply` (the shell \
-             must pass cargo's target dir, {}, to the rust-android plugin).",
+             libshared.so. Check for a `rust.cargoTargetDir` in Android/local.properties, which \
+             overrides cargo's target dir ({}).",
             stale.join(", "),
             target_dir.display()
         );
@@ -362,17 +360,6 @@ fn rust_target_for_abi(abi: &str) -> Option<&'static str> {
     }
 }
 
-/// The Android ABI for a rust-android-gradle target name.
-fn abi_for_rust_target(target: &str) -> Option<&'static str> {
-    match target {
-        "arm64" => Some("arm64-v8a"),
-        "arm" => Some("armeabi-v7a"),
-        "x86_64" => Some("x86_64"),
-        "x86" => Some("x86"),
-        _ => None,
-    }
-}
-
 /// The Rust triple cargo builds for an Android ABI directory.
 fn triple_for_abi(abi: &str) -> Option<&'static str> {
     match abi {
@@ -384,17 +371,26 @@ fn triple_for_abi(abi: &str) -> Option<&'static str> {
     }
 }
 
-/// Of `abis` (the ones built this run), those whose packaged `libshared.so` (under `packaged`, one
-/// dir per ABI) differs from what cargo built into `target_dir/<triple>/<profile>/`. A mismatch
-/// means gradle copied an old library.
-fn stale_libraries(packaged: &Path, target_dir: &Path, profile: &str, abis: &[&str]) -> Vec<String> {
+/// ABIs whose `libshared.so` gradle wrote this run (under `packaged`, one dir per ABI, modified
+/// since `since`) but which differs from what cargo built into `target_dir/<triple>/<profile>/`.
+/// A mismatch means gradle copied an old library. The rust-android plugin copies on every build
+/// and never cleans the dir, so a folder it didn't touch this run is a leftover (another target, a
+/// release build) and is skipped: it isn't in this APK.
+fn stale_libraries(packaged: &Path, target_dir: &Path, profile: &str, since: std::time::SystemTime) -> Vec<String> {
+    let Ok(dirs) = fs::read_dir(packaged) else { return Vec::new() };
     let mut stale = Vec::new();
-    for &abi in abis {
-        let Some(triple) = triple_for_abi(abi) else { continue };
+    for dir in dirs.flatten() {
+        let abi = dir.file_name().to_string_lossy().to_string();
+        let lib = dir.path().join("libshared.so");
+        let written_now = fs::metadata(&lib).and_then(|m| m.modified()).is_ok_and(|t| t >= since);
+        let Some(triple) = triple_for_abi(&abi) else { continue };
+        if !written_now {
+            continue;
+        }
         let built = target_dir.join(triple).join(profile).join("libshared.so");
-        match (fs::read(packaged.join(abi).join("libshared.so")), fs::read(&built)) {
+        match (fs::read(&lib), fs::read(&built)) {
             (Ok(p), Ok(b)) if p == b => {}
-            _ => stale.push(abi.to_string()),
+            _ => stale.push(abi),
         }
     }
     stale.sort();
@@ -449,29 +445,27 @@ fn tail(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn stale_libraries_names_every_abi_whose_packaged_core_differs_from_cargos() {
+    fn stale_libraries_checks_what_gradle_wrote_this_run_against_cargos_output() {
         let dir = std::env::temp_dir().join(format!("mobiler-stale-{}", std::process::id()));
         let packaged = dir.join("rustJniLibs/android");
         let target = dir.join("target");
-        for (abi, triple, packaged_bytes, built_bytes) in [
-            ("arm64-v8a", "aarch64-linux-android", b"new".as_slice(), Some(b"new".as_slice())),
-            ("x86_64", "x86_64-linux-android", b"old".as_slice(), Some(b"new".as_slice())),
-            ("x86", "i686-linux-android", b"old".as_slice(), None),
-        ] {
-            std::fs::create_dir_all(packaged.join(abi)).unwrap();
-            std::fs::write(packaged.join(abi).join("libshared.so"), packaged_bytes).unwrap();
-            if let Some(b) = built_bytes {
-                let out = target.join(triple).join("debug");
-                std::fs::create_dir_all(&out).unwrap();
-                std::fs::write(out.join("libshared.so"), b).unwrap();
-            }
-        }
-        // x86_64 was built but gradle packaged an older copy; x86 is packaged but cargo has none.
-        assert_eq!(super::stale_libraries(&packaged, &target, "debug", &["arm64-v8a", "x86", "x86_64"]), ["x86", "x86_64"]);
-        // A folder left over from an earlier build (x86 here) is ignored when this run didn't build it.
-        assert_eq!(super::stale_libraries(&packaged, &target, "debug", &["arm64-v8a"]), Vec::<String>::new());
-        // An ABI built this run but never packaged is stale too.
-        assert_eq!(super::stale_libraries(&packaged, &target, "debug", &["armeabi-v7a"]), ["armeabi-v7a"]);
+        let put = |path: std::path::PathBuf, bytes: &[u8]| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        };
+        // Left over from an earlier build (e.g. a release build): not written this run, so skipped
+        // even though cargo's debug output differs.
+        put(packaged.join("x86/libshared.so"), b"release");
+        put(target.join("i686-linux-android/debug/libshared.so"), b"debug");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let since = std::time::SystemTime::now();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Written this run: arm64 matches cargo; x86_64 is an old copy.
+        put(packaged.join("arm64-v8a/libshared.so"), b"new");
+        put(target.join("aarch64-linux-android/debug/libshared.so"), b"new");
+        put(packaged.join("x86_64/libshared.so"), b"old");
+        put(target.join("x86_64-linux-android/debug/libshared.so"), b"new");
+        assert_eq!(super::stale_libraries(&packaged, &target, "debug", since), ["x86_64"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

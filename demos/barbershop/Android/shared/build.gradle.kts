@@ -65,9 +65,6 @@ extensions.configure<CargoExtension>("cargo") {
     targets = (findProperty("mobilerRustTargets") as String?)
         ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
         ?: listOf("arm64", "x86_64")
-    // Where cargo writes. The mobiler CLI passes cargo's own answer (-PmobilerCargoTargetDir), so a
-    // `build.target-dir` in cargo's config can't leave a stale library in the APK.
-    (findProperty("mobilerCargoTargetDir") as String?)?.let { targetDirectory = it }
     extraCargoBuildArguments = listOf("--package", "shared", "--features", "uniffi")
     cargoCommand = System.getProperty("user.home") + "/.cargo/bin/cargo"
     rustcCommand = System.getProperty("user.home") + "/.cargo/bin/rustc"
