@@ -117,3 +117,16 @@ fn adr_0038_cleartext_is_debug_only_and_local() {
         .collect();
     assert_eq!(domains, ["10.0.2.2", "localhost", "127.0.0.1"], "ADR-0038: cleartext only to the local dev hosts");
 }
+
+/// ADR-0039: the scaffold's Android minimum is API 26 (Android 8.0), in both gradle modules.
+#[test]
+fn adr_0039_android_minimum_is_api_26() {
+    for module in ["app", "shared"] {
+        let gradle = read(&format!("mobiler/templates/Android/{module}/build.gradle.kts"));
+        let min: Vec<&str> = gradle
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("minSdk = "))
+            .collect();
+        assert_eq!(min, ["26"], "ADR-0039: {module}/build.gradle.kts must set minSdk = 26");
+    }
+}

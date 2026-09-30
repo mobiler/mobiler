@@ -520,13 +520,31 @@ class Core(application: Application) : AndroidViewModel(application) {
         // The app's own version first, so the core's restore/init already see it (cx.app_info()).
         // update() launches on Main.immediate and core.update runs before the first suspension, so
         // the core receives AppInfo, Restore and Start in this order.
-        val pkg = application.packageManager.getPackageInfo(application.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
-        update(Action.AppInfo(pkg.versionName ?: "", pkg.longVersionCode.toString(), "android", application.packageName))
+        update(Action.AppInfo(appVersion(application), appBuild(application), "android", application.packageName))
         // Hand any persisted state back to the core before the first frame.
         val saved = application.getSharedPreferences("mobiler", Context.MODE_PRIVATE).getString("state", "") ?: ""
         if (saved.isNotEmpty()) update(Action.Restore(saved))
         // Always fire Start (after any Restore) so the app can load initial data.
         update(Action.Start)
+    }
+
+    // The minimum is Android 8.0 (API 26, ADR-0039): PackageInfoFlags is API 33 and
+    // longVersionCode API 28, so older phones use the deprecated forms.
+    private fun packageInfo(app: Application): android.content.pm.PackageInfo {
+        val pm = app.packageManager
+        return if (android.os.Build.VERSION.SDK_INT >= 33) {
+            pm.getPackageInfo(app.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION") pm.getPackageInfo(app.packageName, 0)
+        }
+    }
+
+    private fun appVersion(app: Application): String = packageInfo(app).versionName ?: ""
+
+    private fun appBuild(app: Application): String {
+        val pkg = packageInfo(app)
+        return if (android.os.Build.VERSION.SDK_INT >= 28) pkg.longVersionCode.toString()
+        else @Suppress("DEPRECATION") pkg.versionCode.toString()
     }
 
     fun update(action: Action) {

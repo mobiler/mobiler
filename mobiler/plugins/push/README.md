@@ -1,11 +1,11 @@
 # push — remote push notifications, APNs/FCM (free, bundled)
 
-> ⚠️ **Experimental — not yet end-to-end device-tested.** The iOS *receive* path (notification →
-> the events stream → your `update`) is verified on the simulator, and everything compiles + installs
-> on both platforms. The real-APNs/FCM **token round-trip** (`register` → a server push from
-> Apple/Google) has **not** been validated on a physical device yet. Treat the API as stable-ish but
-> the delivery path as unproven; please report what you find. (Mobiler itself is experimental — see
-> the project README.)
+> ⚠️ **Experimental on iOS.** **Android (FCM) is validated end to end:** an app team ran the full
+> path (`register` → an FCM push from their server → the events stream) on the Android emulator in
+> September 2026. On iOS the *receive* path (notification → the events stream → your `update`) is
+> verified on the simulator, but the real-APNs **token round-trip** has not yet been validated on a
+> physical device. Please report what you find. (Mobiler itself is experimental; see the project
+> README.)
 
 ```bash
 mobiler plugin add push

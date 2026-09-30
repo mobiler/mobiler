@@ -19,7 +19,7 @@ android {
     ndkVersion = "30.0.14904198"
 
     defaultConfig {
-        minSdk = 34
+        minSdk = 26
     }
 
     compileOptions {
