@@ -189,20 +189,7 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
     let manifest: Manifest = toml::from_str(&src.read_text("mobiler-plugin.toml")?)
         .context("parsing mobiler-plugin.toml")?;
 
-    // The push plugins call `PushBridge.detach(id)`, which lives in the app's App.swift, not in the
-    // plugin. Check before writing anything: an App.swift that predates it wouldn't compile.
-    if let Some(i) = &manifest.ios {
-        let needs_new_bridge =
-            i.sources.iter().any(|rel| src.read_text(rel).is_ok_and(|t| t.contains("PushBridge.shared.detach(id)")));
-        let app_swift = fs::read_to_string(root.join("iOS/Sources/App.swift")).unwrap_or_default();
-        if needs_new_bridge && app_swift.contains("final class PushBridge") && !app_swift.contains("func detach(_ id: Int)") {
-            bail!(
-                "`{}` needs a newer iOS/Sources/App.swift (PushBridge.detach(_:)). Run `mobiler upgrade --apply` first, then re-run `mobiler plugin add {}`.",
-                manifest.name,
-                manifest.name
-            );
-        }
-    }
+    check_push_bridge(root, &src, &manifest)?;
 
     println!("Installing plugin `{}`{}", manifest.name, fmt_summary(&manifest.summary));
     let mut notes: Vec<String> = Vec::new();
@@ -216,8 +203,10 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
         report(insert_before(&core_kt, "// mobiler:plugins", &format!("{},", a.register), &a.register)?, "Android registration");
         let manifest_xml = root.join("Android/app/src/main/AndroidManifest.xml");
         for perm in &a.permissions {
-            let line = format!("<uses-permission android:name=\"{perm}\" />");
-            report(insert_before(&manifest_xml, "mobiler:permissions", &line, perm)?, "Android permission");
+            let (name, line) = permission_line(perm);
+            // The quoted attribute, so BLUETOOTH isn't taken as present because BLUETOOTH_SCAN is.
+            let needle = format!("android:name=\"{name}\"");
+            report(insert_before(&manifest_xml, "mobiler:permissions", &line, &needle)?, "Android permission");
         }
         let gradle = root.join("Android/app/build.gradle.kts");
         for dep in &a.gradle_deps {
@@ -377,7 +366,8 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
                 (dst.clone(), shipped, fs::read_to_string(dst).ok())
             })
             .collect();
-        candidates.push((name, files));
+        let missing_permission = missing_permissions(root, &manifest);
+        candidates.push((name, files, missing_permission));
     }
 
     // Some alternatives register identical lines too (`geolocation` / `geolocation-fused`), so both
@@ -396,8 +386,8 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
             .sum()
     };
     let mut drifted = Vec::new();
-    for (name, files) in &candidates {
-        let beaten = candidates.iter().any(|(other, other_files)| {
+    for (name, files, missing_permission) in &candidates {
+        let beaten = candidates.iter().any(|(other, other_files, _)| {
             let shared: Vec<&PathBuf> =
                 files.iter().map(|(d, _, _)| d).filter(|d| other_files.iter().any(|(o, _, _)| o == *d)).collect();
             other != name && !shared.is_empty() && closeness(other_files, &shared) > closeness(files, &shared)
@@ -412,11 +402,22 @@ pub(crate) fn drifted(root: &Path, subs: &Subs) -> Vec<String> {
             (Some(_), None) => true,
             _ => false,
         });
-        if stale {
+        // A permission the plugin now declares but the app's manifest lacks (bluetooth's legacy pair
+        // for Android 8–11) is drift too: re-adding the plugin inserts it.
+        if stale || *missing_permission {
             drifted.push(name.clone());
         }
     }
     drifted
+}
+
+/// Whether the app's manifest lacks (as a live line) a permission this plugin declares.
+fn missing_permissions(root: &Path, manifest: &Manifest) -> bool {
+    let Some(a) = &manifest.android else { return false };
+    let path = root.join("Android/app/src/main/AndroidManifest.xml");
+    let Ok(content) = fs::read_to_string(&path) else { return false };
+    let live = without_comments(&path, &content);
+    a.permissions.iter().any(|p| !live.contains(&format!("android:name=\"{}\"", permission_line(p).0)))
 }
 
 /// How many of the app's lines (`on_disk`) also appear in one shipped variant's body.
@@ -496,6 +497,34 @@ fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Resu
     let updated = content.replacen(&anchor, &format!("{indent}{payload}\n{anchor}"), 1);
     fs::write(path, updated).with_context(|| format!("writing {}", path.display()))?;
     Ok(Insert::Inserted)
+}
+
+/// The push plugins call `PushBridge.detach(id)`, which lives in the app's App.swift, not in the
+/// plugin. Checked before writing anything: an App.swift that predates it wouldn't compile.
+fn check_push_bridge(root: &Path, src: &Source, manifest: &Manifest) -> Result<()> {
+    if let Some(i) = &manifest.ios {
+        let needs_new_bridge =
+            i.sources.iter().any(|rel| src.read_text(rel).is_ok_and(|t| t.contains("PushBridge.shared.detach(id)")));
+        let app_swift = fs::read_to_string(root.join("iOS/Sources/App.swift")).unwrap_or_default();
+        if needs_new_bridge && app_swift.contains("final class PushBridge") && !app_swift.contains("func detach(_ id: Int)") {
+            bail!(
+                "`{}` needs a newer iOS/Sources/App.swift (PushBridge.detach(_:)). Run `mobiler upgrade --apply` first, then re-run `mobiler plugin add {}`.",
+                manifest.name,
+                manifest.name
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A manifest `permissions` entry as its name and `<uses-permission>` line. An entry may carry a
+/// ceiling for permissions newer Android replaced: `"android.permission.BLUETOOTH;maxSdkVersion=30"`.
+fn permission_line(entry: &str) -> (&str, String) {
+    if let Some((name, max)) = entry.split_once(";maxSdkVersion=") {
+        (name, format!("<uses-permission android:name=\"{name}\" android:maxSdkVersion=\"{max}\" />"))
+    } else {
+        (entry, format!("<uses-permission android:name=\"{entry}\" />"))
+    }
 }
 
 /// `content` with its comments removed, by file type: `<!-- … -->` blocks in XML (they can span
@@ -873,6 +902,45 @@ mod test {
         assert!(matches!(insert_before(&xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::Inserted));
         assert!(matches!(insert_before(&xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::AlreadyPresent));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Bluetooth on Android 8–11 needs the legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` permissions, which
+    /// Android 12 replaced; the manifest entry carries the ceiling.
+    #[test]
+    fn add_bundled_bluetooth_declares_legacy_permissions_up_to_android_11() {
+        let root = skeleton();
+        add_at(&root, "bluetooth").unwrap();
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        for legacy in ["BLUETOOTH", "BLUETOOTH_ADMIN"] {
+            assert!(
+                manifest.contains(&format!(
+                    "<uses-permission android:name=\"android.permission.{legacy}\" android:maxSdkVersion=\"30\" />"
+                )),
+                "{legacy} with maxSdkVersion 30: {manifest}"
+            );
+        }
+        assert!(manifest.contains("<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\" />"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A plugin whose manifest gained a permission (bluetooth's legacy pair for Android 8–11) is
+    /// drifted even when its sources didn't change: re-adding it is how the app gets the line.
+    #[test]
+    fn drifted_reports_a_plugin_missing_a_declared_permission() {
+        let root = skeleton();
+        let subs = Subs::from_app_root(&root).unwrap();
+        add_at(&root, "bluetooth").unwrap();
+        assert!(!drifted(&root, &subs).contains(&"bluetooth".to_string()), "fresh install is clean");
+        let manifest = root.join("Android/app/src/main/AndroidManifest.xml");
+        let without = fs::read_to_string(&manifest)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.contains("android.permission.BLUETOOTH_ADMIN"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&manifest, without).unwrap();
+        assert!(drifted(&root, &subs).contains(&"bluetooth".to_string()), "a missing permission is drift");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

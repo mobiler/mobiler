@@ -117,3 +117,27 @@ fn adr_0038_cleartext_is_debug_only_and_local() {
         .collect();
     assert_eq!(domains, ["10.0.2.2", "localhost", "127.0.0.1"], "ADR-0038: cleartext only to the local dev hosts");
 }
+
+/// ADR-0039: the Android minimum is API 26 (Android 8.0), in both gradle modules of the template
+/// and of every demo.
+#[test]
+fn adr_0039_android_minimum_is_api_26() {
+    // Every Android shell: the template's, and any demo's (found, so a new demo can't escape).
+    let mut shells = vec!["mobiler/templates/Android".to_string()];
+    for demo in std::fs::read_dir(root().join("demos")).expect("demos/").flatten() {
+        for android in [demo.path().join("Android"), demo.path().join("mobile/Android")] {
+            if android.join("app/build.gradle.kts").exists() {
+                shells.push(android.strip_prefix(root()).unwrap().display().to_string());
+            }
+        }
+    }
+    assert!(shells.len() >= 6, "ADR-0039: expected the template and the demos' shells, found {shells:?}");
+    for (shell, module) in shells.iter().flat_map(|s| ["app", "shared"].map(|m| (s, m))) {
+        let gradle = read(&format!("{shell}/{module}/build.gradle.kts"));
+        let min: Vec<&str> = gradle
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("minSdk = "))
+            .collect();
+        assert_eq!(min, ["26"], "ADR-0039: {shell}/{module}/build.gradle.kts must set minSdk = 26");
+    }
+}

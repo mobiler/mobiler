@@ -1056,11 +1056,11 @@ fn load_all(cx: &mut Cx<Msg>) {
     });
 }
 
-/// Persist a single key/value setting (UPSERT). All sqlite args are strings.
+/// Persist a single key/value setting. All sqlite args are strings. `INSERT OR REPLACE`, not
+/// `ON CONFLICT … DO UPDATE`: Android's own SQLite is 3.18 on Android 8, and UPSERT needs 3.24.
 fn save_setting(cx: &mut Cx<Msg>, key: &str, value: &str) {
     let sql = serde_json::json!({
-        "sql": "INSERT INTO setting(key, value) VALUES (?, ?) \
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "sql": "INSERT OR REPLACE INTO setting(key, value) VALUES (?, ?)",
         "args": [key, value],
     })
     .to_string();

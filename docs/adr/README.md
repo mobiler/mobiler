@@ -94,6 +94,8 @@ what was decided, never what was rejected. So in §3, every option carries a pro
   else in the repo (the gitignored engineering notes, a chat, private memory). Quote it verbatim
   right after the tag; the record then becomes its record. Use `YYYY-MM` when only the month is
   known.
+- `[recorded: <app team> request, YYYY-MM-DD, quoted here]`: a request from an app team that isn't
+  kept in the repo. Quote it verbatim, as for a maintainer statement.
 - `[reconstructed]`: inferred to be the alternative. Nobody wrote it down.
 
 Never present an inferred alternative as recorded history. The tag tells a reader which rationale to

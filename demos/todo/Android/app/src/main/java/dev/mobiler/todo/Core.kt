@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.channels.awaitClose
@@ -160,11 +161,29 @@ class Core(application: Application) : AndroidViewModel(application) {
         // The app's own version first, so the core's restore/init already see it (cx.app_info()).
         // update() launches on Main.immediate and core.update runs before the first suspension, so
         // the core receives AppInfo, Restore and Start in this order.
-        val pkg = application.packageManager.getPackageInfo(application.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
-        update(Action.AppInfo(pkg.versionName ?: "", pkg.longVersionCode.toString(), "android", application.packageName))
+        update(Action.AppInfo(appVersion(application), appBuild(application), "android", application.packageName))
         // Hand any persisted state back to the core before the first frame.
         val saved = application.getSharedPreferences("mobiler", Context.MODE_PRIVATE).getString("state", "") ?: ""
         if (saved.isNotEmpty()) update(Action.Restore(saved))
+    }
+
+    // The minimum is Android 8.0 (API 26, ADR-0039): PackageInfoFlags is API 33 and
+    // longVersionCode API 28, so older phones use the deprecated forms.
+    private fun packageInfo(app: Application): android.content.pm.PackageInfo {
+        val pm = app.packageManager
+        return if (android.os.Build.VERSION.SDK_INT >= 33) {
+            pm.getPackageInfo(app.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION") pm.getPackageInfo(app.packageName, 0)
+        }
+    }
+
+    private fun appVersion(app: Application): String = packageInfo(app).versionName ?: ""
+
+    private fun appBuild(app: Application): String {
+        val pkg = packageInfo(app)
+        return if (android.os.Build.VERSION.SDK_INT >= 28) pkg.longVersionCode.toString()
+        else @Suppress("DEPRECATION") pkg.versionCode.toString()
     }
 
     fun update(action: Action) {
@@ -218,13 +237,41 @@ class Core(application: Application) : AndroidViewModel(application) {
             Log.w("Mobiler", "plugin '$plugin' not available in this build")
             return PluginResponse(false, "plugin '$plugin' not available in this build")
         }
-        return p.handle(op, input)
+        // A plugin that throws (e.g. a permission this Android version lacks) answers ok:false
+        // instead of crashing the app (ADR-0013, ADR-0039). Cancellation still propagates.
+        return try {
+            p.handle(op, input)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            pluginFailed(plugin, e)
+        } catch (e: LinkageError) {
+            // A newer API this Android version lacks (NoSuchMethodError, NoClassDefFoundError, …).
+            pluginFailed(plugin, e)
+        }
     }
+
+    private fun pluginFailed(plugin: String, e: Throwable) =
+        PluginResponse(false, "plugin '$plugin' failed: ${e.message ?: e.javaClass.simpleName}")
 
     /** Streaming dispatch (cx.subscribe): the named plugin's event Flow, or an empty
      *  flow if it isn't registered / isn't streaming-capable. */
     private fun dispatchStream(plugin: String, op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> {
         val p = plugins[plugin] ?: return kotlinx.coroutines.flow.emptyFlow()
-        return p.subscribe(op, input)
+        // As for requests: a stream that throws (or can't even start) ends with one ok:false event
+        // instead of crashing the app. Cancellation still propagates.
+        val flow = try {
+            p.subscribe(op, input)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return kotlinx.coroutines.flow.flowOf(pluginFailed(plugin, e))
+        } catch (e: LinkageError) {
+            return kotlinx.coroutines.flow.flowOf(pluginFailed(plugin, e))
+        }
+        return flow.catch { e ->
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            emit(pluginFailed(plugin, e))
+        }
     }
 }

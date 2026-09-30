@@ -89,10 +89,10 @@ enum Command {
     },
     /// Update this app's generic native shells + `mobiler-core` dep to the CLI's templates.
     /// Non-destructive by default (writes `<file>.mobiler-new`); `--apply` overwrites in place
-    /// (saving `<file>.mobiler-bak`). Never touches your Rust app code or plugin-patched files.
+    /// (saving the old file under `.mobiler/backup/`). Never touches your Rust app code or plugin-patched files.
     Upgrade {
-        /// Overwrite changed shell files in place instead of writing `.mobiler-new` (a
-        /// `.mobiler-bak` of each is saved first).
+        /// Overwrite changed shell files in place instead of writing `.mobiler-new` (the
+        /// old version of each is saved under `.mobiler/backup/` first).
         #[arg(long)]
         apply: bool,
     },

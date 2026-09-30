@@ -42,3 +42,4 @@ Read this before designing a change. Name the records that apply in the spec (se
 | ADR-0036 | Background features are native plugin code that does not depend on the Rust core running: the plugin does its work natively and hands each event to its stream, which delivers it to a live subscriber or holds it until the app next subscribes | Accepted | 2026-06-09 | — |
 | ADR-0037 | The scaffold's Android backup rules exclude `securestore`'s file from cloud backup and device transfer; everything else, including `cx.save`'s plaintext state, stays backed up | Accepted | 2026-09-30 | — |
 | ADR-0038 | Plain-HTTP (cleartext) traffic is allowed only in debug builds, and only to the local dev hosts; release builds keep Android's HTTPS-only default | Accepted | 2026-09-30 | — |
+| ADR-0039 | The Android minimum is API 26 (Android 8.0) in the template and every demo; shell and plugin code that needs a newer API is guarded by a version check | Accepted | 2026-09-30 | — |
