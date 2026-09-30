@@ -413,12 +413,22 @@ private fun ConfirmDialog(req: ConfirmRequest) {
  *  field itself sent (a current or a late one), so a delayed render can never rewind the text
  *  or move the cursor. An app-side change — clear, formatting, or rejecting/reformatting an
  *  edit (e.g. max length, digits only) — is adopted, cursor at the end. */
+/** Field debug log, off by default: `adb shell setprop log.tag.MobilerField DEBUG`, then restart
+ *  the app. Logs every edit, every value the app renders and every adoption, so a field that shows
+ *  the wrong text can be traced to what it was given. */
+private val fieldLog = android.util.Log.isLoggable("MobilerField", android.util.Log.DEBUG)
+
+private fun logField(msg: () -> String) {
+    if (fieldLog) android.util.Log.d("MobilerField", msg())
+}
+
 private class FieldSync(initial: String) {
     var field by mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
     private val pending = ArrayDeque<String>()
     private var lastApp: String? = initial
 
     fun onEdit(next: TextFieldValue, send: (String) -> Unit) {
+        logField { "edit '${next.text}' (composing ${next.composition}) over '${field.text}'; pending $pending" }
         val changed = next.text != field.text
         field = next
         if (changed) {
@@ -431,6 +441,7 @@ private class FieldSync(initial: String) {
     }
 
     fun onAppValue(v: String) {
+        logField { "app '$v' (last app '$lastApp'); field '${field.text}'; pending $pending" }
         if (v == lastApp) return
         lastApp = v
         // lastIndexOf drops every older entry on a match; a repeated text (a, "", a) can
@@ -442,7 +453,10 @@ private class FieldSync(initial: String) {
             return
         }
         pending.clear()
-        if (v != field.text) field = TextFieldValue(v, TextRange(v.length))
+        if (v != field.text) {
+            logField { "adopt '$v' over '${field.text}' (composing ${field.composition})" }
+            field = TextFieldValue(v, TextRange(v.length))
+        }
     }
 }
 
