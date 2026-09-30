@@ -367,7 +367,7 @@ class DateTimePlugin : MobilerPlugin {
                     "date" -> {
                         val dlg = DatePickerDialog(
                             activity,
-                            { _, y, m, d -> done(PluginResponse(true, "%04d-%02d-%02d".format(y, m + 1, d))) },
+                            { _, y, m, d -> done(PluginResponse(true, String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m + 1, d))) },
                             now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH),
                         )
                         dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }
@@ -381,7 +381,7 @@ class DateTimePlugin : MobilerPlugin {
                     "time" -> {
                         val dlg = TimePickerDialog(
                             activity,
-                            { _, h, min -> done(PluginResponse(true, "%02d:%02d".format(h, min))) },
+                            { _, h, min -> done(PluginResponse(true, String.format(java.util.Locale.US, "%02d:%02d", h, min))) },
                             now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), true,
                         )
                         dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }

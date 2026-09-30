@@ -130,11 +130,11 @@ enum TickerStream {
 enum SystemStream {
     static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
         let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
-        await MainActor.run { SystemBridge.shared.attach(sink) }
+        let id = await MainActor.run { SystemBridge.shared.attach(sink) }
         await withTaskCancellationHandler {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
         } onCancel: {
-            Task { @MainActor in SystemBridge.shared.detach() }
+            Task { @MainActor in SystemBridge.shared.detach(id) }
         }
     }
 }

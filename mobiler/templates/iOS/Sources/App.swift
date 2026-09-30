@@ -198,17 +198,23 @@ final class SystemBridge {
     static let shared = SystemBridge()
 
     private var sink: (@Sendable (String) -> Void)?
+    private var sinkId = 0
     private var buffer: [String] = []
     private var lastPhase: ScenePhase = .active
 
-    func attach(_ sink: @escaping @Sendable (String) -> Void) {
+    /// Returns a token for `detach`. A later attach replaces this sink.
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> Int {
+        sinkId += 1
         self.sink = sink
         for payload in buffer { sink(payload) }
         buffer.removeAll()
         // Tell the freshly-subscribed app the current lifecycle state.
         emitLifecycle(lastPhase == .background ? "background" : "active")
+        return sinkId
     }
-    func detach() { sink = nil }
+    /// Clears the sink only if `id` is still the attached one: a stale unsubscribe (of a replaced
+    /// subscription, or one whose cancel runs after a resubscribe) must not silence the live one.
+    func detach(_ id: Int) { if id == sinkId { sink = nil } }
 
     func didOpen(url: URL) {
         emit("{\"type\":\"deeplink\",\"url\":\(Self.jsonString(url.absoluteString))}")
