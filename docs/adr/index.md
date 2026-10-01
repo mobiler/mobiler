@@ -45,3 +45,4 @@ Read this before designing a change. Name the records that apply in the spec (se
 | ADR-0039 | The Android minimum is API 26 (Android 8.0) in the template and every demo; shell and plugin code that needs a newer API is guarded by a version check | Accepted | 2026-09-30 | — |
 | ADR-0040 | The Android field debug log runs only in a debuggable build, logs lengths and hashes unless a second tag asks for raw text, and never logs a SECURE field's text | Accepted | 2026-10-01 | — |
 | ADR-0041 | The shells never set an app-level night mode; the Android system splash follows the OS appearance, and an app that wants its own choice in the first frame keeps it in `cx.save` state | Accepted | 2026-10-01 | — |
+| ADR-0042 | `mobiler upgrade` has a seed class: a listed app-owned file the template provides is created when missing and never touched after that | Accepted | 2026-10-01 | — |

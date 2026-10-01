@@ -53,12 +53,27 @@ enum Class {
     Merge,
     /// A generic interpreter shell file — the upgrade target.
     Shell,
+    /// App-owned values the CLI ships a default for (the launch window colours): created when missing,
+    /// never read, merged or overwritten after that, and never baselined (ADR-0042).
+    Seed,
 }
+
+/// Seed files (ADR-0042): the launch-window values a later `[splash]` sync writes, app-owned meanwhile.
+const SEED_PATHS: &[&str] = &[
+    "Android/app/src/main/res/values/mobiler_splash.xml",
+    "Android/app/src/main/res/values-night/mobiler_splash.xml",
+    "Android/app/src/main/res/drawable/mobiler_launch.xml",
+    "iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset/Contents.json",
+];
 
 /// Classify a template file by its app-relative path + final (substituted) contents.
 fn classify(rel: &Path, desired: &[u8]) -> Class {
     let p = rel.to_string_lossy().replace('\\', "/");
     let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    // SEED — checked first, so a seed path wins over the `Assets.xcassets/` OWN prefix.
+    if SEED_PATHS.contains(&p.as_str()) {
+        return Class::Seed;
+    }
     // OWN — the user's Rust app, the Cargo manifests (deps handled separately), per-app identity
     // files that always differ, and binaries (icons, the gradle wrapper jar).
     // NOTE: iOS/Sources/App.swift is NOT own — it's generic shell infrastructure (the entry point +
@@ -208,6 +223,17 @@ fn sync_file(
 
     let class = classify(&rel, &desired);
     if class == Class::Own {
+        return Ok(());
+    }
+    if class == Class::Seed {
+        let dst = root.join(&rel);
+        if !dst.exists() {
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+            }
+            fs::write(&dst, &desired).with_context(|| format!("writing {}", dst.display()))?;
+            report.added.push(rel.to_string_lossy().to_string());
+        }
         return Ok(());
     }
     let dst = root.join(&rel);
@@ -392,7 +418,7 @@ fn seed_dir(dir: &Dir<'_>, root: &Path, subs: &Subs) -> Result<()> {
                 let Ok(raw) = std::str::from_utf8(file.contents()) else { continue };
                 let rel = templated_path(file.path(), subs);
                 let content = substitute(raw, subs);
-                if classify(&rel, content.as_bytes()) == Class::Own {
+                if matches!(classify(&rel, content.as_bytes()), Class::Own | Class::Seed) {
                     continue;
                 }
                 write_baseline(root, &rel, content.as_bytes())?;
@@ -762,6 +788,61 @@ mod test {
 
     fn read(root: &Path, rel: &str) -> String {
         fs::read_to_string(root.join(rel)).unwrap()
+    }
+
+    #[test]
+    fn seed_paths_classify_as_seed_and_exist_in_the_template() {
+        for p in SEED_PATHS {
+            assert_eq!(classify(Path::new(p), b"x"), Class::Seed, "{p}");
+        }
+        // The rest of the asset catalog stays the app's.
+        assert_eq!(classify(Path::new("iOS/Sources/Assets.xcassets/AppIcon.appiconset/Contents.json"), b"{}"), Class::Own);
+        // Every seed path is shipped by the template, so the list can't rot.
+        for p in SEED_PATHS {
+            assert!(TEMPLATES.get_file(p).is_some(), "seed path {p} is not in the template");
+        }
+    }
+
+    #[test]
+    fn missing_seed_files_are_created_and_existing_ones_never_touched() {
+        let root = skeleton();
+        upgrade_at(&root, false).unwrap();
+        for p in SEED_PATHS {
+            assert!(root.join(p).exists(), "{p} created");
+        }
+        let edited = "<resources><color name=\"mobiler_splash_background\">#123456</color></resources>\n";
+        fs::write(root.join(SEED_PATHS[0]), edited).unwrap();
+        upgrade_at(&root, true).unwrap();
+        assert_eq!(read(&root, SEED_PATHS[0]), edited, "seed file left byte-identical");
+        assert!(!root.join(format!("{}.mobiler-new", SEED_PATHS[0])).exists());
+        assert!(!root.join(".mobiler/base").join(SEED_PATHS[0]).exists(), "no baseline for a seed file");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn seed_files_created_even_when_theme_is_offered_as_new() {
+        let root = skeleton();
+        let theme = "Android/app/src/main/res/values/themes.xml";
+        fs::create_dir_all(root.join(theme).parent().unwrap()).unwrap();
+        fs::write(root.join(theme), "<resources><!-- mine --></resources>\n").unwrap();
+        upgrade_at(&root, false).unwrap();
+        assert_eq!(read(&root, theme), "<resources><!-- mine --></resources>\n");
+        assert!(root.join(format!("{theme}.mobiler-new")).exists());
+        for p in SEED_PATHS {
+            assert!(root.join(p).exists(), "{p} created although the theme was not applied");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn existing_night_theme_is_not_overwritten() {
+        let root = skeleton();
+        let night = "Android/app/src/main/res/values-night/themes.xml";
+        fs::create_dir_all(root.join(night).parent().unwrap()).unwrap();
+        fs::write(root.join(night), "<resources><!-- my night --></resources>\n").unwrap();
+        upgrade_at(&root, false).unwrap();
+        assert_eq!(read(&root, night), "<resources><!-- my night --></resources>\n");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
