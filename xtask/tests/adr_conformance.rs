@@ -147,17 +147,7 @@ fn adr_0039_android_minimum_is_api_26() {
 #[test]
 fn adr_0040_field_log_is_debug_only_and_never_logs_secure_text() {
     let mut shells = vec![root().join("mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt")];
-    let mut stack = vec![root().join("demos")];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())).flatten() {
-            let path = entry.path();
-            if path.is_dir() && !["build", "target", "node_modules", ".gradle"].iter().any(|s| path.ends_with(s)) {
-                stack.push(path);
-            } else if path.file_name().is_some_and(|n| n == "MainActivity.kt") {
-                shells.push(path);
-            }
-        }
-    }
+    shells.extend(files_with_extension(&[root().join("demos")], "kt").into_iter().filter(|p| p.ends_with("MainActivity.kt")));
     let mut checked = 0;
     for path in &shells {
         let kt = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -212,28 +202,62 @@ fn adr_0040_field_log_is_debug_only_and_never_logs_secure_text() {
     assert!(checked >= 2, "ADR-0040: expected the template's and barbershop's field log, checked {checked}");
 }
 
+/// Every file with extension `ext` under `dirs`, skipping build output. Symlinks are not followed,
+/// so a link loop can't hang the walk and a link can't lead outside the repo.
+fn files_with_extension(dirs: &[PathBuf], ext: &str) -> Vec<PathBuf> {
+    let mut stack = dirs.to_vec();
+    let mut out = Vec::new();
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())).flatten() {
+            let (path, Ok(kind)) = (entry.path(), entry.file_type()) else { continue };
+            if kind.is_dir() && !["build", "target", "node_modules", ".gradle"].iter().any(|s| path.ends_with(s)) {
+                stack.push(path);
+            } else if kind.is_file() && path.extension().is_some_and(|e| e == ext) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+/// The part of a Kotlin line that is code: a whole-line comment (`//`, `/*`, `*`) is not; a `//`
+/// later in the line may sit inside a string (`"https://…"`), so the rest of the line counts.
+fn kotlin_code(line: &str) -> &str {
+    let t = line.trim_start();
+    if t.starts_with("//") || t.starts_with("/*") || t.starts_with('*') { "" } else { line }
+}
+
+#[test]
+fn walk_skips_symlinks_and_terminates() {
+    let dir = std::env::temp_dir().join(format!("adr-walk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("sub/a.kt"), "x").unwrap();
+    std::os::unix::fs::symlink("..", dir.join("sub/loop")).unwrap();
+    let found = files_with_extension(&[dir.clone()], "kt");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(found, [dir.join("sub/a.kt")]);
+}
+
+#[test]
+fn kotlin_code_keeps_a_call_after_a_url() {
+    assert!(kotlin_code("val u = \"https://x\"; AppCompatDelegate.setDefaultNightMode(1)").contains("setDefaultNightMode"));
+    assert!(!kotlin_code("    // AppCompatDelegate.setDefaultNightMode(1)").contains("setDefaultNightMode"));
+    assert!(!kotlin_code("     * setDefaultNightMode is not called (ADR-0041)").contains("setDefaultNightMode"));
+}
+
 /// ADR-0041: no shell sets an app-level night mode, so the configuration the shell reads the OS
 /// appearance from stays the OS's. Checked over every Kotlin source of the template and the demos.
 #[test]
 fn adr_0041_no_shell_sets_an_app_level_night_mode() {
-    let mut stack = vec![root().join("mobiler/templates/Android"), root().join("demos")];
-    let mut checked = 0;
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())).flatten() {
-            let path = entry.path();
-            if path.is_dir() && !["build", "target", "node_modules", ".gradle"].iter().any(|s| path.ends_with(s)) {
-                stack.push(path);
-            } else if path.extension().is_some_and(|e| e == "kt") {
-                checked += 1;
-                let kt = std::fs::read_to_string(&path).unwrap();
-                for (i, line) in kt.lines().enumerate() {
-                    let code = line.split("//").next().unwrap_or("");
-                    for call in ["setApplicationNightMode", "setDefaultNightMode"] {
-                        assert!(!code.contains(call), "ADR-0041: {}:{} calls {call}", path.strip_prefix(root()).unwrap().display(), i + 1);
-                    }
-                }
+    let files = files_with_extension(&[root().join("mobiler/templates/Android"), root().join("demos")], "kt");
+    for path in &files {
+        let kt = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        for (i, line) in kt.lines().enumerate() {
+            for call in ["setApplicationNightMode", "setDefaultNightMode"] {
+                assert!(!kotlin_code(line).contains(call), "ADR-0041: {}:{} calls {call}", path.strip_prefix(root()).unwrap().display(), i + 1);
             }
         }
     }
-    assert!(checked > 20, "ADR-0041: expected the shells' Kotlin sources, checked {checked}");
+    assert!(files.len() > 20, "ADR-0041: expected the shells' Kotlin sources, checked {}", files.len());
 }

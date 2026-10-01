@@ -3373,6 +3373,17 @@ mod palette_tests {
         assert_eq!(palette_css(&r), "--bg:rgb(35,31,32);--primary:rgb(31,130,118);--pal-primary:rgb(31,130,118);");
     }
 
+    /// A focused invalid field keeps its error border and ring when `selection` paints focus marks:
+    /// the error rule comes after the focus rule at the same specificity.
+    #[test]
+    fn focused_invalid_field_keeps_the_error_colour() {
+        let focus = STYLE.find("[style*=\"--selection:\"] .field:focus {").expect("selection focus rule");
+        let invalid = STYLE
+            .find("[style*=\"--selection:\"] .field-invalid:focus { border-color: var(--error, var(--danger, #d33)); outline-color: var(--error, var(--danger, #d33)); }")
+            .expect("a focused invalid field must keep the error colour");
+        assert!(invalid > focus, "the error rule must follow the focus rule to win at equal specificity");
+    }
+
     #[test]
     fn theme_css_without_palette_is_unchanged() {
         let t = Theme::default();

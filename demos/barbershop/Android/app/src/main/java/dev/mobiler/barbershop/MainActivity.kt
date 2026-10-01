@@ -343,6 +343,7 @@ fun App(core: Core = viewModel()) {
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
     activeTheme = appTheme
     ActiveLabels.current = (view as? Widget.Scaffold)?.labels
+    ActiveAppearance.dark = dark
     // With a palette the system-bar icons follow the resolved `dark` (appearance / dark_mode), not the OS.
     // If a palette goes away at runtime, restore the default (OS-following) bars once.
     val hasPalette = appTheme?.palette != null
@@ -407,7 +408,7 @@ private fun ConfirmDialog(req: ConfirmRequest) {
                 onClick = { req.answer(true) },
                 modifier = buttonModifier,
                 shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
-                colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
+                colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = LocalPalette.current?.error?.color() ?: MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
             ) { Text(req.confirmLabel, fontSize = labelSize) }
         },
         dismissButton = {
@@ -1700,6 +1701,12 @@ object ActiveLabels {
     @Volatile var current: ShellLabels? = null
 }
 
+/** The current scaffold's resolved light/dark (appearance, else dark_mode, else the OS), set when App()
+ *  renders. Core.kt's picker dialogs follow it. */
+object ActiveAppearance {
+    @Volatile var dark: Boolean = false
+}
+
 // Spacing multiplier from the theme's density. Comfortable (or un-themed) = 1.0; Compact tightens;
 // Large loosens.
 private val densityScale: Float
@@ -1853,13 +1860,14 @@ private fun tonePair(roles: dev.mobiler.barbershop.shared.types.ColorRoles?, ton
 private fun selectionColor(): Color? = LocalPalette.current?.selection?.color()
 
 // Text-field colours from the palette: `surface_muted` fill, `selection` focus border, label, cursor and
-// text-selection handles. Any unset role keeps the M3 default.
+// text-selection handles, `error` for the invalid state. Any unset role keeps the M3 default.
 @Composable
 private fun paletteFieldColors(): TextFieldColors {
     val pal = LocalPalette.current ?: return OutlinedTextFieldDefaults.colors()
     val d = OutlinedTextFieldDefaults.colors()
     val muted = pal.surfaceMuted?.color()
     val sel = pal.selection?.color()
+    val err = pal.error?.color()
     return OutlinedTextFieldDefaults.colors(
         focusedContainerColor = muted ?: d.focusedContainerColor,
         unfocusedContainerColor = muted ?: d.unfocusedContainerColor,
@@ -1867,6 +1875,10 @@ private fun paletteFieldColors(): TextFieldColors {
         focusedLabelColor = sel ?: d.focusedLabelColor,
         cursorColor = sel ?: d.cursorColor,
         selectionColors = sel?.let { TextSelectionColors(handleColor = it, backgroundColor = it.copy(alpha = 0.4f)) } ?: d.textSelectionColors,
+        errorBorderColor = err ?: d.errorIndicatorColor,
+        errorLabelColor = err ?: d.errorLabelColor,
+        errorSupportingTextColor = err ?: d.errorSupportingTextColor,
+        errorCursorColor = err ?: d.errorCursorColor,
     )
 }
 

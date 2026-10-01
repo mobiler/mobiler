@@ -407,6 +407,7 @@ textarea.field { resize: vertical; font-family: inherit; }
    variable. Without it the browser's default focus ring stays, as before. */
 [style*="--selection:"] .field:focus { border-color: var(--selection); outline: 2px solid var(--selection); outline-offset: -1px; }
 [style*="--selection:"] .searchfield:focus-within { border-color: var(--selection); }
+[style*="--selection:"] .field-invalid:focus { border-color: var(--error, var(--danger, #d33)); outline-color: var(--error, var(--danger, #d33)); }
 
 .check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 15px; }
 .check input { width: 18px; height: 18px; accent-color: var(--selection, var(--primary)); }

@@ -180,3 +180,14 @@ Uses:
 - An app set to Dark on a light phone opens dark from the first frame. Covered by keeping the choice in
   `cx.save` state; the Android system splash still follows the OS (ADR-0041), which we tell them.
 - A field error and a filled Danger button show the design's `err` / `err-fill`.
+
+## Amendments
+
+- **2026-10-01 (review of PR A):**
+  - The `error` role is applied to the Android field error colours and the destructive confirm button
+    directly, not through the M3 `error` slot, so setting `error` alone leaves a filled Danger button
+    unchanged, as on iOS and web.
+  - The `values-night` themes would make the Android date/time pickers follow the OS night mode; they now
+    follow the app's resolved appearance through a dialog-local context (ADR-0041 §4).
+  - Web: a focused invalid field keeps its `error` border and ring when `selection` is set.
+

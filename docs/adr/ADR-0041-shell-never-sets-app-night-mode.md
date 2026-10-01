@@ -64,12 +64,20 @@ state, then:
 Option C. The guidance is in the `with_appearance` doc comment and the `mobiler-core` README. The
 launch window itself follows the OS night mode through `values-night` themes (same release).
 
+Native dialogs the shell opens follow the model, not the OS alone: the Android date and time pickers
+get a context whose night mode is the app's resolved appearance (`pickerContext` in `Core.kt`). That
+override is local to the dialog, so the application's configuration stays the OS's.
+
 **Mutation proof:**
 - Adding `(getSystemService(UI_MODE_SERVICE) as android.app.UiModeManager).setApplicationNightMode(android.app.UiModeManager.MODE_NIGHT_YES)`
   to the template's `MainActivity.onCreate` failed the test: "ADR-0041: …/MainActivity.kt:267 calls
   setApplicationNightMode".
-- The same line with a trailing `// comment` failed it the same way (only the comment is stripped).
-- Reverting restored green.
+- The same line with a trailing `// comment` failed it the same way: only whole-line comments are
+  skipped.
+- `val u = "https://x"; androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(2)` failed it:
+  "… calls setDefaultNightMode" (a `//` inside a string does not hide the call).
+- Reverting restored green. The walk skips symlinks (`walk_skips_symlinks_and_terminates`, red with a
+  link loop before the fix).
 
 ## 5. Consequences (Positive and Negative Predictions)
 
@@ -77,6 +85,9 @@ launch window itself follows the OS night mode through `values-night` themes (sa
   state can disagree with the model.
 - **Negative:** an app that forces Dark on a light Android phone still shows a light system splash and
   launch window; the first frame after it is dark. iOS's launch screen likewise follows the OS.
+- **Positive:** the Android pickers match the app: an app forced to Light on a dark phone keeps a
+  light picker (the dark `values-night` theme would otherwise reach it), and an app forced to Dark gets a
+  dark one.
 - **Negative:** apps that already read their choice from `securestore` or `kv` must move it to their
   `cx.save` state to get a correct first frame.
 - **Negative:** the conformance test scans Kotlin sources only; a plugin or app code outside them could
