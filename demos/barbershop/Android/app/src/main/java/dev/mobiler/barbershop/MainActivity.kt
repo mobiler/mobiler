@@ -264,6 +264,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        FieldLog.init(applicationInfo)
         enableEdgeToEdge()
         // A deep link that launched the app — buffered by SystemBus until the core subscribes.
         intent?.data?.let { SystemBus.emitDeepLink(it.toString()) }
@@ -408,27 +409,57 @@ private fun ConfirmDialog(req: ConfirmRequest) {
     )
 }
 
+/** Field debug log (ADR-0040). Never on in a release build, and off by default in a debug one:
+ *  `adb shell setprop log.tag.MobilerField DEBUG`, then restart the app. It logs every edit, every
+ *  value the app renders and every adoption, each value as its length and a short hash, enough to
+ *  tell which value was adopted over which. `log.tag.MobilerFieldValues DEBUG` as well logs the raw
+ *  text. A SECURE field only ever logs its length, in every mode, for the rest of the field's life. */
+private object FieldLog {
+    var on = false
+        private set
+    private var values = false
+
+    /** Called once from `onCreate`, before any field exists. */
+    fun init(info: android.content.pm.ApplicationInfo) {
+        val debuggable = (info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        on = debuggable && android.util.Log.isLoggable("MobilerField", android.util.Log.DEBUG)
+        values = on && android.util.Log.isLoggable("MobilerFieldValues", android.util.Log.DEBUG)
+    }
+
+    /** The only way a field's text reaches the log. */
+    fun show(text: String?, secure: Boolean): String = when {
+        text == null -> "none"
+        secure -> "<secure len=${text.length}>"
+        values -> "'$text'"
+        else -> "<len=${text.length} #${"%04x".format(text.hashCode() and 0xffff)}>"
+    }
+
+    fun show(texts: Collection<String>, secure: Boolean): String = texts.joinToString(", ", "[", "]") { show(it, secure) }
+
+    fun d(msg: () -> String) {
+        if (on) android.util.Log.d("MobilerField", msg())
+    }
+}
+
 /** Local editing state for a controlled text field. The field owns its text, cursor and
  *  selection; the app's rendered `value` is adopted only when it isn't an echo of an edit the
  *  field itself sent (a current or a late one), so a delayed render can never rewind the text
  *  or move the cursor. An app-side change — clear, formatting, or rejecting/reformatting an
  *  edit (e.g. max length, digits only) — is adopted, cursor at the end. */
-/** Field debug log, off by default: `adb shell setprop log.tag.MobilerField DEBUG`, then restart
- *  the app. Logs every edit, every value the app renders and every adoption, so a field that shows
- *  the wrong text can be traced to what it was given. */
-private val fieldLog = android.util.Log.isLoggable("MobilerField", android.util.Log.DEBUG)
-
-private fun logField(msg: () -> String) {
-    if (fieldLog) android.util.Log.d("MobilerField", msg())
-}
-
 private class FieldSync(initial: String) {
     var field by mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
     private val pending = ArrayDeque<String>()
     private var lastApp: String? = initial
 
+    /** Sticky: a field that was ever SECURE (a show-password toggle flips the kind) logs as one. */
+    private var secure = false
+
+    fun noteKind(kind: FieldKind) {
+        if (kind == FieldKind.SECURE) secure = true
+    }
+
     fun onEdit(next: TextFieldValue, send: (String) -> Unit) {
-        logField { "edit '${next.text}' (composing ${next.composition}) over '${field.text}'; pending $pending" }
+        FieldLog.d { "edit ${FieldLog.show(next.text, secure)} (composing ${next.composition}) over ${FieldLog.show(field.text, secure)}; pending ${FieldLog.show(pending, secure)}" }
         val changed = next.text != field.text
         field = next
         if (changed) {
@@ -441,7 +472,7 @@ private class FieldSync(initial: String) {
     }
 
     fun onAppValue(v: String) {
-        logField { "app '$v' (last app '$lastApp'); field '${field.text}'; pending $pending" }
+        FieldLog.d { "app ${FieldLog.show(v, secure)} (last app ${FieldLog.show(lastApp, secure)}); field ${FieldLog.show(field.text, secure)}; pending ${FieldLog.show(pending, secure)}" }
         if (v == lastApp) return
         lastApp = v
         // lastIndexOf drops every older entry on a match; a repeated text (a, "", a) can
@@ -454,7 +485,7 @@ private class FieldSync(initial: String) {
         }
         pending.clear()
         if (v != field.text) {
-            logField { "adopt '$v' over '${field.text}' (composing ${field.composition})" }
+            FieldLog.d { "adopt ${FieldLog.show(v, secure)} over ${FieldLog.show(field.text, secure)} (composing ${field.composition})" }
             field = TextFieldValue(v, TextRange(v.length))
         }
     }
@@ -1282,6 +1313,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 else -> KeyboardType.Text
             }
             val sync = remember(widget.id) { FieldSync(widget.value) }
+            sync.noteKind(widget.kind)
             SideEffect { sync.onAppValue(widget.value) }
             OutlinedTextField(
                 shape = shapeOf { it.input } ?: OutlinedTextFieldDefaults.shape,
