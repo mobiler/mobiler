@@ -130,7 +130,8 @@ your design's backgrounds:
 `values/mobiler_splash.xml` also names the Android 12+ splash icon (the launcher icon by default). These
 files belong to your app: `mobiler upgrade` creates them when they are missing and never changes them. A
 later release will write them from `mobiler.toml`. To open in the app's own light/dark choice from the first
-frame, keep that choice in your `cx.save` state.
+frame, keep that choice in your `cx.save` state. Your own Android theme items go in
+`res/values/themes.xml`; they apply in light and dark mode and on every Android version.
 
 ## Debugging a text field on Android
 

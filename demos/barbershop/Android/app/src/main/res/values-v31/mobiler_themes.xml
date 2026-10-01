@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Framework-owned: the launch window and splash for this mode. Colours and icon live in the app's
+     mobiler_splash.xml; customise the app's own theme in values/themes.xml. -->
 <resources>
     <!-- Android 12+ system splash. Its background is set explicitly: the splash derives it from
          windowBackground only when that is a plain colour, and mobiler_launch is a layer-list. -->
-    <style name="Theme.{{NAME}}" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Base.Theme.Fadehouse" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@drawable/mobiler_launch</item>
         <item name="android:windowSplashScreenBackground">@color/mobiler_splash_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/mobiler_splash_icon</item>

@@ -190,4 +190,10 @@ Uses:
   - The `values-night` themes would make the Android date/time pickers follow the OS night mode; they now
     follow the app's resolved appearance through a dialog-local context (ADR-0041 §4).
   - Web: a focused invalid field keeps its `error` border and ring when `selection` is set.
+- **2026-10-01 (review of PR B):** the launch-window themes are split from the app's theme. The app-facing
+  `Theme.<Name>` lives only in `values/themes.xml`, with `parent="Base.Theme.<Name>"`; the light, dark and
+  `-v31` variants define only `Base.Theme.<Name>`, in `mobiler_themes.xml` files. As first written, each
+  variant redefined `Theme.<Name>`: an app's own theme items were lost on Android 12+ and in dark mode
+  (Android doesn't merge a style across qualifiers), and the template's `values-night/themes.xml` could
+  overwrite an app's own on `upgrade --apply`. Seed writes also never follow a symlink (ADR-0042).
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Framework-owned: the launch window and splash for this mode. Colours and icon live in the app's
+     mobiler_splash.xml; customise the app's own theme in values/themes.xml. -->
+<resources>
+    <style name="Base.Theme.{{NAME}}" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/mobiler_launch</item>
+    </style>
+</resources>

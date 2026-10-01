@@ -226,12 +226,19 @@ fn sync_file(
         return Ok(());
     }
     if class == Class::Seed {
+        // Missing means nothing at the path at all, not even a (dangling) symlink; `create_new` then
+        // refuses to follow one created in between.
         let dst = root.join(&rel);
-        if !dst.exists() {
+        if dst.symlink_metadata().is_err() {
             if let Some(parent) = dst.parent() {
                 fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
             }
-            fs::write(&dst, &desired).with_context(|| format!("writing {}", dst.display()))?;
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&dst)
+                .with_context(|| format!("creating {}", dst.display()))?;
+            std::io::Write::write_all(&mut f, &desired).with_context(|| format!("writing {}", dst.display()))?;
             report.added.push(rel.to_string_lossy().to_string());
         }
         return Ok(());
@@ -835,13 +842,54 @@ mod test {
     }
 
     #[test]
-    fn existing_night_theme_is_not_overwritten() {
+    fn existing_night_theme_is_not_overwritten_even_with_apply() {
         let root = skeleton();
         let night = "Android/app/src/main/res/values-night/themes.xml";
         fs::create_dir_all(root.join(night).parent().unwrap()).unwrap();
         fs::write(root.join(night), "<resources><!-- my night --></resources>\n").unwrap();
-        upgrade_at(&root, false).unwrap();
+        upgrade_at(&root, true).unwrap();
         assert_eq!(read(&root, night), "<resources><!-- my night --></resources>\n");
+        assert!(!root.join(format!("{night}.mobiler-new")).exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The app-facing theme style lives only in `values/themes.xml`; the light/dark/v31 variants define
+    /// `Base.Theme.*`, so an app's own items on its theme apply in every configuration, and an app that
+    /// keeps its old `themes.xml` is not overridden by a variant (Android doesn't merge a style across
+    /// resource qualifiers).
+    #[test]
+    fn only_the_base_theme_file_defines_the_app_theme() {
+        let mut found = Vec::new();
+        fn walk(dir: &Dir<'_>, found: &mut Vec<String>) {
+            for e in dir.entries() {
+                match e {
+                    include_dir::DirEntry::Dir(d) => walk(d, found),
+                    include_dir::DirEntry::File(f) => {
+                        let p = f.path().to_string_lossy().replace('\\', "/");
+                        if p.starts_with("Android/app/src/main/res/") && f.contents_utf8().is_some_and(|t| t.contains("<style name=\"Theme.{{NAME}}\"")) {
+                            found.push(p);
+                        }
+                    }
+                }
+            }
+        }
+        walk(&TEMPLATES, &mut found);
+        assert_eq!(found, ["Android/app/src/main/res/values/themes.xml"]);
+        let base = TEMPLATES.get_file("Android/app/src/main/res/values/themes.xml").unwrap().contents_utf8().unwrap();
+        assert!(base.contains("parent=\"Base.Theme.{{NAME}}\""), "the app theme must inherit the framework's Base theme");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seed_write_does_not_follow_a_symlink() {
+        let root = skeleton();
+        let outside = root.with_extension("outside");
+        let _ = fs::remove_file(&outside);
+        let seed = root.join(SEED_PATHS[0]);
+        fs::create_dir_all(seed.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &seed).unwrap(); // dangling: exists() is false
+        let _ = upgrade_at(&root, true);
+        assert!(!outside.exists(), "the seed write followed a symlink out of the project");
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -5,7 +5,7 @@ Date decided:  2026-10-01
 Deciding PRs:  #266
 Supersedes:    none
 Code anchor:   mobiler/src/upgrade.rs (`Class::Seed`, `SEED_PATHS`, `classify`, `sync_file`, `seed_dir`)
-Conformance:   mobiler/src/upgrade.rs::seed_paths_classify_as_seed_and_exist_in_the_template, mobiler/src/upgrade.rs::missing_seed_files_are_created_and_existing_ones_never_touched
+Conformance:   mobiler/src/upgrade.rs::seed_paths_classify_as_seed_and_exist_in_the_template, mobiler/src/upgrade.rs::missing_seed_files_are_created_and_existing_ones_never_touched, mobiler/src/upgrade.rs::seed_write_does_not_follow_a_symlink
 
 ## 1. Context (The Problem)
 
@@ -43,7 +43,10 @@ merged, overwritten or baselined after that, then:
   every seed file; an edited seed file stays byte-identical across `upgrade --apply`, gets no
   `.mobiler-new` and no baseline.
   - **Validation Metric:** `missing_seed_files_are_created_and_existing_ones_never_touched`; also
-    `seed_files_created_even_when_theme_is_offered_as_new` and `existing_night_theme_is_not_overwritten`.
+    `seed_files_created_even_when_theme_is_offered_as_new`.
+- **Condition 3 — a seed write stays in the project.** A seed path occupied by anything, even a dangling
+  symlink, counts as present; the file is created with `create_new`, so a link is never followed.
+  - **Validation Metric:** `seed_write_does_not_follow_a_symlink`.
 
 ## 3. Considered Options & Rationale for Refutation
 
@@ -60,7 +63,17 @@ merged, overwritten or baselined after that, then:
 ## 4. Decision & Rationale for Corroboration
 
 Option C. `SEED_PATHS` lists the four files; `classify` checks it before the `Own` rules; `sync_file`
-writes a missing seed file and reports it as added; `seed_dir` (the baseline writer) skips seed files.
+writes a missing seed file (`create_new`, only when nothing is at the path) and reports it as added;
+`seed_dir` (the baseline writer) skips seed files.
+
+The seed values are kept apart from theme structure. The app-facing `Theme.<Name>` lives only in
+`values/themes.xml` with `parent="Base.Theme.<Name>"`; the framework's light, dark and Android 12+
+variants define only `Base.Theme.<Name>`, in `mobiler_themes.xml` files of their own. So an app's items
+on its theme apply in every configuration, an app that keeps its old `themes.xml` is not overridden by a
+variant (Android does not merge a style across resource qualifiers), and no template file collides with
+an app's own `values-night/themes.xml` (`existing_night_theme_is_not_overwritten_even_with_apply`,
+`only_the_base_theme_file_defines_the_app_theme`; both failed against the first layout, where each
+variant redefined `Theme.<Name>`).
 
 **Mutation proof:**
 - Removing the `SEED_PATHS` check from `classify` failed `seed_paths_classify_as_seed_and_exist_in_the_template`,
@@ -68,7 +81,10 @@ writes a missing seed file and reports it as added; `seed_dir` (the baseline wri
   `seed_files_created_even_when_theme_is_offered_as_new`.
 - Writing the seed file even when it exists failed `missing_seed_files_are_created_and_existing_ones_never_touched`:
   "seed file left byte-identical".
-- Reverting restored green (94/94).
+- Before the fix, a dangling symlink at a seed path made the upgrade create the link's target outside
+  the project: `seed_write_does_not_follow_a_symlink` failed ("the seed write followed a symlink out of
+  the project").
+- Reverting each mutation restored green (96/96).
 
 ## 5. Consequences (Positive and Negative Predictions)
 
@@ -76,6 +92,8 @@ writes a missing seed file and reports it as added; `seed_dir` (the baseline wri
   apps can hand-edit them meanwhile.
 - **Negative:** a template change to a seed file's *default* never reaches existing apps; only new
   apps get it. A seed file must therefore hold values, not structure the shell depends on.
+- **Negative:** like every file a new version adds, seed files are created by a plain `mobiler upgrade`
+  too, not only with `--apply`.
 - **Negative:** deleting a seed file makes the next upgrade restore the default, which may surprise an
   app that removed it on purpose (its themes reference it, so removal breaks the build anyway).
 - **Negative:** the list is explicit; a new seed file needs a code change, and the template-shipped

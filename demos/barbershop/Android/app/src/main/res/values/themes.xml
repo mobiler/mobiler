@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Fadehouse" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@drawable/mobiler_launch</item>
-    </style>
+    <!-- The app's theme. Add your own items here: they apply in light and dark mode and on every
+         Android version. The window and splash come from Base.Theme.Fadehouse (mobiler_themes.xml). -->
+    <style name="Theme.Fadehouse" parent="Base.Theme.Fadehouse" />
 </resources>
