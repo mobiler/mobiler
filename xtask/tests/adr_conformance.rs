@@ -211,3 +211,29 @@ fn adr_0040_field_log_is_debug_only_and_never_logs_secure_text() {
     }
     assert!(checked >= 2, "ADR-0040: expected the template's and barbershop's field log, checked {checked}");
 }
+
+/// ADR-0041: no shell sets an app-level night mode, so the configuration the shell reads the OS
+/// appearance from stays the OS's. Checked over every Kotlin source of the template and the demos.
+#[test]
+fn adr_0041_no_shell_sets_an_app_level_night_mode() {
+    let mut stack = vec![root().join("mobiler/templates/Android"), root().join("demos")];
+    let mut checked = 0;
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())).flatten() {
+            let path = entry.path();
+            if path.is_dir() && !["build", "target", "node_modules", ".gradle"].iter().any(|s| path.ends_with(s)) {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "kt") {
+                checked += 1;
+                let kt = std::fs::read_to_string(&path).unwrap();
+                for (i, line) in kt.lines().enumerate() {
+                    let code = line.split("//").next().unwrap_or("");
+                    for call in ["setApplicationNightMode", "setDefaultNightMode"] {
+                        assert!(!code.contains(call), "ADR-0041: {}:{} calls {call}", path.strip_prefix(root()).unwrap().display(), i + 1);
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 20, "ADR-0041: expected the shells' Kotlin sources, checked {checked}");
+}

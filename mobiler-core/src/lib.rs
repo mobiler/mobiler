@@ -1479,6 +1479,11 @@ pub fn with_labels(widget: Widget, labels: ShellLabels) -> Widget {
 
 /// Choose Light / Dark / System for the scaffold. `System` follows the OS live on every shell and
 /// switches the theme palette's light/dark set by itself; `dark_mode` is then ignored.
+///
+/// To open in the app's own choice from the first frame, keep that choice in the app's `cx.save` state
+/// (it is not a secret): `Restore` arrives before `Start`, so the first render already carries it. A value
+/// read in `init` from `securestore` or `kv` arrives after the first frame. The Android system splash still
+/// follows the OS appearance (ADR-0041).
 #[must_use]
 pub fn with_appearance(widget: Widget, appearance: Appearance) -> Widget {
     match widget {

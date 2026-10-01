@@ -44,7 +44,9 @@ pub type App = MobilerShell<Counter>;
   (Compact/Comfortable/Large — `Large` scales up control sizing and spacing for touch)
   all flow through the `Widget` tree, plus a design system's tokens: a light/dark `Palette` of
   colour roles, `with_appearance` (Light/Dark/System), custom fonts (`FontFamily::Custom` +
-  `mobiler fonts sync`), a per-style `TypeScale`, and per-component corner `Shapes`.
+  `mobiler fonts sync`), a per-style `TypeScale`, and per-component corner `Shapes`. To open in
+  the app's own appearance choice from the first frame, keep it in `cx.save` state: `Restore`
+  arrives before `Start`, while a `securestore` read arrives after the first frame.
 - **Feedback & actions** — `cx.snackbar` (with an optional Undo), an extended FAB
   (`with_extended_fab`), a pinned bottom bar for a screen's main actions (`with_bottom_bar`),
   a step indicator (`steps` / `with_step_caption`), status badges with icons (`with_icon`),
@@ -67,6 +69,9 @@ Most users go through the [`mobiler`](https://crates.io/crates/mobiler) CLI, whi
 scaffolds a project wired to this crate and a generic native shell.
 
 ## Upgrading
+
+**Breaking in mobiler-ui 0.30 / mobiler-core 0.41:** `ColorRoles` gained `selection`, `error`,
+`error_fill` and `on_error_fill`. A full `ColorRoles { … }` literal needs `..Default::default()`.
 
 **Breaking in mobiler-ui 0.29 / mobiler-core 0.40** (the design release — additive in spirit,
 but new fields on existing types):
