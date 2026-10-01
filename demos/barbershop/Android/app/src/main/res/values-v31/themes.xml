@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ system splash. Its background is set explicitly: the splash derives it from
+         windowBackground only when that is a plain colour, and mobiler_launch is a layer-list. -->
+    <style name="Theme.Fadehouse" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/mobiler_launch</item>
+        <item name="android:windowSplashScreenBackground">@color/mobiler_splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/mobiler_splash_icon</item>
+    </style>
+</resources>

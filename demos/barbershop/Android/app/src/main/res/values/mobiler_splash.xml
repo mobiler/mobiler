@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launch window and splash. App-owned: `mobiler upgrade` creates this file when missing and never
+     changes it. Edit the colours to your design's backgrounds; a later mobiler release can write them from
+     mobiler.toml [splash]. -->
+<resources>
+    <color name="mobiler_splash_background">#FFFAF7F0</color>
+    <drawable name="mobiler_splash_icon">@mipmap/ic_launcher</drawable>
+</resources>
