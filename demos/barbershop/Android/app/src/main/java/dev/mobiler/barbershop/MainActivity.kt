@@ -1871,6 +1871,7 @@ private fun paletteFieldColors(): TextFieldColors {
     return OutlinedTextFieldDefaults.colors(
         focusedContainerColor = muted ?: d.focusedContainerColor,
         unfocusedContainerColor = muted ?: d.unfocusedContainerColor,
+        errorContainerColor = muted ?: d.errorContainerColor,
         focusedBorderColor = sel ?: d.focusedIndicatorColor,
         focusedLabelColor = sel ?: d.focusedLabelColor,
         cursorColor = sel ?: d.cursorColor,
