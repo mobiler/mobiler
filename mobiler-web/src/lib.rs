@@ -2782,6 +2782,10 @@ fn palette_css(p: &ColorRoles) -> String {
             }
         }
     }
+    put_rgb(&mut s, &["--selection"], p.selection);
+    put_rgb(&mut s, &["--error"], p.error);
+    put_rgb(&mut s, &["--error-fill"], p.error_fill);
+    put_rgb(&mut s, &["--on-error-fill"], p.on_error_fill);
     if let Some(a) = p.scrim {
         s.push_str(&format!("--scrim:rgba({},{},{},{:.3});", a.r, a.g, a.b, f32::from(a.a) / 255.0));
     }
@@ -3345,6 +3349,39 @@ mod palette_tests {
         assert!(css.contains("--primary-text:rgb(111,203,187);"));
         assert!(!css.contains("--accent:"), "primary_text must not override --accent (it also paints fills)");
         assert!(css.contains("--accent-soft:rgb(49,74,72);--seg-sel-bg:rgb(49,74,72);"));
+    }
+
+    #[test]
+    fn palette_css_emits_selection_and_error_roles_only_when_set() {
+        assert_eq!(palette_css(&ColorRoles::default()), "");
+        let r = ColorRoles {
+            selection: Some(Rgb::hex(0x4fb3a4)),
+            error: Some(Rgb::hex(0xff8f85)),
+            error_fill: Some(Rgb::hex(0xc0392b)),
+            ..Default::default()
+        };
+        let css = palette_css(&r);
+        assert!(css.contains("--selection:rgb(79,179,164);"));
+        assert!(css.contains("--error:rgb(255,143,133);"));
+        assert!(css.contains("--error-fill:rgb(192,57,43);"));
+        assert!(!css.contains("--on-error-fill"), "unset on_error_fill emits nothing (falls back to today's ink)");
+    }
+
+    #[test]
+    fn palette_without_new_roles_gives_the_same_css_as_before() {
+        let r = ColorRoles { background: Some(Rgb::hex(0x231f20)), primary: Some(Rgb::hex(0x1f8276)), ..Default::default() };
+        assert_eq!(palette_css(&r), "--bg:rgb(35,31,32);--primary:rgb(31,130,118);--pal-primary:rgb(31,130,118);");
+    }
+
+    /// A focused invalid field keeps its error border and ring when `selection` paints focus marks:
+    /// the error rule comes after the focus rule at the same specificity.
+    #[test]
+    fn focused_invalid_field_keeps_the_error_colour() {
+        let focus = STYLE.find("[style*=\"--selection:\"] .field:focus {").expect("selection focus rule");
+        let invalid = STYLE
+            .find("[style*=\"--selection:\"] .field-invalid:focus { border-color: var(--error, var(--danger, #d33)); outline-color: var(--error, var(--danger, #d33)); }")
+            .expect("a focused invalid field must keep the error colour");
+        assert!(invalid > focus, "the error rule must follow the focus rule to win at equal specificity");
     }
 
     #[test]

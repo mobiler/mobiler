@@ -1383,8 +1383,17 @@ fn moj_termin_palette() -> Palette {
         danger: pair(0x4d2626, 0xffb4ab),
         info: pair(0x25324a, 0xc7d8ff),
         scrim: Some(Rgba::new(0, 0, 0, 82)),
+        selection: Some(Rgb::hex(0x4fb3a4)),
+        error: Some(Rgb::hex(0xff8f85)),
+        error_fill: Some(Rgb::hex(0xc0392b)),
+        on_error_fill: Some(Rgb::hex(0xffffff)),
+        ..Default::default()
     };
     let light = ColorRoles {
+        selection: Some(Rgb::hex(0x1f8276)),
+        error: Some(Rgb::hex(0xb3261e)),
+        error_fill: Some(Rgb::hex(0xb3261e)),
+        on_error_fill: Some(Rgb::hex(0xffffff)),
         background: Some(Rgb::hex(0xfaf7f0)),
         surface: Some(Rgb::hex(0xffffff)),
         surface_bar: Some(Rgb::hex(0xf0ebe1)),

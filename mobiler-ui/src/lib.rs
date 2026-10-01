@@ -482,7 +482,7 @@ pub struct ColorRoles {
     pub outline: Option<Rgb>,
     /// Hairlines and dividers.
     pub outline_variant: Option<Rgb>,
-    /// Filled buttons, selected calendar day, toggles.
+    /// Filled buttons, selected calendar day, toggles (unless `selection` is set).
     pub primary: Option<Rgb>,
     pub on_primary: Option<Rgb>,
     /// Primary-coloured text/icons on the background (text buttons, selected tab, back button).
@@ -492,13 +492,24 @@ pub struct ColorRoles {
     pub on_secondary_container: Option<Rgb>,
     pub fab: Option<Rgb>,
     pub on_fab: Option<Rgb>,
-    /// One container/on-container pair per [`Tone`]. Filled toned buttons swap the pair.
+    /// One container/on-container pair per [`Tone`]. Filled toned buttons swap the pair (Danger: unless
+    /// `error_fill` is set).
     pub success: Option<TonePair>,
     pub warning: Option<TonePair>,
     pub danger: Option<TonePair>,
     pub info: Option<TonePair>,
     /// Sheet and dialog scrim.
     pub scrim: Option<Rgba>,
+    /// Focus and selection marks: the focused field's border, label and cursor, checked toggles and
+    /// checkboxes, sliders, progress. Unset: the shell's current colour (`primary` on most shells).
+    pub selection: Option<Rgb>,
+    /// Error text and the invalid field's border; outlined and text Danger buttons. Unset: `danger`'s
+    /// on-container colour, as before.
+    pub error: Option<Rgb>,
+    /// A filled Danger button's background. Unset: the `danger` pair, swapped, as before.
+    pub error_fill: Option<Rgb>,
+    /// A filled Danger button's text. Unset: as before.
+    pub on_error_fill: Option<Rgb>,
 }
 
 /// A tone's soft background and its foreground.
@@ -1048,6 +1059,20 @@ mod tests {
         let theme = Theme { palette: Some(Palette { light: ColorRoles::default(), dark }), ..Default::default() };
         round_trips(&theme);
         assert_eq!(ColorRoles::default().surface, None);
+    }
+
+    #[test]
+    fn selection_and_error_roles_round_trip_and_default_to_none() {
+        let d = ColorRoles::default();
+        assert_eq!((d.selection, d.error, d.error_fill, d.on_error_fill), (None, None, None, None));
+        let dark = ColorRoles {
+            selection: Some(Rgb::hex(0x4fb3a4)),
+            error: Some(Rgb::hex(0xff8f85)),
+            error_fill: Some(Rgb::hex(0xc0392b)),
+            on_error_fill: Some(Rgb::hex(0xffffff)),
+            ..Default::default()
+        };
+        round_trips(&Theme { palette: Some(Palette { light: ColorRoles::default(), dark }), ..Default::default() });
     }
 
     #[test]

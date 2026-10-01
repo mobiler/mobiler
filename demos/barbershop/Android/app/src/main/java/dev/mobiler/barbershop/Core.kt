@@ -386,7 +386,7 @@ class DateTimePlugin : MobilerPlugin {
                 when (op) {
                     "date" -> {
                         val dlg = DatePickerDialog(
-                            activity,
+                            pickerContext(activity),
                             { _, y, m, d -> done(PluginResponse(true, String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m + 1, d))) },
                             now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH),
                         )
@@ -400,7 +400,7 @@ class DateTimePlugin : MobilerPlugin {
                     }
                     "time" -> {
                         val dlg = TimePickerDialog(
-                            activity,
+                            pickerContext(activity),
                             { _, h, min -> done(PluginResponse(true, String.format(java.util.Locale.US, "%02d:%02d", h, min))) },
                             now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), true,
                         )
@@ -710,4 +710,14 @@ class Core(application: Application) : AndroidViewModel(application) {
             emit(pluginFailed(plugin, e))
         }
     }
+}
+
+/** The date/time picker dialogs follow the app's resolved appearance (`ActiveAppearance`, set by App()),
+ *  not the OS night mode alone: the app theme resolved for that mode (its values / values-night
+ *  variant). Only this dialog's context is overridden; the app's configuration stays the OS's (ADR-0041). */
+private fun pickerContext(activity: Activity): android.content.Context {
+    val conf = android.content.res.Configuration(activity.resources.configuration)
+    val night = if (ActiveAppearance.dark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO
+    conf.uiMode = (conf.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or night
+    return android.view.ContextThemeWrapper(activity, activity.applicationInfo.theme).apply { applyOverrideConfiguration(conf) }
 }
