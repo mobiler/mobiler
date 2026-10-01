@@ -141,3 +141,73 @@ fn adr_0039_android_minimum_is_api_26() {
         assert_eq!(min, ["26"], "ADR-0039: {shell}/{module}/build.gradle.kts must set minSdk = 26");
     }
 }
+
+/// ADR-0040: the Android field debug log never runs in a release build, and never logs a SECURE
+/// field's text. Checked on every Android shell that has the log: the template's and any demo's.
+#[test]
+fn adr_0040_field_log_is_debug_only_and_never_logs_secure_text() {
+    let mut shells = vec![root().join("mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt")];
+    let mut stack = vec![root().join("demos")];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())).flatten() {
+            let path = entry.path();
+            if path.is_dir() && !["build", "target", "node_modules", ".gradle"].iter().any(|s| path.ends_with(s)) {
+                stack.push(path);
+            } else if path.file_name().is_some_and(|n| n == "MainActivity.kt") {
+                shells.push(path);
+            }
+        }
+    }
+    let mut checked = 0;
+    for path in &shells {
+        let kt = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        if !kt.contains("\"MobilerField\"") {
+            continue;
+        }
+        checked += 1;
+        let at = path.strip_prefix(root()).unwrap().display();
+
+        // Only two lines name the tag: the gate, and the one write, behind it.
+        for line in kt.lines().filter(|l| l.contains("\"MobilerField\"")) {
+            let line = line.trim();
+            assert!(
+                line.starts_with("on = debuggable && android.util.Log.isLoggable(\"MobilerField\"")
+                    || line == "if (on) android.util.Log.d(\"MobilerField\", msg())",
+                "ADR-0040: {at}: the MobilerField tag is used outside the gate and the gated write: {line}"
+            );
+        }
+        assert!(
+            kt.contains("val debuggable = (info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0"),
+            "ADR-0040: {at}: the field log must be gated on the app being debuggable"
+        );
+        assert!(kt.contains("values = on && "), "ADR-0040: {at}: raw values need the log itself on");
+        assert!(kt.contains("FieldLog.init(applicationInfo)"), "ADR-0040: {at}: onCreate must initialise the gate");
+
+        // `show` answers SECURE before any branch that could print the text.
+        let show = kt.split_once("fun show(text: String?, secure: Boolean)").map(|(_, b)| b).unwrap_or_else(|| panic!("ADR-0040: {at}: no FieldLog.show"));
+        let show = &show[..show.find("\n    }").unwrap_or(show.len())];
+        let secure = show.find("secure -> \"<secure len=${text.length}>\"").unwrap_or_else(|| panic!("ADR-0040: {at}: show must log a SECURE value as its length only"));
+        let values = show.find("values ->").unwrap_or_else(|| panic!("ADR-0040: {at}: show has no values branch"));
+        assert!(secure < values, "ADR-0040: {at}: show must check secure before printing raw values");
+
+        // Every log message interpolates a field's text only through `show`.
+        let messages: Vec<&str> = kt.lines().filter(|l| l.contains("FieldLog.d {")).collect();
+        assert!(!messages.is_empty(), "ADR-0040: {at}: no FieldLog.d messages found");
+        for line in messages {
+            for (i, _) in line.match_indices('$') {
+                let rest = &line[i + 1..];
+                let ok = rest.starts_with("{FieldLog.show(")
+                    || rest.split_once('}').is_some_and(|(expr, _)| {
+                        expr.strip_prefix('{').and_then(|e| e.strip_suffix(".composition")).is_some_and(|v| v.chars().all(|c| c.is_alphanumeric()))
+                    });
+                assert!(ok, "ADR-0040: {at}: a field log message interpolates text without FieldLog.show: {}", line.trim());
+            }
+        }
+
+        // A TextField tells its FieldSync its kind before the field is drawn.
+        let text_field = kt.split_once("is Widget.TextField ->").map(|(_, b)| b).unwrap_or_else(|| panic!("ADR-0040: {at}: no TextField branch"));
+        let before_draw = &text_field[..text_field.find("OutlinedTextField(").expect("TextField draws an OutlinedTextField")];
+        assert!(before_draw.contains("sync.noteKind(widget.kind)"), "ADR-0040: {at}: the TextField must note its kind on its FieldSync");
+    }
+    assert!(checked >= 2, "ADR-0040: expected the template's and barbershop's field log, checked {checked}");
+}

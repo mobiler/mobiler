@@ -118,18 +118,23 @@ version; where Android itself only has a feature on newer versions, older phones
 
 ## Debugging a text field on Android
 
-If a `text_field` / `search_field` shows text you didn't expect, turn on the field log, restart the
-app, and reproduce:
+If a `text_field` / `search_field` shows text you didn't expect, turn on the field log in a **debug
+build**, restart the app, and reproduce. A release build never logs, whatever the device's settings
+([ADR-0040](https://github.com/mobiler/mobiler/blob/main/docs/adr/ADR-0040-field-log-debug-only-never-secure.md)).
 
 ```bash
-adb shell setprop log.tag.MobilerField DEBUG   # off again: … MobilerField INFO
+adb shell setprop log.tag.MobilerField DEBUG         # off again: … MobilerField INFO
+adb shell setprop log.tag.MobilerFieldValues DEBUG   # optional: raw text instead of length + hash
 adb logcat -s MobilerField
 ```
 
 Each keystroke logs the edit the field received, each render logs the value the app sent, and an
-`adopt` line marks the field taking the app's value. When scripting input with `adb shell input
-text`, wait until the keyboard is shown (`adb shell dumpsys input_method | grep mInputShown=true`)
-before typing: a key injected while the keyboard is still starting can be delivered twice.
+`adopt` line marks the field taking the app's value. Values show as `<len=N #hash>`, enough to tell
+which value was adopted over which; with `MobilerFieldValues` on they show as text. A `secure_field`
+only ever shows `<secure len=N>`.
+
+When scripting input with `adb shell input text`, wait until the keyboard is shown
+(`adb shell dumpsys input_method | grep mInputShown=true`) before typing: a key injected while the keyboard is still starting can be delivered twice.
 
 ## Plugins
 
