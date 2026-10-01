@@ -1,6 +1,6 @@
 # ADR-0012: `mobiler upgrade` refreshes an app's generated files by a three-way merge against the stored `.mobiler/base/` snapshot; a conflict is left as `<file>.mobiler-new` and never applied, and the app's own code is never touched
 
-Status:        Accepted
+Status:        Superseded by ADR-0043
 Date decided:  2026-06-01
 Deciding PRs:  #44 (the three-way merge); built on #33 (2026-05-31, the command, file classes and review-first default) and #43 (2026-06-01, anchor splice); fixed by #194 (2026-07-19, a new anchor no longer fails the fallback)
 Supersedes:    none

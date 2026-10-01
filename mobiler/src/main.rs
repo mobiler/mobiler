@@ -88,7 +88,7 @@ enum Command {
         name: Option<String>,
     },
     /// Update this app's generic native shells + `mobiler-core` dep to the CLI's templates.
-    /// Non-destructive by default (writes `<file>.mobiler-new`); `--apply` overwrites in place
+    /// Non-destructive by default (writes `<file>.mobiler-new`; Android resources under `.mobiler/new/`); `--apply` overwrites in place
     /// (saving the old file under `.mobiler/backup/`). Never touches your Rust app code or plugin-patched files.
     Upgrade {
         /// Overwrite changed shell files in place instead of writing `.mobiler-new` (the

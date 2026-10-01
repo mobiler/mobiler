@@ -280,11 +280,13 @@ shell-drawn text (back buttons, "Load more"/"Refresh", confirm/picker defaults, 
 PDF error text and web iframe titles) once, on the scaffold.
 
 A `Theme` can also carry a full **design system**: `palette` (light + dark colour roles — page, cards,
-bars, text, outlines, primary, status pairs), `font: FontFamily::Custom` with your own display and body
+bars, text, outlines, primary, status pairs, focus and selection marks, error text and fills), `font: FontFamily::Custom` with your own display and body
 font files (`mobiler.toml` `[fonts]`, synced into every shell by the CLI), and a `type_scale` (size,
 weight and font role per text style, including the `display(...)` / `headline(...)` styles).
 `with_appearance(Light | Dark | System)` follows the phone's light/dark setting live. Anything you
-leave unset keeps the stock look.
+leave unset keeps the stock look. The launch window and Android 12+ splash follow the phone's
+light/dark setting too, in colours you set once (see *Launch window colours* in the
+[CLI README](mobiler/README.md)).
 
 **Fade House** ([`demos/barbershop`](demos/barbershop/)) — a barbershop booking demo: a
 brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar
@@ -362,10 +364,13 @@ and the new template — exactly like `git merge`. Framework improvements apply 
 plugin injections are preserved; only genuinely overlapping changes become a conflict, written as
 `<file>.mobiler-new` with `<<<<<<<`/`>>>>>>>` markers (never auto-applied). It **never** touches your
 Rust app code (`shared/src/`). It also bumps your `mobiler-core` dependency. By default a clean merge
-is offered as `<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit
-`.mobiler/` so the baseline (and version stamp) travel with the repo; `.mobiler/backup/` is skipped by the
-template's `.gitignore`. Apps scaffolded before baselines
-existed fall back to a conservative reconcile and get a baseline written for next time.
+is offered as `<file>.mobiler-new` (for an Android resource file, under `.mobiler/new/`, since a stray file in
+`res/` breaks the Android build); `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit
+`.mobiler/` so the baseline (and version stamp) travel with the repo; `.mobiler/backup/` and `.mobiler/new/` are
+skipped by the template's `.gitignore`. Apps scaffolded before baselines
+existed fall back to a conservative reconcile and get a baseline written for next time. A few
+app-owned files the template provides defaults for (the launch window colours) are created when
+missing and never changed after that.
 
 ### Breaking changes in your app code
 
@@ -374,6 +379,8 @@ existed fall back to a conservative reconcile and get a baseline written for nex
 - **Breaking in mobiler-ui 0.29 / mobiler-core 0.40:** `Theme` gained `palette` (and further
   design-release fields follow). Code that lists every field in a `Theme { … }` literal no longer
   compiles. Write `Theme { seed, ..Default::default() }` and set only what you need.
+- **Breaking in mobiler-ui 0.30 / mobiler-core 0.41:** `ColorRoles` gained `selection`, `error`,
+  `error_fill` and `on_error_fill`. A full `ColorRoles { … }` literal needs `..Default::default()`.
 
 ## License
 

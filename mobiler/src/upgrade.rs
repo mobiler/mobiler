@@ -10,7 +10,8 @@
 //! A clean merge is written in place with `--apply` (saving the old file under `.mobiler/backup/`), or offered as
 //! `<file>.mobiler-new` by default. Apps scaffolded before baselines existed have no ancestor, so
 //! those files fall back to a conservative 2-way reconcile (anchor-aware splice / sidecar) and get
-//! a baseline written so the *next* upgrade is a real 3-way merge.
+//! a baseline written so the *next* upgrade is a real 3-way merge. An Android resource's review copy
+//! goes under `.mobiler/new/` instead (Gradle rejects any non-`.xml` file in a resource folder).
 
 use crate::templating::{Subs, is_binary, substitute, templated_path};
 use anyhow::{Context, Result, bail};
@@ -311,13 +312,13 @@ fn three_way(
             Ok(true)
         }
         Ok(merged) => {
-            write_sidecar(dst, "mobiler-new", merged.as_bytes())?;
+            write_review(report.app_root.as_deref(), dst, merged.as_bytes())?;
             report.changed.push(rel_disp.to_string());
             Ok(false)
         }
         // Overlapping edits: emit the conflict-marked merge for the user to resolve; never apply.
         Err(conflicted) => {
-            write_sidecar(dst, "mobiler-new", conflicted.as_bytes())?;
+            write_review(report.app_root.as_deref(), dst, conflicted.as_bytes())?;
             report.conflict.push(rel_disp.to_string());
             Ok(false)
         }
@@ -360,7 +361,7 @@ fn two_way(
     // A successfully-spliced anchor file is safe to write like a shell file; a splice failure
     // stays hands-off (offered as `.mobiler-new`).
     if class == Class::Merge && merge_failed {
-        write_sidecar(dst, "mobiler-new", &desired)?;
+        write_review(report.app_root.as_deref(), dst, &desired)?;
         report.merge.push(rel_disp.to_string());
         return Ok(false);
     }
@@ -383,7 +384,7 @@ fn shell_write(
         report.updated.push(rel_disp.to_string());
         Ok(true)
     } else {
-        write_sidecar(dst, "mobiler-new", desired)?;
+        write_review(report.app_root.as_deref(), dst, desired)?;
         report.changed.push(rel_disp.to_string());
         Ok(false)
     }
@@ -501,6 +502,31 @@ fn write_backup(app_root: Option<&Path>, dst: &Path, bytes: &[u8]) -> Result<()>
     fs::write(&backup, bytes).with_context(|| format!("writing {}", backup.display()))
 }
 
+/// Whether `rel` is an Android resource (`…/src/<sourceSet>/res/…`). Gradle's resource merge rejects
+/// any file in a resource folder that isn't `.xml`, so nothing but the real file may sit there.
+fn is_android_resource(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    parts.iter().enumerate().any(|(i, p)| *p == "res" && i >= 2 && parts[i - 2] == "src" && i + 1 < parts.len())
+}
+
+/// Where `upgrade` offers the new version of `rel` for review: `<file>.mobiler-new` next to it, except
+/// Android resources, whose copy goes under `.mobiler/new/` (a copy in `res/` breaks the build).
+fn review_rel(rel: &str) -> String {
+    if is_android_resource(rel) { format!(".mobiler/new/{rel}.mobiler-new") } else { format!("{rel}.mobiler-new") }
+}
+
+/// Write the review copy of `dst` (see [`review_rel`]).
+fn write_review(app_root: Option<&Path>, dst: &Path, bytes: &[u8]) -> Result<()> {
+    let Some((root, rel)) = app_root.and_then(|root| dst.strip_prefix(root).ok().map(|rel| (root, rel))) else {
+        return write_sidecar(dst, "mobiler-new", bytes);
+    };
+    let side = root.join(review_rel(&rel.to_string_lossy().replace('\\', "/")));
+    if let Some(parent) = side.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::write(&side, bytes).with_context(|| format!("writing {}", side.display()))
+}
+
 /// Write `<dst>.<suffix>` next to `dst` (e.g. `Render.swift.mobiler-new`).
 fn write_sidecar(dst: &Path, suffix: &str, bytes: &[u8]) -> Result<()> {
     let side = PathBuf::from(format!("{}.{suffix}", dst.display()));
@@ -548,13 +574,13 @@ impl Report {
             println!("  ~ updated {u}  (previous version in .mobiler/backup/)");
         }
         for c in &self.changed {
-            println!("  ~ changed {c}  -> {c}.mobiler-new");
+            println!("  ~ changed {c}  -> {}", review_rel(c));
         }
         for m in &self.merge {
-            println!("  ! merge   {m}  (plugin/user state) -> {m}.mobiler-new");
+            println!("  ! merge   {m}  (plugin/user state) -> {}", review_rel(m));
         }
         for c in &self.conflict {
-            println!("  ‼ conflict {c}  (overlapping edits) -> {c}.mobiler-new");
+            println!("  ‼ conflict {c}  (overlapping edits) -> {}", review_rel(c));
         }
         for p in &self.plugins {
             println!("  ! plugin  {p}  has shell updates in this release");
@@ -834,7 +860,9 @@ mod test {
         fs::write(root.join(theme), "<resources><!-- mine --></resources>\n").unwrap();
         upgrade_at(&root, false).unwrap();
         assert_eq!(read(&root, theme), "<resources><!-- mine --></resources>\n");
-        assert!(root.join(format!("{theme}.mobiler-new")).exists());
+        // Gradle rejects any non-.xml file in a resource folder: the review copy goes outside `res/`.
+        assert!(!root.join(format!("{theme}.mobiler-new")).exists(), "a review copy inside res/ breaks the Android build");
+        assert!(root.join(format!(".mobiler/new/{theme}.mobiler-new")).exists());
         for p in SEED_PATHS {
             assert!(root.join(p).exists(), "{p} created although the theme was not applied");
         }
@@ -891,6 +919,14 @@ mod test {
         let _ = upgrade_at(&root, true);
         assert!(!outside.exists(), "the seed write followed a symlink out of the project");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn review_copies_of_android_resources_go_outside_res() {
+        assert_eq!(review_rel("Android/app/src/main/res/values/themes.xml"), ".mobiler/new/Android/app/src/main/res/values/themes.xml.mobiler-new");
+        assert_eq!(review_rel("Android/app/src/debug/res/xml/network_security_config.xml"), ".mobiler/new/Android/app/src/debug/res/xml/network_security_config.xml.mobiler-new");
+        assert_eq!(review_rel("iOS/Sources/Render.swift"), "iOS/Sources/Render.swift.mobiler-new");
+        assert_eq!(review_rel("Android/app/src/main/java/x/res/Core.kt"), "Android/app/src/main/java/x/res/Core.kt.mobiler-new");
     }
 
     #[test]

@@ -9,7 +9,7 @@ Conformance:   mobiler/src/upgrade.rs::seed_paths_classify_as_seed_and_exist_in_
 
 ## 1. Context (The Problem)
 
-ADR-0012 sorts every template file into a class for `mobiler upgrade`: `Own` files (the app's code,
+ADR-0012 (now restated by ADR-0043) sorts every template file into a class for `mobiler upgrade`: `Own` files (the app's code,
 identity files, binaries) are never touched, `Shell` files are three-way merged against the stored
 baseline, and `Merge` files carry anchors and are offered as `.mobiler-new`.
 
@@ -58,7 +58,7 @@ merged, overwritten or baselined after that, then:
   meet three-way merges and `.mobiler-new` conflicts whenever a template default changed, and the
   first upgrade without a baseline would offer the app's own colours back as a conflict.
 - **Option C — a `Seed` class: create when missing, never touch after** `[recorded: docs/superpowers/specs/2026-10-01-dark-theme-gaps-design.md, decision 1]`
-  Chosen. It extends ADR-0012 with a fourth class; it supersedes nothing.
+  Chosen. It extends ADR-0012 / ADR-0043 with a fourth class; it supersedes nothing.
 
 ## 4. Decision & Rationale for Corroboration
 
