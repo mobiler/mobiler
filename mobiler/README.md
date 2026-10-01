@@ -95,9 +95,10 @@ template per file — like `git merge`. Framework improvements apply **and** you
 injections survive; only overlapping changes become a conflict (written as `<file>.mobiler-new`
 with `<<<<<<<`/`>>>>>>>` markers, never auto-applied). It bumps your `mobiler-core` dependency and
 never touches your Rust app code (`shared/src/`). By default a clean merge is offered as
-`<file>.mobiler-new` (an Android resource file's under `.mobiler/new/`: a stray file in `res/` breaks the
-build); `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit `.mobiler/`
-(the baseline + version stamp), except `.mobiler/backup/` and `.mobiler/new/`, which the template's `.gitignore` skips. Apps scaffolded before baselines existed fall back to a conservative
+`<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit `.mobiler/`
+(the baseline + version stamp), except `.mobiler/backup/` and `.mobiler/new/`, which the template's `.gitignore` skips.
+Review copies of Android resource files, clean or conflicted, go under `.mobiler/new/` instead of next to
+the file (a stray file in `res/` breaks the build); the report prints each copy's path. Apps scaffolded before baselines existed fall back to a conservative
 reconcile and get a baseline for next time. App-owned files the template provides defaults for (the
 launch window colours, below) are created when missing and never changed after that.
 

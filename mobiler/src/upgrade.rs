@@ -512,7 +512,8 @@ fn is_android_resource(rel: &str) -> bool {
 /// Where `upgrade` offers the new version of `rel` for review: `<file>.mobiler-new` next to it, except
 /// Android resources, whose copy goes under `.mobiler/new/` (a copy in `res/` breaks the build).
 fn review_rel(rel: &str) -> String {
-    if is_android_resource(rel) { format!(".mobiler/new/{rel}.mobiler-new") } else { format!("{rel}.mobiler-new") }
+    let rel = rel.replace('\\', "/");
+    if is_android_resource(&rel) { format!(".mobiler/new/{rel}.mobiler-new") } else { format!("{rel}.mobiler-new") }
 }
 
 /// Write the review copy of `dst` (see [`review_rel`]).
@@ -520,7 +521,7 @@ fn write_review(app_root: Option<&Path>, dst: &Path, bytes: &[u8]) -> Result<()>
     let Some((root, rel)) = app_root.and_then(|root| dst.strip_prefix(root).ok().map(|rel| (root, rel))) else {
         return write_sidecar(dst, "mobiler-new", bytes);
     };
-    let side = root.join(review_rel(&rel.to_string_lossy().replace('\\', "/")));
+    let side = root.join(review_rel(&rel.to_string_lossy()));
     if let Some(parent) = side.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
@@ -927,6 +928,8 @@ mod test {
         assert_eq!(review_rel("Android/app/src/debug/res/xml/network_security_config.xml"), ".mobiler/new/Android/app/src/debug/res/xml/network_security_config.xml.mobiler-new");
         assert_eq!(review_rel("iOS/Sources/Render.swift"), "iOS/Sources/Render.swift.mobiler-new");
         assert_eq!(review_rel("Android/app/src/main/java/x/res/Core.kt"), "Android/app/src/main/java/x/res/Core.kt.mobiler-new");
+        // A Windows relative path (as the report holds it) maps to the same place the file is written.
+        assert_eq!(review_rel("Android\\app\\src\\main\\res\\values\\themes.xml"), ".mobiler/new/Android/app/src/main/res/values/themes.xml.mobiler-new");
     }
 
     #[test]

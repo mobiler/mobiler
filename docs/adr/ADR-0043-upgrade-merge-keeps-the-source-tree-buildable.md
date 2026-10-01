@@ -80,7 +80,7 @@ The merge options are ADR-0012's (A–E); Option D, the three-way merge, stands.
 - **Option H — move every review copy under `.mobiler/new/`** `[reconstructed]`
   Rejected: it changes the documented place for every file (Kotlin, Swift, gradle, xcodegen) where
   next-to-the-file works and is what users and release notes expect.
-- **Option I — only Android resources move; backups always under `.mobiler/backup/`** `[recorded: PR #258 for backups]`
+- **Option I — only Android resources move; backups always under `.mobiler/backup/`** `[recorded: PR #258 for backups; reconstructed for review copies, decided 2026-10-01 after the dark-theme verification]`
   Chosen.
 
 ## 4. Decision & Rationale for Corroboration
