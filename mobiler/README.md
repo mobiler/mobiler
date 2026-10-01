@@ -127,8 +127,7 @@ your design's backgrounds:
 | Android | `Android/app/src/main/res/values/mobiler_splash.xml` | `Android/app/src/main/res/values-night/mobiler_splash.xml` |
 | iOS | `iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset` (any appearance) | same file (dark appearance) |
 
-`values/mobiler_splash.xml` also names the Android 12+ splash icon (the launcher icon by default). These
-files belong to your app: `mobiler upgrade` creates them when they are missing and never changes them. A
+These files belong to your app: `mobiler upgrade` creates them when they are missing and never changes them. A
 later release will write them from `mobiler.toml`. To open in the app's own light/dark choice from the first
 frame, keep that choice in your `cx.save` state. Your own Android theme items go in
 `res/values/themes.xml`; they apply in light and dark mode and on every Android version.

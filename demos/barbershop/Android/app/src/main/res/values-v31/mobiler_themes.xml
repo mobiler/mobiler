@@ -7,6 +7,5 @@
     <style name="Base.Theme.Fadehouse" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@drawable/mobiler_launch</item>
         <item name="android:windowSplashScreenBackground">@color/mobiler_splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/mobiler_splash_icon</item>
     </style>
 </resources>
