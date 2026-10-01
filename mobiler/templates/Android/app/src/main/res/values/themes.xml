@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.{{NAME}}" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- The app's theme. Add your own items here: they apply in light and dark mode and on every
+         Android version. The window and splash come from Base.Theme.{{NAME}} (mobiler_themes.xml). -->
+    <style name="Theme.{{NAME}}" parent="Base.Theme.{{NAME}}" />
 </resources>

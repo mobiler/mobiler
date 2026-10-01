@@ -36,7 +36,8 @@ targets:
       # letterboxed (black bars top/bottom) instead of full screen.
       properties:
         PRODUCT_BUNDLE_IDENTIFIER: {{PACKAGE}}
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: MobilerSplashBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four

@@ -190,4 +190,16 @@ Uses:
   - The `values-night` themes would make the Android date/time pickers follow the OS night mode; they now
     follow the app's resolved appearance through a dialog-local context (ADR-0041 §4).
   - Web: a focused invalid field keeps its `error` border and ring when `selection` is set.
+- **2026-10-01 (review of PR B):** the launch-window themes are split from the app's theme. The app-facing
+  `Theme.<Name>` lives only in `values/themes.xml`, with `parent="Base.Theme.<Name>"`; the light, dark and
+  `-v31` variants define only `Base.Theme.<Name>`, in `mobiler_themes.xml` files. As first written, each
+  variant redefined `Theme.<Name>`: an app's own theme items were lost on Android 12+ and in dark mode
+  (Android doesn't merge a style across qualifiers), and the template's `values-night/themes.xml` could
+  overwrite an app's own on `upgrade --apply`. Seed writes also never follow a symlink (ADR-0042).
+- **2026-10-01 (scaffold check of PR B):** The `-v31` variants set only the splash background, not `windowSplashScreenAnimatedIcon`: setting it,
+  even to the launcher icon, makes Android 12+ draw the icon larger (it is then treated as an icon without
+  a background). `mobiler_splash_icon` stays in the seed file for the `[splash]` release to use.
+- **2026-10-01 (scaffold check of PR B):** `mobiler upgrade` wrote an Android resource's review copy
+  (`res/values/themes.xml.mobiler-new`) inside `res/`, which fails the Android build. Review copies of
+  Android resources now go under `.mobiler/new/` (ADR-0043, superseding ADR-0012).
 

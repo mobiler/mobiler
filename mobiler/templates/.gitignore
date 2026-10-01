@@ -7,6 +7,7 @@
 *.mobiler-new
 *.mobiler-bak
 .mobiler/backup/
+.mobiler/new/
 
 # Android
 /Android/.gradle/

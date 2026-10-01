@@ -3,7 +3,7 @@
      changes it. Edit the colours to your design's backgrounds; a later mobiler release can write them from
      mobiler.toml [splash]. -->
 <resources>
-    <color name="mobiler_splash_background">#FFFAF7F0</color>
+    <color name="mobiler_splash_background">#FFFEF7FF</color>
     <!-- The Android 12+ splash icon, for a later [splash] release; the splash shows the launcher
          icon until a theme uses this. -->
     <drawable name="mobiler_splash_icon">@mipmap/ic_launcher</drawable>

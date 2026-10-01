@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The window behind the app until its first frame. App-owned, like values/mobiler_splash.xml. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/mobiler_splash_background" />
+</layer-list>

@@ -34,6 +34,12 @@ provenance tags for rationale written from history.
 | `docs/superpowers/plans/` | how a feature is built, task by task | written before the work |
 | crate `README.md`s, `capabilities.json` | what the framework does *now* | living; updated with the code (`cargo run -p xtask -- gen-readme`) |
 
+**Every README that describes a behaviour moves with it.** When a change alters something an app
+developer can see (a CLI command or its output, an upgrade rule, a builder or ABI type, a template
+file), grep every `README.md` for the area (e.g. `mobiler upgrade`, `palette`, `.mobiler-new`) and
+update each match in the same PR. The root `README.md`, `mobiler/README.md` and the library READMEs
+often describe the same thing. List the READMEs you checked in the PR body.
+
 ## Tests
 
 - `cargo test --workspace` runs the root workspace (the CLI, `mobiler-ui`, `mobiler-core`, `xtask`).

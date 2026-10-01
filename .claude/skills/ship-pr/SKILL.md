@@ -14,6 +14,7 @@ The standard way to merge work into `main`. Follow these steps in order; stop an
 ## 2. Verify the changeset
 - `git status -s` and confirm every change is intended. **Exclude `.claude/`** and other untracked noise — stage with `git add -u` plus explicit new paths, never a blind `git add -A` that could sweep in stray files.
 - After any multi-file edit batch, grep-verify each intended change actually landed before committing (a parallel edit batch can silently no-op a file).
+- **READMEs move with behaviour** (CLAUDE.md): if the change alters anything an app developer can see (CLI command/output, upgrade rule, builder or ABI type, template file), `git grep -n '<area keyword>' -- '*README.md'` for each area touched and update every match. Name the READMEs checked in the PR body.
 
 ## 3. Commit
 - Write a clear `type(scope) summary` subject + a body explaining the what/why and how it was verified.
