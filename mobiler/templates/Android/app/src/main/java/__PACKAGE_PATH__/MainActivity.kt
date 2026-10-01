@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity as PaletteActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.animation.AnimatedContent
@@ -113,6 +114,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -141,6 +144,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Switch
+import androidx.compose.material3.ProgressIndicatorDefaults
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -336,6 +343,7 @@ fun App(core: Core = viewModel()) {
     // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
     activeTheme = appTheme
     ActiveLabels.current = (view as? Widget.Scaffold)?.labels
+    ActiveAppearance.dark = dark
     // With a palette the system-bar icons follow the resolved `dark` (appearance / dark_mode), not the OS.
     // If a palette goes away at runtime, restore the default (OS-following) bars once.
     val hasPalette = appTheme?.palette != null
@@ -400,7 +408,7 @@ private fun ConfirmDialog(req: ConfirmRequest) {
                 onClick = { req.answer(true) },
                 modifier = buttonModifier,
                 shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
-                colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
+                colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = LocalPalette.current?.error?.color() ?: MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
             ) { Text(req.confirmLabel, fontSize = labelSize) }
         },
         dismissButton = {
@@ -632,9 +640,9 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Progress -> {
             val v = widget.value
             if (v != null) {
-                LinearProgressIndicator(progress = { v }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                LinearProgressIndicator(progress = { v }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
             } else {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
             }
         }
         is Widget.Skeleton -> Box(
@@ -1240,7 +1248,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         }
                     }
                     if (loading) {
-                        item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(8.dp)) }
+                        item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(8.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor) }
                     } else if (!hasMore && onLoadMore != null && endLabel != null) {
                         item {
                             Text(
@@ -1255,10 +1263,20 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
             val onRefresh = widget.onRefresh
             if (onRefresh != null) {
+                val ptr = rememberPullToRefreshState()
                 PullToRefreshBox(
                     isRefreshing = widget.refreshing,
                     onRefresh = { send(Action.Fired(onRefresh)) },
                     modifier = boundedOrFill,
+                    state = ptr,
+                    indicator = {
+                        PullToRefreshDefaults.Indicator(
+                            state = ptr,
+                            isRefreshing = widget.refreshing,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                            color = selectionColor() ?: PullToRefreshDefaults.indicatorColor,
+                        )
+                    },
                 ) { list() }
             } else {
                 list()
@@ -1361,11 +1379,19 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(text = widget.label, modifier = Modifier.weight(1f))
-            Switch(checked = widget.value, onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) })
+            Switch(
+                checked = widget.value,
+                onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) },
+                colors = selectionColor()?.let { SwitchDefaults.colors(checkedTrackColor = it) } ?: SwitchDefaults.colors(),
+            )
         }
 
         is Widget.Checkbox -> Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = widget.value, onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) })
+            Checkbox(
+                checked = widget.value,
+                onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) },
+                colors = selectionColor()?.let { CheckboxDefaults.colors(checkedColor = it) } ?: CheckboxDefaults.colors(),
+            )
             Text(text = widget.label, modifier = Modifier.weight(1f))
         }
 
@@ -1374,6 +1400,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             onValueChange = { send(Action.Input(widget.id, InputValue.Int(it.toLong()))) },
             valueRange = 0f..widget.max.toFloat(),
             modifier = Modifier.fillMaxWidth(),
+            colors = selectionColor()?.let { SliderDefaults.colors(thumbColor = it, activeTrackColor = it) } ?: SliderDefaults.colors(),
         )
 
         is Widget.Stepper -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1553,7 +1580,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     verticalArrangement = Arrangement.spacedBy(if (isLarge && fillIndex != null && fillIndex >= 0) 12.dp else 6.dp),
                                 ) {
                                     if (screen.refreshing) {
-                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
                                     }
                                     if (fillIndex == null) {
                                         Render(screen.body, send)
@@ -1578,10 +1605,20 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             if (onRefresh != null) {
                                 // Pull-to-refresh — the body is pull-refreshable; the spinner is
                                 // driven by the app-owned `refreshing` flag.
+                                val ptr = rememberPullToRefreshState()
                                 PullToRefreshBox(
                                     isRefreshing = screen.refreshing,
                                     onRefresh = { send(Action.Fired(onRefresh)) },
                                     modifier = Modifier.fillMaxSize().padding(padding),
+                                    state = ptr,
+                                    indicator = {
+                                        PullToRefreshDefaults.Indicator(
+                                            state = ptr,
+                                            isRefreshing = screen.refreshing,
+                                            modifier = Modifier.align(Alignment.TopCenter),
+                                            color = selectionColor() ?: PullToRefreshDefaults.indicatorColor,
+                                        )
+                                    },
                                 ) {
                                     Box(
                                         modifier = if (fillIndex != null) Modifier.fillMaxSize() else Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -1660,6 +1697,12 @@ private fun bodyFamily(style: androidx.compose.ui.text.TextStyle): androidx.comp
  *  dialog/picker plugins read it for their defaults; null ⇒ English/platform defaults. */
 object ActiveLabels {
     @Volatile var current: ShellLabels? = null
+}
+
+/** The current scaffold's resolved light/dark (appearance, else dark_mode, else the OS), set when App()
+ *  renders. Core.kt's picker dialogs follow it. */
+object ActiveAppearance {
+    @Volatile var dark: Boolean = false
 }
 
 // Spacing multiplier from the theme's density. Comfortable (or un-themed) = 1.0; Compact tightens;
@@ -1772,9 +1815,23 @@ private fun toneColors(tone: Tone): Pair<Color, Color> {
     }
 }
 
-// Strong (filled) color pair for a toned button.
+// Strong (filled) color pair for a toned button. A palette's error_fill / on_error_fill replace a filled
+// Danger button's colours, each falling back to today's.
 @Composable
 private fun toneStrong(tone: Tone): Pair<Color, Color> {
+    val (fill, onFill) = toneStrongBase(tone)
+    val pal = LocalPalette.current
+    if (tone != Tone.DANGER || pal == null) return fill to onFill
+    return (pal.errorFill?.color() ?: fill) to (pal.onErrorFill?.color() ?: onFill)
+}
+
+// Outlined/text toned buttons' colour: a palette's `error` for Danger, else today's strong colour.
+@Composable
+private fun toneLine(tone: Tone): Color =
+    (if (tone == Tone.DANGER) LocalPalette.current?.error?.color() else null) ?: toneStrongBase(tone).first
+
+@Composable
+private fun toneStrongBase(tone: Tone): Pair<Color, Color> {
     val cs = MaterialTheme.colorScheme
     // A palette pair flips for fills: on-container fill, container text.
     tonePair(LocalPalette.current, tone)?.let { return it.onContainer.color() to it.container.color() }
@@ -1796,11 +1853,32 @@ private fun tonePair(roles: {{PACKAGE_SHARED_TYPES}}.ColorRoles?, tone: Tone): T
     Tone.NEUTRAL -> null
 }
 
-// Text-field fill from the palette's `surface_muted` (the M3 default colours otherwise).
+/** The palette's `selection` mark colour; null = M3's default (primary) at each site, as before. */
+@Composable
+private fun selectionColor(): Color? = LocalPalette.current?.selection?.color()
+
+// Text-field colours from the palette: `surface_muted` fill, `selection` focus border, label, cursor and
+// text-selection handles, `error` for the invalid state. Any unset role keeps the M3 default.
 @Composable
 private fun paletteFieldColors(): TextFieldColors {
-    val muted = LocalPalette.current?.surfaceMuted?.color() ?: return OutlinedTextFieldDefaults.colors()
-    return OutlinedTextFieldDefaults.colors(focusedContainerColor = muted, unfocusedContainerColor = muted)
+    val pal = LocalPalette.current ?: return OutlinedTextFieldDefaults.colors()
+    val d = OutlinedTextFieldDefaults.colors()
+    val muted = pal.surfaceMuted?.color()
+    val sel = pal.selection?.color()
+    val err = pal.error?.color()
+    return OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = muted ?: d.focusedContainerColor,
+        unfocusedContainerColor = muted ?: d.unfocusedContainerColor,
+        errorContainerColor = muted ?: d.errorContainerColor,
+        focusedBorderColor = sel ?: d.focusedIndicatorColor,
+        focusedLabelColor = sel ?: d.focusedLabelColor,
+        cursorColor = sel ?: d.cursorColor,
+        selectionColors = sel?.let { TextSelectionColors(handleColor = it, backgroundColor = it.copy(alpha = 0.4f)) } ?: d.textSelectionColors,
+        errorBorderColor = err ?: d.errorIndicatorColor,
+        errorLabelColor = err ?: d.errorLabelColor,
+        errorSupportingTextColor = err ?: d.errorSupportingTextColor,
+        errorCursorColor = err ?: d.errorCursorColor,
+    )
 }
 
 // Widget.Button. A NEUTRAL tone keeps each M3 button's default colors (an un-toned button renders
@@ -1815,6 +1893,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
         .then(if (large) Modifier.heightIn(min = 56.dp) else Modifier)
     val neutral = widget.tone == Tone.NEUTRAL
     val (strong, onStrong) = toneStrong(widget.tone)
+    val line = toneLine(widget.tone)
     val (soft, onSoft) = toneColors(widget.tone)
     val content: @Composable RowScope.() -> Unit = {
         widget.icon?.let {
@@ -1851,8 +1930,8 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
                 modifier = modifier,
                 shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape,
                 contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = strong),
-                border = BorderStroke(1.dp, strong),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = line),
+                border = BorderStroke(1.dp, line),
                 content = content,
             )
         }
@@ -1861,7 +1940,7 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
             modifier = modifier,
             shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
             contentPadding = if (large) LargeButtonPadding else ButtonDefaults.TextButtonContentPadding,
-            colors = if (neutral) (LocalPalette.current?.primaryText?.color()?.let { ButtonDefaults.textButtonColors(contentColor = it) } ?: ButtonDefaults.textButtonColors()) else ButtonDefaults.textButtonColors(contentColor = strong),
+            colors = if (neutral) (LocalPalette.current?.primaryText?.color()?.let { ButtonDefaults.textButtonColors(contentColor = it) } ?: ButtonDefaults.textButtonColors()) else ButtonDefaults.textButtonColors(contentColor = line),
             content = content,
         )
     }
@@ -2035,7 +2114,7 @@ private fun PdfViewWidget(url: String) {
     Column(modifier = Modifier.fillMaxWidth().heightIn(min = 480.dp)) {
         when {
             error != null -> Text(ActiveLabels.current?.pdfError?.takeIf { it.isNotEmpty() } ?: "PDF: $error")
-            pages.isEmpty() -> CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+            pages.isEmpty() -> CircularProgressIndicator(modifier = Modifier.padding(16.dp), color = selectionColor() ?: ProgressIndicatorDefaults.circularColor)
             else -> pages.forEach { page ->
                 Image(
                     bitmap = page,

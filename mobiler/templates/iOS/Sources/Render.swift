@@ -117,7 +117,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 
     case .progress(let value):
         if let v = value {
-            return AnyView(ProgressView(value: Double(v)).progressViewStyle(.linear).padding(.vertical, 4))
+            return AnyView(ProgressView(value: Double(v)).progressViewStyle(.linear).selectionTint().padding(.vertical, 4))
         }
         return AnyView(ProgressView().padding(.vertical, 4))
 
@@ -296,7 +296,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             VStack(alignment: .leading, spacing: 4) {
                 control
                 if let error = error {
-                    Text(error).font(CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption)).foregroundColor(.red)
+                    Text(error).font(CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption)).foregroundColor(role(pal?.error, else: .red))
                 }
             }
         )
@@ -309,6 +309,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                     get: { value },
                     set: { send(.input(id: id, value: .text($0))) }
                 ))
+                .selectionTint()
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
@@ -342,6 +343,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 get: { value },
                 set: { send(.input(id: id, value: .bool($0))) }
             ))
+            .selectionTint()
         )
 
     case .checkbox(let id, let label, let value):
@@ -350,7 +352,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             Button(action: { send(.input(id: id, value: .bool(!value))) }) {
                 HStack(spacing: 10) {
                     Image(systemName: value ? "checkmark.square.fill" : "square")
-                        .foregroundColor(value ? .accentColor : .secondary)
+                        .foregroundColor(value ? role(pal?.selection, else: .accentColor) : .secondary)
                     Text(label).foregroundColor(.primary)
                     Spacer()
                 }
@@ -366,6 +368,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 ),
                 in: 0...Double(max)
             )
+            .selectionTint()
         )
 
     case .stepper(let value, let onDecrement, let onIncrement):
@@ -424,6 +427,12 @@ extension Rgb { var color: Color { Color(red: Double(r) / 255, green: Double(g) 
 extension Rgba { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255) } }
 /// The palette colour for a role, else the shell's current colour.
 func role(_ c: Rgb?, else fallback: Color) -> Color { c?.color ?? fallback }
+extension View {
+    /// The palette's `selection` as this control's tint; unset keeps the inherited tint (today's colour).
+    @ViewBuilder func selectionTint() -> some View {
+        if let s = pal?.selection { self.tint(s.color) } else { self }
+    }
+}
 /// The palette's container/on-container pair for a tone (nil: no palette, neutral, or unset).
 private func palettePair(_ tone: Tone) -> TonePair? {
     guard let p = pal else { return nil }
@@ -524,21 +533,29 @@ enum ShapeTokens {
 /// (`.roundedBorder` can't be recoloured); otherwise the system rounded border, as before.
 private struct PaletteFieldStyle: ViewModifier {
     @Environment(\.paletteRoles) private var paletteRoles
+    /// A palette's `selection` marks the focused field's border; unset: no focus border, as before.
+    @FocusState private var focused: Bool
     @ViewBuilder func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
+        let focusMark = focused ? pal?.selection : nil
         // `.roundedBorder` can't take another radius either: an `input` radius also switches to a plain
         // field with its own shape.
         let inputShape = ShapeTokens.shape(ShapeTokens.shapes?.input)
         if pal?.surfaceMuted != nil || inputShape != nil {
             let shape = inputShape ?? AnyShape(RoundedRectangle(cornerRadius: 8))
             content.textFieldStyle(.plain)
+                .focused($focused)
+                .selectionTint()
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemFill))))
                 // A palette without `outline` keeps its borderless field; the gray hairline is only for
                 // an input radius without a palette.
-                .overlay(shape.stroke(role(pal?.outline, else: pal?.surfaceMuted != nil ? .clear : Color.gray.opacity(0.3))))
+                .overlay(shape.stroke(focusMark?.color ?? role(pal?.outline, else: pal?.surfaceMuted != nil ? .clear : Color.gray.opacity(0.3))))
         } else {
             content.textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .selectionTint()
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(focusMark?.color ?? .clear, lineWidth: 1))
         }
     }
 }
@@ -1682,7 +1699,26 @@ private struct MobilerButton: View {
     /// With a palette: neutral buttons use primary / secondary_container / primary_text; a toned button
     /// uses its pair (filled flips it: on-container fill, container text). nil = no palette, or a toned
     /// button whose pair the palette leaves unset — today's styling then.
+    /// `pairColors()`, with a palette's error roles over a Danger button (each falls back to today's).
     private func paletteColors() -> (fill: Color, fg: Color, stroke: Color)? {
+        let base = pairColors()
+        guard case .danger = tone, let p = pal else { return base }
+        switch style {
+        case .filled:
+            guard p.errorFill != nil || p.onErrorFill != nil else { return base }
+            return (role(p.errorFill, else: base?.fill ?? .red), role(p.onErrorFill, else: base?.fg ?? .white), .clear)
+        case .outlined:
+            guard let e = p.error else { return base }
+            return (.clear, e.color, e.color)
+        case .text:
+            guard let e = p.error else { return base }
+            return (.clear, e.color, .clear)
+        case .tonal:
+            return base
+        }
+    }
+
+    private func pairColors() -> (fill: Color, fg: Color, stroke: Color)? {
         guard let p = pal else { return nil }
         let pair = palettePair(tone)
         if !neutral && pair == nil { return nil }

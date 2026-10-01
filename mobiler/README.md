@@ -116,6 +116,22 @@ version; where Android itself only has a feature on newer versions, older phones
 | `Video` picture-in-picture | Not available | Auto-entering PiP (12+) |
 | `sqlite` | The phone's own SQLite: 3.18 on Android 8.0, 3.19 on 8.1, 3.22 on 9–10, 3.28 on 11 | Newer SQL (e.g. UPSERT needs 3.24, `RETURNING` 3.35): use `INSERT OR REPLACE` and friends to stay portable |
 
+## Launch window colours
+
+Before an app draws its first frame, the phone shows a launch window (and, on Android 12+, the system
+splash) in the app's background colour. It follows the phone's light/dark setting. Set the two colours to
+your design's backgrounds:
+
+| | Light | Dark |
+|---|---|---|
+| Android | `Android/app/src/main/res/values/mobiler_splash.xml` | `Android/app/src/main/res/values-night/mobiler_splash.xml` |
+| iOS | `iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset` (any appearance) | same file (dark appearance) |
+
+`values/mobiler_splash.xml` also names the Android 12+ splash icon (the launcher icon by default). These
+files belong to your app: `mobiler upgrade` creates them when they are missing and never changes them. A
+later release will write them from `mobiler.toml`. To open in the app's own light/dark choice from the first
+frame, keep that choice in your `cx.save` state.
+
 ## Debugging a text field on Android
 
 If a `text_field` / `search_field` shows text you didn't expect, turn on the field log in a **debug
