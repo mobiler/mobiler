@@ -65,7 +65,7 @@ private fun paletteScheme(base: ColorScheme, p: ColorRoles): ColorScheme {
         onSecondaryContainer = p.onSecondaryContainer?.color() ?: base.onSecondaryContainer,
         primaryContainer = p.fab?.color() ?: base.primaryContainer,
         onPrimaryContainer = p.onFab?.color() ?: base.onPrimaryContainer,
-        error = p.danger?.onContainer?.color() ?: base.error,
+        error = p.error?.color() ?: p.danger?.onContainer?.color() ?: base.error,
         onError = p.danger?.container?.color() ?: base.onError,
         errorContainer = p.danger?.container?.color() ?: base.errorContainer,
         onErrorContainer = p.danger?.onContainer?.color() ?: base.onErrorContainer,
