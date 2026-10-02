@@ -89,3 +89,15 @@ Barbershop: with a service selected (the Services tab's detail pane), the scaffo
   - the bar's bounds bottom == the NavigationBar top, and it doesn't move after a scroll
   - the FAB is above it
 - **iOS:** CI compile only.
+
+## Amendments
+
+- **2026-10-02 (appointments request "pinned bar above keyboard with tabs"):** decision 4's Android exception is
+  reversed. On a screen with bottom tabs, the pinned bar rides on the keyboard once the keyboard is taller than the
+  tabs (which stay behind it): its extra bottom padding is the keyboard inset minus the tabs' measured height,
+  applied at layout (`WindowInsets.ime.exclude(...)`), so it moves with the keyboard frame by frame. A send button
+  under a message field was hidden behind the keyboard on every tabbed compose screen. (A first version hid the tabs
+  while the keyboard was open; deciding that during composition lagged the keyboard by a frame and made the bar
+  jump.) iOS is unchanged: the keyboard lifts the bar and the tabs together, so the bar sits one tab bar higher
+  there (a known divergence; the Send button is visible either way). Android 11+ only: on older Android the window pans (no `adjustResize`), which the follow-up "the keyboard
+  never covers the focused field" addresses.
