@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 pub mod app_info;
 pub mod bunny;
 pub mod device;
+pub mod photo;
 pub mod dialog;
 pub mod format;
 pub mod http;
@@ -17,6 +18,7 @@ pub mod i18n;
 pub mod transfer;
 pub use app_info::AppInfo;
 pub use device::DeviceInfo;
+pub use photo::{Photo, PhotoError, PhotoFormat, PhotoOptions};
 pub use dialog::{Confirm, Picker, Snackbar, SnackbarDuration};
 pub use format::{Currency, Locale, Weekday};
 pub use http::{HttpHeader, HttpOutcome};
@@ -351,6 +353,20 @@ impl<E> Cx<E> {
     /// the system camera app, so no extra runtime permission is needed.
     pub fn capture_photo(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("camera", "capture", "", then);
+    }
+
+    /// [`pick_photo`](Self::pick_photo) with per-call options: the shell re-encodes the picked image to
+    /// the format and limits asked for (applying its orientation and, by default, dropping its EXIF and
+    /// GPS data) and delivers a [`Photo`] (a new file handle plus MIME, size and dimensions), or a
+    /// [`PhotoError`]. The rules are ADR-0045's; `pick_photo` itself is unchanged.
+    pub fn pick_photo_with(&mut self, options: PhotoOptions, then: impl FnOnce(Result<Photo, PhotoError>) -> E + Send + 'static) {
+        self.plugin("photo", "pick", options.to_input(), move |r| then(photo::from_response(&r)));
+    }
+
+    /// [`capture_photo`](Self::capture_photo) with per-call options, like
+    /// [`pick_photo_with`](Self::pick_photo_with).
+    pub fn capture_photo_with(&mut self, options: PhotoOptions, then: impl FnOnce(Result<Photo, PhotoError>) -> E + Send + 'static) {
+        self.plugin("camera", "capture", options.to_input(), move |r| then(photo::from_response(&r)));
     }
 
     /// Ask the user to confirm via a native dialog (built-in `dialog` capability).
@@ -1946,6 +1962,17 @@ mod tests {
         cx.subscribe_appearance("appr", |_| Ev::Tap);
         let (st, _) = &cx.streams[0];
         assert_eq!((st.key.as_str(), st.plugin.as_str(), st.op.as_str(), st.input.as_str()), ("appr", "appearance", "changes", ""));
+    }
+
+    #[test]
+    fn photo_with_calls_send_options_on_the_same_plugin() {
+        let mut cx = Cx::<Ev>::default();
+        cx.pick_photo_with(PhotoOptions::new().jpeg(), |_| Ev::Tap);
+        cx.capture_photo_with(PhotoOptions::new(), |_| Ev::Tap);
+        let (p, _) = &cx.requests[0];
+        assert_eq!((p.plugin.as_str(), p.op.as_str(), p.input.as_str()), ("photo", "pick", r#"{"format":"jpeg"}"#));
+        let (c, _) = &cx.requests[1];
+        assert_eq!((c.plugin.as_str(), c.op.as_str(), c.input.as_str()), ("camera", "capture", "{}"));
     }
 
     #[test]

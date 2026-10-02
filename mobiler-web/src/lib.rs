@@ -993,11 +993,12 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         };
         return PluginResponse::text(true, output);
     }
+    // An empty input is the plain call (the original file); any other is `PhotoOptions` (ADR-0045).
     if call.plugin == "photo" && call.op == "pick" {
-        return take_image(false).await;
+        return if call.input.is_empty() { take_image(false).await } else { take_photo_with(false, &call.input).await };
     }
     if call.plugin == "camera" && call.op == "capture" {
-        return take_image(true).await;
+        return if call.input.is_empty() { take_image(true).await } else { take_photo_with(true, &call.input).await };
     }
     if call.plugin == "datetime" {
         return match call.op.as_str() {
@@ -1118,13 +1119,25 @@ fn http_transport_error(message: String) -> PluginResponse {
 /// permission needed (the picker/camera prompt is the browser's). Backs both the
 /// `photo`/`pick` and `camera`/`capture` capabilities.
 async fn take_image(capture: bool) -> PluginResponse {
+    match pick_file(capture).await {
+        Ok(file) => match web_sys::Url::create_object_url_with_blob(&file) {
+            Ok(url) => PluginResponse::text(true, url),
+            Err(_) => PluginResponse::text(false, "no object url"),
+        },
+        Err(code) => PluginResponse::text(false, code),
+    }
+}
+
+/// Open a hidden `<input type=file accept=image/*>` and wait for a file, or for the dialog's
+/// `cancel` (otherwise a cancelled dialog would never answer).
+async fn pick_file(capture: bool) -> Result<web_sys::File, &'static str> {
     use wasm_bindgen::{closure::Closure, JsCast};
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return PluginResponse::text(false, "no document");
-    };
-    let Some(input) = doc.create_element("input").ok().and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok()) else {
-        return PluginResponse::text(false, "no input element");
-    };
+    let doc = web_sys::window().and_then(|w| w.document()).ok_or("unavailable")?;
+    let input = doc
+        .create_element("input")
+        .ok()
+        .and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .ok_or("unavailable")?;
     input.set_type("file");
     input.set_accept("image/*");
     if capture {
@@ -1132,26 +1145,131 @@ async fn take_image(capture: bool) -> PluginResponse {
         let _ = input.set_attribute("capture", "environment");
     }
 
-    let (tx, rx) = futures_channel::oneshot::channel::<Option<String>>();
-    let tx = std::cell::RefCell::new(Some(tx));
+    let (tx, rx) = futures_channel::oneshot::channel::<Option<web_sys::File>>();
+    let tx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
     let input_for_cb = input.clone();
+    let tx_change = tx.clone();
     let on_change = Closure::wrap(Box::new(move || {
-        let url = input_for_cb
-            .files()
-            .and_then(|files| files.get(0))
-            .and_then(|file| web_sys::Url::create_object_url_with_blob(&file).ok());
+        let file = input_for_cb.files().and_then(|files| files.get(0));
+        if let Some(tx) = tx_change.borrow_mut().take() {
+            let _ = tx.send(file);
+        }
+    }) as Box<dyn FnMut()>);
+    let on_cancel = Closure::wrap(Box::new(move || {
         if let Some(tx) = tx.borrow_mut().take() {
-            let _ = tx.send(url);
+            let _ = tx.send(None);
         }
     }) as Box<dyn FnMut()>);
     input.set_onchange(Some(on_change.as_ref().unchecked_ref()));
+    let _ = input.add_event_listener_with_callback("cancel", on_cancel.as_ref().unchecked_ref());
     input.click();
-    on_change.forget(); // keep the handler alive until `change` fires
+    // Keep the handlers alive until one fires.
+    on_change.forget();
+    on_cancel.forget();
 
     match rx.await {
-        Ok(Some(url)) => PluginResponse::text(true, url),
-        _ => PluginResponse::text(false, "cancelled"),
+        Ok(Some(file)) => Ok(file),
+        _ => Err("cancelled"),
     }
+}
+
+/// The file's MIME type: from its first bytes when recognised, else the declared one.
+fn sniffed_mime(declared: &str, bytes: &[u8]) -> String {
+    // The bytes win when recognised (the declared type comes from the file name), like the native
+    // shells, which take it from the decoder.
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png".into()
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg".into()
+    } else if !declared.is_empty() {
+        declared.to_string()
+    } else {
+        "application/octet-stream".into()
+    }
+}
+
+/// The ladder keeps an encoding only when it is within `max_bytes` (ADR-0045: never over the limit).
+fn within_limit(size: u64, max_bytes: Option<u64>) -> bool {
+    max_bytes.is_none_or(|m| size <= m)
+}
+
+/// `cx.pick_photo_with` / `cx.capture_photo_with` on the web: pick, then re-encode under ADR-0045.
+async fn take_photo_with(capture: bool, input: &str) -> PluginResponse {
+    let opts = mobiler_core::PhotoOptions::from_input(input);
+    let file = match pick_file(capture).await {
+        Ok(f) => f,
+        Err(code) => return PluginResponse::text(false, code),
+    };
+    match process_photo(&file, &opts).await {
+        Ok(photo) => PluginResponse { ok: true, output: photo.encode() },
+        Err(code) => PluginResponse::text(false, code),
+    }
+}
+
+async fn process_photo(file: &web_sys::File, o: &mobiler_core::PhotoOptions) -> Result<mobiler_core::Photo, String> {
+    use mobiler_core::photo::{needs_reencode, output_format, png_is_clean, quality_ladder, target_size};
+    use wasm_bindgen::JsCast;
+    let window = web_sys::window().ok_or("unavailable")?;
+    let size = file.size() as u64;
+    // The bytes decide whether the file is a clean PNG (its type comes from the file name).
+    let buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await.map_err(|_| "unsupported_image".to_string())?;
+    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    let mime = sniffed_mime(&file.type_(), &bytes);
+    // createImageBitmap applies the EXIF orientation by default (imageOrientation "from-image").
+    let promise = window.create_image_bitmap_with_blob(file).map_err(|_| "unsupported_image".to_string())?;
+    let bitmap: web_sys::ImageBitmap = wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .map_err(|_| "unsupported_image".to_string())?
+        .unchecked_into();
+    let (w, h) = (bitmap.width(), bitmap.height());
+    let fits = o.max_dimension_opt().is_none_or(|m| w.max(h) <= m) && within_limit(size, o.max_bytes_opt());
+    if !needs_reencode(o.format(), fits, o.strip_metadata(), !png_is_clean(&bytes)) {
+        bitmap.close();
+        let handle = web_sys::Url::create_object_url_with_blob(file).map_err(|_| "unavailable".to_string())?;
+        return Ok(mobiler_core::Photo { handle, mime, bytes: size, width: w, height: h });
+    }
+    let format = output_format(o.format(), bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    let (tw, th) = target_size(w, h, o.max_dimension_opt());
+    let doc = window.document().ok_or("unavailable")?;
+    let canvas: web_sys::HtmlCanvasElement = doc.create_element("canvas").map_err(|_| "unavailable".to_string())?.unchecked_into();
+    canvas.set_width(tw);
+    canvas.set_height(th);
+    let ctx: web_sys::CanvasRenderingContext2d = canvas
+        .get_context("2d")
+        .ok()
+        .flatten()
+        .ok_or("unavailable")?
+        .unchecked_into();
+    let drawn = ctx.draw_image_with_image_bitmap_and_dw_and_dh(&bitmap, 0.0, 0.0, f64::from(tw), f64::from(th));
+    bitmap.close();
+    drawn.map_err(|_| "unsupported_image".to_string())?;
+    let ladder = if format == mobiler_core::PhotoFormat::Png { vec![100] } else { quality_ladder(o.quality_value()) };
+    for q in ladder {
+        let blob = canvas_to_blob(&canvas, format.mime(), f64::from(q) / 100.0).await?;
+        if within_limit(blob.size() as u64, o.max_bytes_opt()) {
+            let handle = web_sys::Url::create_object_url_with_blob(&blob).map_err(|_| "unavailable".to_string())?;
+            return Ok(mobiler_core::Photo { handle, mime: blob.type_(), bytes: blob.size() as u64, width: tw, height: th });
+        }
+        // A browser that can't encode the format (Safari has no WebP) writes PNG and ignores the
+        // quality: another rung would give the same bytes.
+        if blob.type_() != format.mime() {
+            break;
+        }
+    }
+    Err("too_large".into())
+}
+
+async fn canvas_to_blob(canvas: &web_sys::HtmlCanvasElement, mime: &str, quality: f64) -> Result<web_sys::Blob, String> {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let (tx, rx) = futures_channel::oneshot::channel::<Option<web_sys::Blob>>();
+    let cb = Closure::once(move |blob: Option<web_sys::Blob>| {
+        let _ = tx.send(blob);
+    });
+    canvas
+        .to_blob_with_type_and_encoder_options(cb.as_ref().unchecked_ref(), mime, &wasm_bindgen::JsValue::from_f64(quality))
+        .map_err(|_| "unavailable".to_string())?;
+    cb.forget();
+    rx.await.ok().flatten().ok_or_else(|| "unavailable".to_string())
 }
 
 /// Pick a date (`kind = "date"`) or time (`kind = "time"`) via a hidden native
@@ -3601,3 +3719,25 @@ mod device_info_tests {
     }
 }
 
+
+#[cfg(test)]
+mod photo_tests {
+    use super::*;
+
+    #[test]
+    fn mime_falls_back_from_the_bytes() {
+        assert_eq!(sniffed_mime("", b"\x89PNG\r\n\x1a\nrest"), "image/png");
+        assert_eq!(sniffed_mime("", b"\xff\xd8\xff\xe0"), "image/jpeg");
+        assert_eq!(sniffed_mime("", b"????"), "application/octet-stream");
+        assert_eq!(sniffed_mime("image/png", b"\xff\xd8\xff"), "image/jpeg"); // a JPEG renamed .png
+        assert_eq!(sniffed_mime("image/webp", b"RIFF"), "image/webp");
+    }
+
+    #[test]
+    fn ladder_never_returns_over_limit() {
+        // The ladder loop keeps an encoding only when it is within the limit.
+        assert!(within_limit(600, Some(600)));
+        assert!(!within_limit(601, Some(600)));
+        assert!(within_limit(u64::MAX, None));
+    }
+}
