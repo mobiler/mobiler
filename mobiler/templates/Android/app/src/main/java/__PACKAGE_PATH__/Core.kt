@@ -47,6 +47,7 @@ import {{PACKAGE_SHARED}}.CoreFfi
 import {{PACKAGE_SHARED_TYPES}}.Action
 import {{PACKAGE_SHARED_TYPES}}.Effect
 import {{PACKAGE_SHARED_TYPES}}.HttpHeader
+import {{PACKAGE_SHARED_TYPES}}.DeviceInfo
 import {{PACKAGE_SHARED_TYPES}}.HttpOutcome
 import {{PACKAGE_SHARED_TYPES}}.PluginResponse
 import {{PACKAGE_SHARED_TYPES}}.Requests
@@ -146,6 +147,12 @@ class SystemPlugin : MobilerPlugin {
 class DevicePlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
+        // Structured (cx.device_info): OS version + API level, manufacturer, model. No serial or ids.
+        "info" -> PluginResponse(
+            true,
+            DeviceInfo(Build.VERSION.RELEASE.orEmpty(), Build.VERSION.SDK_INT.toUInt(), Build.MANUFACTURER.orEmpty(), Build.MODEL.orEmpty())
+                .bincodeSerialize().toUByteList(),
+        )
         "locale" -> PluginResponse(true, java.util.Locale.getDefault().toLanguageTag())
         // The OS light/dark setting (system resources: unaffected by the app's own appearance).
         "appearance" -> PluginResponse(true, nightName(android.content.res.Resources.getSystem().configuration))
