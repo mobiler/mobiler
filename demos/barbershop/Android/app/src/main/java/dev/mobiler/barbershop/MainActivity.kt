@@ -56,6 +56,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
@@ -370,6 +371,11 @@ fun App(core: Core = viewModel()) {
     }
     FadehouseTheme(darkTheme = dark, theme = appTheme) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            // Before Android 9 the platform gives a focusable view focus even in touch mode, and Compose
+            // hands it to its first focus target: the first text field looked focused at launch and took
+            // focus (and the keyboard) on a tab switch. An empty full-size focus target, first in traversal
+            // order, catches that automatic focus instead; tapping a field still focuses it.
+            PrePieFocusSink(Modifier.fillMaxSize())
             if (view is Widget.Scaffold) {
                 // Scaffold provides its own bars + scrollable body.
                 Render(view) { action -> core.update(action) }
@@ -506,6 +512,16 @@ private class FieldSync(initial: String) {
             FieldLog.d { "adopt ${FieldLog.show(v, secure)} over ${FieldLog.show(field.text, secure)} (composing ${field.composition})" }
             field = TextFieldValue(v, TextRange(v.length))
         }
+    }
+}
+
+/** Before Android 9, an empty focus target that catches the focus the platform hands a window in touch
+ *  mode (see App()); nothing on newer Android. It needs an area (the initial focus search skips a
+ *  0-size target): give it its container's size. It draws nothing, takes no touches, has no semantics. */
+@Composable
+private fun PrePieFocusSink(modifier: Modifier) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.P) {
+        Box(modifier.focusTarget())
     }
 }
 
@@ -1436,12 +1452,18 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     val top = if (r is dev.mobiler.barbershop.shared.types.Radius.Dp) r.value.toInt().dp else 32.dp
                     RoundedCornerShape(topStart = top, topEnd = top)
                 } ?: BottomSheetDefaults.ExpandedShape, scrimColor = LocalPalette.current?.scrim?.color() ?: BottomSheetDefaults.ScrimColor) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(sheet.title, style = activeTheme?.typeScale?.headline?.let { scaled(it, MaterialTheme.typography.titleLarge, true) } ?: MaterialTheme.typography.titleLarge)
-                        Render(sheet.child, send)
+                    // The sheet is its own window: the same pre-Android-9 automatic focus happens there. The
+                    // sink spans the content (a 0-size target is skipped by the initial focus search) without
+                    // adding height.
+                    Box {
+                        PrePieFocusSink(Modifier.matchParentSize())
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(sheet.title, style = activeTheme?.typeScale?.headline?.let { scaled(it, MaterialTheme.typography.titleLarge, true) } ?: MaterialTheme.typography.titleLarge)
+                            Render(sheet.child, send)
+                        }
                     }
                 }
             }
