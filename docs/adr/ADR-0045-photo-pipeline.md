@@ -1,11 +1,11 @@
-# ADR-0045: A photo picked or captured with options is re-encoded by the shell under one set of rules — passed through untouched only when its format is kept, it fits both limits and it has no metadata to strip; otherwise upright, capped, encoded (Original keeps PNG, else JPEG), stepped down in quality to 45 to fit or refused, and without metadata — and the reply is a typed Photo or a machine-code reason
+# ADR-0045: A photo picked or captured with options is re-encoded by the shell under one set of rules — passed through untouched only when its format is kept, it fits both limits and it is proven free of metadata (a PNG with only harmless chunks) or metadata is kept; otherwise upright, capped (longest side, 16 MP), encoded (Original keeps PNG, else JPEG), stepped down in quality to 45 to fit or refused, and without metadata — and the reply is a typed Photo or a machine-code reason
 
 Status:        Accepted
 Date decided:  2026-10-02
 Deciding PRs:  #276
 Supersedes:    none
 Code anchor:   mobiler-core/src/photo.rs (needs_reencode, target_size, quality_ladder, output_format, Photo, PhotoError, PhotoOptions), the shells' photo pipelines (Android PhotoPipeline.kt, iOS PhotoPipeline.swift, mobiler-web process_photo)
-Conformance:   mobiler-core/src/photo.rs::pass_through_only_when_original_fits_and_clean, mobiler-core/src/photo.rs::quality_ladder_steps_down_to_45, mobiler-core/src/photo.rs::target_size_caps_the_longest_side_and_never_upscales, mobiler-core/src/photo.rs::original_keeps_png_and_writes_everything_else_as_jpeg
+Conformance:   mobiler-core/src/photo.rs::pass_through_only_when_original_fits_and_clean, mobiler-core/src/photo.rs::quality_ladder_steps_down_to_45, mobiler-core/src/photo.rs::target_size_caps_the_longest_side_and_never_upscales, mobiler-core/src/photo.rs::target_size_caps_the_pixel_count, mobiler-core/src/photo.rs::original_keeps_png_and_writes_everything_else_as_jpeg, mobiler-core/src/photo.rs::only_a_png_with_harmless_chunks_is_clean
 
 ## 1. Context (The Problem)
 
@@ -38,6 +38,14 @@ mobiler-core as tested functions, then:
   - **Validation Metric:** `target_size_caps_the_longest_side_and_never_upscales`.
 - **Condition 4 — Original keeps PNG, writes everything else as JPEG.**
   - **Validation Metric:** `original_keeps_png_and_writes_everything_else_as_jpeg`.
+- **Condition 5 — metadata detection fails closed.** With `strip_metadata`, only a file proven clean passes
+  through: a PNG by its signature bytes (not its name or declared type) whose every chunk is on an allow-list
+  (pixels, palette, transparency, colour description). A JPEG, WebP or HEIC, a PNG with `eXIf`/`tEXt`/`iTXt`/`zTXt`,
+  or a truncated file is re-encoded.
+  - **Validation Metric:** `only_a_png_with_harmless_chunks_is_clean`.
+- **Condition 6 — at most 16 MP.** A re-encoded image is scaled to at most `MAX_PIXELS` even without
+  `max_dimension`, which bounds decode memory and stays within Safari's canvas limit.
+  - **Validation Metric:** `target_size_caps_the_pixel_count`.
 
 The shells' native code (Kotlin, Swift) mirrors these functions and is checked by review and by emulator runs of the
 team's acceptance checks; the web shell calls them directly.
@@ -60,6 +68,13 @@ team's acceptance checks; the web shell calls them directly.
 Option D. `PhotoOptions` is a JSON input on the existing `photo`/`pick` and `camera`/`capture` ops (an empty input is
 the old call). Metadata is stripped by default; a re-encoded file never carries any. Reported dimensions are upright.
 
+Metadata detection fails closed (Condition 5). A first version used per-shell heuristics (a list of EXIF tags on
+Android, the `{GPS}`/`{Exif}` dictionaries on iOS, "every non-PNG" on the web); the security review found each could
+miss location data (XMP-only or IPTC-only files, a PNG with an `iTXt` packet, a JPEG renamed `.png` on the web), and
+Android treated a file it couldn't parse as clean. The byte-level allow-list replaced them on every shell. An
+intermediate copy of the original (the iOS picker copy, the Android and iOS camera capture) is deleted after a
+re-encode.
+
 **Mutation proof:**
 - `needs_reencode` without the `strip_metadata && has_metadata` term failed
   `pass_through_only_when_original_fits_and_clean`.
@@ -67,6 +82,9 @@ the old call). Metadata is stripped by default; a re-encoded file never carries 
 - `target_size` without the `longest > m` guard (so it upscales) failed
   `target_size_caps_the_longest_side_and_never_upscales`.
 - `output_format(Original, png)` returning JPEG failed `original_keeps_png_and_writes_everything_else_as_jpeg`.
+- Adding `iTXt` to the allow-list failed `only_a_png_with_harmless_chunks_is_clean`.
+- Skipping the PNG signature check (clean chunks behind a JPEG signature) failed it too.
+- Disabling the pixel cap failed `target_size_caps_the_pixel_count`.
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
@@ -76,7 +94,12 @@ the old call). Metadata is stripped by default; a re-encoded file never carries 
 - **Negative:** HEIC can't be decoded on Android 8.0–8.1 or in browsers other than Safari (`unsupported_image`).
 - **Negative:** iOS can't encode WebP (JPEG instead) and Safari's canvas can't (PNG instead); `Photo.mime` says what
   was produced.
-- **Negative:** the web can't detect metadata without parsing, so with `strip_metadata` it re-encodes every non-PNG.
+- **Negative:** with `strip_metadata` (the default) every JPEG, WebP and HEIC is re-encoded, even a clean one, and so is
+  a PNG with any text chunk: an iOS screenshot carries an XMP "Screenshot" note, so it is re-encoded losslessly (same
+  pixels, not byte-identical). `.keep_metadata()` lets such files pass through.
+- **Negative:** a photo over 16 MP is scaled down to 16 MP even without `max_dimension`.
+- **Negative:** a transparent PNG written as JPEG gets an opaque (black) background.
+- **Negative:** the produced files in the cache are not pruned by the framework; the OS may evict them.
 - **Negative:** the quality floor of 45 can make an aggressive `max_bytes` fail where scaling down further would fit;
   the app can lower `max_dimension`.
 - **Negative:** the plain `pick_photo` / `capture_photo` still return originals with their metadata.

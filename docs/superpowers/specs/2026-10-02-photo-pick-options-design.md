@@ -127,3 +127,20 @@ with no content type) and shows the result's size and dimensions.
 - The uploaded JPEG has no GPS EXIF.
 - A portrait photo arrives upright.
 - A 1.5 MB PNG screenshot with `Original` + `max_bytes` arrives byte-identical.
+
+## Amendments
+
+- **2026-10-02 (implementation and review of PR A):**
+  - Metadata detection fails closed on every shell: with `strip_metadata`, only a PNG proven clean by its chunks
+    (`png_is_clean`, an allow-list) passes through; everything else is re-encoded. The per-shell heuristics in
+    decision 3 (ExifInterface tags on Android, ImageIO dictionaries on iOS, "every non-PNG" on the web) missed
+    XMP-/IPTC-only metadata and renamed files (security review). An iOS screenshot (it carries an XMP note) is
+    therefore re-encoded losslessly rather than passed through byte-identical.
+  - A re-encoded photo has at most 16 MP (`MAX_PIXELS`) even without `max_dimension` (decode memory on Android, the
+    Safari canvas limit); Android answers `too_large` if a decode still runs out of memory. `max_dimension(0)` means
+    no limit.
+  - Android decodes with `BitmapFactory` (HEIF from API 28), not `ImageDecoder`; the web relies on
+    `createImageBitmap`'s default `imageOrientation` ("from-image") rather than passing it, so `ImageBitmapOptions` /
+    `ImageOrientation` web-sys features were not needed.
+  - Intermediate originals (the iOS picker copy, the camera captures) are deleted after a re-encode.
+

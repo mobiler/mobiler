@@ -40,32 +40,63 @@ internal object PhotoPipeline {
         return out
     }
 
+    /** mobiler_core::photo::target_size: longest side ≤ max (never upscale), at most MAX_PIXELS. */
     private fun target(w: Int, h: Int, max: Int?): Pair<Int, Int> {
         val longest = maxOf(w, h)
-        if (max == null || max <= 0 || longest <= max) return w to h
-        val s = max.toDouble() / longest
-        return maxOf(1, Math.round(w * s).toInt()) to maxOf(1, Math.round(h * s).toInt())
+        var scale = if (max != null && max > 0 && longest > max) max.toDouble() / longest else 1.0
+        val pixels = w.toDouble() * h * scale * scale
+        if (pixels > MAX_PIXELS) scale *= Math.sqrt(MAX_PIXELS / pixels)
+        if (scale >= 1.0) return w to h
+        return maxOf(1, Math.floor(w * scale).toInt()) to maxOf(1, Math.floor(h * scale).toInt())
     }
 
-    private val metadataTags = listOf(
-        ExifInterface.TAG_GPS_LATITUDE, ExifInterface.TAG_MAKE, ExifInterface.TAG_MODEL,
-        ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_SOFTWARE,
-    )
+    private const val MAX_PIXELS = 16_000_000.0
+
+    private val cleanPngChunks = setOf("IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "sBIT", "pHYs", "bKGD", "cICP")
+
+    /** mobiler_core::photo::png_is_clean: only a PNG (by its bytes) whose every chunk is harmless
+     *  is proven free of metadata; anything else counts as carrying some. */
+    private fun pngIsClean(b: ByteArray): Boolean {
+        val magic = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        if (b.size < 8 || !b.copyOfRange(0, 8).contentEquals(magic)) return false
+        var i = 8
+        while (true) {
+            if (b.size - i < 12) return false
+            val len = ((b[i].toLong() and 0xFF) shl 24) or ((b[i + 1].toLong() and 0xFF) shl 16) or
+                ((b[i + 2].toLong() and 0xFF) shl 8) or (b[i + 3].toLong() and 0xFF)
+            val kind = String(b, i + 4, 4, Charsets.ISO_8859_1)
+            if (kind !in cleanPngChunks) return false
+            val next = i.toLong() + 12 + len
+            if (next > b.size) return false
+            if (kind == "IEND") return true
+            i = next.toInt()
+        }
+    }
 
     @Suppress("DEPRECATION") // Bitmap.CompressFormat.WEBP below API 30
-    fun process(context: Context, source: Uri, input: String): PluginResponse {
+    fun process(context: Context, source: Uri, input: String): PluginResponse = try {
+        processOrThrow(context, source, input)
+    } catch (e: OutOfMemoryError) {
+        // A photo too big to decode on this device; the 16 MP cap makes this rare.
+        fail("too_large")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun processOrThrow(context: Context, source: Uri, input: String): PluginResponse {
         val o = parse(input)
         val cr = context.contentResolver
-        val mime = cr.getType(source) ?: "image/jpeg"
         val original = cr.openInputStream(source)?.use { it.readBytes() } ?: return fail("unsupported_image")
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(original, 0, original.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return fail("unsupported_image") // e.g. HEIC on API 26/27
+        // The decoder's own type first: a provider may report none, or the wrong one.
+        val mime = bounds.outMimeType ?: cr.getType(source) ?: "image/jpeg"
         val exif = runCatching { ExifInterface(original.inputStream()) }.getOrNull()
         val orientation = exif?.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) ?: ExifInterface.ORIENTATION_NORMAL
         val swaps = orientation in setOf(ExifInterface.ORIENTATION_ROTATE_90, ExifInterface.ORIENTATION_ROTATE_270, ExifInterface.ORIENTATION_TRANSPOSE, ExifInterface.ORIENTATION_TRANSVERSE)
         val (w, h) = if (swaps) bounds.outHeight to bounds.outWidth else bounds.outWidth to bounds.outHeight
-        val hasMetadata = exif != null && (orientation != ExifInterface.ORIENTATION_NORMAL && orientation != ExifInterface.ORIENTATION_UNDEFINED || metadataTags.any { exif.getAttribute(it) != null })
+        // Fail closed (ADR-0045): only a PNG proven clean by its chunks counts as metadata-free.
+        val hasMetadata = !pngIsClean(original)
         val fits = (o.maxDimension == null || maxOf(w, h) <= o.maxDimension) && (o.maxBytes == null || original.size <= o.maxBytes)
         val dir = File(context.cacheDir, "photos").apply { mkdirs() }
         if (o.format == "original" && fits && !(o.strip && hasMetadata)) {
@@ -92,22 +123,30 @@ internal object PhotoPipeline {
                 ExifInterface.ORIENTATION_TRANSVERSE -> { postRotate(270f); postScale(-1f, 1f) }
             }
         }
-        val upright = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-        val scaled = if (upright.width == tw && upright.height == th) upright else Bitmap.createScaledBitmap(upright, tw, th, true)
+        // One transform: rotate/flip, then scale to the exact target (upright dimensions).
+        val rotatedW = if (swaps) decoded.height else decoded.width
+        val rotatedH = if (swaps) decoded.width else decoded.height
+        matrix.postScale(tw.toFloat() / rotatedW, th.toFloat() / rotatedH)
+        val scaled = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+        if (scaled !== decoded) decoded.recycle()
         val (format, outMime, ext) = when {
             png -> Triple(Bitmap.CompressFormat.PNG, "image/png", "png")
             webp && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Triple(Bitmap.CompressFormat.WEBP_LOSSY, "image/webp", "webp")
             webp -> Triple(Bitmap.CompressFormat.WEBP, "image/webp", "webp")
             else -> Triple(Bitmap.CompressFormat.JPEG, "image/jpeg", "jpg")
         }
-        for (q in if (png) listOf(100) else ladder(o.quality)) {
-            val bytes = ByteArrayOutputStream().also { scaled.compress(format, q, it) }.toByteArray()
-            if (o.maxBytes == null || bytes.size <= o.maxBytes) {
-                val out = File(dir, "${UUID.randomUUID()}.$ext").apply { writeBytes(bytes) }
-                return ok(out, outMime, bytes.size.toLong(), tw, th)
+        try {
+            for (q in if (png) listOf(100) else ladder(o.quality)) {
+                val bytes = ByteArrayOutputStream().also { scaled.compress(format, q, it) }.toByteArray()
+                if (o.maxBytes == null || bytes.size <= o.maxBytes) {
+                    val out = File(dir, "${UUID.randomUUID()}.$ext").apply { writeBytes(bytes) }
+                    return ok(out, outMime, bytes.size.toLong(), scaled.width, scaled.height)
+                }
             }
+            return fail("too_large")
+        } finally {
+            scaled.recycle()
         }
-        return fail("too_large")
     }
 
     private fun ok(file: File, mime: String, size: Long, w: Int, h: Int): PluginResponse =

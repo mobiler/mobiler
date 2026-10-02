@@ -25,11 +25,37 @@ enum PhotoPipeline {
         return out
     }
 
+    /// mobiler_core::photo::target_size: longest side ≤ max (never upscale), at most maxPixels.
     private static func target(_ w: Int, _ h: Int, _ maxDim: Int?) -> (Int, Int) {
         let longest = max(w, h)
-        guard let m = maxDim, m > 0, longest > m else { return (w, h) }
-        let s = Double(m) / Double(longest)
-        return (max(1, Int((Double(w) * s).rounded())), max(1, Int((Double(h) * s).rounded())))
+        var scale = 1.0
+        if let m = maxDim, m > 0, longest > m { scale = Double(m) / Double(longest) }
+        let pixels = Double(w) * Double(h) * scale * scale
+        if pixels > maxPixels { scale *= (maxPixels / pixels).squareRoot() }
+        if scale >= 1 { return (w, h) }
+        return (max(1, Int((Double(w) * scale).rounded(.down))), max(1, Int((Double(h) * scale).rounded(.down))))
+    }
+
+    private static let maxPixels = 16_000_000.0
+
+    private static let cleanPngChunks: Set<String> = ["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "sBIT", "pHYs", "bKGD", "cICP"]
+
+    /// mobiler_core::photo::png_is_clean: only a PNG (by its bytes) whose every chunk is harmless is
+    /// proven free of metadata; anything else counts as carrying some.
+    private static func pngIsClean(_ data: Data) -> Bool {
+        let b = [UInt8](data)
+        guard b.count >= 8, Array(b[0..<8]) == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] else { return false }
+        var i = 8
+        while true {
+            guard b.count - i >= 12 else { return false }
+            let len = Int(b[i]) << 24 | Int(b[i + 1]) << 16 | Int(b[i + 2]) << 8 | Int(b[i + 3])
+            let kind = String(decoding: b[(i + 4)..<(i + 8)], as: UTF8.self)
+            guard cleanPngChunks.contains(kind) else { return false }
+            let next = i + 12 + len
+            guard next <= b.count else { return false }
+            if kind == "IEND" { return true }
+            i = next
+        }
     }
 
     static func process(_ url: URL, input: String) -> PluginResponse {
@@ -43,7 +69,8 @@ enum PhotoPipeline {
         let utType = (CGImageSourceGetType(src) as String?).flatMap { UTType($0) }
         let mime = utType?.preferredMIMEType ?? "image/jpeg"
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        let hasMetadata = orientation != 1 || props[kCGImagePropertyGPSDictionary] != nil || props[kCGImagePropertyExifDictionary] != nil
+        // Fail closed (ADR-0045): only a PNG proven clean by its chunks counts as metadata-free.
+        let hasMetadata = !pngIsClean((try? Data(contentsOf: url)) ?? Data())
         let fits = (o.maxDimension.map { max(w, h) <= $0 } ?? true) && (o.maxBytes.map { size <= $0 } ?? true)
         if o.format == "original" && fits && !(o.strip && hasMetadata) {
             return ok(url, mime, size, w, h)
@@ -61,7 +88,7 @@ enum PhotoPipeline {
         let outType: UTType = png ? .png : .jpeg // iOS can't encode WebP → JPEG
         for q in png ? [100] : ladder(o.quality) {
             let data = NSMutableData()
-            guard let dest = CGImageDestinationCreateWithData(data, outType.identifier as CFString, 1, nil) else { break }
+            guard let dest = CGImageDestinationCreateWithData(data as CFMutableData, outType.identifier as CFString, 1, nil) else { break }
             CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: Double(q) / 100] as CFDictionary)
             guard CGImageDestinationFinalize(dest) else { break }
             if o.maxBytes.map({ data.length <= $0 }) ?? true {
@@ -71,6 +98,16 @@ enum PhotoPipeline {
             }
         }
         return PluginResponse(ok: false, output: "too_large")
+    }
+
+    /// `process`, then delete `source` when a new file was written (it is an intermediate copy that may
+    /// still carry the original's metadata); a pass-through keeps it, since it is the returned handle.
+    static func processReplacing(_ source: URL, input: String) -> PluginResponse {
+        let result = process(source, input: input)
+        if result.ok, let photo = try? Photo.bincodeDeserialize(input: result.output), photo.handle != source.absoluteString {
+            try? FileManager.default.removeItem(at: source)
+        }
+        return result
     }
 
     private static func ok(_ url: URL, _ mime: String, _ size: Int, _ w: Int, _ h: Int) -> PluginResponse {

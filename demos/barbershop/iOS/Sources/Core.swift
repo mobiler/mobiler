@@ -835,7 +835,11 @@ private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegat
             let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
             do {
                 try FileManager.default.copyItem(at: url, to: dest)
-                self.finish(self.input.isEmpty ? PluginResponse(ok: true, output: dest.absoluteString) : PhotoPipeline.process(dest, input: self.input))
+                if self.input.isEmpty {
+                    self.finish(PluginResponse(ok: true, output: dest.absoluteString))
+                } else {
+                    self.finish(PhotoPipeline.processReplacing(dest, input: self.input))
+                }
             } catch {
                 self.finish(PluginResponse(ok: false, output: error.localizedDescription))
             }
@@ -889,9 +893,15 @@ private final class CameraCaptureDelegate: NSObject, UIImagePickerControllerDele
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
         do {
             try data.write(to: dest)
-            finish(input.isEmpty ? PluginResponse(ok: true, output: dest.absoluteString) : PhotoPipeline.process(dest, input: input))
         } catch {
-            finish(PluginResponse(ok: false, output: error.localizedDescription))
+            finish(PluginResponse(ok: false, output: error.localizedDescription)); return
+        }
+        if input.isEmpty {
+            finish(PluginResponse(ok: true, output: dest.absoluteString))
+        } else {
+            // Up to five full-size encodes: off the main thread.
+            let input = self.input
+            DispatchQueue.global(qos: .userInitiated).async { self.finish(PhotoPipeline.processReplacing(dest, input: input)) }
         }
     }
 

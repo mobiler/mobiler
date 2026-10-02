@@ -472,7 +472,12 @@ class CameraPlugin(private val app: Application) : MobilerPlugin {
         }
         if (uri == null) return PluginResponse(false, "cancelled")
         if (input.isEmpty()) return PluginResponse(true, uri)
-        return withContext(Dispatchers.IO) { PhotoPipeline.process(app, Uri.parse(uri), input) }
+        return withContext(Dispatchers.IO) {
+            val result = PhotoPipeline.process(app, Uri.parse(uri), input)
+            // The pipeline wrote a new file; the full-size capture (with the camera's EXIF) goes.
+            if (result.ok) Uri.parse(uri).lastPathSegment?.let { java.io.File(app.cacheDir, "captures/$it").delete() }
+            result
+        }
     }
 }
 

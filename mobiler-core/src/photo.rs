@@ -103,10 +103,10 @@ impl PhotoOptions {
         self.format = PhotoFormat::Original;
         self
     }
-    /// The longest side in pixels; a smaller image is never upscaled.
+    /// The longest side in pixels; a smaller image is never upscaled. `0` means no limit.
     #[must_use]
     pub fn max_dimension(mut self, px: u32) -> Self {
-        self.max_dimension = Some(px);
+        self.max_dimension = (px > 0).then_some(px);
         self
     }
     /// The largest file allowed. A lossy format steps its quality down to fit; if it can't, the call
@@ -154,6 +154,7 @@ impl PhotoOptions {
     pub fn from_input(input: &str) -> Self {
         let mut o: Self = serde_json::from_str(input).unwrap_or_default();
         o.quality = o.quality.clamp(1, 100);
+        o.max_dimension = o.max_dimension.filter(|px| *px > 0);
         o
     }
 }
@@ -236,16 +237,53 @@ pub fn needs_reencode(format: PhotoFormat, fits: bool, strip_metadata: bool, has
     format != PhotoFormat::Original || !fits || (strip_metadata && has_metadata)
 }
 
-/// ADR-0045 rule: scale so the longest (upright) side is at most `max`; never upscale.
+/// The most pixels a re-encoded photo has (16 MP): it bounds the memory a decode needs and stays
+/// within Safari's canvas limit. A larger image is scaled down to it even without `max_dimension`.
+pub const MAX_PIXELS: u64 = 16_000_000;
+
+/// ADR-0045 rule: scale so the longest (upright) side is at most `max` and the image has at most
+/// [`MAX_PIXELS`]; never upscale.
 pub fn target_size(width: u32, height: u32, max: Option<u32>) -> (u32, u32) {
     let longest = width.max(height);
-    match max {
-        Some(m) if m > 0 && longest > m => {
-            let scale = f64::from(m) / f64::from(longest);
-            let fit = |v: u32| ((f64::from(v) * scale).round() as u32).max(1);
-            (fit(width), fit(height))
+    let mut scale: f64 = 1.0;
+    if let Some(m) = max.filter(|m| *m > 0 && longest > *m) {
+        scale = f64::from(m) / f64::from(longest);
+    }
+    let pixels = f64::from(width) * f64::from(height) * scale * scale;
+    if pixels > MAX_PIXELS as f64 {
+        scale *= (MAX_PIXELS as f64 / pixels).sqrt();
+    }
+    if scale >= 1.0 {
+        return (width, height);
+    }
+    let fit = |v: u32| ((f64::from(v) * scale).floor() as u32).max(1);
+    (fit(width), fit(height))
+}
+
+/// The PNG chunks that carry no metadata: pixels, palette, transparency and colour description.
+const CLEAN_PNG_CHUNKS: [&[u8; 4]; 13] =
+    [b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"iCCP", b"sBIT", b"pHYs", b"bKGD", b"cICP"];
+
+/// ADR-0045 rule: a file is proven free of metadata only when it is a PNG (by its bytes, not its
+/// name) whose every chunk is one of [`CLEAN_PNG_CHUNKS`]. Everything else (a JPEG, WebP or HEIC, a
+/// PNG with `eXIf`, `tEXt`, `iTXt` or `zTXt`, a truncated file) counts as carrying metadata.
+pub fn png_is_clean(bytes: &[u8]) -> bool {
+    const MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+    let Some(mut rest) = bytes.strip_prefix(MAGIC) else { return false };
+    loop {
+        if rest.len() < 12 {
+            return false;
         }
-        _ => (width, height),
+        let len = u32::from_be_bytes([rest[0], rest[1], rest[2], rest[3]]) as usize;
+        let kind: &[u8; 4] = rest[4..8].try_into().expect("4 bytes");
+        if !CLEAN_PNG_CHUNKS.contains(&kind) {
+            return false;
+        }
+        let Some(next) = rest.get(12 + len..) else { return false };
+        if kind == b"IEND" {
+            return true;
+        }
+        rest = next;
     }
 }
 
@@ -321,9 +359,51 @@ mod tests {
     fn target_size_caps_the_longest_side_and_never_upscales() {
         assert_eq!(target_size(4000, 3000, Some(2048)), (2048, 1536));
         assert_eq!(target_size(3000, 4000, Some(2048)), (1536, 2048));
+        assert_eq!(target_size(4000, 3000, Some(0)), (4000, 3000));
         assert_eq!(target_size(800, 600, Some(2048)), (800, 600));
         assert_eq!(target_size(800, 600, None), (800, 600));
         assert_eq!(target_size(10_000, 1, Some(100)), (100, 1));
+    }
+
+    fn png(chunks: &[&[u8; 4]]) -> Vec<u8> {
+        let mut v = b"\x89PNG\r\n\x1a\n".to_vec();
+        for c in chunks {
+            v.extend_from_slice(&3u32.to_be_bytes());
+            v.extend_from_slice(*c);
+            v.extend_from_slice(b"abc");
+            v.extend_from_slice(&[0, 0, 0, 0]); // CRC (not checked)
+        }
+        v
+    }
+
+    #[test]
+    fn only_a_png_with_harmless_chunks_is_clean() {
+        assert!(png_is_clean(&png(&[b"IHDR", b"sRGB", b"pHYs", b"IDAT", b"IEND"])));
+        assert!(!png_is_clean(&png(&[b"IHDR", b"eXIf", b"IDAT", b"IEND"])));
+        assert!(!png_is_clean(&png(&[b"IHDR", b"iTXt", b"IDAT", b"IEND"])));
+        assert!(!png_is_clean(&png(&[b"IHDR", b"tEXt", b"IDAT", b"IEND"])));
+        assert!(!png_is_clean(b"\xff\xd8\xff\xe1 a JPEG renamed .png"));
+        // Clean chunks behind the wrong signature: not a PNG, so not proven clean.
+        let mut fake = png(&[b"IHDR", b"IDAT", b"IEND"]);
+        fake[..8].copy_from_slice(b"\xff\xd8\xff\xe0JFIF");
+        assert!(!png_is_clean(&fake));
+        assert!(!png_is_clean(&png(&[b"IHDR", b"IDAT"])[..20])); // truncated
+        assert!(!png_is_clean(b""));
+    }
+
+    #[test]
+    fn target_size_caps_the_pixel_count() {
+        // 200 MP with no max_dimension → at most 16 MP, aspect kept.
+        let (w, h) = target_size(16_320, 12_240, None);
+        assert!(u64::from(w) * u64::from(h) <= MAX_PIXELS, "{w}x{h}");
+        assert_eq!((w as f64 / h as f64 * 100.0).round(), (16_320.0f64 / 12_240.0 * 100.0).round());
+        assert_eq!(target_size(4000, 3000, None), (4000, 3000)); // 12 MP is under the cap
+    }
+
+    #[test]
+    fn max_dimension_zero_means_no_limit() {
+        assert_eq!(PhotoOptions::new().max_dimension(0).max_dimension_opt(), None);
+        assert_eq!(PhotoOptions::from_input(r#"{"max_dimension":0}"#).max_dimension_opt(), None);
     }
 
     #[test]

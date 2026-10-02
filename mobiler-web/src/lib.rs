@@ -1173,10 +1173,18 @@ async fn pick_file(capture: bool) -> Result<web_sys::File, &'static str> {
     }
 }
 
-/// The web can't read a file's metadata without parsing it, so for `strip_metadata` every non-PNG
-/// counts as carrying some (ADR-0045).
-fn web_has_metadata(mime: &str) -> bool {
-    mime != "image/png"
+/// The file's MIME type, or one guessed from its first bytes when the browser gave none.
+fn sniffed_mime(declared: &str, bytes: &[u8]) -> String {
+    if !declared.is_empty() {
+        return declared.to_string();
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png".into()
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg".into()
+    } else {
+        "application/octet-stream".into()
+    }
 }
 
 /// The ladder keeps an encoding only when it is within `max_bytes` (ADR-0045: never over the limit).
@@ -1198,11 +1206,14 @@ async fn take_photo_with(capture: bool, input: &str) -> PluginResponse {
 }
 
 async fn process_photo(file: &web_sys::File, o: &mobiler_core::PhotoOptions) -> Result<mobiler_core::Photo, String> {
-    use mobiler_core::photo::{needs_reencode, output_format, quality_ladder, target_size};
+    use mobiler_core::photo::{needs_reencode, output_format, png_is_clean, quality_ladder, target_size};
     use wasm_bindgen::JsCast;
     let window = web_sys::window().ok_or("unavailable")?;
-    let mime = file.type_();
     let size = file.size() as u64;
+    // The bytes decide whether the file is a clean PNG (its type comes from the file name).
+    let buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await.map_err(|_| "unsupported_image".to_string())?;
+    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    let mime = sniffed_mime(&file.type_(), &bytes);
     // createImageBitmap applies the EXIF orientation by default (imageOrientation "from-image").
     let promise = window.create_image_bitmap_with_blob(file).map_err(|_| "unsupported_image".to_string())?;
     let bitmap: web_sys::ImageBitmap = wasm_bindgen_futures::JsFuture::from(promise)
@@ -1211,11 +1222,12 @@ async fn process_photo(file: &web_sys::File, o: &mobiler_core::PhotoOptions) -> 
         .unchecked_into();
     let (w, h) = (bitmap.width(), bitmap.height());
     let fits = o.max_dimension_opt().is_none_or(|m| w.max(h) <= m) && within_limit(size, o.max_bytes_opt());
-    if !needs_reencode(o.format(), fits, o.strip_metadata(), web_has_metadata(&mime)) {
+    if !needs_reencode(o.format(), fits, o.strip_metadata(), !png_is_clean(&bytes)) {
+        bitmap.close();
         let handle = web_sys::Url::create_object_url_with_blob(file).map_err(|_| "unavailable".to_string())?;
         return Ok(mobiler_core::Photo { handle, mime, bytes: size, width: w, height: h });
     }
-    let format = output_format(o.format(), mime == "image/png");
+    let format = output_format(o.format(), bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
     let (tw, th) = target_size(w, h, o.max_dimension_opt());
     let doc = window.document().ok_or("unavailable")?;
     let canvas: web_sys::HtmlCanvasElement = doc.create_element("canvas").map_err(|_| "unavailable".to_string())?.unchecked_into();
@@ -1227,14 +1239,20 @@ async fn process_photo(file: &web_sys::File, o: &mobiler_core::PhotoOptions) -> 
         .flatten()
         .ok_or("unavailable")?
         .unchecked_into();
-    ctx.draw_image_with_image_bitmap_and_dw_and_dh(&bitmap, 0.0, 0.0, f64::from(tw), f64::from(th))
-        .map_err(|_| "unsupported_image".to_string())?;
+    let drawn = ctx.draw_image_with_image_bitmap_and_dw_and_dh(&bitmap, 0.0, 0.0, f64::from(tw), f64::from(th));
+    bitmap.close();
+    drawn.map_err(|_| "unsupported_image".to_string())?;
     let ladder = if format == mobiler_core::PhotoFormat::Png { vec![100] } else { quality_ladder(o.quality_value()) };
     for q in ladder {
         let blob = canvas_to_blob(&canvas, format.mime(), f64::from(q) / 100.0).await?;
         if within_limit(blob.size() as u64, o.max_bytes_opt()) {
             let handle = web_sys::Url::create_object_url_with_blob(&blob).map_err(|_| "unavailable".to_string())?;
             return Ok(mobiler_core::Photo { handle, mime: blob.type_(), bytes: blob.size() as u64, width: tw, height: th });
+        }
+        // A browser that can't encode the format (Safari has no WebP) writes PNG and ignores the
+        // quality: another rung would give the same bytes.
+        if blob.type_() != format.mime() {
+            break;
         }
     }
     Err("too_large".into())
@@ -3706,11 +3724,11 @@ mod photo_tests {
     use super::*;
 
     #[test]
-    fn web_has_metadata_rule() {
-        // The web can't inspect metadata: every non-PNG counts as carrying some.
-        assert!(!web_has_metadata("image/png"));
-        assert!(web_has_metadata("image/jpeg"));
-        assert!(web_has_metadata("image/webp"));
+    fn mime_falls_back_from_the_bytes() {
+        assert_eq!(sniffed_mime("", b"\x89PNG\r\n\x1a\nrest"), "image/png");
+        assert_eq!(sniffed_mime("", b"\xff\xd8\xff\xe0"), "image/jpeg");
+        assert_eq!(sniffed_mime("", b"????"), "application/octet-stream");
+        assert_eq!(sniffed_mime("image/webp", b"\xff\xd8\xff"), "image/webp");
     }
 
     #[test]
