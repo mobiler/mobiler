@@ -309,8 +309,8 @@ impl<E> Cx<E> {
     }
 
     /// The phone's OS version and model ([`DeviceInfo`]) via the built-in `device` capability, for
-    /// a support message or bug report. `None` when the shell can't answer (one that predates this
-    /// call). Unlike [`device_model`](Self::device_model)'s display string, every field is separate.
+    /// a support message or bug report. `None` when the shell can't answer: the web shell, or a
+    /// native shell that predates this call. Unlike [`device_model`](Self::device_model)'s display string, every field is separate.
     pub fn device_info(&mut self, then: impl FnOnce(Option<DeviceInfo>) -> E + Send + 'static) {
         self.plugin("device", "info", "", move |r| then(device::from_response(&r)));
     }

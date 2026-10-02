@@ -260,7 +260,7 @@ private final class TransferDelegate: NSObject, URLSessionTaskDelegate, URLSessi
     private var cancelledByApp = false
     private var finished = false
     /// An upload's reply (e.g. `{"url": …}`), kept up to `uploadBodyCap` bytes; a longer reply is cut
-    /// there, so a misbehaving server can't make the shell buffer it. Same cap on every shell.
+    /// there (not marked as cut) and the rest is dropped as it arrives. Same cap on every shell (ADR-0044).
     private var uploadBody = Data()
     private static let uploadBodyCap = 64 * 1024
     /// Resumes the continuation `subscribe` is suspended on. Set right before `task.resume()`.

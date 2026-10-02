@@ -62,7 +62,7 @@ ABI change in the framework, not app work).
 - **Capabilities** = device/platform APIs as async effects via `cx`, fulfilled natively:
   - fire-and-forget: `cx.toast`, `cx.copy`, `cx.share`, `cx.open_url`, `cx.haptic`, `cx.save`
   - request/response (take a `then: |resp| -> Msg` closure): `cx.get` / `cx.post` / `cx.patch`
-    / `cx.delete` (HTTP/JSON), `cx.confirm`, `cx.pick_photo`, `cx.capture_photo`, `cx.device_model`
+    / `cx.delete` (HTTP/JSON), `cx.confirm`, `cx.pick_photo`, `cx.capture_photo`, `cx.device_model` / `cx.device_info`
   - **Data**: call whatever HTTP API you have with `cx.get` / `post` / `patch` / `delete`, **or**
     keep it on-device with `cx.save` + `restore`. Never open a database or socket directly from the app.
   - If you stand up your **own** backend: **SQLite** is an excellent default for a small app, but

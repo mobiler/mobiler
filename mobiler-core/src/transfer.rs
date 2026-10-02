@@ -19,8 +19,8 @@ pub enum TransferEvent {
     Progress { transferred: u64, total: Option<u64> },
     /// The transfer finished. `outcome` is Release A's request result; for a download
     /// its `body` is empty (bytes went to disk) and `handle` is the destination the
-    /// shell wrote (sandbox path on native, `blob:` URL on web). `handle` is `None` for
-    /// an upload.
+    /// shell wrote (sandbox path on native, `blob:` URL on web). For an upload, `body` is
+    /// the server's reply, up to 64 KB (ADR-0044), and `handle` is `None`.
     Done { outcome: HttpOutcome, handle: Option<String> },
 }
 

@@ -507,17 +507,18 @@ fn infer_filename(source: &str) -> String {
     }
 }
 
-/// Parse the CRLF-separated block from `XmlHttpRequest::get_all_response_headers` into
-/// `HttpHeader`s. Each line is `name: value`; a value never contains CRLF (XHR spec), so
-/// splitting on `\r\n` then on the first `:` is sufficient. Blank lines are skipped.
 /// An upload's reply is kept up to this many bytes (a stored file's URL or id); a longer reply is cut
-/// there, so a misbehaving server can't make the shell buffer it. Same cap on every shell.
+/// there and not marked as cut. On the web the browser holds the whole reply; the cap bounds what
+/// crosses into the core. Same cap on every shell (ADR-0044).
 const UPLOAD_BODY_CAP: usize = 64 * 1024;
 
 fn capped_upload_body(body: &[u8]) -> Vec<u8> {
     body[..body.len().min(UPLOAD_BODY_CAP)].to_vec()
 }
 
+/// Parse the CRLF-separated block from `XmlHttpRequest::get_all_response_headers` into
+/// `HttpHeader`s. Each line is `name: value`; a value never contains CRLF (XHR spec), so
+/// splitting on `\r\n` then on the first `:` is sufficient. Blank lines are skipped.
 fn parse_header_block(raw: &str) -> Vec<HttpHeader> {
     raw.split("\r\n")
         .filter_map(|line| {
@@ -969,9 +970,9 @@ struct WsStream {
 }
 
 /// `cx.device_info` on the web: browsers no longer expose a reliable OS version or model (and
-/// user-agent parsing isn't worth it), so every field is empty.
+/// user-agent parsing isn't worth it), so it is refused (ADR-0013) and the app gets `None`.
 fn web_device_info() -> PluginResponse {
-    PluginResponse { ok: true, output: mobiler_core::DeviceInfo::default().encode() }
+    PluginResponse::text(false, "device info is not available on the web")
 }
 
 /// Fulfil a request/response capability. `http` via `fetch`; `device` via the
@@ -3592,10 +3593,11 @@ mod device_info_tests {
     use super::*;
 
     #[test]
-    fn web_device_info_is_an_empty_device_info() {
+    fn web_device_info_is_refused_so_the_app_sees_none() {
+        // ADR-0013: `ok` reports a real answer; the web knows none of the fields.
         let r = web_device_info();
-        assert!(r.ok);
-        assert_eq!(mobiler_core::DeviceInfo::decode(&r.output), Ok(mobiler_core::DeviceInfo::default()));
+        assert!(!r.ok);
+        assert_eq!(r.output, b"device info is not available on the web".to_vec());
     }
 }
 

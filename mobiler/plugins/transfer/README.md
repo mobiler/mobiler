@@ -43,7 +43,8 @@ cx.unsubscribe("up");
   transport failure is `Done{TransportError}`. `handle` is the destination path/URL the shell wrote
   for a **download** (`None` for an upload). A download's response body goes straight to disk and is
   never inlined; an **upload's** `Response` body is the server's reply (e.g. `{"url": …}`), kept up
-  to 64 KB (a longer reply is cut there).
+  to 64 KB (a longer reply is cut there, and not marked as cut: compare `Content-Length` if it
+  matters).
 - **Cancel semantics:** cancelling (`cx.unsubscribe`) — at any point, before or during the
   transfer — emits **no terminal event**; the app has already stopped listening. A **partial
   download file is deleted** on cancel or on a genuine failure. This matches the web shell's
