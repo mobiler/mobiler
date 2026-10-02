@@ -4,6 +4,7 @@
 //! the generic shells on web (here) and native.
 
 use mobiler_core::{
+    Photo, PhotoError, PhotoOptions,
     A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
     map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns, steps, with_step_caption, with_bottom_bar,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
@@ -249,7 +250,8 @@ pub enum Msg {
     /// Pick a photo to send (the bundled `photo` plugin — a real file/blob handle on every shell).
     PickForUpload,
     /// The picked source handle (empty string = the user cancelled the picker).
-    Picked(String),
+    /// `cx.pick_photo_with`: the re-encoded photo to upload, or why there is none.
+    Picked(Result<Photo, PhotoError>),
     /// An upload progress tick (`cx.upload(..).start(..)`).
     UpProgress { transferred: u64, total: Option<u64> },
     /// The upload finished — the HTTP status (0 = transport error).
@@ -1110,22 +1112,33 @@ impl MobilerApp for FadeHouse {
                     return;
                 }
                 model.transfer_note = "Choose a photo…".to_string();
-                cx.pick_photo(|r| Msg::Picked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
+                // A server-friendly upload (ADR-0045): JPEG, longest side 2048 px, at most 4 MB, no GPS.
+                cx.pick_photo_with(PhotoOptions::new().jpeg().max_dimension(2048).max_bytes(4 * 1024 * 1024), Msg::Picked);
             }
-            Msg::Picked(handle) => {
-                if handle.is_empty() {
-                    model.transfer_note = "Cancelled.".to_string();
-                    return;
-                }
+            Msg::Picked(picked) => {
+                let photo = match picked {
+                    Ok(p) => p,
+                    Err(e) => {
+                        model.transfer_note = match e {
+                            PhotoError::Cancelled => "Cancelled.".to_string(),
+                            PhotoError::TooLarge => "That photo can't be made small enough to send.".to_string(),
+                            PhotoError::UnsupportedImage => "That image format isn't supported on this device.".to_string(),
+                            PhotoError::Unavailable => "No photo picker on this device.".to_string(),
+                            PhotoError::Failed(why) => format!("Couldn't prepare the photo ({why})."),
+                        };
+                        return;
+                    }
+                };
                 model.transfer_pct = Some(0);
-                model.transfer_note = "Uploading…".to_string();
+                model.transfer_note = format!("Uploading {}×{} {} ({:.1} MB)…", photo.width, photo.height, photo.mime, photo.bytes as f64 / 1_048_576.0);
+                let ext = match photo.mime.as_str() { "image/png" => "png", "image/webp" => "webp", _ => "jpg" };
                 // `cx.upload` streams progress + a final status over the `transfer` primitive via the
                 // native `transfer` plugin on iOS/Android and `FormData` on web. `.multipart("file")`
                 // sends this as `multipart/form-data` (flips the default PUT to POST) with a
-                // "source" text field — a real filename (`.filename(...)`) is set explicitly because
-                // the inferred default is useless in practice on every shell (a picker media id on
-                // Android, a `blob:` UUID on web, a temp name on iOS).
-                cx.upload(UPLOAD_URL, handle).multipart("file").filename("photo.jpg").field("source", "barbershop").start("bx-up", |ev| match ev {
+                // "source" text field. The filename and content type come from the Photo: the inferred
+                // default name is useless on every shell (a picker media id on Android, a `blob:` UUID
+                // on web, a temp name on iOS).
+                cx.upload(UPLOAD_URL, photo.handle).multipart("file").filename(format!("photo.{ext}")).file_content_type(photo.mime).field("source", "barbershop").start("bx-up", |ev| match ev {
                     TransferEvent::Progress { transferred, total } => Msg::UpProgress { transferred, total },
                     TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0), outcome.body().len()),
                 });
@@ -2441,17 +2454,30 @@ mod test {
         assert_eq!(model.last_video.as_deref(), Some("file:///tmp/clip.mov"));
     }
 
+    fn sample_photo() -> Photo {
+        Photo { handle: "blob:abc123".into(), mime: "image/jpeg".into(), bytes: 1_048_576, width: 2048, height: 1536 }
+    }
+
     #[test]
     fn transfer_flow_uploads_then_downloads_it_back() {
         let (app, mut model) = app();
         let mut cx = Cx::<Msg>::default();
-        // Cancelling the picker (empty handle) is a no-op that just updates the note.
-        app.update(Msg::Picked(String::new()), &mut model, &mut cx);
+        // Cancelling the picker is a no-op that just updates the note.
+        app.update(Msg::Picked(Err(PhotoError::Cancelled)), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, None);
         assert_eq!(model.transfer_note, "Cancelled.");
-        // A real pick kicks off the upload leg.
-        app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
+        // A photo that can't be made small enough says so and uploads nothing.
+        app.update(Msg::Picked(Err(PhotoError::TooLarge)), &mut model, &mut cx);
+        assert_eq!(model.transfer_pct, None);
+        assert!(stream_inputs(Msg::Picked(Err(PhotoError::TooLarge))).is_empty());
+        // A real pick kicks off the upload leg, labelled from the Photo.
+        app.update(Msg::Picked(Ok(sample_photo())), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, Some(0));
+        assert_eq!(model.transfer_note, "Uploading 2048×1536 image/jpeg (1.0 MB)…");
+        let ups = stream_inputs(Msg::Picked(Ok(sample_photo())));
+        assert_eq!(ups.len(), 1);
+        assert_eq!(ups[0]["multipart"]["filename"], "photo.jpg");
+        assert_eq!(ups[0]["multipart"]["file_content_type"], "image/jpeg");
         app.update(Msg::UpProgress { transferred: 50, total: Some(200) }, &mut model, &mut cx);
         assert_eq!(model.transfer_pct, Some(25));
         assert_eq!(model.transfer_note, "Uploading… 50/200 bytes");
@@ -2471,7 +2497,7 @@ mod test {
     fn transfer_flow_surfaces_failures_without_starting_the_next_leg() {
         let (app, mut model) = app();
         let mut cx = Cx::<Msg>::default();
-        app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
+        app.update(Msg::Picked(Ok(sample_photo())), &mut model, &mut cx);
         app.update(Msg::UpDone(500, 0), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, None);
         assert_eq!(model.transfer_note, "Upload failed (status 500).");
@@ -2484,7 +2510,7 @@ mod test {
         let (app, mut model) = app();
         let mut cx = Cx::<Msg>::default();
         // Start a transfer — "bx-up" is now a live subscription (transfer_pct is `Some`).
-        app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
+        app.update(Msg::Picked(Ok(sample_photo())), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, Some(0));
         model.transfer_note = "Uploading…".to_string();
         // A repeat tap while it's in flight must be a no-op: no second `pick_photo` request,
@@ -2555,6 +2581,20 @@ mod test {
             app.view(&model),
             Widget::Scaffold { theme: Some(Theme { density: Density::Large, .. }), .. }
         ));
+    }
+
+    // Drives the full shell so the test sees the streams (transfers) the update starts.
+    fn stream_inputs(msg: Msg) -> Vec<serde_json::Value> {
+        use crux_core::App as _;
+        let shell = App::default();
+        let mut model = Model::default();
+        let mut cmd = shell.update(mobiler_core::Action::Fired { token: serde_json::to_string(&msg).unwrap() }, &mut model);
+        cmd.effects()
+            .filter_map(|e| match e {
+                mobiler_core::Effect::PluginStream(r) => serde_json::from_str(&r.operation.input).ok(),
+                _ => None,
+            })
+            .collect()
     }
 
     // Drives the full shell so the test sees the plugin requests the update emits.

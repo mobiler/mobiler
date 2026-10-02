@@ -188,7 +188,7 @@ impl Photo {
 }
 
 /// Why a `_with` call delivered no photo. Word it yourself: the shells send only these codes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PhotoError {
     Cancelled,
     /// It could not be made to fit `max_bytes`.
