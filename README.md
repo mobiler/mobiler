@@ -161,8 +161,8 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 | Appearance | `cx.system_appearance(then) · cx.subscribe_appearance(key, on_event)` | "light" / "dark" — the OS value even when the app forces one; the stream sends the current value, then each change. Pair with with_appearance(Light/Dark/System) |
 | Haptics | `cx.haptic(style)` | light / medium / heavy |
 | Confirm | `cx.confirm(title, message, then) · cx.confirm_with(Confirm::new(t, m).confirm_label(…).cancel_label(…).destructive(), then)` | native dialog; app labels + destructive style; defaults from the scaffold's ShellLabels |
-| Photo | `cx.pick_photo(then)` | system photo picker → local image URI (no permission) |
-| Camera | `cx.capture_photo(then)` | system camera → local image URI |
+| Photo | `cx.pick_photo(then) · cx.pick_photo_with(PhotoOptions, then)` | system photo picker → local image URI (no permission); _with: re-encoded to a format/size, upright, metadata stripped (ADR-0045) → typed Photo |
+| Camera | `cx.capture_photo(then) · cx.capture_photo_with(PhotoOptions, then)` | system camera → local image URI; _with: re-encoded to a format/size, upright, metadata stripped (ADR-0045) → typed Photo |
 | Date picker | `cx.pick_date(then) · cx.pick_date_with(Picker::new().title(…).confirm_label(…).cancel_label(…), then)` | native date picker → ISO YYYY-MM-DD string; title shown on iOS only, button labels on iOS/Android, web uses the browser picker |
 | Time picker | `cx.pick_time(then) · cx.pick_time_with(Picker::new().title(…).confirm_label(…).cancel_label(…), then)` | native time picker → 24-hour HH:MM string; title shown on iOS only, button labels on iOS/Android, web uses the browser picker |
 <!-- capabilities:end -->
