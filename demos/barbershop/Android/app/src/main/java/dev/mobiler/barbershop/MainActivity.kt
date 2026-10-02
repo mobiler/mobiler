@@ -15,6 +15,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -379,6 +380,8 @@ fun App(core: Core = viewModel()) {
                     modifier = Modifier
                         .fillMaxSize()
                         .statusBarsPadding()
+                        // Keyboard: the column ends above it, so the focused field stays in view.
+                        .imePadding()
                         .verticalScroll(rememberScrollState()),
                 ) {
                     Column(
@@ -1631,7 +1634,9 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 PullToRefreshBox(
                                     isRefreshing = screen.refreshing,
                                     onRefresh = { send(Action.Fired(onRefresh)) },
-                                    modifier = Modifier.fillMaxSize().padding(padding),
+                                    // Keyboard: the body ends above it (minus what the bars below already cover),
+                                    // so the scroll area shrinks and the focused field is brought into view.
+                                    modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
                                     state = ptr,
                                     indicator = {
                                         PullToRefreshDefaults.Indicator(
@@ -1649,7 +1654,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 }
                             } else {
                                 Box(
-                                    modifier = Modifier.fillMaxSize().padding(padding)
+                                    // Keyboard: as above, the body ends above it and the focused field stays in view.
+                                    modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
                                         .let { if (fillIndex != null) it else it.verticalScroll(rememberScrollState()) },
                                     content = column,
                                 )
