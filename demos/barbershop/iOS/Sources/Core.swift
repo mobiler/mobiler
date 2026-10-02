@@ -806,7 +806,7 @@ enum PhotoPlugin {
             config.filter = .images
             config.selectionLimit = 1
             let picker = PHPickerViewController(configuration: config)
-            let delegate = PhotoPickerDelegate { cont.resume(returning: $0) }
+            let delegate = PhotoPickerDelegate(input: input) { cont.resume(returning: $0) }
             PhotoPickerDelegate.retained = delegate // PHPicker holds its delegate weakly
             picker.delegate = delegate
             presenter.present(picker, animated: true)
@@ -816,8 +816,10 @@ enum PhotoPlugin {
 
 private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegate {
     static var retained: PhotoPickerDelegate?
+    private let input: String
     private let onResult: (PluginResponse) -> Void
-    init(onResult: @escaping (PluginResponse) -> Void) { self.onResult = onResult }
+    /// An empty `input` returns the picked file (cx.pick_photo); options re-encode it (ADR-0045).
+    init(input: String, onResult: @escaping (PluginResponse) -> Void) { self.input = input; self.onResult = onResult }
 
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
@@ -833,7 +835,7 @@ private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegat
             let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
             do {
                 try FileManager.default.copyItem(at: url, to: dest)
-                self.finish(PluginResponse(ok: true, output: dest.absoluteString))
+                self.finish(self.input.isEmpty ? PluginResponse(ok: true, output: dest.absoluteString) : PhotoPipeline.process(dest, input: self.input))
             } catch {
                 self.finish(PluginResponse(ok: false, output: error.localizedDescription))
             }
@@ -855,7 +857,7 @@ enum CameraPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "capture" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-            return PluginResponse(ok: false, output: "camera not available")
+            return PluginResponse(ok: false, output: input.isEmpty ? "camera not available" : "unavailable")
         }
         guard let presenter = topViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
@@ -863,7 +865,7 @@ enum CameraPlugin {
         return await withCheckedContinuation { cont in
             let picker = UIImagePickerController()
             picker.sourceType = .camera
-            let delegate = CameraCaptureDelegate { cont.resume(returning: $0) }
+            let delegate = CameraCaptureDelegate(input: input) { cont.resume(returning: $0) }
             CameraCaptureDelegate.retained = delegate // the picker holds its delegate weakly
             picker.delegate = delegate
             presenter.present(picker, animated: true)
@@ -873,18 +875,21 @@ enum CameraPlugin {
 
 private final class CameraCaptureDelegate: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     static var retained: CameraCaptureDelegate?
+    private let input: String
     private let onResult: (PluginResponse) -> Void
-    init(onResult: @escaping (PluginResponse) -> Void) { self.onResult = onResult }
+    /// An empty `input` returns the captured JPEG (cx.capture_photo); options re-encode it (ADR-0045).
+    init(input: String, onResult: @escaping (PluginResponse) -> Void) { self.input = input; self.onResult = onResult }
 
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
         picker.dismiss(animated: true)
-        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.9) else {
+        // With options, keep full quality here: the pipeline does the one lossy encode.
+        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: input.isEmpty ? 0.9 : 1.0) else {
             finish(PluginResponse(ok: false, output: "no image")); return
         }
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
         do {
             try data.write(to: dest)
-            finish(PluginResponse(ok: true, output: dest.absoluteString))
+            finish(input.isEmpty ? PluginResponse(ok: true, output: dest.absoluteString) : PhotoPipeline.process(dest, input: input))
         } catch {
             finish(PluginResponse(ok: false, output: error.localizedDescription))
         }
