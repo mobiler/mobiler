@@ -912,7 +912,8 @@ private final class CameraCaptureDelegate: NSObject, UIImagePickerControllerDele
 
     private func finish(_ r: PluginResponse) {
         onResult(r)
-        CameraCaptureDelegate.retained = nil
+        // May run off the main thread (the encode): clear the static there, and only if it is still us.
+        DispatchQueue.main.async { if CameraCaptureDelegate.retained === self { CameraCaptureDelegate.retained = nil } }
     }
 }
 

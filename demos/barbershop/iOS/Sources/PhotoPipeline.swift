@@ -12,7 +12,7 @@ enum PhotoPipeline {
         var o = Opts()
         guard let data = input.data(using: .utf8), let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return o }
         if let f = j["format"] as? String { o.format = f }
-        o.maxDimension = (j["max_dimension"] as? NSNumber)?.intValue
+        o.maxDimension = (j["max_dimension"] as? NSNumber)?.intValue.flatMap { $0 > 0 ? $0 : nil }
         o.maxBytes = (j["max_bytes"] as? NSNumber)?.intValue
         if let q = (j["quality"] as? NSNumber)?.intValue { o.quality = min(max(q, 1), 100) }
         if let s = j["strip_metadata"] as? Bool { o.strip = s }
@@ -28,12 +28,17 @@ enum PhotoPipeline {
     /// mobiler_core::photo::target_size: longest side ≤ max (never upscale), at most maxPixels.
     private static func target(_ w: Int, _ h: Int, _ maxDim: Int?) -> (Int, Int) {
         let longest = max(w, h)
-        var scale = 1.0
-        if let m = maxDim, m > 0, longest > m { scale = Double(m) / Double(longest) }
+        let dimensionCap = maxDim.flatMap { $0 > 0 && longest > $0 ? $0 : nil }
+        var scale = dimensionCap.map { Double($0) / Double(longest) } ?? 1.0
         let pixels = Double(w) * Double(h) * scale * scale
-        if pixels > maxPixels { scale *= (maxPixels / pixels).squareRoot() }
+        let pixelCapped = pixels > maxPixels
+        if pixelCapped { scale *= (maxPixels / pixels).squareRoot() }
         if scale >= 1 { return (w, h) }
-        return (max(1, Int((Double(w) * scale).rounded(.down))), max(1, Int((Double(h) * scale).rounded(.down))))
+        var tw = max(1, Int((Double(w) * scale).rounded(.down)))
+        var th = max(1, Int((Double(h) * scale).rounded(.down)))
+        // When max_dimension is what scaled it, the long side is exactly max (floor can land one short).
+        if let m = dimensionCap, !pixelCapped { if w >= h { tw = m } else { th = m } }
+        return (tw, th)
     }
 
     private static let maxPixels = 16_000_000.0
@@ -53,7 +58,8 @@ enum PhotoPipeline {
             guard cleanPngChunks.contains(kind) else { return false }
             let next = i + 12 + len
             guard next <= b.count else { return false }
-            if kind == "IEND" { return true }
+            // Nothing may follow IEND (a cropped screenshot can keep the original there).
+            if kind == "IEND" { return next == b.count }
             i = next
         }
     }
@@ -100,13 +106,14 @@ enum PhotoPipeline {
         return PluginResponse(ok: false, output: "too_large")
     }
 
-    /// `process`, then delete `source` when a new file was written (it is an intermediate copy that may
-    /// still carry the original's metadata); a pass-through keeps it, since it is the returned handle.
+    /// `process`, then delete `source` unless it is the returned handle (a pass-through): it is an
+    /// intermediate copy that may still carry the original's metadata.
     static func processReplacing(_ source: URL, input: String) -> PluginResponse {
         let result = process(source, input: input)
-        if result.ok, let photo = try? Photo.bincodeDeserialize(input: result.output), photo.handle != source.absoluteString {
-            try? FileManager.default.removeItem(at: source)
-        }
+        // Keep `source` only when it is the returned handle (a pass-through); a failed re-encode
+        // leaves nothing the app was given, so the copy goes too.
+        let passedThrough = result.ok && (try? Photo.bincodeDeserialize(input: result.output))?.handle == source.absoluteString
+        if !passedThrough { try? FileManager.default.removeItem(at: source) }
         return result
     }
 

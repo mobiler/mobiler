@@ -24,7 +24,7 @@ internal object PhotoPipeline {
         val j = runCatching { JSONObject(input) }.getOrElse { JSONObject() }
         return Opts(
             j.optString("format", "original"),
-            if (j.has("max_dimension")) j.getInt("max_dimension") else null,
+            if (j.has("max_dimension")) j.getInt("max_dimension").takeIf { it > 0 } else null,
             if (j.has("max_bytes")) j.getLong("max_bytes") else null,
             j.optInt("quality", 85).coerceIn(1, 100),
             j.optBoolean("strip_metadata", true),
@@ -43,11 +43,17 @@ internal object PhotoPipeline {
     /** mobiler_core::photo::target_size: longest side ≤ max (never upscale), at most MAX_PIXELS. */
     private fun target(w: Int, h: Int, max: Int?): Pair<Int, Int> {
         val longest = maxOf(w, h)
-        var scale = if (max != null && max > 0 && longest > max) max.toDouble() / longest else 1.0
+        val dimensionCap = if (max != null && max > 0 && longest > max) max else null
+        var scale = if (dimensionCap != null) dimensionCap.toDouble() / longest else 1.0
         val pixels = w.toDouble() * h * scale * scale
-        if (pixels > MAX_PIXELS) scale *= Math.sqrt(MAX_PIXELS / pixels)
+        val pixelCapped = pixels > MAX_PIXELS
+        if (pixelCapped) scale *= Math.sqrt(MAX_PIXELS / pixels)
         if (scale >= 1.0) return w to h
-        return maxOf(1, Math.floor(w * scale).toInt()) to maxOf(1, Math.floor(h * scale).toInt())
+        var tw = maxOf(1, Math.floor(w * scale).toInt())
+        var th = maxOf(1, Math.floor(h * scale).toInt())
+        // When max_dimension is what scaled it, the long side is exactly max (floor can land one short).
+        if (dimensionCap != null && !pixelCapped) { if (w >= h) tw = dimensionCap else th = dimensionCap }
+        return tw to th
     }
 
     private const val MAX_PIXELS = 16_000_000.0
@@ -68,7 +74,8 @@ internal object PhotoPipeline {
             if (kind !in cleanPngChunks) return false
             val next = i.toLong() + 12 + len
             if (next > b.size) return false
-            if (kind == "IEND") return true
+            // Nothing may follow IEND (a cropped screenshot can keep the original there).
+            if (kind == "IEND") return next == b.size.toLong()
             i = next.toInt()
         }
     }

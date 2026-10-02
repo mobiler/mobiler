@@ -1173,15 +1173,16 @@ async fn pick_file(capture: bool) -> Result<web_sys::File, &'static str> {
     }
 }
 
-/// The file's MIME type, or one guessed from its first bytes when the browser gave none.
+/// The file's MIME type: from its first bytes when recognised, else the declared one.
 fn sniffed_mime(declared: &str, bytes: &[u8]) -> String {
-    if !declared.is_empty() {
-        return declared.to_string();
-    }
+    // The bytes win when recognised (the declared type comes from the file name), like the native
+    // shells, which take it from the decoder.
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         "image/png".into()
     } else if bytes.starts_with(b"\xff\xd8\xff") {
         "image/jpeg".into()
+    } else if !declared.is_empty() {
+        declared.to_string()
     } else {
         "application/octet-stream".into()
     }
@@ -3728,7 +3729,8 @@ mod photo_tests {
         assert_eq!(sniffed_mime("", b"\x89PNG\r\n\x1a\nrest"), "image/png");
         assert_eq!(sniffed_mime("", b"\xff\xd8\xff\xe0"), "image/jpeg");
         assert_eq!(sniffed_mime("", b"????"), "application/octet-stream");
-        assert_eq!(sniffed_mime("image/webp", b"\xff\xd8\xff"), "image/webp");
+        assert_eq!(sniffed_mime("image/png", b"\xff\xd8\xff"), "image/jpeg"); // a JPEG renamed .png
+        assert_eq!(sniffed_mime("image/webp", b"RIFF"), "image/webp");
     }
 
     #[test]

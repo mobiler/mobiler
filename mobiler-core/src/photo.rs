@@ -245,19 +245,23 @@ pub const MAX_PIXELS: u64 = 16_000_000;
 /// [`MAX_PIXELS`]; never upscale.
 pub fn target_size(width: u32, height: u32, max: Option<u32>) -> (u32, u32) {
     let longest = width.max(height);
-    let mut scale: f64 = 1.0;
-    if let Some(m) = max.filter(|m| *m > 0 && longest > *m) {
-        scale = f64::from(m) / f64::from(longest);
-    }
+    let dimension_cap = max.filter(|m| *m > 0 && longest > *m);
+    let mut scale = dimension_cap.map_or(1.0, |m| f64::from(m) / f64::from(longest));
     let pixels = f64::from(width) * f64::from(height) * scale * scale;
-    if pixels > MAX_PIXELS as f64 {
+    let pixel_capped = pixels > MAX_PIXELS as f64;
+    if pixel_capped {
         scale *= (MAX_PIXELS as f64 / pixels).sqrt();
     }
     if scale >= 1.0 {
         return (width, height);
     }
     let fit = |v: u32| ((f64::from(v) * scale).floor() as u32).max(1);
-    (fit(width), fit(height))
+    let (mut w, mut h) = (fit(width), fit(height));
+    // When max_dimension is what scaled it, the long side is exactly max (floor can land one short).
+    if let (Some(m), false) = (dimension_cap, pixel_capped) {
+        if width >= height { w = m } else { h = m }
+    }
+    (w, h)
 }
 
 /// The PNG chunks that carry no metadata: pixels, palette, transparency and colour description.
@@ -279,9 +283,11 @@ pub fn png_is_clean(bytes: &[u8]) -> bool {
         if !CLEAN_PNG_CHUNKS.contains(&kind) {
             return false;
         }
-        let Some(next) = rest.get(12 + len..) else { return false };
+        // `get` twice, not `12 + len`: that sum wraps a 32-bit usize (wasm) for a crafted length.
+        let Some(next) = rest.get(12..).and_then(|r| r.get(len..)) else { return false };
         if kind == b"IEND" {
-            return true;
+            // Nothing may follow IEND (a cropped screenshot can keep the original there).
+            return next.is_empty();
         }
         rest = next;
     }
@@ -389,6 +395,32 @@ mod tests {
         assert!(!png_is_clean(&fake));
         assert!(!png_is_clean(&png(&[b"IHDR", b"IDAT"])[..20])); // truncated
         assert!(!png_is_clean(b""));
+    }
+
+    #[test]
+    fn a_png_must_end_at_iend() {
+        // aCropalypse: a cropped screenshot can keep the uncropped original after IEND.
+        let mut trailing = png(&[b"IHDR", b"IDAT", b"IEND"]);
+        trailing.push(0);
+        assert!(!png_is_clean(&trailing));
+    }
+
+    #[test]
+    fn a_huge_chunk_length_is_not_clean() {
+        // 12 + 0xFFFF_FFF4 wraps a 32-bit usize (wasm): the walk must still fail, not loop.
+        let mut huge = b"\x89PNG\r\n\x1a\n".to_vec();
+        huge.extend_from_slice(&0xFFFF_FFF4u32.to_be_bytes());
+        huge.extend_from_slice(b"IDAT");
+        huge.extend_from_slice(&[0; 8]);
+        assert!(!png_is_clean(&huge));
+    }
+
+    #[test]
+    fn the_long_side_lands_exactly_on_max_dimension() {
+        for (w, h, m) in [(4624, 3468, 1600), (4624, 3468, 800), (3468, 4624, 3000)] {
+            let (tw, th) = target_size(w, h, Some(m));
+            assert_eq!(tw.max(th), m, "{w}x{h} → {tw}x{th}");
+        }
     }
 
     #[test]

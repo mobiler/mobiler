@@ -474,8 +474,9 @@ class CameraPlugin(private val app: Application) : MobilerPlugin {
         if (input.isEmpty()) return PluginResponse(true, uri)
         return withContext(Dispatchers.IO) {
             val result = PhotoPipeline.process(app, Uri.parse(uri), input)
-            // The pipeline wrote a new file; the full-size capture (with the camera's EXIF) goes.
-            if (result.ok) Uri.parse(uri).lastPathSegment?.let { java.io.File(app.cacheDir, "captures/$it").delete() }
+            // The result is always a new file (a pass-through is copied), so the full-size capture,
+            // with the camera's EXIF, goes on every outcome.
+            Uri.parse(uri).lastPathSegment?.let { java.io.File(app.cacheDir, "captures/$it").delete() }
             result
         }
     }
