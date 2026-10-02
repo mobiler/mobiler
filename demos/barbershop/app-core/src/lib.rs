@@ -171,6 +171,8 @@ pub enum Msg {
 
     /// The device's preferred locale tag (built-in `device` "locale" capability).
     GotDeviceLocale(String),
+    /// `cx.device_info` → the Profile tab's "Device:" line (empty until the shell answers).
+    GotDeviceInfo(String),
     /// Home Light · Dark · System control.
     SetAppearance(Appearance),
     /// The OS light/dark setting, from the `appearance` stream (current value, then each change).
@@ -342,6 +344,8 @@ pub struct Model {
     oauth_status: String,
     /// Device locale tag detected at startup (e.g. "de-CH").
     device_locale: String,
+    /// "Android 13 · samsung SM-A325F" from `cx.device_info` (Profile tab).
+    device_info: String,
     /// "Live" streaming demo (cx.subscribe to the built-in `ticker`): whether the
     /// subscription is active, how many events have streamed in, and the last value.
     live_on: bool,
@@ -454,6 +458,7 @@ impl Default for Model {
             bio: String::new(),
             oauth_status: String::new(),
             device_locale: String::new(),
+            device_info: String::new(),
             live_on: false,
             live_count: 0,
             live_last: String::new(),
@@ -914,6 +919,7 @@ impl MobilerApp for FadeHouse {
                 cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.as_text().unwrap_or_default().to_string()));
             }
             Msg::GotDeviceLocale(tag) => model.device_locale = tag,
+            Msg::GotDeviceInfo(line) => model.device_info = line,
             Msg::SetAppearance(a) => model.appearance = a,
             Msg::SystemAppearance(v) => model.system_appearance = v,
             Msg::ToggleLive => {
@@ -1169,6 +1175,8 @@ impl MobilerApp for FadeHouse {
         // Detect the device's preferred locale (built-in `device` capability) so the
         // formatting card can show it — works on iOS, Android, and web.
         cx.device_locale(|r| Msg::GotDeviceLocale(r.as_text().unwrap_or_default().to_string()));
+        // The phone's OS version and model (a support line, e.g. "Android 13 · samsung SM-A325F").
+        cx.device_info(|info| Msg::GotDeviceInfo(info.map(|d| device_line(&d)).unwrap_or_default()));
         // The OS light/dark setting, live (current value first) — shown under Home's appearance control.
         cx.subscribe_appearance("appearance", |r| Msg::SystemAppearance(r.as_text().unwrap_or_default().to_string()));
         // In-app purchase (`iap` plugin): subscribe to the transactions stream at startup (the single
@@ -2152,6 +2160,12 @@ fn coverage_chart() -> Widget {
     )
 }
 
+/// "Android 13 · samsung SM-A325F" / "iOS 17.5 · Apple iPhone15,2"; the web knows none of it.
+fn device_line(d: &mobiler_core::DeviceInfo) -> String {
+    let os = if d.os_api_level > 0 { format!("Android {}", d.os_version) } else if d.manufacturer == "Apple" { format!("iOS {}", d.os_version) } else { d.os_version.clone() };
+    [os, format!("{} {}", d.manufacturer, d.model).trim().to_string()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
 fn profile_screen(model: &Model) -> Widget {
     let pct = (completeness(model) * 100.0).round() as u32;
     column(vec![
@@ -2162,6 +2176,7 @@ fn profile_screen(model: &Model) -> Widget {
         progress(Some(completeness(model))),
         // Theme-level switch: Density::Large enlarges every control on every screen.
         toggle("large_controls", "Large controls", model.large_controls),
+        caption(format!("Device: {}", if model.device_info.is_empty() { "unknown" } else { &model.device_info })),
         divider(),
         row(vec![icon_button(Icon::Person, Msg::SelectTab(Tab::Profile)), text("Account")]),
         row(vec![icon_button(Icon::Bell, Msg::Notifications), text("Notifications")]),

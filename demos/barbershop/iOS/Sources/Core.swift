@@ -440,6 +440,16 @@ enum BrowserPlugin {
     }
 }
 
+/// The hardware identifier (`utsname.machine`, e.g. "iPhone15,2"); on the simulator, the simulated one.
+private func hardwareModel() -> String {
+    if let sim = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return sim }
+    var sys = utsname()
+    uname(&sys)
+    return withUnsafeBytes(of: &sys.machine) { raw in
+        String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
+    }
+}
+
 /// Device info — request/response. `model` returns e.g. "Apple iPhone (iOS 18.0)".
 @MainActor
 enum DevicePlugin {
@@ -448,6 +458,11 @@ enum DevicePlugin {
         case "model":
             let d = UIDevice.current
             return PluginResponse(ok: true, output: "Apple \(d.model) (\(d.systemName) \(d.systemVersion))")
+        case "info":
+            // Structured (cx.device_info): OS version and the hardware identifier ("iPhone15,2"),
+            // not the user-set device name. The simulator reports its simulated model.
+            let info = DeviceInfo(osVersion: UIDevice.current.systemVersion, osApiLevel: 0, manufacturer: "Apple", model: hardwareModel())
+            return PluginResponse(ok: true, output: (try? info.bincodeSerialize()) ?? [])
         case "locale":
             return PluginResponse(ok: true, output: Locale.preferredLanguages.first ?? Locale.current.identifier)
         case "appearance":

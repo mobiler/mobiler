@@ -968,6 +968,12 @@ struct WsStream {
     _onclose: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::CloseEvent)>,
 }
 
+/// `cx.device_info` on the web: browsers no longer expose a reliable OS version or model (and
+/// user-agent parsing isn't worth it), so every field is empty.
+fn web_device_info() -> PluginResponse {
+    PluginResponse { ok: true, output: mobiler_core::DeviceInfo::default().encode() }
+}
+
 /// Fulfil a request/response capability. `http` via `fetch`; `device` via the
 /// browser's user-agent string (the web analogue of a device model).
 async fn perform(call: &PluginCall) -> PluginResponse {
@@ -979,6 +985,8 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         } else if call.op == "appearance" {
             // The OS colour scheme, whatever the app forces.
             (if os_dark() { "dark" } else { "light" }).to_string()
+        } else if call.op == "info" {
+            return web_device_info();
         } else {
             nav.and_then(|n| n.user_agent().ok()).unwrap_or_default()
         };
@@ -3578,3 +3586,16 @@ mod upload_body_tests {
         assert_eq!(capped_upload_body(&big).len(), UPLOAD_BODY_CAP);
     }
 }
+
+#[cfg(test)]
+mod device_info_tests {
+    use super::*;
+
+    #[test]
+    fn web_device_info_is_an_empty_device_info() {
+        let r = web_device_info();
+        assert!(r.ok);
+        assert_eq!(mobiler_core::DeviceInfo::decode(&r.output), Ok(mobiler_core::DeviceInfo::default()));
+    }
+}
+
