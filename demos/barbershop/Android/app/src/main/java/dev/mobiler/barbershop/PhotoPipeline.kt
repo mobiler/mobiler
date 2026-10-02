@@ -51,8 +51,12 @@ internal object PhotoPipeline {
         if (scale >= 1.0) return w to h
         var tw = maxOf(1, Math.floor(w * scale).toInt())
         var th = maxOf(1, Math.floor(h * scale).toInt())
-        // When max_dimension is what scaled it, the long side is exactly max (floor can land one short).
-        if (dimensionCap != null && !pixelCapped) { if (w >= h) tw = dimensionCap else th = dimensionCap }
+        // When max_dimension is what scaled it, the long side is exactly max and the short side is
+        // integer-scaled from it (floating floor can land one short, and a square must stay square).
+        if (dimensionCap != null && !pixelCapped) {
+            if (w >= h) { tw = dimensionCap; th = maxOf(1, (h.toLong() * dimensionCap / w).toInt()) }
+            else { th = dimensionCap; tw = maxOf(1, (w.toLong() * dimensionCap / h).toInt()) }
+        }
         return tw to th
     }
 

@@ -257,9 +257,11 @@ pub fn target_size(width: u32, height: u32, max: Option<u32>) -> (u32, u32) {
     }
     let fit = |v: u32| ((f64::from(v) * scale).floor() as u32).max(1);
     let (mut w, mut h) = (fit(width), fit(height));
-    // When max_dimension is what scaled it, the long side is exactly max (floor can land one short).
+    // When max_dimension is what scaled it, the long side is exactly max and the short side is
+    // integer-scaled from it (floating floor can land one short, and a square must stay square).
     if let (Some(m), false) = (dimension_cap, pixel_capped) {
-        if width >= height { w = m } else { h = m }
+        let short = |s: u32, l: u32| ((u64::from(s) * u64::from(m) / u64::from(l)) as u32).max(1);
+        if width >= height { (w, h) = (m, short(height, width)) } else { (w, h) = (short(width, height), m) }
     }
     (w, h)
 }
@@ -420,6 +422,10 @@ mod tests {
         for (w, h, m) in [(4624, 3468, 1600), (4624, 3468, 800), (3468, 4624, 3000)] {
             let (tw, th) = target_size(w, h, Some(m));
             assert_eq!(tw.max(th), m, "{w}x{h} → {tw}x{th}");
+        }
+        // A square stays square.
+        for (side, m) in [(3000, 1600), (161, 100), (194, 100), (4000, 2048)] {
+            assert_eq!(target_size(side, side, Some(m)), (m, m), "{side}² at {m}");
         }
     }
 

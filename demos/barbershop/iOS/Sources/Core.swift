@@ -848,7 +848,8 @@ private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegat
 
     private func finish(_ r: PluginResponse) {
         onResult(r)
-        PhotoPickerDelegate.retained = nil
+        // Runs on the loadFileRepresentation queue: clear the static on main, and only if it is still us.
+        DispatchQueue.main.async { if PhotoPickerDelegate.retained === self { PhotoPickerDelegate.retained = nil } }
     }
 }
 

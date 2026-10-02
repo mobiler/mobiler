@@ -89,7 +89,7 @@ re-encode.
 - Disabling the pixel cap failed `target_size_caps_the_pixel_count`.
 - `a_png_must_end_at_iend` and `the_long_side_lands_exactly_on_max_dimension` were written against the code before
   their fixes and failed there (returning clean at `IEND` regardless of what follows; a floor that lands one pixel
-  short of `max_dimension`). The chunk walk also avoids `12 + len`, which wraps a 32-bit `usize` (wasm) for a crafted
+  short of `max_dimension`; then a square coming out one pixel narrower, fixed by integer-scaling the short side). The chunk walk also avoids `12 + len`, which wraps a 32-bit `usize` (wasm) for a crafted
   length; that can't fail on the 64-bit test host, so `a_huge_chunk_length_is_not_clean` documents it without a
   mutation proof.
 - Reverting restored green.

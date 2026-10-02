@@ -12,7 +12,7 @@ enum PhotoPipeline {
         var o = Opts()
         guard let data = input.data(using: .utf8), let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return o }
         if let f = j["format"] as? String { o.format = f }
-        o.maxDimension = (j["max_dimension"] as? NSNumber)?.intValue.flatMap { $0 > 0 ? $0 : nil }
+        o.maxDimension = ((j["max_dimension"] as? NSNumber)?.intValue).flatMap { $0 > 0 ? $0 : nil }
         o.maxBytes = (j["max_bytes"] as? NSNumber)?.intValue
         if let q = (j["quality"] as? NSNumber)?.intValue { o.quality = min(max(q, 1), 100) }
         if let s = j["strip_metadata"] as? Bool { o.strip = s }
@@ -36,8 +36,11 @@ enum PhotoPipeline {
         if scale >= 1 { return (w, h) }
         var tw = max(1, Int((Double(w) * scale).rounded(.down)))
         var th = max(1, Int((Double(h) * scale).rounded(.down)))
-        // When max_dimension is what scaled it, the long side is exactly max (floor can land one short).
-        if let m = dimensionCap, !pixelCapped { if w >= h { tw = m } else { th = m } }
+        // When max_dimension is what scaled it, the long side is exactly max and the short side is
+        // integer-scaled from it (floating floor can land one short, and a square must stay square).
+        if let m = dimensionCap, !pixelCapped {
+            if w >= h { tw = m; th = max(1, h * m / w) } else { th = m; tw = max(1, w * m / h) }
+        }
         return (tw, th)
     }
 
