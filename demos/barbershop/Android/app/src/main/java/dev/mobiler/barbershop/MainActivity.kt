@@ -16,6 +16,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -195,6 +200,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -211,6 +217,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
@@ -1485,11 +1492,24 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         bottomBar = {
                           Column {
                             val pinned = widget.bottomBar.orEmpty()
+                            val bottomTabs = !wide && widget.tabs.isNotEmpty()
+                            // The tabs' measured height, system bar inset included (like the keyboard's); until
+                            // measured, M3's 80dp bar plus that inset, so a first frame with the keyboard up is right.
+                            val density = LocalDensity.current
+                            val navInset = WindowInsets.navigationBars.getBottom(density)
+                            var tabsHeight by remember { mutableIntStateOf(with(density) { 80.dp.roundToPx() } + navInset) }
                             if (pinned.isNotEmpty()) {
                                 // with_bottom_bar: the screen's main actions above the tabs. M3 lifts the FAB and
-                                // snackbar above this slot. Without bottom tabs it clears the system bar and
-                                // rises with the keyboard (the tabs themselves stay behind the keyboard).
-                                val barInsets = if (!wide && widget.tabs.isNotEmpty()) Modifier else Modifier.navigationBarsPadding().imePadding()
+                                // snackbar above this slot. Without tabs below it, it clears the system bar and
+                                // rises with the keyboard. Above tabs, it rides on the keyboard once the keyboard
+                                // is taller than the tabs (which stay behind it): the extra padding is the
+                                // keyboard's height minus the tabs', computed at layout, so the bar moves with the
+                                // keyboard frame by frame and nothing appears or disappears.
+                                val barInsets = if (bottomTabs) {
+                                    Modifier.windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets(bottom = tabsHeight)))
+                                } else {
+                                    Modifier.navigationBarsPadding().imePadding()
+                                }
                                 Surface(color = LocalPalette.current?.surfaceBar?.color() ?: MaterialTheme.colorScheme.surfaceContainer) {
                                     Column(barInsets) {
                                         HorizontalDivider(color = LocalPalette.current?.outlineVariant?.color() ?: MaterialTheme.colorScheme.outlineVariant)
@@ -1503,8 +1523,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                     }
                                 }
                             }
-                            if (!wide && widget.tabs.isNotEmpty()) {
-                                NavigationBar {
+                            if (bottomTabs) {
+                                NavigationBar(Modifier.onSizeChanged { tabsHeight = it.height }) {
                                     widget.tabs.forEach { t ->
                                         NavigationBarItem(
                                             selected = t.selected,
