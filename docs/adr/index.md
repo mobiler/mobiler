@@ -47,3 +47,4 @@ Read this before designing a change. Name the records that apply in the spec (se
 | ADR-0041 | The shells never set an app-level night mode; the Android system splash follows the OS appearance, and an app that wants its own choice in the first frame keeps it in `cx.save` state | Accepted | 2026-10-01 | — |
 | ADR-0042 | `mobiler upgrade` has a seed class: a listed app-owned file the template provides is created when missing and never touched after that | Accepted | 2026-10-01 | — |
 | ADR-0043 | `mobiler upgrade` three-way merges an app's generated files against `.mobiler/base/`, never applies a conflict and never touches the app's own code; its review copies and backups never land where a build reads them | Accepted | 2026-10-01 | — |
+| ADR-0044 | An upload's terminal `Done` carries the server's reply in its `Response` body, cut at the same 64 KB on every shell and not marked as cut; a download's body still never enters the core | Accepted | 2026-10-02 | — |

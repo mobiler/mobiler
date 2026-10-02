@@ -252,13 +252,17 @@ private func inferFilename(_ source: String) -> String {
 /// only ever touched from URLSession's delegate queue (serial by default) plus the two call sites
 /// in `subscribe` above that run strictly before/after the session is alive, so there's no
 /// concurrent access — same reasoning the bluetooth plugin's `BleManager` uses.
-private final class TransferDelegate: NSObject, URLSessionTaskDelegate, URLSessionDownloadDelegate, @unchecked Sendable {
+private final class TransferDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate, URLSessionDownloadDelegate, @unchecked Sendable {
     private let emit: @Sendable (PluginResponse) -> Void
     private let dest: URL? // set only for downloads — where to move the finished temp file
     private let tempUploadFile: URL? // set only for a multipart upload — the composed temp file to delete
     private var lastEmit = Date.distantPast
     private var cancelledByApp = false
     private var finished = false
+    /// An upload's reply (e.g. `{"url": …}`), kept up to `uploadBodyCap` bytes; a longer reply is cut
+    /// there (not marked as cut) and the rest is dropped as it arrives. Same cap on every shell (ADR-0044).
+    private var uploadBody = Data()
+    private static let uploadBodyCap = 64 * 1024
     /// Resumes the continuation `subscribe` is suspended on. Set right before `task.resume()`.
     var onFinish: (() -> Void)?
 
@@ -278,6 +282,12 @@ private final class TransferDelegate: NSObject, URLSessionTaskDelegate, URLSessi
         lastEmit = now
         let t: UInt64? = total > 0 ? UInt64(total) : nil
         emit(TransferPlugin.response(for: .progress(transferred: UInt64(max(0, transferred)), total: t)))
+    }
+
+    // An upload's reply arrives here (an upload task is a data task); a download's goes to its file.
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let room = Self.uploadBodyCap - uploadBody.count
+        if room > 0 { uploadBody.append(data.prefix(room)) }
     }
 
     // Upload progress.
@@ -344,6 +354,6 @@ private final class TransferDelegate: NSObject, URLSessionTaskDelegate, URLSessi
             guard let name = key as? String else { return nil }
             return HttpHeader(name: name, value: String(describing: value))
         }
-        emit(TransferPlugin.response(for: .done(outcome: .response(status: status, headers: headers, body: []), handle: nil)))
+        emit(TransferPlugin.response(for: .done(outcome: .response(status: status, headers: headers, body: [UInt8](uploadBody)), handle: nil)))
     }
 }

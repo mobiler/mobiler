@@ -171,6 +171,8 @@ pub enum Msg {
 
     /// The device's preferred locale tag (built-in `device` "locale" capability).
     GotDeviceLocale(String),
+    /// `cx.device_info` → the Profile tab's "Device:" line (empty until the shell answers).
+    GotDeviceInfo(String),
     /// Home Light · Dark · System control.
     SetAppearance(Appearance),
     /// The OS light/dark setting, from the `appearance` stream (current value, then each change).
@@ -251,7 +253,8 @@ pub enum Msg {
     /// An upload progress tick (`cx.upload(..).start(..)`).
     UpProgress { transferred: u64, total: Option<u64> },
     /// The upload finished — the HTTP status (0 = transport error).
-    UpDone(u16),
+    /// An upload finished: its status and how many bytes the server replied with (httpbin echoes JSON).
+    UpDone(u16, usize),
     /// A download progress tick for the "fetch it back" leg (`cx.download(..).start(..)`).
     DlProgress { transferred: u64, total: Option<u64> },
     /// The download finished — the destination handle (sandbox path / `blob:` URL) + HTTP status.
@@ -342,6 +345,8 @@ pub struct Model {
     oauth_status: String,
     /// Device locale tag detected at startup (e.g. "de-CH").
     device_locale: String,
+    /// "Android 13 · samsung SM-A325F" from `cx.device_info` (Profile tab).
+    device_info: String,
     /// "Live" streaming demo (cx.subscribe to the built-in `ticker`): whether the
     /// subscription is active, how many events have streamed in, and the last value.
     live_on: bool,
@@ -454,6 +459,7 @@ impl Default for Model {
             bio: String::new(),
             oauth_status: String::new(),
             device_locale: String::new(),
+            device_info: String::new(),
             live_on: false,
             live_count: 0,
             live_last: String::new(),
@@ -914,6 +920,7 @@ impl MobilerApp for FadeHouse {
                 cx.plugin("oauth", "login", input, |r| Msg::OAuthDone(r.ok, r.as_text().unwrap_or_default().to_string()));
             }
             Msg::GotDeviceLocale(tag) => model.device_locale = tag,
+            Msg::GotDeviceInfo(line) => model.device_info = line,
             Msg::SetAppearance(a) => model.appearance = a,
             Msg::SystemAppearance(v) => model.system_appearance = v,
             Msg::ToggleLive => {
@@ -1120,18 +1127,18 @@ impl MobilerApp for FadeHouse {
                 // Android, a `blob:` UUID on web, a temp name on iOS).
                 cx.upload(UPLOAD_URL, handle).multipart("file").filename("photo.jpg").field("source", "barbershop").start("bx-up", |ev| match ev {
                     TransferEvent::Progress { transferred, total } => Msg::UpProgress { transferred, total },
-                    TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0)),
+                    TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0), outcome.body().len()),
                 });
             }
             Msg::UpProgress { transferred, total } => {
                 model.transfer_pct = transfer_pct(transferred, total);
                 model.transfer_note = transfer_note("Uploading", transferred, total);
             }
-            Msg::UpDone(status) => {
+            Msg::UpDone(status, reply) => {
                 cx.unsubscribe("bx-up");
                 if status == 200 {
                     model.transfer_pct = Some(0);
-                    model.transfer_note = "Uploaded ✓ — fetching it back…".to_string();
+                    model.transfer_note = format!("Uploaded ✓ (server replied {reply} bytes) — fetching it back…");
                     cx.download(DOWNLOAD_URL, "att.bin").start("bx-dl", |ev| match ev {
                         TransferEvent::Progress { transferred, total } => Msg::DlProgress { transferred, total },
                         TransferEvent::Done { outcome, handle } => Msg::DlDone { handle, status: outcome.status().unwrap_or(0) },
@@ -1169,6 +1176,8 @@ impl MobilerApp for FadeHouse {
         // Detect the device's preferred locale (built-in `device` capability) so the
         // formatting card can show it — works on iOS, Android, and web.
         cx.device_locale(|r| Msg::GotDeviceLocale(r.as_text().unwrap_or_default().to_string()));
+        // The phone's OS version and model (a support line, e.g. "Android 13 · samsung SM-A325F").
+        cx.device_info(|info| Msg::GotDeviceInfo(info.map(|d| device_line(&d)).unwrap_or_default()));
         // The OS light/dark setting, live (current value first) — shown under Home's appearance control.
         cx.subscribe_appearance("appearance", |r| Msg::SystemAppearance(r.as_text().unwrap_or_default().to_string()));
         // In-app purchase (`iap` plugin): subscribe to the transactions stream at startup (the single
@@ -2152,6 +2161,12 @@ fn coverage_chart() -> Widget {
     )
 }
 
+/// "Android 13 · samsung SM-A325F" / "iOS 17.5 · Apple iPhone15,2"; the web knows none of it.
+fn device_line(d: &mobiler_core::DeviceInfo) -> String {
+    let os = if d.os_api_level > 0 { format!("Android {}", d.os_version) } else if d.manufacturer == "Apple" { format!("iOS {}", d.os_version) } else { d.os_version.clone() };
+    [os, format!("{} {}", d.manufacturer, d.model).trim().to_string()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
 fn profile_screen(model: &Model) -> Widget {
     let pct = (completeness(model) * 100.0).round() as u32;
     column(vec![
@@ -2162,6 +2177,7 @@ fn profile_screen(model: &Model) -> Widget {
         progress(Some(completeness(model))),
         // Theme-level switch: Density::Large enlarges every control on every screen.
         toggle("large_controls", "Large controls", model.large_controls),
+        caption(format!("Device: {}", if model.device_info.is_empty() { "unknown" } else { &model.device_info })),
         divider(),
         row(vec![icon_button(Icon::Person, Msg::SelectTab(Tab::Profile)), text("Account")]),
         row(vec![icon_button(Icon::Bell, Msg::Notifications), text("Notifications")]),
@@ -2440,9 +2456,9 @@ mod test {
         assert_eq!(model.transfer_pct, Some(25));
         assert_eq!(model.transfer_note, "Uploading… 50/200 bytes");
         // A successful upload (status 200) kicks off the download-it-back leg.
-        app.update(Msg::UpDone(200), &mut model, &mut cx);
+        app.update(Msg::UpDone(200, 412), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, Some(0));
-        assert_eq!(model.transfer_note, "Uploaded ✓ — fetching it back…");
+        assert_eq!(model.transfer_note, "Uploaded ✓ (server replied 412 bytes) — fetching it back…");
         app.update(Msg::DlProgress { transferred: 100, total: Some(400) }, &mut model, &mut cx);
         assert_eq!(model.transfer_pct, Some(25));
         // Completion clears the progress bar and reports the destination handle.
@@ -2456,7 +2472,7 @@ mod test {
         let (app, mut model) = app();
         let mut cx = Cx::<Msg>::default();
         app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
-        app.update(Msg::UpDone(500), &mut model, &mut cx);
+        app.update(Msg::UpDone(500, 0), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, None);
         assert_eq!(model.transfer_note, "Upload failed (status 500).");
         app.update(Msg::DlDone { handle: None, status: 0 }, &mut model, &mut cx);
@@ -2479,7 +2495,7 @@ mod test {
         assert_eq!(model.transfer_pct, Some(0), "guard must not touch the in-flight state");
         assert_eq!(model.transfer_note, "Uploading…", "no-op: must not reset the note as a fresh pick would");
         // Once the flow reaches its terminal point, the guard releases and a new pick works again.
-        app.update(Msg::UpDone(200), &mut model, &mut cx);
+        app.update(Msg::UpDone(200, 0), &mut model, &mut cx);
         app.update(Msg::DlDone { handle: Some("blob:xyz".into()), status: 200 }, &mut model, &mut cx);
         assert_eq!(model.transfer_pct, None);
         app.update(Msg::PickForUpload, &mut model, &mut cx);

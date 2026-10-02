@@ -36,6 +36,7 @@ fn main() -> Result<()> {
         .register_app::<App>()?
         .register_type::<mobiler_core::HttpOutcome>()?
         .register_type::<mobiler_core::TransferEvent>()?
+        .register_type::<mobiler_core::DeviceInfo>()?
         .build()?;
 
     match args.language {

@@ -9,12 +9,14 @@ use std::marker::PhantomData;
 
 pub mod app_info;
 pub mod bunny;
+pub mod device;
 pub mod dialog;
 pub mod format;
 pub mod http;
 pub mod i18n;
 pub mod transfer;
 pub use app_info::AppInfo;
+pub use device::DeviceInfo;
 pub use dialog::{Confirm, Picker, Snackbar, SnackbarDuration};
 pub use format::{Currency, Locale, Weekday};
 pub use http::{HttpHeader, HttpOutcome};
@@ -197,7 +199,9 @@ impl<E> Cx<E> {
     }
 
     /// Upload the file at `source` (a path / `content://` / `file://` / `blob:` handle)
-    /// as the raw request body. Finish with [`TransferBuilder::start`].
+    /// as the raw request body. Finish with [`TransferBuilder::start`]. The terminal
+    /// `TransferEvent::Done`'s `Response` body is the server's reply (e.g. `{"url": …}`), kept
+    /// up to 64 KB on every shell.
     pub fn upload(&mut self, url: impl Into<String>, source: impl Into<String>) -> crate::transfer::TransferBuilder<'_, E> {
         crate::transfer::TransferBuilder::upload(self, url.into(), source.into())
     }
@@ -302,6 +306,13 @@ impl<E> Cx<E> {
     /// delivered to `then`.
     pub fn device_model(&mut self, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.plugin("device", "model", "", then);
+    }
+
+    /// The phone's OS version and model ([`DeviceInfo`]) via the built-in `device` capability, for
+    /// a support message or bug report. `None` when the shell can't answer: the web shell, or a
+    /// native shell that predates this call. Unlike [`device_model`](Self::device_model)'s display string, every field is separate.
+    pub fn device_info(&mut self, then: impl FnOnce(Option<DeviceInfo>) -> E + Send + 'static) {
+        self.plugin("device", "info", "", move |r| then(device::from_response(&r)));
     }
 
     /// Query the device's preferred locale as a BCP-47 language tag (e.g. `"de-CH"`, `"en-US"`)
@@ -1934,6 +1945,14 @@ mod tests {
         cx.subscribe_appearance("appr", |_| Ev::Tap);
         let (st, _) = &cx.streams[0];
         assert_eq!((st.key.as_str(), st.plugin.as_str(), st.op.as_str(), st.input.as_str()), ("appr", "appearance", "changes", ""));
+    }
+
+    #[test]
+    fn device_info_is_the_device_info_op() {
+        let mut cx = Cx::<Ev>::default();
+        cx.device_info(|_| Ev::Tap);
+        let (call, _) = &cx.requests[0];
+        assert_eq!((call.plugin.as_str(), call.op.as_str(), call.input.as_str()), ("device", "info", ""));
     }
 
     #[test]

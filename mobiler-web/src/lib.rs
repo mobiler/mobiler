@@ -507,6 +507,15 @@ fn infer_filename(source: &str) -> String {
     }
 }
 
+/// An upload's reply is kept up to this many bytes (a stored file's URL or id); a longer reply is cut
+/// there and not marked as cut. On the web the browser holds the whole reply; the cap bounds what
+/// crosses into the core. Same cap on every shell (ADR-0044).
+const UPLOAD_BODY_CAP: usize = 64 * 1024;
+
+fn capped_upload_body(body: &[u8]) -> Vec<u8> {
+    body[..body.len().min(UPLOAD_BODY_CAP)].to_vec()
+}
+
 /// Parse the CRLF-separated block from `XmlHttpRequest::get_all_response_headers` into
 /// `HttpHeader`s. Each line is `name: value`; a value never contains CRLF (XHR spec), so
 /// splitting on `\r\n` then on the first `:` is sufficient. Blank lines are skipped.
@@ -593,7 +602,9 @@ fn start_web_upload(
                     .ok()
                     .map(|raw| parse_header_block(&raw))
                     .unwrap_or_default();
-                HttpOutcome::Response { status, headers, body: vec![] }
+                // The reply (e.g. `{"url": …}`), capped like the native shells.
+                let body = xhr_c.response_text().ok().flatten().unwrap_or_default();
+                HttpOutcome::Response { status, headers, body: capped_upload_body(body.as_bytes()) }
             };
             emit(transfer_response(&TransferEvent::Done { outcome, handle: None }));
         })
@@ -958,6 +969,12 @@ struct WsStream {
     _onclose: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::CloseEvent)>,
 }
 
+/// `cx.device_info` on the web: browsers no longer expose a reliable OS version or model (and
+/// user-agent parsing isn't worth it), so it is refused (ADR-0013) and the app gets `None`.
+fn web_device_info() -> PluginResponse {
+    PluginResponse::text(false, "device info is not available on the web")
+}
+
 /// Fulfil a request/response capability. `http` via `fetch`; `device` via the
 /// browser's user-agent string (the web analogue of a device model).
 async fn perform(call: &PluginCall) -> PluginResponse {
@@ -969,6 +986,8 @@ async fn perform(call: &PluginCall) -> PluginResponse {
         } else if call.op == "appearance" {
             // The OS colour scheme, whatever the app forces.
             (if os_dark() { "dark" } else { "light" }).to_string()
+        } else if call.op == "info" {
+            return web_device_info();
         } else {
             nav.and_then(|n| n.user_agent().ok()).unwrap_or_default()
         };
@@ -3555,3 +3574,30 @@ mod snackbar_tests {
         assert_eq!(snackbar_lift(900.0, &[]), 12.0);
     }
 }
+
+#[cfg(test)]
+mod upload_body_tests {
+    use super::*;
+
+    #[test]
+    fn upload_body_is_kept_up_to_the_cap() {
+        assert_eq!(capped_upload_body(br#"{"url":"https://x/y"}"#), br#"{"url":"https://x/y"}"#.to_vec());
+        assert_eq!(capped_upload_body(b""), Vec::<u8>::new());
+        let big = vec![b'a'; UPLOAD_BODY_CAP + 10];
+        assert_eq!(capped_upload_body(&big).len(), UPLOAD_BODY_CAP);
+    }
+}
+
+#[cfg(test)]
+mod device_info_tests {
+    use super::*;
+
+    #[test]
+    fn web_device_info_is_refused_so_the_app_sees_none() {
+        // ADR-0013: `ok` reports a real answer; the web knows none of the fields.
+        let r = web_device_info();
+        assert!(!r.ok);
+        assert_eq!(r.output, b"device info is not available on the web".to_vec());
+    }
+}
+

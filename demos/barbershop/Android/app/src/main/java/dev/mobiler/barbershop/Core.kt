@@ -47,6 +47,7 @@ import dev.mobiler.barbershop.shared.CoreFfi
 import dev.mobiler.barbershop.shared.types.Action
 import dev.mobiler.barbershop.shared.types.Effect
 import dev.mobiler.barbershop.shared.types.HttpHeader
+import dev.mobiler.barbershop.shared.types.DeviceInfo
 import dev.mobiler.barbershop.shared.types.HttpOutcome
 import dev.mobiler.barbershop.shared.types.PluginResponse
 import dev.mobiler.barbershop.shared.types.Requests
@@ -146,6 +147,12 @@ class SystemPlugin : MobilerPlugin {
 class DevicePlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
+        // Structured (cx.device_info): OS version + API level, manufacturer, model. No serial or ids.
+        "info" -> PluginResponse(
+            true,
+            DeviceInfo(Build.VERSION.RELEASE.orEmpty(), Build.VERSION.SDK_INT.toUInt(), Build.MANUFACTURER.orEmpty(), Build.MODEL.orEmpty())
+                .bincodeSerialize().toUByteList(),
+        )
         "locale" -> PluginResponse(true, java.util.Locale.getDefault().toLanguageTag())
         // The OS light/dark setting (system resources: unaffected by the app's own appearance).
         "appearance" -> PluginResponse(true, nightName(android.content.res.Resources.getSystem().configuration))
