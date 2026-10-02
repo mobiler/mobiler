@@ -167,7 +167,9 @@ class TransferPlugin(private val application: Application) : MobilerPlugin {
                 override fun onResponse(call: Call, response: Response) {
                     response.use { r ->
                         val headers = r.headers.map { (n, v) -> HttpHeader(n, v) }
-                        finish(TransferEvent.Done(HttpOutcome.Response(r.code.toUShort(), headers, emptyList()), null))
+                        // The reply (e.g. `{"url": …}`), capped: see UPLOAD_BODY_CAP.
+                        val body = r.body?.let(::cappedUploadBody) ?: emptyList()
+                        finish(TransferEvent.Done(HttpOutcome.Response(r.code.toUShort(), headers, body), null))
                     }
                 }
             })
@@ -333,3 +335,13 @@ private fun eventResponse(ev: TransferEvent): PluginResponse {
 /** The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives the wrong
  *  element type and will not compile. */
 private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
+
+/** An upload's reply is kept up to this many bytes (a stored file's URL or id); a longer reply is cut
+ *  there, so a misbehaving server can't make the shell buffer it. Same cap on every shell. */
+private const val UPLOAD_BODY_CAP = 64L * 1024
+
+private fun cappedUploadBody(body: okhttp3.ResponseBody): List<UByte> {
+    val src = body.source()
+    src.request(UPLOAD_BODY_CAP) // buffers up to the cap (less if the reply is shorter)
+    return src.buffer.readByteArray(minOf(src.buffer.size, UPLOAD_BODY_CAP)).toUByteList()
+}

@@ -41,8 +41,9 @@ cx.unsubscribe("up");
   `TransferEvent::Done { outcome, handle }`. `outcome` is the same `HttpOutcome` the `http`
   capability uses — a non-2xx response is still `Done{Response}`, not an error; only a genuine
   transport failure is `Done{TransportError}`. `handle` is the destination path/URL the shell wrote
-  for a **download** (`None` for an upload; the response body itself is never inlined — it goes
-  straight to disk).
+  for a **download** (`None` for an upload). A download's response body goes straight to disk and is
+  never inlined; an **upload's** `Response` body is the server's reply (e.g. `{"url": …}`), kept up
+  to 64 KB (a longer reply is cut there).
 - **Cancel semantics:** cancelling (`cx.unsubscribe`) — at any point, before or during the
   transfer — emits **no terminal event**; the app has already stopped listening. A **partial
   download file is deleted** on cancel or on a genuine failure. This matches the web shell's

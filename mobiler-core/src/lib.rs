@@ -197,7 +197,9 @@ impl<E> Cx<E> {
     }
 
     /// Upload the file at `source` (a path / `content://` / `file://` / `blob:` handle)
-    /// as the raw request body. Finish with [`TransferBuilder::start`].
+    /// as the raw request body. Finish with [`TransferBuilder::start`]. The terminal
+    /// `TransferEvent::Done`'s `Response` body is the server's reply (e.g. `{"url": …}`), kept
+    /// up to 64 KB on every shell.
     pub fn upload(&mut self, url: impl Into<String>, source: impl Into<String>) -> crate::transfer::TransferBuilder<'_, E> {
         crate::transfer::TransferBuilder::upload(self, url.into(), source.into())
     }
