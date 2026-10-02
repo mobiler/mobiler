@@ -72,6 +72,8 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     // HTTP capability (Core.kt HttpPlugin)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Photo options (cx.pick_photo_with): EXIF orientation and the metadata check.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("com.google.android.play:review:2.0.2")
     implementation("androidx.browser:browser:1.8.0")
     // Media3/ExoPlayer for Widget.Video (MP4 + HLS playback)

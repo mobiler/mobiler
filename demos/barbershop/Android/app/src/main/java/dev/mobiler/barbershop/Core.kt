@@ -435,15 +435,19 @@ object PhotoPicker {
     var launch: ((onResult: (String?) -> Unit) -> Unit)? = null
 }
 
-/** Official, bundled plugin: pick an image via the system photo picker (no permission). */
-class PhotoPlugin : MobilerPlugin {
+/** Official, bundled plugin: pick an image via the system photo picker (no permission). An empty
+ *  input returns the picked URI (cx.pick_photo); options re-encode it (cx.pick_photo_with, ADR-0045). */
+class PhotoPlugin(private val app: Application) : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         if (op != "pick") return PluginResponse(false, "unknown op '$op'")
-        val launch = PhotoPicker.launch ?: return PluginResponse(false, "photo picker unavailable")
+        val launch = PhotoPicker.launch
+            ?: return PluginResponse(false, if (input.isEmpty()) "photo picker unavailable" else "unavailable")
         val uri = suspendCancellableCoroutine<String?> { cont ->
             launch { result -> cont.resumeWith(Result.success(result)) }
         }
-        return if (uri != null) PluginResponse(true, uri) else PluginResponse(false, "cancelled")
+        if (uri == null) return PluginResponse(false, "cancelled")
+        if (input.isEmpty()) return PluginResponse(true, uri)
+        return withContext(Dispatchers.IO) { PhotoPipeline.process(app, Uri.parse(uri), input) }
     }
 }
 
@@ -458,14 +462,17 @@ object CameraCapture {
 
 /** Official, bundled plugin: capture a photo with the system camera (cx.capture_photo).
  *  Intent-based (the system camera app handles capture), so no CAMERA permission. */
-class CameraPlugin : MobilerPlugin {
+class CameraPlugin(private val app: Application) : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         if (op != "capture") return PluginResponse(false, "unknown op '$op'")
-        val launch = CameraCapture.launch ?: return PluginResponse(false, "camera unavailable")
+        val launch = CameraCapture.launch
+            ?: return PluginResponse(false, if (input.isEmpty()) "camera unavailable" else "unavailable")
         val uri = suspendCancellableCoroutine<String?> { cont ->
             launch { result -> cont.resumeWith(Result.success(result)) }
         }
-        return if (uri != null) PluginResponse(true, uri) else PluginResponse(false, "cancelled")
+        if (uri == null) return PluginResponse(false, "cancelled")
+        if (input.isEmpty()) return PluginResponse(true, uri)
+        return withContext(Dispatchers.IO) { PhotoPipeline.process(app, Uri.parse(uri), input) }
     }
 }
 
@@ -567,8 +574,8 @@ class Core(application: Application) : AndroidViewModel(application) {
         "haptics" to HapticsPlugin(application),
         "dialog" to DialogPlugin(),
         "datetime" to DateTimePlugin(),
-        "photo" to PhotoPlugin(),
-        "camera" to CameraPlugin(),
+        "photo" to PhotoPlugin(application),
+        "camera" to CameraPlugin(application),
         "connectivity" to ConnectivityPlugin(application),
         "geolocation" to GeolocationPlugin(application),
         "contacts" to ContactsPlugin(application),
