@@ -101,3 +101,8 @@ Barbershop: with a service selected (the Services tab's detail pane), the scaffo
   jump.) iOS is unchanged: the keyboard lifts the bar and the tabs together, so the bar sits one tab bar higher
   there (a known divergence; the Send button is visible either way). Android 11+ only: on older Android the window pans (no `adjustResize`), which the follow-up "the keyboard
   never covers the focused field" addresses.
+- **2026-10-02 (follow-up "the keyboard never covers the focused field"):** the main activity now sets
+  `windowSoftInputMode="adjustResize|stateHidden"`, so the keyboard inset reaches Compose on Android 8–10 too: the
+  pinned bar rides on the keyboard there as well (emulator-checked on API 26). The scaffold body ends above the
+  keyboard (`consumeWindowInsets(innerPadding).imePadding()`), so a focused field is scrolled into view.
+

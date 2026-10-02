@@ -37,6 +37,7 @@
             android:launchMode="singleTask"
             android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:windowSoftInputMode="adjustResize|stateHidden"
             android:theme="@style/Theme.Fadehouse">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
