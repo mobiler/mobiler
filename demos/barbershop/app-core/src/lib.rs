@@ -253,7 +253,8 @@ pub enum Msg {
     /// An upload progress tick (`cx.upload(..).start(..)`).
     UpProgress { transferred: u64, total: Option<u64> },
     /// The upload finished — the HTTP status (0 = transport error).
-    UpDone(u16),
+    /// An upload finished: its status and how many bytes the server replied with (httpbin echoes JSON).
+    UpDone(u16, usize),
     /// A download progress tick for the "fetch it back" leg (`cx.download(..).start(..)`).
     DlProgress { transferred: u64, total: Option<u64> },
     /// The download finished — the destination handle (sandbox path / `blob:` URL) + HTTP status.
@@ -1126,18 +1127,18 @@ impl MobilerApp for FadeHouse {
                 // Android, a `blob:` UUID on web, a temp name on iOS).
                 cx.upload(UPLOAD_URL, handle).multipart("file").filename("photo.jpg").field("source", "barbershop").start("bx-up", |ev| match ev {
                     TransferEvent::Progress { transferred, total } => Msg::UpProgress { transferred, total },
-                    TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0)),
+                    TransferEvent::Done { outcome, .. } => Msg::UpDone(outcome.status().unwrap_or(0), outcome.body().len()),
                 });
             }
             Msg::UpProgress { transferred, total } => {
                 model.transfer_pct = transfer_pct(transferred, total);
                 model.transfer_note = transfer_note("Uploading", transferred, total);
             }
-            Msg::UpDone(status) => {
+            Msg::UpDone(status, reply) => {
                 cx.unsubscribe("bx-up");
                 if status == 200 {
                     model.transfer_pct = Some(0);
-                    model.transfer_note = "Uploaded ✓ — fetching it back…".to_string();
+                    model.transfer_note = format!("Uploaded ✓ (server replied {reply} bytes) — fetching it back…");
                     cx.download(DOWNLOAD_URL, "att.bin").start("bx-dl", |ev| match ev {
                         TransferEvent::Progress { transferred, total } => Msg::DlProgress { transferred, total },
                         TransferEvent::Done { outcome, handle } => Msg::DlDone { handle, status: outcome.status().unwrap_or(0) },
@@ -2455,9 +2456,9 @@ mod test {
         assert_eq!(model.transfer_pct, Some(25));
         assert_eq!(model.transfer_note, "Uploading… 50/200 bytes");
         // A successful upload (status 200) kicks off the download-it-back leg.
-        app.update(Msg::UpDone(200), &mut model, &mut cx);
+        app.update(Msg::UpDone(200, 412), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, Some(0));
-        assert_eq!(model.transfer_note, "Uploaded ✓ — fetching it back…");
+        assert_eq!(model.transfer_note, "Uploaded ✓ (server replied 412 bytes) — fetching it back…");
         app.update(Msg::DlProgress { transferred: 100, total: Some(400) }, &mut model, &mut cx);
         assert_eq!(model.transfer_pct, Some(25));
         // Completion clears the progress bar and reports the destination handle.
@@ -2471,7 +2472,7 @@ mod test {
         let (app, mut model) = app();
         let mut cx = Cx::<Msg>::default();
         app.update(Msg::Picked("blob:abc123".into()), &mut model, &mut cx);
-        app.update(Msg::UpDone(500), &mut model, &mut cx);
+        app.update(Msg::UpDone(500, 0), &mut model, &mut cx);
         assert_eq!(model.transfer_pct, None);
         assert_eq!(model.transfer_note, "Upload failed (status 500).");
         app.update(Msg::DlDone { handle: None, status: 0 }, &mut model, &mut cx);
@@ -2494,7 +2495,7 @@ mod test {
         assert_eq!(model.transfer_pct, Some(0), "guard must not touch the in-flight state");
         assert_eq!(model.transfer_note, "Uploading…", "no-op: must not reset the note as a fresh pick would");
         // Once the flow reaches its terminal point, the guard releases and a new pick works again.
-        app.update(Msg::UpDone(200), &mut model, &mut cx);
+        app.update(Msg::UpDone(200, 0), &mut model, &mut cx);
         app.update(Msg::DlDone { handle: Some("blob:xyz".into()), status: 200 }, &mut model, &mut cx);
         assert_eq!(model.transfer_pct, None);
         app.update(Msg::PickForUpload, &mut model, &mut cx);
