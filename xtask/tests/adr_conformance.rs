@@ -263,7 +263,8 @@ fn adr_0041_no_shell_sets_an_app_level_night_mode() {
 }
 
 /// ADR-0047: the reference shell and the template render a container's children under a stable
-/// identity (`childKeys`: the widget's id, else its kind and place among same-kind siblings), never
+/// identity (`childKeys`: the widget's id, else its kind plus the first id inside it, numbered among
+/// siblings with the same base), never
 /// by position, so a widget appearing above a field doesn't rebuild the field (focus, text) and a
 /// player or map keeps its state.
 #[test]

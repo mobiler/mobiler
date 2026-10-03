@@ -93,6 +93,9 @@ Option D, in barbershop first and ported to the template (ADR-0015).
 - **Negative:** a widget whose id changes is rebuilt. That is the intended meaning of an id, but an app that derives
   ids from changing data (an index, a label) loses that widget's state. A step that replaces a focused field with a
   different-id field at the same place now drops the keyboard, where it used to keep it.
+- **Negative:** an id-less container is re-keyed when the first id in its subtree changes, which rebuilds that
+  container. That happens when a field, toggle, map or video is inserted or removed ahead of the others inside it.
+  Any "first id" choice has this case; it is rarer than a row appearing above the container, which this ADR fixes.
 - **Negative:** the demos other than barbershop keep their own copies of the shells and stay positional until
   regenerated or upgraded.
 - **Negative:** the web shell is unchanged.
