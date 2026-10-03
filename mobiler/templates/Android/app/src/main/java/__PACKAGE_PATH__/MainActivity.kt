@@ -213,6 +213,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
@@ -513,6 +514,38 @@ private class FieldSync(initial: String) {
             field = TextFieldValue(v, TextRange(v.length))
         }
     }
+}
+
+/** A child's identity across renders: its id when it has one, else its kind and its place among the
+ *  siblings of that kind. Always a unique String (saveable, and a lazy list key). So a row appearing above a field (an error, a caption) never moves the
+ *  field's key, and Compose keeps its text, cursor and focus instead of rebuilding it. */
+private fun childKeys(children: List<Widget>): List<Any> {
+    val seen = HashMap<String, Int>()
+    return children.map { w ->
+        val id = when (w) {
+            is Widget.TextField -> w.id
+            is Widget.SearchField -> w.id
+            is Widget.Toggle -> w.id
+            is Widget.Checkbox -> w.id
+            is Widget.Slider -> w.id
+            is Widget.Video -> w.id
+            is Widget.Map -> w.id
+            else -> null
+        }
+        // Unique even when an app repeats an id (a lazy list throws on a duplicate key): the second
+        // one gets "#1", as an id-less widget's kind does.
+        val base = if (id != null) "id:$id" else w::class.java.simpleName
+        val n = seen.getOrDefault(base, 0)
+        seen[base] = n + 1
+        "$base#$n"
+    }
+}
+
+/** Renders siblings each under its `childKeys` identity, so widget state follows the widget, not its position. */
+@Composable
+private inline fun KeyedChildren(children: List<Widget>, content: @Composable (Int, Widget) -> Unit) {
+    val keys = childKeys(children)
+    children.forEachIndexed { i, child -> key(keys[i]) { content(i, child) } }
 }
 
 /** Before Android 9, an empty focus target that catches the focus the platform hands a window in touch
@@ -1090,7 +1123,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         ) {
             // Let greedy inputs (which fill width) share the row with trailing
             // controls (buttons/chips/icons) instead of pushing them off-screen.
-            widget.children.forEach { child ->
+            KeyedChildren(widget.children) { _, child ->
                 when (child) {
                     is Widget.TextField, is Widget.Checkbox, is Widget.Column ->
                         Box(modifier = Modifier.weight(1f)) { Render(child, send) }
@@ -1102,7 +1135,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Column -> Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(if (isLarge) 12.dp else 6.dp),
-        ) { widget.children.forEach { Render(it, send) } }
+        ) { KeyedChildren(widget.children) { _, child -> Render(child, send) } }
 
         is Widget.Card -> {
             val op = widget.onPress
@@ -1170,10 +1203,10 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 Render(kids.first(), send)
                 Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.40f)))
                 CompositionLocalProvider(LocalContentColor provides Color.White) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { kids.drop(1).forEach { Render(it, send) } }
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { KeyedChildren(kids.drop(1)) { _, child -> Render(child, send) } }
                 }
             } else {
-                kids.forEach { Render(it, send) }
+                KeyedChildren(kids) { _, child -> Render(child, send) }
             }
         }
 
@@ -1183,10 +1216,11 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             // with_columns: exactly that many (1-4) at every width.
             val cols = widget.columns?.toInt()?.coerceIn(1, 4) ?: maxOf(2, (maxWidth.value / 190f).toInt())
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                widget.children.chunked(cols).forEach { rowItems ->
+                val keys = childKeys(widget.children)
+                widget.children.indices.chunked(cols).forEach { rowIdx ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        rowItems.forEach { item -> Box(modifier = Modifier.weight(1f)) { Render(item, send) } }
-                        repeat(cols - rowItems.size) { Spacer(modifier = Modifier.weight(1f)) }
+                        rowIdx.forEach { i -> key(keys[i]) { Box(modifier = Modifier.weight(1f)) { Render(widget.children[i], send) } } }
+                        repeat(cols - rowIdx.size) { Spacer(modifier = Modifier.weight(1f)) }
                     }
                 }
             }
@@ -1197,7 +1231,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-            ) { widget.children.forEach { Render(it, send) } }
+            ) { KeyedChildren(widget.children) { _, child -> Render(child, send) } }
         } else {
             // Fade the viewport's trailing 32.dp (DstIn over an offscreen layer, so it works on any
             // background) + 32.dp of trailing room so the last item clears the fade at scroll-end.
@@ -1218,7 +1252,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                widget.children.forEach { Render(it, send) }
+                KeyedChildren(widget.children) { _, child -> Render(child, send) }
                 Spacer(Modifier.width(32.dp))
             }
         }
@@ -1260,11 +1294,12 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val fillParent = LocalFillList.current && widget.fill
             val boundedOrFill = if (fillParent) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(max = 480.dp)
             val list: @Composable () -> Unit = {
+                val lazyKeys = childKeys(widget.children)
                 LazyColumn(
                     modifier = boundedOrFill,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    itemsIndexed(widget.children) { idx, child ->
+                    itemsIndexed(widget.children, key = { i, _ -> lazyKeys[i] }) { idx, child ->
                         // Reset the flag around the list's own children so a nested list (or a
                         // second `fill: true` list further down) doesn't inherit fill mode.
                         CompositionLocalProvider(LocalFillList provides false) { Render(child, send) }
@@ -1541,7 +1576,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            pinned.forEach { child -> Box(Modifier.weight(1f)) { Render(child, send) } }
+                                            KeyedChildren(pinned) { _, child -> Box(Modifier.weight(1f)) { Render(child, send) } }
                                         }
                                     }
                                 }
@@ -1634,7 +1669,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                             CompositionLocalProvider(LocalFillList provides true) { Render(screen.body, send) }
                                         }
                                     } else {
-                                        (screen.body as Widget.Column).children.forEachIndexed { i, child ->
+                                        KeyedChildren((screen.body as Widget.Column).children) { i, child ->
                                             if (i == fillIndex) {
                                                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                                                     CompositionLocalProvider(LocalFillList provides true) { Render(child, send) }

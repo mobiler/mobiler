@@ -585,11 +585,45 @@ private func isLargeDensity() -> Bool {
     return false
 }
 
-/// Renders a `[Widget]` as sibling views (children of a stack/grid).
+/// A child's identity across renders: its id when it has one, else its kind and its place among the
+/// siblings of that kind; always unique (a repeated id gets "#1"). So a row appearing above a field
+/// (an error, a caption) never changes the field's identity, and SwiftUI keeps its text and focus.
+func childKeys(_ children: [SharedTypes.Widget]) -> [String] {
+    var seen: [String: Int] = [:]
+    return children.map { w in
+        let base: String
+        switch w {
+        case .textField(let id, _, _, _, _), .searchField(let id, _, _), .toggle(let id, _, _),
+             .checkbox(let id, _, _), .slider(let id, _, _), .map(let id, _, _, _, _, _, _):
+            base = "id:\(id)"
+        case .video(_, let id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _):
+            base = "id:\(id)"
+        default:
+            // The case name: a case with values reflects as one labelled child.
+            base = Mirror(reflecting: w).children.first?.label ?? String(describing: w)
+        }
+        let n = seen[base, default: 0]
+        seen[base] = n + 1
+        return "\(base)#\(n)"
+    }
+}
+
+/// A sibling with its `childKeys` identity and its position, for `ForEach`.
+struct KeyedChild: Identifiable {
+    let id: String
+    let offset: Int
+    let element: SharedTypes.Widget
+}
+
+func keyedChildren(_ children: [SharedTypes.Widget]) -> [KeyedChild] {
+    zip(childKeys(children), children.enumerated()).map { KeyedChild(id: $0, offset: $1.offset, element: $1.element) }
+}
+
+/// Renders a `[Widget]` as sibling views (children of a stack/grid), each under its identity.
 @ViewBuilder
 private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Action) -> Void) -> some View {
-    ForEach(Array(children.enumerated()), id: \.offset) { _, child in
-        render(child, send)
+    ForEach(keyedChildren(children)) { item in
+        render(item.element, send)
     }
 }
 
@@ -1152,7 +1186,8 @@ private struct LazyListView: View {
                 if refreshing {
                     ProgressView().frame(maxWidth: .infinity).padding(.bottom, 4)
                 }
-                ForEach(Array(children.enumerated()), id: \.offset) { idx, child in
+                ForEach(keyedChildren(children)) { item in
+                    let (idx, child) = (item.offset, item.element)
                     render(child, send)
                         .environment(\.fillList, false)
                         .onAppear {
@@ -1492,7 +1527,8 @@ private struct ScaffoldView: View {
                         if fillIndex == -1 {
                             render(self.content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
                         } else if case .column(let children) = self.content {
-                            ForEach(Array(children.enumerated()), id: \.offset) { i, child in
+                            ForEach(keyedChildren(children)) { item in
+                                let (i, child) = (item.offset, item.element)
                                 if i == fillIndex {
                                     render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
                                 } else {
@@ -1548,8 +1584,8 @@ private struct ScaffoldView: View {
             if let bar = bottomBar, !bar.isEmpty {
                 PaletteDivider()
                 HStack(spacing: 12) {
-                    ForEach(Array(bar.enumerated()), id: \.offset) { _, w in
-                        render(w, send).frame(maxWidth: .infinity)
+                    ForEach(keyedChildren(bar)) { item in
+                        render(item.element, send).frame(maxWidth: .infinity)
                     }
                 }
                 .padding(.horizontal, 16)
