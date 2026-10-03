@@ -165,7 +165,7 @@ prints a warning and leaves the last synced files unchanged.
   least 3× `logo_size` in pixels. An app made before CLI 0.65 gets the marker this needs with
   `mobiler upgrade --apply`; until then only the colours apply on iOS.
 - **The web** (when the app has `web/index.html`) shows the colours and the logo until the app's first
-  render. Keep `<body></body>` empty in `index.html` for the logo to show. A web-only workflow (`trunk serve`)
+  render. A web-only workflow (`trunk serve`)
   doesn't run the sync: run `mobiler splash sync` after changing `[splash]`.
 
 | What the sync writes | |

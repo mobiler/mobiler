@@ -15,8 +15,8 @@
 <link data-trunk rel="copy-dir" href="splash"/>
 <style>
 html{background:#FAF7F0}
-body:empty{min-height:100vh;margin:0;background:url(splash/mobiler-splash-logo.png) center/120px 120px no-repeat}
-@media (prefers-color-scheme: dark){html{background:#231F20}body:empty{background-image:url(splash/mobiler-splash-logo-dark.png)}}
+body:not(:has(*)){min-height:100vh;margin:0;background:url(splash/mobiler-splash-logo.png) center/120px 120px no-repeat}
+@media (prefers-color-scheme: dark){html{background:#231F20}body:not(:has(*)){background-image:url(splash/mobiler-splash-logo-dark.png)}}
 </style>
 <!-- mobiler:splash-end -->
 </head>

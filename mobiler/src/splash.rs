@@ -187,7 +187,8 @@ pub fn ios_plist_lines(on: bool) -> Vec<String> {
 }
 
 /// The lines between the `mobiler:splash` markers in web/index.html: the page background (light/dark)
-/// and the logo, centred on the empty body until the app's first render fills it.
+/// and the logo, centred on the body until it holds an element (the app's first render). Not `:empty`:
+/// the parser puts the whitespace after `</body>` into the body.
 pub fn web_lines(light: Rgba, dark: Rgba, logo: Option<(u32, u32)>, has_dark: bool) -> Vec<String> {
     let mut lines = Vec::new();
     if logo.is_some() {
@@ -197,11 +198,11 @@ pub fn web_lines(light: Rgba, dark: Rgba, logo: Option<(u32, u32)>, has_dark: bo
     lines.push(format!("html{{background:{}}}", light.css()));
     if let Some((w, h)) = logo {
         lines.push(format!(
-            "body:empty{{min-height:100vh;margin:0;background:url(splash/mobiler-splash-logo.png) center/{w}px {h}px no-repeat}}"
+            "body:not(:has(*)){{min-height:100vh;margin:0;background:url(splash/mobiler-splash-logo.png) center/{w}px {h}px no-repeat}}"
         ));
     }
     let dark_logo = if logo.is_some() && has_dark {
-        "body:empty{background-image:url(splash/mobiler-splash-logo-dark.png)}"
+        "body:not(:has(*)){background-image:url(splash/mobiler-splash-logo-dark.png)}"
     } else {
         ""
     };
@@ -752,7 +753,9 @@ mod tests {
         let web = web_lines(l, d, Some((120, 60)), true).join("\n");
         assert!(web.contains("prefers-color-scheme: dark") && web.contains("#FFFBFE") && web.contains("#1C1B1F"));
         assert!(web.contains("splash/mobiler-splash-logo.png") && web.contains("splash/mobiler-splash-logo-dark.png"));
-        assert!(web.contains("body:empty") && web.contains("120px 60px"));
+        // The parser puts the whitespace after </body> into the body, so `:empty` never matches: the logo
+        // shows while the body has no element yet.
+        assert!(web.contains("body:not(:has(*))") && !web.contains(":empty") && web.contains("120px 60px"));
         assert!(web.contains(r#"rel="copy-dir" href="splash""#));
         let no_logo = web_lines(l, d, None, false).join("\n");
         assert!(!no_logo.contains("splash/") && no_logo.contains("#1C1B1F"));

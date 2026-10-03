@@ -1,4 +1,5 @@
 {
+  "active": true,
   "seeds": {
     "Android/app/src/main/res/drawable/mobiler_launch.xml": "dbbf41f77cc73912",
     "Android/app/src/main/res/values-night/mobiler_splash.xml": "440a37d861b8d481",

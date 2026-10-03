@@ -2,7 +2,7 @@
 <!-- generated from mobiler.toml [splash]; edit mobiler.toml, not this file. The Android 12+ splash icon. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
     android:drawable="@drawable/mobiler_splash_logo"
-    android:insetLeft="63.5dp"
-    android:insetRight="63.5dp"
-    android:insetTop="63.5dp"
-    android:insetBottom="63.5dp" />
+    android:insetLeft="29.2%"
+    android:insetRight="29.2%"
+    android:insetTop="29.2%"
+    android:insetBottom="29.2%" />
