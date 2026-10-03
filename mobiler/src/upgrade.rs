@@ -587,7 +587,17 @@ fn write_pending(root: &Path, rel: &Path, offer: &Offer<'_>) -> Result<()> {
 }
 
 fn clear_pending(root: &Path, rel: &Path) {
-    let _ = fs::remove_file(pending_path(root, rel));
+    let path = pending_path(root, rel);
+    let _ = fs::remove_file(&path);
+    // Drop the folders the record emptied, up to `.mobiler/pending/` (remove_dir fails on a non-empty one).
+    let top = root.join(PENDING_REL);
+    let mut dir = path.parent();
+    while let Some(d) = dir.filter(|d| d.starts_with(&top) && *d != top) {
+        if fs::remove_dir(d).is_err() {
+            break;
+        }
+        dir = d.parent();
+    }
 }
 
 /// Whether `text` still holds a merge conflict: a whole line that is a marker.
@@ -895,7 +905,7 @@ impl Report {
                  edits first (registrations and other files are left alone)."
             );
         }
-        let offered = self.changed.len() + self.merge.len() + self.conflict.len();
+        let offered = self.changed.len() + self.new_review.len() + self.merge.len() + self.conflict.len();
         if offered == 0 && self.updated.is_empty() {
             if self.plugins.is_empty() && self.pending.is_empty() && self.deps_would.is_none() {
                 println!("Up to date. ✓");
@@ -909,14 +919,14 @@ impl Report {
                 self.conflict.len()
             );
         }
-        if !self.changed.is_empty() {
+        let reviews = self.changed.len() + self.new_review.len();
+        if reviews > 0 {
             if apply {
                 // (in --apply mode `changed` is empty; shown only for completeness)
             } else {
                 println!(
-                    "Review the {} .mobiler-new shell file(s) and merge, or re-run with `--apply` \
-                     to overwrite in place (previous versions go to .mobiler/backup/).",
-                    self.changed.len()
+                    "Review the {reviews} .mobiler-new shell file(s) and merge, or re-run with `--apply` \
+                     to overwrite in place (previous versions go to .mobiler/backup/)."
                 );
             }
         }
@@ -1286,6 +1296,18 @@ mod test {
         let r = upgrade_at(&root, false).unwrap();
         assert!(!r.pending.iter().any(|(f, _)| f == "rust-toolchain.toml"), "{:?}", r.pending);
         assert_eq!(read(&root, "rust-toolchain.toml"), t);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn clearing_a_record_removes_its_empty_folders() {
+        let root = skeleton();
+        let offer = Offer { template: "x\n", current: b"", kind: "review", offered: b"", conflict: None };
+        write_pending(&root, Path::new("a/b/C.kt"), &offer).unwrap();
+        write_pending(&root, Path::new("a/D.kt"), &offer).unwrap();
+        clear_pending(&root, Path::new("a/b/C.kt"));
+        assert!(!root.join(".mobiler/pending/a/b").exists(), "empty folder removed");
+        assert!(root.join(".mobiler/pending/a/D.kt.json").exists(), "a folder still holding a record stays");
         let _ = fs::remove_dir_all(&root);
     }
 
