@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -201,6 +202,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -516,25 +518,42 @@ private class FieldSync(initial: String) {
     }
 }
 
-/** A child's identity across renders: its id when it has one, else its kind and its place among the
- *  siblings of that kind. Always a unique String (saveable, and a lazy list key). So a row appearing above a field (an error, a caption) never moves the
- *  field's key, and Compose keeps its text, cursor and focus instead of rebuilding it. */
-private fun childKeys(children: List<Widget>): List<Any> {
+/** A widget's own id, for the kinds that have one. */
+private fun ownId(w: Widget): String? = when (w) {
+    is Widget.TextField -> w.id
+    is Widget.SearchField -> w.id
+    is Widget.Toggle -> w.id
+    is Widget.Checkbox -> w.id
+    is Widget.Slider -> w.id
+    is Widget.Video -> w.id
+    is Widget.Map -> w.id
+    else -> null
+}
+
+/** The first id in a widget's subtree (depth first): how an id-less container is known by what it holds. */
+private fun firstId(w: Widget): String? = ownId(w) ?: when (w) {
+    is Widget.Row -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Column -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Box -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Grid -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Scroller -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.LazyList -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Card -> firstId(w.child)
+    is Widget.A11y -> firstId(w.child)
+    is Widget.SwipeAction -> firstId(w.child)
+    is Widget.Split -> firstId(w.primary) ?: firstId(w.detail)
+    else -> null
+}
+
+/** A child's identity across renders (ADR-0047): its id; else its kind, plus the first id inside it for
+ *  a container (`Row[email]`); then `#n` for its place among siblings with the same base, so keys are
+ *  unique Strings (saveable, and a lazy list key). A row appearing above a field, or above the row or
+ *  card holding it, never moves the field's key, so Compose keeps its text, cursor and focus. */
+private fun childKeys(children: List<Widget>): List<String> {
     val seen = HashMap<String, Int>()
     return children.map { w ->
-        val id = when (w) {
-            is Widget.TextField -> w.id
-            is Widget.SearchField -> w.id
-            is Widget.Toggle -> w.id
-            is Widget.Checkbox -> w.id
-            is Widget.Slider -> w.id
-            is Widget.Video -> w.id
-            is Widget.Map -> w.id
-            else -> null
-        }
-        // Unique even when an app repeats an id (a lazy list throws on a duplicate key): the second
-        // one gets "#1", as an id-less widget's kind does.
-        val base = if (id != null) "id:$id" else w::class.java.simpleName
+        val id = ownId(w)
+        val base = if (id != null) "id:$id" else w::class.java.simpleName + (firstId(w)?.let { "[$it]" } ?: "")
         val n = seen.getOrDefault(base, 0)
         seen[base] = n + 1
         "$base#$n"
@@ -1314,7 +1333,15 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val boundedOrFill = if (fillParent) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(max = 480.dp)
             val list: @Composable () -> Unit = {
                 val lazyKeys = childKeys(widget.children)
+                // Keyed items keep the first visible one in place, so an item inserted above it would
+                // land just off-screen: a list that was at the very top stays at the top.
+                val listState = rememberLazyListState()
+                val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 } }
+                val firstKey = lazyKeys.firstOrNull()
+                val wasAtTop = remember(firstKey) { atTop }
+                LaunchedEffect(firstKey) { if (wasAtTop) listState.scrollToItem(0) }
                 LazyColumn(
+                    state = listState,
                     modifier = boundedOrFill,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -1659,19 +1686,23 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         .widthIn(max = 760.dp)
                                         .align(Alignment.TopCenter)
                                         .padding(horizontal = 16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(if (isLarge && fillIndex != null && fillIndex >= 0) 12.dp else 6.dp),
+                                    // A Column body's own spacing (as its Column arm would give it).
+                                    verticalArrangement = Arrangement.spacedBy(if (isLarge && screen.body is Widget.Column && fillIndex != -1) 12.dp else 6.dp),
                                 ) {
                                     if (screen.refreshing) {
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
                                     }
-                                    if (fillIndex == null) {
-                                        Render(screen.body, send)
+                                    // A Column body is walked here whether or not it holds a fill list, so a
+                                    // fill list appearing (search results) doesn't rebuild the fields above it.
+                                    val body = screen.body
+                                    if (fillIndex == null && body !is Widget.Column) {
+                                        Render(body, send)
                                     } else if (fillIndex == -1) {
                                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                                             CompositionLocalProvider(LocalFillList provides true) { Render(screen.body, send) }
                                         }
                                     } else {
-                                        KeyedChildren((screen.body as Widget.Column).children) { i, child ->
+                                        KeyedChildren((body as Widget.Column).children) { i, child ->
                                             if (i == fillIndex) {
                                                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                                                     CompositionLocalProvider(LocalFillList provides true) { Render(child, send) }

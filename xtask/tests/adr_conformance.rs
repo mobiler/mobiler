@@ -283,7 +283,7 @@ fn adr_0047_shells_key_children_by_identity_not_position() {
                 let rest = &code[at + list.len()..];
                 word_start && (rest.contains(".forEach") || rest.contains(".chunked("))
             })
-        }) && !code.contains("key(") && !code.contains(".indices")
+        }) && !code.contains("key(keys[") && !code.contains(".indices.chunked(")
     };
     for path in kotlin {
         let text = std::fs::read_to_string(root().join(path)).expect(path);
@@ -291,9 +291,10 @@ fn adr_0047_shells_key_children_by_identity_not_position() {
         for (n, line) in text.lines().enumerate() {
             let code = kotlin_code(line);
             assert!(!positional(code), "ADR-0047: {path}:{} walks children by position: {line}", n + 1);
+            let lazy_items = code.contains("items(") || code.contains("itemsIndexed(");
             assert!(
-                !code.contains("itemsIndexed(widget.children)"),
-                "ADR-0047: {path}:{} lazy list without a key: {line}",
+                !(lazy_items && code.contains("children") && !code.contains("key =")),
+                "ADR-0047: {path}:{} lazy list over children without a key: {line}",
                 n + 1
             );
         }
@@ -301,10 +302,18 @@ fn adr_0047_shells_key_children_by_identity_not_position() {
     for path in swift {
         let text = std::fs::read_to_string(root().join(path)).expect(path);
         assert!(text.contains("func childKeys("), "ADR-0047: {path} has no childKeys");
-        // Child-rendering ForEach loops must go through keyedChildren.
+        // Every ForEach over a child list (`children`, `kids`, `bar`) goes through keyedChildren.
         for (n, line) in text.lines().enumerate() {
-            let walks = line.contains("ForEach(Array(children.enumerated())") || line.contains("ForEach(Array(bar.enumerated())");
-            assert!(!walks, "ADR-0047: {path}:{} renders children by position: {line}", n + 1);
+            let over_children = ["children", "kids", "bar"].iter().any(|list| {
+                line.match_indices(list).any(|(at, _)| {
+                    let before = line[..at].chars().last();
+                    let after = line[at + list.len()..].chars().next();
+                    !before.is_some_and(|c| c.is_alphanumeric()) && !after.is_some_and(|c| c.is_alphanumeric())
+                })
+            });
+            if line.contains("ForEach(") && over_children {
+                assert!(line.contains("keyedChildren("), "ADR-0047: {path}:{} renders children by position: {line}", n + 1);
+            }
         }
     }
 }

@@ -585,22 +585,52 @@ private func isLargeDensity() -> Bool {
     return false
 }
 
-/// A child's identity across renders: its id when it has one, else its kind and its place among the
-/// siblings of that kind; always unique (a repeated id gets "#1"). So a row appearing above a field
-/// (an error, a caption) never changes the field's identity, and SwiftUI keeps its text and focus.
-func childKeys(_ children: [SharedTypes.Widget]) -> [String] {
+/// A widget's own id, for the kinds that have one.
+fileprivate func ownId(_ w: SharedTypes.Widget) -> String? {
+    switch w {
+    case .textField(let id, _, _, _, _), .searchField(let id, _, _), .toggle(let id, _, _),
+         .checkbox(let id, _, _), .slider(let id, _, _), .map(let id, _, _, _, _, _, _):
+        return id
+    case .video(_, let id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _):
+        return id
+    default:
+        return nil
+    }
+}
+
+/// The first id in a widget's subtree (depth first): how an id-less container is known by what it holds.
+fileprivate func firstId(_ w: SharedTypes.Widget) -> String? {
+    if let id = ownId(w) { return id }
+    switch w {
+    case .row(let children), .column(let children):
+        return children.lazy.compactMap(firstId).first
+    case .box(let children, _, _), .grid(let children, _), .scroller(let children, _):
+        return children.lazy.compactMap(firstId).first
+    case .lazyList(let children, _, _, _, _, _, _, _):
+        return children.lazy.compactMap(firstId).first
+    case .card(let child, _, _, _), .a11y(let child, _, _, _), .swipeAction(let child, _):
+        return firstId(child)
+    case .split(let primary, let detail, _, _):
+        return firstId(primary) ?? firstId(detail)
+    default:
+        return nil
+    }
+}
+
+/// A child's identity across renders (ADR-0047): its id; else its kind, plus the first id inside it
+/// for a container (`row[email]`); then `#n` for its place among siblings with the same base, so keys
+/// are unique. A row appearing above a field, or above the row or card holding it, never changes the
+/// field's identity, so SwiftUI keeps its text and focus.
+fileprivate func childKeys(_ children: [SharedTypes.Widget]) -> [String] {
     var seen: [String: Int] = [:]
     return children.map { w in
         let base: String
-        switch w {
-        case .textField(let id, _, _, _, _), .searchField(let id, _, _), .toggle(let id, _, _),
-             .checkbox(let id, _, _), .slider(let id, _, _), .map(let id, _, _, _, _, _, _):
+        if let id = ownId(w) {
             base = "id:\(id)"
-        case .video(_, let id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _):
-            base = "id:\(id)"
-        default:
+        } else {
             // The case name: a case with values reflects as one labelled child.
-            base = Mirror(reflecting: w).children.first?.label ?? String(describing: w)
+            let kind = Mirror(reflecting: w).children.first?.label ?? String(describing: w)
+            base = kind + (firstId(w).map { "[\($0)]" } ?? "")
         }
         let n = seen[base, default: 0]
         seen[base] = n + 1
@@ -609,13 +639,13 @@ func childKeys(_ children: [SharedTypes.Widget]) -> [String] {
 }
 
 /// A sibling with its `childKeys` identity and its position, for `ForEach`.
-struct KeyedChild: Identifiable {
+fileprivate struct KeyedChild: Identifiable {
     let id: String
     let offset: Int
     let element: SharedTypes.Widget
 }
 
-func keyedChildren(_ children: [SharedTypes.Widget]) -> [KeyedChild] {
+fileprivate func keyedChildren(_ children: [SharedTypes.Widget]) -> [KeyedChild] {
     zip(childKeys(children), children.enumerated()).map { KeyedChild(id: $0, offset: $1.offset, element: $1.element) }
 }
 
