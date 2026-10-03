@@ -95,6 +95,10 @@ enum Command {
         /// old version of each is saved under `.mobiler/backup/` first).
         #[arg(long)]
         apply: bool,
+        /// Mark a file left with a conflict as resolved (after you resolved it, or chose to keep your
+        /// own version): its review stops and the next upgrade merges only newer changes. Repeatable.
+        #[arg(long, value_name = "FILE")]
+        resolved: Vec<String>,
     },
 }
 
@@ -157,7 +161,7 @@ fn main() -> std::process::ExitCode {
                 std::process::ExitCode::FAILURE
             }
         },
-        Command::Upgrade { apply } => match upgrade::run(apply) {
+        Command::Upgrade { apply, resolved } => match upgrade::run(apply, &resolved) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

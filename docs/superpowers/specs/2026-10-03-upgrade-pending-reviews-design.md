@@ -160,3 +160,11 @@ three things:
   - Both checks read CRLF as LF.
   - This closes the case of an edit beside a pending conflict, or beside a clean change in the same file. Before, the
     block fingerprint changed, so it counted as resolved and the template's lines were dropped.
+- **2026-10-03 (maintainer decision after the fourth review):** decision 2 is replaced for conflicts.
+  - A conflict is never inferred as resolved. It is settled by `mobiler upgrade --resolved <file>`, which refuses a
+    file with marker lines and works whatever side the user kept.
+  - A review copy settles automatically only when the file equals it as offered. Any other change goes through the
+    normal merge.
+  - Why: four review rounds each found an ordinary edit that made inference report "resolved" and drop the framework
+    change. "Kept my side" and "edited before looking" can't be told apart from the file. ADR-0046 records this as
+    Option C chosen and Option D rejected.

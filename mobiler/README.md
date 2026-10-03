@@ -87,6 +87,7 @@ cargo install mobiler   # get the new CLI first
 cd myapp
 mobiler upgrade         # 3-way merge; review results as *.mobiler-new
 mobiler upgrade --apply # …or write the merged shells in place (old versions go to .mobiler/backup/)
+mobiler upgrade --resolved path/to/File.kt  # after resolving a conflict (any side you chose)
 ```
 
 It does a **true 3-way merge**. `mobiler new` snapshots the pristine shells into `.mobiler/base/`
@@ -101,11 +102,11 @@ made. `--apply` writes clean merges and new files
 in place, after saving the old file under `.mobiler/backup/`, and bumps `mobiler-core`. It never applies a conflict.
 
 Everything left for review is recorded in `.mobiler/pending/`. Every `mobiler upgrade` ends with a warning listing
-those files and what to do with each. Once you've dealt with one, by taking the review copy or by resolving the conflicting
-lines with no `<<<<<<<` markers left, the next run confirms it with `✓ resolved`, and it stays resolved. Any other
-edit doesn't count, for example from `mobiler plugin add`: the offered change is still merged in, or reported as a
-conflict if your edit sits right next to it. To drop a review you don't want, delete its record under
-`.mobiler/pending/`.
+those files and what to do with each. A review copy you put in place as it is gets
+confirmed by the next run (`✓ resolved`). A conflict is settled only when you say so: resolve its review copy, which
+can mean keeping your own side, put the result in place, then run `mobiler upgrade --resolved <file>`. From then on
+it stays resolved, and later upgrades merge only newer changes. Any other edit doesn't settle anything, for example
+from `mobiler plugin add`: the offered change is still merged in, or reported as a conflict.
 
 Commit `.mobiler/` (the baseline, the version stamp and pending reviews), except `.mobiler/backup/` and `.mobiler/new/`,
 which the template's `.gitignore` skips.

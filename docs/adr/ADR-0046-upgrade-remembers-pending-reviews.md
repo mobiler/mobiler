@@ -1,11 +1,11 @@
-# ADR-0046: `mobiler upgrade` remembers every file it leaves for review, treats one the user has since changed (with no conflict markers left) as resolved and advances its baseline, names everything still pending on every run, and without `--apply` changes no file a build reads; ADR-0043's merge and side-file rules otherwise stand
+# ADR-0046: `mobiler upgrade` remembers every file it leaves for review and names it on every run; a review copy counts as dealt with when the file equals it, a conflict only when the user runs `mobiler upgrade --resolved <file>`, and nothing else ever drops what was offered; without `--apply` it changes no file a build reads; ADR-0043's merge and side-file rules otherwise stand
 
 Status:        Accepted
 Date decided:  2026-10-03
 Deciding PRs:  #280
 Supersedes:    ADR-0043
-Code anchor:   mobiler/src/upgrade.rs (sync_file, read_pending, write_pending, clear_pending, fingerprint, has_conflict_markers, list_pending, Report::pending_lines, bump_core_dep), plus ADR-0043's anchors (classify, three_way, two_way, merge_anchors, seed_baseline, write_review, review_rel, write_backup), mobiler/src/new.rs (seeds the baseline)
-Conformance:   mobiler/src/upgrade.rs::resolved_conflict_stays_resolved, mobiler/src/upgrade.rs::unresolved_conflict_is_reported_on_every_run, mobiler/src/upgrade.rs::markers_left_in_file_stay_pending, mobiler/src/upgrade.rs::review_run_never_touches_build_inputs, mobiler/src/upgrade.rs::review_offer_survives_an_unrelated_edit, mobiler/src/upgrade.rs::conflict_with_an_edit_elsewhere_stays_pending, mobiler/src/upgrade.rs::clean_offer_with_an_adjacent_edit_becomes_a_conflict, mobiler/src/upgrade.rs::edit_next_to_a_pending_conflict_stays_pending, mobiler/src/upgrade.rs::edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending, mobiler/src/upgrade.rs::orphan_record_is_dropped, mobiler/src/upgrade.rs::three_way_applies_framework_change_preserves_edit_and_flags_conflict, mobiler/src/upgrade.rs::new_seeds_baseline_so_upgrade_is_idempotent, mobiler/src/upgrade.rs::bumps_dep_stamps_and_leaves_app_code_untouched, mobiler/src/upgrade.rs::review_copies_of_android_resources_go_outside_res
+Code anchor:   mobiler/src/upgrade.rs (upgrade_with, mark_resolved, check_pending, sync_file, read_pending, write_pending, clear_pending, fingerprint, has_conflict_markers, list_pending, Report::pending_lines, bump_core_dep), mobiler/src/main.rs (`upgrade --resolved`), plus ADR-0043's anchors (classify, three_way, two_way, merge_anchors, seed_baseline, write_review, review_rel, write_backup), mobiler/src/new.rs (seeds the baseline)
+Conformance:   mobiler/src/upgrade.rs::resolved_conflict_stays_resolved, mobiler/src/upgrade.rs::keeping_your_own_side_resolves_with_the_flag, mobiler/src/upgrade.rs::conflict_resolved_by_hand_waits_for_resolved_flag, mobiler/src/upgrade.rs::resolved_flag_refuses_markers_and_unknown_files, mobiler/src/upgrade.rs::unresolved_conflict_is_reported_on_every_run, mobiler/src/upgrade.rs::markers_left_in_file_stay_pending, mobiler/src/upgrade.rs::review_run_never_touches_build_inputs, mobiler/src/upgrade.rs::review_offer_survives_an_unrelated_edit, mobiler/src/upgrade.rs::conflict_with_an_edit_elsewhere_stays_pending, mobiler/src/upgrade.rs::clean_offer_with_an_adjacent_edit_becomes_a_conflict, mobiler/src/upgrade.rs::edit_next_to_a_pending_conflict_stays_pending, mobiler/src/upgrade.rs::edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending, mobiler/src/upgrade.rs::orphan_record_is_dropped, mobiler/src/upgrade.rs::three_way_applies_framework_change_preserves_edit_and_flags_conflict, mobiler/src/upgrade.rs::new_seeds_baseline_so_upgrade_is_idempotent, mobiler/src/upgrade.rs::bumps_dep_stamps_and_leaves_app_code_untouched, mobiler/src/upgrade.rs::review_copies_of_android_resources_go_outside_res
 
 ## 1. Context (The Problem)
 
@@ -26,39 +26,41 @@ review from silently dropping a framework change. The CLI 0.64.0 post-release sm
 
 ## 2. Hypothesis
 
-If upgrade records what it offered for each file it leaves for review, it can tell later whether the user dealt with
-it. If it judges that by the app's file, not by the gitignored review copy, then:
+Suppose upgrade records what it offered for each file it leaves for review. Suppose it settles a file only on an
+unambiguous signal: the file equals the review copy as offered, or the user names a conflict with `--resolved`. Then:
 
-- a resolved conflict is resolved once and never raised again;
-- an ignored one is still never dropped silently, and is named on every run;
+- a resolved conflict is resolved once and never raised again, whichever side the user kept;
+- no edit the user makes for another reason drops an offered change;
+- everything still pending is named on every run;
 - a run without `--apply` leaves a buildable app.
 
-The record is `.mobiler/pending/<file>.json`, committed with the app. It holds the offered template (the baseline once
-resolved), a fingerprint of the app's file when the review was offered, and the kind: `conflict`, `merge`, `review`
-or `new`. On each run, before merging a file with a record:
+**The record** is `.mobiler/pending/<file>.json`, committed with the app. It holds:
+- the offered template, which becomes the baseline once settled;
+- a fingerprint of the app's file when offered, and of the review copy as offered;
+- the kind: `conflict`, `merge`, `review` or `new`.
 
-- **Changed since offered, no conflict marker lines left, and the user dealt with the offer itself:** the file counts
-  as resolved. The recorded template becomes its baseline, the record is deleted, the report says `✓ resolved`, and
-  the normal merge then runs. "Dealt with the offer" means one of:
-  - the file equals the review copy as offered (the record keeps its fingerprint);
-  - for a conflict, two checks both hold. First, the file contains every run of lines the offered template adds or
-    changes relative to the baseline. Second, merging the offer onto the file still conflicts, but in different
-    lines than the recorded conflict blocks (the record keeps their fingerprint). Both are compared with CRLF read as
-    LF. An edit beside the conflict, or beside a clean template change, leaves a template line out, so it isn't a
-    resolution. The second check covers a template change that only deletes lines.
-  - Without a baseline, a `new` or `merge` record resolves on any change.
-- **Changed for another reason** (`plugin add`, a `git pull`, a formatter): not resolved. The normal merge runs
-  against the old baseline. It applies the offer if it still merges cleanly, or reports a real conflict, such as an
-  edit right next to the offered change. Either way, the offer is never dropped.
-  - Marker lines are `<<<<<<< `, `||||||| `, `=======` and `>>>>>>> `. The fingerprint treats CRLF as LF, so a Windows
-    checkout is not a change.
-- **Unchanged:** the merge runs again against the old baseline. The review copy and the record are rewritten, which
-  also recreates the review copy on a fresh clone.
-- **Changed but with marker lines:** the file stays pending and is never touched.
-- **Deleted:** it is offered again as a new file. It is not counted as resolved.
+**On each run, before merging a file with a record:**
 
-A record for a path the template no longer produces is deleted and reported as `dropped`, since nothing is left to
-review. That covers a dropped file, a renamed package, or a file that became the app's own.
+- **Changed since offered, no conflict marker lines, and equal to the review copy as offered:** it counts as settled.
+  The recorded template becomes its baseline, the record is deleted, and the report says `✓ resolved`.
+  - Without a baseline, a `new` or `merge` record also settles on any change, since the user wrote that file
+    themselves.
+- **Any other change:** the normal merge runs against the old baseline. That covers `plugin add`, a `git pull`, a
+  formatter, and a hand-resolved conflict. The merge applies the offer if it merges cleanly, or reports a conflict.
+  Nothing is dropped.
+- **Unchanged:** the merge runs again. The review copy and the record are rewritten, which also recreates the review
+  copy on a fresh clone.
+- **Marker lines in the file:** the file stays pending and is never touched. Marker lines are `<<<<<<< `,
+  `||||||| `, `=======` and `>>>>>>> `.
+- **Deleted:** it is offered again as a new file.
+
+**A conflict is settled only by `mobiler upgrade --resolved <file>`**, which is repeatable and also accepts the review
+copy's path. It refuses a file with marker lines or with no record. It makes the recorded template the file's baseline,
+deletes the record and the review copy, and then the run continues. It works for any resolution, keeping your own side
+included.
+
+The warning names the command for each pending conflict. A record for a path the template no longer produces is
+deleted and reported as `dropped`. The fingerprint reads CRLF as LF.
 
 Every run ends with a warning listing each pending file and what to do with it. "Up to date" is printed only when
 nothing is pending. Without `--apply`:
@@ -70,24 +72,26 @@ copies of Android resources under `.mobiler/new/`, backups under `.mobiler/backu
 
 ### 2.1. Refutation Conditions
 
-- **Condition 1: a resolved file stays resolved.**
-  - **Validation Metric:** `resolved_conflict_stays_resolved` (a second run reports `✓ resolved` and no conflict,
-    the baseline equals the template, and a third run is quiet).
-- **Condition 2: pending files are named on every run, including a fresh clone without the review copy.**
+- **Condition 1: a conflict marked resolved stays resolved, whichever side was kept.**
+  - **Validation Metric:** `resolved_conflict_stays_resolved`, `keeping_your_own_side_resolves_with_the_flag`.
+- **Condition 2: a conflict is never inferred as resolved from the file, not even a correct resolution.**
+  - **Validation Metric:** `conflict_resolved_by_hand_waits_for_resolved_flag`.
+- **Condition 3: `--resolved` refuses a file with markers or without a pending review.**
+  - **Validation Metric:** `resolved_flag_refuses_markers_and_unknown_files`.
+- **Condition 4: pending files are named on every run, including a fresh clone without the review copy.**
   - **Validation Metric:** `unresolved_conflict_is_reported_on_every_run`.
-- **Condition 3: conflict markers keep a file pending and untouched.**
+- **Condition 5: conflict markers keep a file pending and untouched.**
   - **Validation Metric:** `markers_left_in_file_stay_pending`.
-- **Condition 4: a run without `--apply` writes no build input.**
+- **Condition 6: a run without `--apply` writes no build input.**
   - **Validation Metric:** `review_run_never_touches_build_inputs`.
-- **Condition 5: an edit that doesn't deal with the offer never drops it.** That covers an edit elsewhere in the
-  file, an edit next to a clean offer, and an edit next to a pending conflict or next to a clean change in a file
-  with one.
+- **Condition 7: an edit that isn't the offered review copy never drops the offer.** That includes an edit next to it
+  or next to a pending conflict.
   - **Validation Metric:** `review_offer_survives_an_unrelated_edit`, `clean_offer_with_an_adjacent_edit_becomes_a_conflict`,
     `conflict_with_an_edit_elsewhere_stays_pending`, `edit_next_to_a_pending_conflict_stays_pending`,
     `edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending`.
-- **Condition 6: a record the template no longer produces doesn't warn forever.**
+- **Condition 8: a record the template no longer produces doesn't warn forever.**
   - **Validation Metric:** `orphan_record_is_dropped`.
-- **Condition 7: ADR-0043's merge and side-file rules hold.**
+- **Condition 9: ADR-0043's merge and side-file rules hold.**
   - **Validation Metric:** `three_way_applies_framework_change_preserves_edit_and_flags_conflict`,
     `new_seeds_baseline_so_upgrade_is_idempotent`, `bumps_dep_stamps_and_leaves_app_code_untouched` (now with
     `--apply`, where the bump and the added file happen), `review_copies_of_android_resources_go_outside_res`.
@@ -99,57 +103,62 @@ copies of Android resources under `.mobiler/new/`, backups under `.mobiler/backu
   would be dropped silently: the risk ADR-0012 and ADR-0043 guard against.
 - **Option B: "the review copy is gone" means resolved** `[recorded: design discussion, 2026-10-03]`
   Rejected. Review copies are gitignored, so on a teammate's clone every pending file would look resolved.
-- **Option C: an explicit resolve command (`mobiler upgrade --resolved <file>`)** `[reconstructed]`
-  Rejected. The report already tells the user to edit the file. A second step they must remember would bring the
-  recurring conflict back for anyone who forgets it.
-- **Option D: a committed pending record, resolution judged by the app's file** `[recorded: docs/superpowers/specs/2026-10-03-upgrade-pending-reviews-design.md, approved 2026-10-03]`
-  Chosen.
+- **Option D: infer a conflict's resolution from the app's file** `[recorded: the approved spec, then four review rounds, 2026-10-03]`
+  This was approved first and implemented. Each refinement in turn was beaten by a review: "changed since offered",
+  "the offer no longer merges", "the conflict blocks changed", and "the file holds every line the template adds". Each
+  time, an ordinary edit could make the file look resolved and drop the change. Examples: an edit beside the conflict,
+  a line uncommented next to it, or a template line that already appears elsewhere. "Resolved, kept my own side" and
+  "edited before looking" can't be told apart from the file at all, and keeping your own side looped forever.
+  Rejected.
+- **Option C: an explicit `mobiler upgrade --resolved <file>`** `[recorded: maintainer decision, 2026-10-03]`
+  Chosen. It was first rejected as a step users might forget. The warning now names the command on every run, so
+  forgetting it is visible, not silent.
 
 ## 4. Decision & Rationale for Corroboration
 
-Option D. The fingerprint is FNV-1a 64-bit. It only tells "changed since offered" apart and is not a security check;
-unlike `DefaultHasher`, it is the same on every machine and Rust version. A record that can't be read counts as no
-record, and the next run writes a valid one. The version stamp still advances on every run (nothing reads it to decide
-anything) and shows the pending count. The template `.gitignore` is unchanged: it already doesn't ignore
-`.mobiler/pending/`.
+Option C, with records for every review and automatic settling only for the unambiguous case: the file equals the
+review copy as offered.
+
+- **The fingerprint** is FNV-1a 64-bit. It only tells "changed since offered" apart and is not a security check;
+  unlike `DefaultHasher`, it is the same on every machine and Rust version.
+- **A record that can't be read** counts as no record, and the next run writes a valid one.
+- **The version stamp** still advances on every run (nothing reads it to decide anything) and shows the pending count.
+- **The template `.gitignore`** is unchanged: it already doesn't ignore `.mobiler/pending/`.
 
 **Mutation proof:**
-- Skipping the baseline advance and record clean-up when a pending file has changed failed
-  `resolved_conflict_stays_resolved`.
+- Settling any changed conflict automatically failed five tests: `conflict_resolved_by_hand_waits_for_resolved_flag`,
+  `conflict_with_an_edit_elsewhere_stays_pending`, `edit_next_to_a_pending_conflict_stays_pending`,
+  `edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending` and `resolved_conflict_stays_resolved`.
+- `--resolved` without advancing the baseline failed `keeping_your_own_side_resolves_with_the_flag`,
+  `resolved_conflict_stays_resolved` and `conflict_resolved_by_hand_waits_for_resolved_flag`.
+- `--resolved` accepting a file with markers failed `resolved_flag_refuses_markers_and_unknown_files`.
 - Making `pending_lines` always return nothing failed `unresolved_conflict_is_reported_on_every_run`.
 - Dropping the early return for a file with conflict markers failed `markers_left_in_file_stay_pending`.
 - Writing new files in place without `--apply` failed `review_run_never_touches_build_inputs` (and
   `accepted_new_file_is_resolved`).
-- Treating every changed file as resolved, without the re-merge check, failed `review_offer_survives_an_unrelated_edit`.
-- Treating any still-conflicting edit as a resolution (ignoring the recorded conflict blocks) failed
-  `conflict_with_an_edit_elsewhere_stays_pending`.
-- Treating any change to a clean offer as a resolution failed `clean_offer_with_an_adjacent_edit_becomes_a_conflict`
-  and `review_offer_survives_an_unrelated_edit`.
-- Skipping the "file holds every line the template adds" check failed `edit_next_to_a_pending_conflict_stays_pending`
-  and `edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending`.
+- Settling any changed clean offer failed `clean_offer_with_an_adjacent_edit_becomes_a_conflict` and
+  `review_offer_survives_an_unrelated_edit`.
 - Never dropping records for unproduced paths failed `orphan_record_is_dropped`.
-- Reverting restored green (116/116). The four tests carried over from ADR-0043 are not re-proven here.
+- Reverting restored green (118/118). The four tests carried over from ADR-0043 are not re-proven here.
 
 ## 5. Consequences (Positive and Negative Predictions)
 
-- **Positive:** a conflict is resolved once. Upgrading again later, or with a newer CLI, merges only newer template
-  changes.
-- **Positive:** pending reviews are visible on every run and on every clone.
+- **Positive:** an offered framework change is never dropped by an edit. Only the user's own `--resolved` or a taken
+  review copy settles a file.
+- **Positive:** a conflict is resolved once, whichever side was kept. Upgrading again later, or with a newer CLI,
+  merges only newer template changes.
+- **Positive:** pending reviews are visible on every run and on every clone, with the exact command to settle each
+  conflict.
 - **Positive:** "upgrade, build, then review" works again without `--apply`.
-- **Negative:** where a template change only deletes lines, an edit beside that conflict counts as resolving it, and
-  the deleted lines stay. The report names the file (`✓ resolved`). Template lines that are added or changed are never
-  dropped this way: a file without them is never resolved.
-- **Negative:** these files are offered again on every run until they hold the template's lines, or until their
-  record is deleted:
-  - a conflict resolved in the original file without the review copy's clean changes;
-  - a review copy taken and then edited in the offered lines.
-- **Negative:** keeping only your own side of a conflict leaves the file unchanged, so it is offered again on every
-  run. Delete its record to stop that.
+- **Negative:** settling a conflict takes one extra command after resolving it. Until it runs, the conflict is offered
+  again on every upgrade.
+- **Negative:** `--resolved` trusts the user. It records the offered template as the baseline whatever the file holds,
+  so a framework change the user deleted while resolving is not offered again.
+- **Negative:** a review copy taken and then edited isn't settled automatically. It goes through the merge again,
+  which may report a conflict to resolve with `--resolved`.
 - **Negative:** an edit right next to a pending clean offer turns it into a conflict to resolve by hand.
-- **Negative:** a pending review is abandoned by deleting its record (`.mobiler/pending/<file>.json`). No command
-  does it.
 - **Negative:** a review run (no `--apply`) no longer bumps `mobiler-core` or adds new files. A user who relied on a
   plain run doing that must now use `--apply` or move the review copies in.
-- **Negative:** `.mobiler/pending/` adds committed files, each holding a copy of a template file, until resolved.
+- **Negative:** `.mobiler/pending/` adds committed files, each holding a copy of a template file, until settled.
 - All of ADR-0043's consequences still hold, apart from "an upgraded app builds whatever was left for review", which
   this ADR now makes true for new files and the core bump as well.
