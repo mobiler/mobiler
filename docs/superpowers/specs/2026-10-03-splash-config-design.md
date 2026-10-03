@@ -174,3 +174,11 @@ must produce an APK, with no file inside `res/` other than resources.
 - **`mobiler/README.md`:** a `[splash]` section next to the "Launch window colours" section, which it supersedes.
 - **The root `README.md`:** the upgrade and launch notes.
 - **The CLI `--help`** for `mobiler splash sync`.
+
+## Amendments
+
+- **2026-10-03 (plan):** the Android 12 icon uses a marker block in the framework's v31 themes. The sync fills it only
+  with a logo, so the no-logo theme is byte-identical to today, and no default drawable has to match it. The generated
+  icon drawable is `mobiler_splash_logo_icon`, because `mobiler_splash_icon` is already an alias in the seed
+  `values/mobiler_splash.xml`. iOS JSON seeds are recognised as the sync's own through a ledger
+  (`.mobiler/splash.json`), since JSON has no comments for a header.
