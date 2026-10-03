@@ -87,7 +87,7 @@ cargo install mobiler   # get the new CLI first
 cd myapp
 mobiler upgrade         # 3-way merge; review results as *.mobiler-new
 mobiler upgrade --apply # …or write the merged shells in place (old versions go to .mobiler/backup/)
-mobiler upgrade --resolved path/to/File.kt  # after resolving a conflict (any side you chose)
+mobiler upgrade --resolved path/to/File.kt  # a conflict you resolved, or an offer you decline
 ```
 
 It does a **true 3-way merge**. `mobiler new` snapshots the pristine shells into `.mobiler/base/`
@@ -105,7 +105,8 @@ Everything left for review is recorded in `.mobiler/pending/`. Every `mobiler up
 those files and what to do with each. A review copy you put in place as it is gets
 confirmed by the next run (`✓ resolved`). A conflict is settled only when you say so: resolve its review copy, which
 can mean keeping your own side, put the result in place, then run `mobiler upgrade --resolved <file>`. From then on
-it stays resolved, and later upgrades merge only newer changes. Any other edit doesn't settle anything, for example
+it stays resolved, and later upgrades merge only newer changes. The same command declines any other offered change
+and keeps your version. Any other edit doesn't settle anything, for example
 from `mobiler plugin add`: the offered change is still merged in, or reported as a conflict.
 
 Commit `.mobiler/` (the baseline, the version stamp and pending reviews), except `.mobiler/backup/` and `.mobiler/new/`,

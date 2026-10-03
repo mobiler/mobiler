@@ -97,8 +97,9 @@ enum Command {
         /// old version of each is saved under `.mobiler/backup/` first).
         #[arg(long)]
         apply: bool,
-        /// Mark a file left with a conflict as resolved (after you resolved it, or chose to keep your
-        /// own version): its review stops and the next upgrade merges only newer changes. Repeatable.
+        /// Mark a file waiting for review as dealt with: a conflict you resolved, or an offered change you
+        /// decided not to take (your version stays). Its review stops and the next upgrade merges only
+        /// newer changes. Repeatable; checked before any is applied.
         #[arg(long, value_name = "FILE")]
         resolved: Vec<String>,
     },

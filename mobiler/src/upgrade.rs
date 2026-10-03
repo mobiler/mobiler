@@ -164,8 +164,14 @@ fn upgrade_with(root: &Path, apply: bool, resolved: &[&str]) -> Result<Report> {
     }
     let subs = Subs::from_app_root(root)?;
     let mut report = Report { app_root: Some(root.to_path_buf()), ..Report::default() };
-    for file in resolved {
-        mark_resolved(root, file, &mut report)?;
+    // Check every `--resolved` argument before settling any, so one typo leaves nothing half-done.
+    let settle = resolved.iter().map(|file| check_resolved(root, file)).collect::<Result<Vec<_>>>()?;
+    for (rel, rec) in settle {
+        write_baseline(root, &rel, rec.template.as_bytes())?;
+        clear_pending(root, &rel);
+        let rel_disp = rel.to_string_lossy().to_string();
+        let _ = fs::remove_file(root.join(review_rel(&rel_disp)));
+        report.resolved.push(rel_disp);
     }
     bump_core_dep(root, apply, &mut report)?;
     sync_dir(&TEMPLATES, root, &subs, apply, &mut report)?;
@@ -369,13 +375,12 @@ fn check_pending(root: &Path, rel: &Path, dst: &Path, rel_disp: &str, report: &m
                 report.markers.push(rel_disp.to_string());
                 return Ok(true);
             }
-            // Settled without being told only when the user took the review copy as offered (without a
-            // baseline, a new or unsplicable file they wrote themselves). Any other edit (plugin add,
-            // git pull, a formatter) goes through the normal merge below, which applies the offer or
-            // reports a conflict, never drops it. A conflict is settled by `--resolved` (ADR-0046):
-            // from the file alone, "resolved, kept my side" and "edited before looking" are the same.
-            let resolved = fingerprint(&now_bytes) == rec.offered_hash
-                || (read_baseline(root, rel).is_none() && (rec.kind == "new" || rec.kind == "merge"));
+            // Settled without being told only when the user took the review copy as offered. Any other
+            // edit (plugin add, git pull, a formatter, a stub of their own) goes through the normal merge
+            // below, which applies the offer or offers it again, never drops it. Anything else is settled
+            // by `--resolved` (ADR-0046): from the file alone, "dealt with it, kept my version" and
+            // "edited before looking" are the same.
+            let resolved = fingerprint(&now_bytes) == rec.offered_hash;
             if resolved {
                 write_baseline(root, rel, rec.template.as_bytes())?;
                 clear_pending(root, rel);
@@ -601,13 +606,23 @@ fn has_conflict_markers(text: &str) -> bool {
     })
 }
 
-/// `--resolved <file>`: the user has dealt with a pending review (any outcome, their own side
-/// included). What was offered becomes the file's baseline, so the next merge layers only newer
-/// template changes; the record and the review copy go. The file must hold no conflict markers.
-fn mark_resolved(root: &Path, arg: &str, report: &mut Report) -> Result<()> {
+/// `--resolved <file>`: the user has dealt with a pending review: resolved a conflict, or decided to
+/// keep their own version of any offered file. What was offered becomes the file's baseline, so the
+/// next merge layers only newer template changes; the record and the review copy go. Checked here,
+/// applied by the caller once every argument passed: the file is inside the app, exists, has a
+/// pending review and no conflict markers.
+fn check_resolved(root: &Path, arg: &str) -> Result<(PathBuf, PendingRecord)> {
     let given = Path::new(arg);
-    let mut rel = given.strip_prefix(root).unwrap_or(given).to_string_lossy().replace('\\', "/");
-    rel = rel.trim_start_matches("./").to_string();
+    let canon_root = fs::canonicalize(root).ok();
+    let inside = given
+        .strip_prefix(root)
+        .ok()
+        .or_else(|| canon_root.as_deref().and_then(|c| given.strip_prefix(c).ok()))
+        .unwrap_or(given);
+    let mut rel = inside.to_string_lossy().replace('\\', "/");
+    while let Some(r) = rel.strip_prefix("./") {
+        rel = r.to_string();
+    }
     // The review copy's path names the same file.
     if let Some(r) = rel.strip_prefix(".mobiler/new/") {
         rel = r.to_string();
@@ -616,19 +631,19 @@ fn mark_resolved(root: &Path, arg: &str, report: &mut Report) -> Result<()> {
         rel = r.to_string();
     }
     let rel_path = PathBuf::from(&rel);
+    if rel.is_empty() || !rel_path.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        bail!("{arg}: give a path inside the app (relative to its root)");
+    }
     let Some(rec) = read_pending(root, &rel_path) else {
         bail!("no pending review for {rel} — `mobiler upgrade` lists the files waiting for one");
     };
-    if let Ok(text) = fs::read_to_string(root.join(&rel_path))
-        && has_conflict_markers(&text)
-    {
+    let Ok(bytes) = fs::read(root.join(&rel_path)) else {
+        bail!("{rel} doesn't exist — put your version in place first (or move its review copy in)");
+    };
+    if has_conflict_markers(&String::from_utf8_lossy(&bytes)) {
         bail!("{rel} still has conflict markers — finish resolving them, then run --resolved again");
     }
-    write_baseline(root, &rel_path, rec.template.as_bytes())?;
-    clear_pending(root, &rel_path);
-    let _ = fs::remove_file(root.join(review_rel(&rel)));
-    report.resolved.push(rel_path.to_string_lossy().to_string());
-    Ok(())
+    Ok((rel_path, rec))
 }
 
 /// Every pending record under `.mobiler/pending/`: (the file's path, its kind), sorted.
@@ -822,9 +837,13 @@ impl Report {
                     "conflict" => format!(
                         "conflict — resolve {copy}, replace the file, then run `mobiler upgrade --resolved {rel}`"
                     ),
-                    "merge" => format!("plugin/user state — merge {copy} by hand"),
+                    "merge" => format!(
+                        "plugin/user state — merge {copy} by hand, then `mobiler upgrade --resolved {rel}`"
+                    ),
                     "new" => format!("new file — move {copy} into place, or run with --apply"),
-                    _ => format!("review {copy} and replace the file, or run with --apply"),
+                    _ => format!(
+                        "review {copy} and replace the file, run with --apply, or keep yours with `--resolved {rel}`"
+                    ),
                 }
             };
             lines.push(format!("    {rel}   {what}"));
@@ -920,8 +939,8 @@ impl Report {
         }
         if !self.conflict.is_empty() {
             println!(
-                "{} file(s) have overlapping edits — resolve the conflict markers in their \
-                 .mobiler-new, replace the original (never auto-applied), then run \
+                "{} file(s) have overlapping edits — resolve the conflict markers in their review \
+                 copy (path above), replace the original (never auto-applied), then run \
                  `mobiler upgrade --resolved <file>`.",
                 self.conflict.len()
             );
@@ -1419,6 +1438,58 @@ mod test {
         fs::write(root.join("rust-toolchain.toml"), format!("# fixed\n{}", toolchain())).unwrap();
         let r = upgrade_with(&root, true, &["rust-toolchain.toml.mobiler-new"]).unwrap();
         assert_eq!(r.resolved, ["rust-toolchain.toml"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_stub_where_a_new_file_was_offered_is_not_settled() {
+        let root = skeleton();
+        upgrade_at(&root, false).unwrap();
+        fs::write(root.join("iOS/Sources/Render.swift"), "// my stub\n").unwrap();
+        let r = upgrade_at(&root, false).unwrap();
+        assert!(!r.resolved.iter().any(|f| f == "iOS/Sources/Render.swift"), "{:?}", r.resolved);
+        assert!(r.pending.iter().any(|(f, _)| f == "iOS/Sources/Render.swift"), "still offered: {:?}", r.pending);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolved_rejects_paths_outside_the_app() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        let outside = root.with_extension("outside");
+        fs::create_dir_all(&outside).unwrap();
+        let record = r#"{"template":"PWNED\n","file_hash":"0","kind":"conflict","offered_hash":"0"}"#;
+        fs::write(outside.join("victim.json"), record).unwrap();
+        let name = outside.file_name().unwrap().to_string_lossy().to_string();
+        let up = format!("../../{name}/victim");
+        let abs = outside.join("victim").to_string_lossy().to_string();
+        for arg in [up.as_str(), abs.as_str()] {
+            let err = upgrade_with(&root, true, &[arg]).err().expect("refused");
+            assert!(format!("{err:#}").contains("inside the app"), "{err:#}");
+        }
+        assert!(!outside.join("victim").exists(), "nothing written outside the app");
+        assert!(outside.join("victim.json").exists(), "nothing deleted outside the app");
+        let _ = fs::remove_dir_all(&outside);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn one_bad_resolved_argument_applies_none() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        assert!(upgrade_with(&root, true, &["rust-toolchain.toml", "typo/Nope.kt"]).is_err());
+        assert!(read_pending(&root, Path::new("rust-toolchain.toml")).is_some(), "the good one is not half-applied");
+        assert!(upgrade_with(&root, true, &["rust-toolchain.toml"]).is_ok(), "and a retry works");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolved_refuses_a_missing_file() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        fs::remove_file(root.join("rust-toolchain.toml")).unwrap();
+        let err = upgrade_with(&root, true, &["rust-toolchain.toml"]).err().expect("refused");
+        assert!(format!("{err:#}").contains("doesn't exist"), "{err:#}");
         let _ = fs::remove_dir_all(&root);
     }
 

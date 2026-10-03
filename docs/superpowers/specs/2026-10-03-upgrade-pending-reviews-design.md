@@ -168,3 +168,9 @@ three things:
   - Why: four review rounds each found an ordinary edit that made inference report "resolved" and drop the framework
     change. "Kept my side" and "edited before looking" can't be told apart from the file. ADR-0046 records this as
     Option C chosen and Option D rejected.
+- **2026-10-03 (final review):**
+  - A file is never settled just because it changed without a baseline. A stub where a new file was offered goes
+    through the normal merge.
+  - `--resolved` also declines a clean offer, keeping the user's version.
+  - `--resolved` refuses paths outside the app and missing files.
+  - `--resolved` checks every argument before settling any.
