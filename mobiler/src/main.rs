@@ -88,8 +88,10 @@ enum Command {
         name: Option<String>,
     },
     /// Update this app's generic native shells + `mobiler-core` dep to the CLI's templates.
-    /// Non-destructive by default (writes `<file>.mobiler-new`; Android resources under `.mobiler/new/`); `--apply` overwrites in place
-    /// (saving the old file under `.mobiler/backup/`). Never touches your Rust app code or plugin-patched files.
+    /// Without `--apply` nothing the build reads changes: merges and new files are offered as `<file>.mobiler-new`
+    /// (Android resources under `.mobiler/new/`) and the dep bump is reported. `--apply` writes them in place (saving
+    /// the old file under `.mobiler/backup/`) and bumps the dep. Every run lists what still waits for review
+    /// (`.mobiler/pending/`). Never touches your Rust app code; never applies a conflict.
     Upgrade {
         /// Overwrite changed shell files in place instead of writing `.mobiler-new` (the
         /// old version of each is saved under `.mobiler/backup/` first).
