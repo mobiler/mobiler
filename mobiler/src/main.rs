@@ -7,6 +7,7 @@ mod display_name;
 mod doctor;
 mod new;
 mod plugin;
+mod splash;
 mod templating;
 mod upgrade;
 mod watch;
