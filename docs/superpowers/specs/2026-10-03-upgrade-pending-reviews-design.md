@@ -154,3 +154,9 @@ three things:
   - Any other edit goes through the normal merge, which applies the offer or reports a real conflict. This closes
     two gaps: a conflict plus an edit elsewhere was counted as resolved, and a clean offer plus an adjacent edit
     (`plugin add` at an anchor) was counted as resolved.
+- **2026-10-03 (third review):** a conflict counts as resolved only when two checks hold.
+  - The file contains every run of lines the offered template adds or changes relative to the baseline.
+  - The conflict blocks changed.
+  - Both checks read CRLF as LF.
+  - This closes the case of an edit beside a pending conflict, or beside a clean change in the same file. Before, the
+    block fingerprint changed, so it counted as resolved and the template's lines were dropped.

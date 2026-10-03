@@ -5,7 +5,7 @@ Date decided:  2026-10-03
 Deciding PRs:  #280
 Supersedes:    ADR-0043
 Code anchor:   mobiler/src/upgrade.rs (sync_file, read_pending, write_pending, clear_pending, fingerprint, has_conflict_markers, list_pending, Report::pending_lines, bump_core_dep), plus ADR-0043's anchors (classify, three_way, two_way, merge_anchors, seed_baseline, write_review, review_rel, write_backup), mobiler/src/new.rs (seeds the baseline)
-Conformance:   mobiler/src/upgrade.rs::resolved_conflict_stays_resolved, mobiler/src/upgrade.rs::unresolved_conflict_is_reported_on_every_run, mobiler/src/upgrade.rs::markers_left_in_file_stay_pending, mobiler/src/upgrade.rs::review_run_never_touches_build_inputs, mobiler/src/upgrade.rs::review_offer_survives_an_unrelated_edit, mobiler/src/upgrade.rs::conflict_with_an_edit_elsewhere_stays_pending, mobiler/src/upgrade.rs::clean_offer_with_an_adjacent_edit_becomes_a_conflict, mobiler/src/upgrade.rs::orphan_record_is_dropped, mobiler/src/upgrade.rs::three_way_applies_framework_change_preserves_edit_and_flags_conflict, mobiler/src/upgrade.rs::new_seeds_baseline_so_upgrade_is_idempotent, mobiler/src/upgrade.rs::bumps_dep_stamps_and_leaves_app_code_untouched, mobiler/src/upgrade.rs::review_copies_of_android_resources_go_outside_res
+Conformance:   mobiler/src/upgrade.rs::resolved_conflict_stays_resolved, mobiler/src/upgrade.rs::unresolved_conflict_is_reported_on_every_run, mobiler/src/upgrade.rs::markers_left_in_file_stay_pending, mobiler/src/upgrade.rs::review_run_never_touches_build_inputs, mobiler/src/upgrade.rs::review_offer_survives_an_unrelated_edit, mobiler/src/upgrade.rs::conflict_with_an_edit_elsewhere_stays_pending, mobiler/src/upgrade.rs::clean_offer_with_an_adjacent_edit_becomes_a_conflict, mobiler/src/upgrade.rs::edit_next_to_a_pending_conflict_stays_pending, mobiler/src/upgrade.rs::edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending, mobiler/src/upgrade.rs::orphan_record_is_dropped, mobiler/src/upgrade.rs::three_way_applies_framework_change_preserves_edit_and_flags_conflict, mobiler/src/upgrade.rs::new_seeds_baseline_so_upgrade_is_idempotent, mobiler/src/upgrade.rs::bumps_dep_stamps_and_leaves_app_code_untouched, mobiler/src/upgrade.rs::review_copies_of_android_resources_go_outside_res
 
 ## 1. Context (The Problem)
 
@@ -41,8 +41,11 @@ or `new`. On each run, before merging a file with a record:
   as resolved. The recorded template becomes its baseline, the record is deleted, the report says `✓ resolved`, and
   the normal merge then runs. "Dealt with the offer" means one of:
   - the file equals the review copy as offered (the record keeps its fingerprint);
-  - for a conflict, merging the offer onto the file still conflicts, but in different lines than the recorded
-    conflict blocks (the record keeps their fingerprint). The user changed the conflict itself.
+  - for a conflict, two checks both hold. First, the file contains every run of lines the offered template adds or
+    changes relative to the baseline. Second, merging the offer onto the file still conflicts, but in different
+    lines than the recorded conflict blocks (the record keeps their fingerprint). Both are compared with CRLF read as
+    LF. An edit beside the conflict, or beside a clean template change, leaves a template line out, so it isn't a
+    resolution. The second check covers a template change that only deletes lines.
   - Without a baseline, a `new` or `merge` record resolves on any change.
 - **Changed for another reason** (`plugin add`, a `git pull`, a formatter): not resolved. The normal merge runs
   against the old baseline. It applies the offer if it still merges cleanly, or reports a real conflict, such as an
@@ -77,9 +80,11 @@ copies of Android resources under `.mobiler/new/`, backups under `.mobiler/backu
 - **Condition 4: a run without `--apply` writes no build input.**
   - **Validation Metric:** `review_run_never_touches_build_inputs`.
 - **Condition 5: an edit that doesn't deal with the offer never drops it.** That covers an edit elsewhere in the
-  file, an edit next to a clean offer, and an edit to a file with a pending conflict that leaves the conflict alone.
+  file, an edit next to a clean offer, and an edit next to a pending conflict or next to a clean change in a file
+  with one.
   - **Validation Metric:** `review_offer_survives_an_unrelated_edit`, `clean_offer_with_an_adjacent_edit_becomes_a_conflict`,
-    `conflict_with_an_edit_elsewhere_stays_pending`.
+    `conflict_with_an_edit_elsewhere_stays_pending`, `edit_next_to_a_pending_conflict_stays_pending`,
+    `edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending`.
 - **Condition 6: a record the template no longer produces doesn't warn forever.**
   - **Validation Metric:** `orphan_record_is_dropped`.
 - **Condition 7: ADR-0043's merge and side-file rules hold.**
@@ -120,8 +125,10 @@ anything) and shows the pending count. The template `.gitignore` is unchanged: i
   `conflict_with_an_edit_elsewhere_stays_pending`.
 - Treating any change to a clean offer as a resolution failed `clean_offer_with_an_adjacent_edit_becomes_a_conflict`
   and `review_offer_survives_an_unrelated_edit`.
+- Skipping the "file holds every line the template adds" check failed `edit_next_to_a_pending_conflict_stays_pending`
+  and `edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending`.
 - Never dropping records for unproduced paths failed `orphan_record_is_dropped`.
-- Reverting restored green (112/112). The four tests carried over from ADR-0043 are not re-proven here.
+- Reverting restored green (116/116). The four tests carried over from ADR-0043 are not re-proven here.
 
 ## 5. Consequences (Positive and Negative Predictions)
 
@@ -129,9 +136,13 @@ anything) and shows the pending count. The template `.gitignore` is unchanged: i
   changes.
 - **Positive:** pending reviews are visible on every run and on every clone.
 - **Positive:** "upgrade, build, then review" works again without `--apply`.
-- **Negative:** an edit inside a pending conflict's own lines counts as resolving it, even when made for another
-  reason, and the framework change there is dropped. The report names the file (`✓ resolved`), so it is visible but
-  not prevented. Edits elsewhere never resolve anything.
+- **Negative:** where a template change only deletes lines, an edit beside that conflict counts as resolving it, and
+  the deleted lines stay. The report names the file (`✓ resolved`). Template lines that are added or changed are never
+  dropped this way: a file without them is never resolved.
+- **Negative:** these files are offered again on every run until they hold the template's lines, or until their
+  record is deleted:
+  - a conflict resolved in the original file without the review copy's clean changes;
+  - a review copy taken and then edited in the offered lines.
 - **Negative:** keeping only your own side of a conflict leaves the file unchanged, so it is offered again on every
   run. Delete its record to stop that.
 - **Negative:** an edit right next to a pending clean offer turns it into a conflict to resolve by hand.

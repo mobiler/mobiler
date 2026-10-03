@@ -338,7 +338,11 @@ fn sync_file(
         };
         let offered = fs::read(root.join(review_rel(&rel_disp))).unwrap_or_default();
         let conflict = match (kind, read_baseline(root, &rel)) {
-            ("conflict", Some(base)) => diffy::merge(&base, &current_s, &pristine).err(),
+            // Normalised like `conflict_resolved` reads it back.
+            ("conflict", Some(base)) => {
+                let lf = |s: &str| s.replace("\r\n", "\n");
+                diffy::merge(&lf(&base), &lf(&current_s), &lf(&pristine)).err()
+            }
             _ => None,
         };
         let offer = Offer { template: &pristine, current: &current, kind, offered: &offered, conflict: conflict.as_deref() };
@@ -369,10 +373,7 @@ fn check_pending(root: &Path, rel: &Path, dst: &Path, rel_disp: &str, report: &m
             // never drops it. Without a baseline only a new or unsplicable file is resolved by hand.
             let resolved = fingerprint(&now_bytes) == rec.offered_hash
                 || match (read_baseline(root, rel), rec.kind.as_str()) {
-                    (Some(base), "conflict") => match diffy::merge(&base, &now, &rec.template) {
-                        Ok(_) => false,
-                        Err(c) => Some(fingerprint(conflict_blocks(&c).as_bytes())) != rec.conflict_hash,
-                    },
+                    (Some(base), "conflict") => conflict_resolved(&base, &now, &rec),
                     (Some(_), _) => false,
                     (None, kind) => kind == "new" || kind == "merge",
                 };
@@ -605,6 +606,41 @@ fn has_conflict_markers(text: &str) -> bool {
     text.lines().any(|l| {
         l.starts_with("<<<<<<< ") || l.starts_with("||||||| ") || l == "=======" || l.starts_with(">>>>>>> ")
     })
+}
+
+/// Whether the user resolved a pending conflict by hand: the file holds every run of lines the offered
+/// template adds or changes (an edit beside the conflict or beside a clean change leaves one out), and
+/// the conflict itself changed (covers a change that only deletes lines). Line endings don't count.
+fn conflict_resolved(base: &str, now: &str, rec: &PendingRecord) -> bool {
+    let lf = |s: &str| s.replace("\r\n", "\n");
+    let (base, now, template) = (lf(base), lf(now), lf(&rec.template));
+    if !template_additions(&base, &template).iter().all(|run| now.contains(run.as_str())) {
+        return false;
+    }
+    match diffy::merge(&base, &now, &template) {
+        Ok(_) => false, // merges cleanly now: the normal merge settles it
+        Err(c) => Some(fingerprint(conflict_blocks(&c).as_bytes())) != rec.conflict_hash,
+    }
+}
+
+/// Each run of consecutive lines `template` inserts or changes relative to `base`.
+fn template_additions(base: &str, template: &str) -> Vec<String> {
+    let patch = diffy::create_patch(base, template);
+    let mut runs = Vec::new();
+    for hunk in patch.hunks() {
+        let mut run = String::new();
+        for line in hunk.lines() {
+            if let diffy::Line::Insert(text) = line {
+                run.push_str(text);
+            } else if !run.is_empty() {
+                runs.push(std::mem::take(&mut run));
+            }
+        }
+        if !run.is_empty() {
+            runs.push(run);
+        }
+    }
+    runs
 }
 
 /// The conflict blocks of a conflict-marked merge (each `<<<<<<<` … `>>>>>>>` run, markers included):
@@ -1308,6 +1344,67 @@ mod test {
         clear_pending(&root, Path::new("a/b/C.kt"));
         assert!(!root.join(".mobiler/pending/a/b").exists(), "empty folder removed");
         assert!(root.join(".mobiler/pending/a/D.kt.json").exists(), "a folder still holding a record stays");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// An app whose `channel` line conflicts (template `stable`, old baseline `beta`, user `nightly`),
+    /// optionally with a second, clean template change on the `profile` line.
+    fn channel_conflict_app(two_hunks: bool) -> PathBuf {
+        let root = skeleton();
+        let t = toolchain();
+        let mut base = t.replace("channel = \"stable\"", "channel = \"beta\"");
+        if two_hunks {
+            base = base.replace("profile = \"minimal\"", "profile = \"default\"");
+        }
+        let user = base.replace("channel = \"beta\"", "channel = \"nightly\"");
+        fs::create_dir_all(root.join(".mobiler/base")).unwrap();
+        fs::write(root.join(".mobiler/base/rust-toolchain.toml"), &base).unwrap();
+        fs::write(root.join("rust-toolchain.toml"), &user).unwrap();
+        root
+    }
+
+    #[test]
+    fn edit_next_to_a_pending_conflict_stays_pending() {
+        let root = channel_conflict_app(false);
+        upgrade_at(&root, true).unwrap();
+        let now = read(&root, "rust-toolchain.toml").replace("[toolchain]", "[toolchain] # touched");
+        fs::write(root.join("rust-toolchain.toml"), &now).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.resolved.is_empty(), "the template's line is not in the file: {:?}", r.resolved);
+        assert!(r.conflict.iter().any(|c| c == "rust-toolchain.toml"), "{:?}", r.conflict);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn edit_next_to_a_clean_hunk_in_a_conflicted_file_stays_pending() {
+        // plugin add inserting at an anchor beside a clean template change, while a conflict waits.
+        let root = channel_conflict_app(true);
+        upgrade_at(&root, true).unwrap();
+        let now = read(&root, "rust-toolchain.toml").replace("profile = ", "# plugin line\nprofile = ");
+        fs::write(root.join("rust-toolchain.toml"), &now).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.resolved.is_empty(), "{:?}", r.resolved);
+        assert!(read_pending(&root, Path::new("rust-toolchain.toml")).is_some(), "still pending");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn conflict_resolved_with_both_sides_is_resolved() {
+        let root = channel_conflict_app(true);
+        upgrade_at(&root, true).unwrap();
+        // The user resolves the review copy: the template's channel, their note, the clean change kept.
+        let resolved = read(&root, "rust-toolchain.toml.mobiler-new")
+            .lines()
+            .filter(|l| !l.starts_with("<<<<<<<") && !l.starts_with("|||||||") && !l.starts_with(">>>>>>>") && *l != "=======")
+            .filter(|l| !l.contains("beta") && !l.contains("nightly"))
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+            .replace("channel = \"stable\"\n", "channel = \"stable\" # wanted nightly\nchannel = \"stable\"\n");
+        fs::write(root.join("rust-toolchain.toml"), &resolved).unwrap();
+        fs::remove_file(root.join("rust-toolchain.toml.mobiler-new")).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert_eq!(r.resolved, ["rust-toolchain.toml"], "file: {resolved}");
+        assert!(r.conflict.is_empty());
         let _ = fs::remove_dir_all(&root);
     }
 
