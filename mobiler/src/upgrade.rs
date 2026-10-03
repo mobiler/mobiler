@@ -166,7 +166,11 @@ fn upgrade_with(root: &Path, apply: bool, resolved: &[&str]) -> Result<Report> {
     let mut report = Report { app_root: Some(root.to_path_buf()), ..Report::default() };
     // Check every `--resolved` argument before settling any, so one typo leaves nothing half-done.
     let settle = resolved.iter().map(|file| check_resolved(root, file)).collect::<Result<Vec<_>>>()?;
+    let mut seen = std::collections::HashSet::new();
     for (rel, rec) in settle {
+        if !seen.insert(rel.clone()) {
+            continue; // the same file named twice
+        }
         write_baseline(root, &rel, rec.template.as_bytes())?;
         clear_pending(root, &rel);
         let rel_disp = rel.to_string_lossy().to_string();
@@ -630,10 +634,14 @@ fn check_resolved(root: &Path, arg: &str) -> Result<(PathBuf, PendingRecord)> {
     if let Some(r) = rel.strip_suffix(".mobiler-new") {
         rel = r.to_string();
     }
-    let rel_path = PathBuf::from(&rel);
-    if rel.is_empty() || !rel_path.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+    let given_rel = PathBuf::from(&rel);
+    let components: Vec<_> = given_rel.components().filter(|c| !matches!(c, std::path::Component::CurDir)).collect();
+    if components.is_empty() || !components.iter().all(|c| matches!(c, std::path::Component::Normal(_))) {
         bail!("{arg}: give a path inside the app (relative to its root)");
     }
+    // One spelling (`a/./b` → `a/b`), the one the records, review copies and report use.
+    let rel_path: PathBuf = components.iter().collect();
+    let rel = rel_path.to_string_lossy().to_string();
     let Some(rec) = read_pending(root, &rel_path) else {
         bail!("no pending review for {rel} — `mobiler upgrade` lists the files waiting for one");
     };
@@ -1480,6 +1488,15 @@ mod test {
         assert!(upgrade_with(&root, true, &["rust-toolchain.toml", "typo/Nope.kt"]).is_err());
         assert!(read_pending(&root, Path::new("rust-toolchain.toml")).is_some(), "the good one is not half-applied");
         assert!(upgrade_with(&root, true, &["rust-toolchain.toml"]).is_ok(), "and a retry works");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn repeated_resolved_arguments_settle_once() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        let r = upgrade_with(&root, true, &["rust-toolchain.toml", "./rust-toolchain.toml", "rust-toolchain.toml.mobiler-new"]).unwrap();
+        assert_eq!(r.resolved, ["rust-toolchain.toml"]);
         let _ = fs::remove_dir_all(&root);
     }
 
