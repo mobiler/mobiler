@@ -27,6 +27,9 @@ pub(crate) const STAMP_REL: &str = ".mobiler/version";
 /// Project-relative dir holding the pristine template snapshot (the 3-way merge ancestor),
 /// mirroring the app layout: `.mobiler/base/<app-relative path>`.
 const BASE_REL: &str = ".mobiler/base";
+/// Files `upgrade` left for review (a conflict, a review copy, a new file): what was offered, so a
+/// later run can tell a resolved file from an ignored one (ADR-0046). Committed with the app.
+const PENDING_REL: &str = ".mobiler/pending";
 
 /// Anchor markers that mark a file as carrying plugin/user state (patched by `plugin add`).
 /// A file whose template contains any of these is MERGE-class: never auto-overwritten.
@@ -119,6 +122,10 @@ struct Report {
     merge: Vec<String>,
     /// 3-way merges with overlapping edits — written with conflict markers for manual resolution.
     conflict: Vec<String>,
+    /// Files left for review earlier that the user has since resolved: their baseline advanced.
+    resolved: Vec<String>,
+    /// Files left for review whose conflict markers are still in the file (never touched).
+    markers: Vec<String>,
     /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
     /// automatically (they may carry user edits) — reported so the mismatch is not silent.
     plugins: Vec<String>,
@@ -247,6 +254,21 @@ fn sync_file(
     let dst = root.join(&rel);
     let rel_disp = rel.to_string_lossy().to_string();
 
+    // A file left for review by an earlier run: changed since then and marker-free means the user
+    // resolved it, so what was offered becomes its baseline (ADR-0046). Unchanged: merge again below.
+    if let Some(rec) = read_pending(root, &rel) {
+        let now = fs::read(&dst).unwrap_or_default();
+        if fingerprint(&now) != rec.file_hash {
+            if has_conflict_markers(&String::from_utf8_lossy(&now)) {
+                report.markers.push(rel_disp);
+                return Ok(());
+            }
+            write_baseline(root, &rel, rec.template.as_bytes())?;
+            clear_pending(root, &rel);
+            report.resolved.push(rel_disp.clone());
+        }
+    }
+
     if !dst.exists() {
         // A file the new version introduces — additive, safe to create (and baseline).
         if let Some(parent) = dst.parent() {
@@ -255,6 +277,7 @@ fn sync_file(
         fs::write(&dst, &desired).with_context(|| format!("writing {}", dst.display()))?;
         report.added.push(rel_disp);
         write_baseline(root, &rel, &desired)?;
+        clear_pending(root, &rel);
         return Ok(());
     }
 
@@ -274,12 +297,23 @@ fn sync_file(
 
     // With a recorded ancestor we do a real 3-way merge; otherwise reconcile conservatively and
     // leave behind a baseline so the next upgrade can.
+    let (conflicts, merges) = (report.conflict.len(), report.merge.len());
     let incorporated = match read_baseline(root, &rel) {
         Some(base) => three_way(&base, &current_s, &pristine, &dst, &rel_disp, apply, report)?,
         None => two_way(class, &current, &pristine, &dst, &rel_disp, apply, report)?,
     };
     if incorporated {
         write_baseline(root, &rel, pristine.as_bytes())?;
+        clear_pending(root, &rel);
+    } else {
+        let kind = if report.conflict.len() > conflicts {
+            "conflict"
+        } else if report.merge.len() > merges {
+            "merge"
+        } else {
+            "review"
+        };
+        write_pending(root, &rel, &pristine, &current, kind)?;
     }
     Ok(())
 }
@@ -407,6 +441,63 @@ fn write_baseline(root: &Path, rel: &Path, bytes: &[u8]) -> Result<()> {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     fs::write(&path, bytes).with_context(|| format!("writing baseline {}", path.display()))
+}
+
+/// Path of `rel`'s pending record: `.mobiler/pending/<rel>.json`.
+fn pending_path(root: &Path, rel: &Path) -> PathBuf {
+    let mut p = root.join(PENDING_REL).join(rel).into_os_string();
+    p.push(".json");
+    PathBuf::from(p)
+}
+
+/// A stable fingerprint of a file's bytes (FNV-1a 64): tells "changed since offered" apart. Not a
+/// security hash; the same across Rust versions and machines, unlike `DefaultHasher`.
+fn fingerprint(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+/// What `upgrade` offered for a file it could not incorporate.
+struct PendingRecord {
+    /// The new template: the file's baseline once the user has resolved it.
+    template: String,
+    /// `fingerprint` of the app's file when it was offered (of empty bytes for a new file).
+    file_hash: String,
+    /// "conflict", "merge", "review" or "new".
+    kind: String,
+}
+
+/// The pending record for `rel`; a missing or unreadable one is no record.
+fn read_pending(root: &Path, rel: &Path) -> Option<PendingRecord> {
+    let text = fs::read_to_string(pending_path(root, rel)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    Some(PendingRecord {
+        template: v["template"].as_str()?.to_string(),
+        file_hash: v["file_hash"].as_str()?.to_string(),
+        kind: v["kind"].as_str()?.to_string(),
+    })
+}
+
+fn write_pending(root: &Path, rel: &Path, template: &str, current: &[u8], kind: &str) -> Result<()> {
+    let path = pending_path(root, rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let json = serde_json::json!({ "template": template, "file_hash": fingerprint(current), "kind": kind });
+    fs::write(&path, serde_json::to_string_pretty(&json)?).with_context(|| format!("writing {}", path.display()))
+}
+
+fn clear_pending(root: &Path, rel: &Path) {
+    let _ = fs::remove_file(pending_path(root, rel));
+}
+
+/// Whether `text` still holds a merge conflict: a whole line that is a marker.
+fn has_conflict_markers(text: &str) -> bool {
+    text.lines().any(|l| l.starts_with("<<<<<<< ") || l == "=======" || l.starts_with(">>>>>>> "))
 }
 
 /// Snapshot every managed (non-OWN, text) template file into `.mobiler/base/` as the merge
@@ -822,6 +913,91 @@ mod test {
 
     fn read(root: &Path, rel: &str) -> String {
         fs::read_to_string(root.join(rel)).unwrap()
+    }
+
+    /// The shipped `rust-toolchain.toml` template (a Shell-class file with no tokens).
+    fn toolchain() -> String {
+        TEMPLATES.get_file("rust-toolchain.toml").unwrap().contents_utf8().unwrap().to_string()
+    }
+
+    /// An app whose `rust-toolchain.toml` conflicts with the template: the old baseline had a first
+    /// line the template dropped, and the user changed that same line.
+    fn conflicted_app() -> PathBuf {
+        let root = skeleton();
+        let t = toolchain();
+        fs::create_dir_all(root.join(".mobiler/base")).unwrap();
+        fs::write(root.join(".mobiler/base/rust-toolchain.toml"), format!("# old\n{t}")).unwrap();
+        fs::write(root.join("rust-toolchain.toml"), format!("# mine\n{t}")).unwrap();
+        root
+    }
+
+    #[test]
+    fn resolved_conflict_stays_resolved() {
+        let root = conflicted_app();
+        let r1 = upgrade_at(&root, true).unwrap();
+        assert!(r1.conflict.iter().any(|c| c == "rust-toolchain.toml"), "{:?}", r1.conflict);
+        assert!(root.join(".mobiler/pending/rust-toolchain.toml.json").exists(), "the conflict is recorded");
+
+        // The user resolves it as told: edits the file (no markers left), drops the review copy.
+        let resolved = format!("# mine, resolved\n{}", toolchain());
+        fs::write(root.join("rust-toolchain.toml"), &resolved).unwrap();
+        fs::remove_file(root.join("rust-toolchain.toml.mobiler-new")).unwrap();
+
+        let r2 = upgrade_at(&root, true).unwrap();
+        assert_eq!(r2.resolved, ["rust-toolchain.toml"]);
+        assert!(r2.conflict.is_empty(), "a resolved conflict never comes back: {:?}", r2.conflict);
+        assert_eq!(read(&root, ".mobiler/base/rust-toolchain.toml"), toolchain(), "baseline advanced");
+        assert!(!root.join(".mobiler/pending/rust-toolchain.toml.json").exists(), "record cleared");
+        assert_eq!(read(&root, "rust-toolchain.toml"), resolved, "the user's resolution is kept");
+
+        let r3 = upgrade_at(&root, true).unwrap();
+        assert!(r3.conflict.is_empty() && r3.resolved.is_empty(), "third run is quiet");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn markers_left_in_file_stay_pending() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        // The user copies the review copy over the file without resolving its markers.
+        let review = read(&root, "rust-toolchain.toml.mobiler-new");
+        fs::write(root.join("rust-toolchain.toml"), &review).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert_eq!(r.markers, ["rust-toolchain.toml"]);
+        assert!(r.resolved.is_empty());
+        assert_eq!(read(&root, "rust-toolchain.toml"), review, "a file with markers is never touched");
+        assert!(root.join(".mobiler/pending/rust-toolchain.toml.json").exists(), "still pending");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn incorporated_file_clears_its_record() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        // The file now equals the template (e.g. the user took the template's side): incorporated.
+        fs::write(root.join("rust-toolchain.toml"), toolchain()).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.conflict.is_empty());
+        assert!(!root.join(".mobiler/pending/rust-toolchain.toml.json").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn markers_are_whole_lines() {
+        assert!(has_conflict_markers("a\n<<<<<<< ours\nb\n=======\nc\n>>>>>>> theirs\n"));
+        assert!(!has_conflict_markers("// ======= section =======\nlet x = \"<<<<<<<\";\n"));
+    }
+
+    #[test]
+    fn corrupt_record_is_ignored() {
+        let root = conflicted_app();
+        let p = root.join(".mobiler/pending/rust-toolchain.toml.json");
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, "{ not json").unwrap();
+        let r = upgrade_at(&root, true).unwrap(); // must not fail
+        assert!(r.conflict.iter().any(|c| c == "rust-toolchain.toml"));
+        assert!(read_pending(&root, Path::new("rust-toolchain.toml")).is_some(), "rewritten as a valid record");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
