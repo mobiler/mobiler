@@ -37,6 +37,7 @@ fn main() -> Result<()> {
         .register_type::<mobiler_core::HttpOutcome>()?
         .register_type::<mobiler_core::TransferEvent>()?
         .register_type::<mobiler_core::DeviceInfo>()?
+        .register_type::<mobiler_core::Photo>()?
         // mobiler:codegen-types — insert above
         .build()?;
 
