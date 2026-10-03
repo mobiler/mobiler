@@ -93,10 +93,18 @@ It does a **true 3-way merge**. `mobiler new` snapshots the pristine shells into
 (the merge *ancestor*), so `upgrade` reconciles the ancestor, your current file, and the new
 template per file — like `git merge`. Framework improvements apply **and** your edits + plugin
 injections survive; only overlapping changes become a conflict (written as `<file>.mobiler-new`
-with `<<<<<<<`/`>>>>>>>` markers, never auto-applied). It bumps your `mobiler-core` dependency and
-never touches your Rust app code (`shared/src/`). By default a clean merge is offered as
-`<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit `.mobiler/`
-(the baseline + version stamp), except `.mobiler/backup/` and `.mobiler/new/`, which the template's `.gitignore` skips.
+with `<<<<<<<`/`>>>>>>>` markers, never auto-applied). It never touches your Rust app code (`shared/src/`).
+
+Without `--apply`, nothing your build reads changes. Clean merges, new files and conflicts are offered as
+`<file>.mobiler-new`, and the `mobiler-core` bump is reported, not made. `--apply` writes clean merges and new files
+in place, after saving the old file under `.mobiler/backup/`, and bumps `mobiler-core`. It never applies a conflict.
+
+Everything left for review is recorded in `.mobiler/pending/`. Every `mobiler upgrade` ends with a warning listing
+those files and what to do with each. Once you've dealt with one, meaning the file changed and no `<<<<<<<` markers
+are left, the next run confirms it with `✓ resolved`, and it stays resolved.
+
+Commit `.mobiler/` (the baseline, the version stamp and pending reviews), except `.mobiler/backup/` and `.mobiler/new/`,
+which the template's `.gitignore` skips.
 Review copies of Android resource files, clean or conflicted, go under `.mobiler/new/` instead of next to
 the file (a stray file in `res/` breaks the build); the report prints each copy's path. Apps scaffolded before baselines existed fall back to a conservative
 reconcile and get a baseline for next time. App-owned files the template provides defaults for (the

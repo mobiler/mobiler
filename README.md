@@ -363,10 +363,18 @@ mobiler upgrade --apply # …or write the merged shells in place (old versions g
 and the new template — exactly like `git merge`. Framework improvements apply **and** your edits and
 plugin injections are preserved; only genuinely overlapping changes become a conflict, written as
 `<file>.mobiler-new` with `<<<<<<<`/`>>>>>>>` markers (never auto-applied). It **never** touches your
-Rust app code (`shared/src/`). It also bumps your `mobiler-core` dependency. By default a clean merge
-is offered as `<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit
-`.mobiler/` so the baseline (and version stamp) travel with the repo; `.mobiler/backup/` and `.mobiler/new/` are
-skipped by the template's `.gitignore`. Review copies of Android resource files, clean or conflicted, go under `.mobiler/new/`
+Rust app code (`shared/src/`).
+
+Without `--apply`, nothing your build reads changes. Clean merges, new files and conflicts are offered as
+`<file>.mobiler-new`, and the `mobiler-core` bump is reported, not made. `--apply` writes clean merges and new files
+in place, after saving the old file under `.mobiler/backup/`, and bumps `mobiler-core`. It never applies a conflict.
+
+Everything left for review is recorded in `.mobiler/pending/`. Every `mobiler upgrade` ends with a warning listing
+those files and what to do with each. Once you've dealt with one, meaning the file changed and no `<<<<<<<` markers
+are left, the next run confirms it with `✓ resolved`, and it stays resolved.
+
+Commit `.mobiler/` so the baseline, the version stamp and the pending reviews travel with the repo. The template's
+`.gitignore` skips `.mobiler/backup/` and `.mobiler/new/`. Review copies of Android resource files, clean or conflicted, go under `.mobiler/new/`
 instead of next to the file: a stray file in `res/` breaks the Android build. The upgrade report prints
 each copy's path. Apps scaffolded before baselines
 existed fall back to a conservative reconcile and get a baseline written for next time. A few

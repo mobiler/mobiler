@@ -1,6 +1,6 @@
 # ADR-0043: `mobiler upgrade` three-way merges an app's generated files against `.mobiler/base/`, never applies a conflict and never touches the app's own code; its review copies and backups never land where a build reads them
 
-Status:        Accepted
+Status:        Superseded by ADR-0046
 Date decided:  2026-10-01
 Deciding PRs:  #266; restates ADR-0012 (#33, #43, #44, #194) and the backup move of #258
 Supersedes:    ADR-0012
