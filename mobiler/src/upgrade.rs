@@ -134,6 +134,8 @@ struct Report {
     deps_would: Option<(String, String)>,
     /// Pending records for paths the template no longer produces: deleted, nothing left to review.
     dropped: Vec<String>,
+    /// Managed paths holding a symlink that points nowhere: never written through, left for the user.
+    skipped: Vec<String>,
     /// Every managed path this run visited (to find records for paths no longer produced).
     managed: std::collections::HashSet<String>,
     /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
@@ -303,6 +305,11 @@ fn sync_file(
         return Ok(());
     }
 
+    if dst.symlink_metadata().is_ok() && !dst.exists() {
+        // A symlink pointing nowhere: writing would create its target, possibly outside the app.
+        report.skipped.push(rel_disp);
+        return Ok(());
+    }
     if !dst.exists() {
         // A file the new version introduces. A review run offers it instead: it may need edits that
         // still wait as review copies (e.g. a type registered in codegen.rs).
@@ -895,6 +902,9 @@ impl Report {
         for m in &self.markers {
             println!("  ‼ markers  {m}  (conflict markers left in the file)");
         }
+        for k in &self.skipped {
+            println!("  ! skipped  {k}  (a symlink that points nowhere — remove it, then run upgrade again)");
+        }
         for d in &self.dropped {
             println!("  - dropped  {d}  (no longer part of the template; its pending review was removed)");
         }
@@ -1400,8 +1410,11 @@ mod test {
             .lines()
             .filter(|l| !l.starts_with("<<<<<<<") && !l.starts_with("|||||||") && !l.starts_with(">>>>>>>") && *l != "=======")
             .filter(|l| !l.contains("beta") && !l.contains("nightly"))
-            .map(|l| format!("{l}\n"))
-            .collect::<String>()
+            .fold(String::new(), |mut out, l| {
+                out.push_str(l);
+                out.push('\n');
+                out
+            })
             .replace("channel = \"stable\"\n", "channel = \"stable\" # wanted nightly\nchannel = \"stable\"\n");
         fs::write(root.join("rust-toolchain.toml"), &resolved).unwrap();
         fs::remove_file(root.join("rust-toolchain.toml.mobiler-new")).unwrap();
@@ -1510,6 +1523,21 @@ mod test {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_at_a_managed_path_is_skipped() {
+        // A missing managed file is created — but not through a symlink that points nowhere.
+        let root = skeleton();
+        let outside = root.with_extension("outside-render");
+        let _ = fs::remove_file(&outside);
+        let dst = root.join("iOS/Sources/Render.swift");
+        std::os::unix::fs::symlink(&outside, &dst).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(!outside.exists(), "the write followed a symlink out of the project");
+        assert!(r.skipped.iter().any(|s| s.contains("Render.swift")), "{:?}", r.skipped);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn orphan_record_is_dropped() {
         // A record for a path the template no longer produces (dropped file, renamed package).
@@ -1518,7 +1546,7 @@ mod test {
         let offer = Offer { template: "x\n", current: b"", kind: "conflict", offered: b"" };
         write_pending(&root, Path::new("gone/Old.kt"), &offer).unwrap();
         let r = upgrade_at(&root, true).unwrap();
-        assert_eq!(r.dropped, ["gone/Old.kt"]);
+        assert_eq!(r.dropped, [Path::new("gone").join("Old.kt").to_string_lossy()]);
         assert!(r.pending.is_empty(), "{:?}", r.pending);
         assert!(!root.join(".mobiler/pending/gone/Old.kt.json").exists());
         let _ = fs::remove_dir_all(&root);
