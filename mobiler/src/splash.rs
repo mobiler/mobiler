@@ -43,12 +43,12 @@ impl Rgba {
     }
 
     /// Android's `#AARRGGBB`.
-    pub fn android(&self) -> String {
+    pub fn android(self) -> String {
         format!("#{:02X}{:02X}{:02X}{:02X}", self.a, self.r, self.g, self.b)
     }
 
     /// CSS `#RRGGBB`.
-    pub fn css(&self) -> String {
+    pub fn css(self) -> String {
         format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
     }
 
@@ -91,12 +91,14 @@ pub fn validate(spec: &SplashSpec) -> Result<Splash, String> {
 }
 
 /// A `w`×`h` image fitted inside a `size` square, aspect kept; each side at least 1.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a positive value at most `size` (≤ 288)
 pub fn fit(w: u32, h: u32, size: u32) -> (u32, u32) {
     let scale = f64::from(size) / f64::from(w.max(h).max(1));
-    let side = |v: u32| ((f64::from(v) * scale).round() as u32).max(1);
-    (side(w), side(h))
+    let scaled = |v: u32| ((f64::from(v) * scale).round() as u32).max(1);
+    (scaled(w), scaled(h))
 }
 
+#[allow(clippy::cast_possible_truncation)] // a whole number of dp below 240
 fn dp(v: f64) -> String {
     if v.fract() == 0.0 { format!("{}dp", v as i64) } else { format!("{v:.1}dp") }
 }
@@ -344,59 +346,68 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             }
         }
     }
-    // The sync's own files.
-    match &logo {
-        Some(l) => {
-            changes.push(Change::Write(LOGO_PNG.into(), png_at(l, 4, &mut report)?));
-            changes.push(Change::Write(ICON.into(), android_icon_xml(l.box_dp.0, l.box_dp.1).into_bytes()));
-            changes.push(Change::Write(format!("{IMAGESET}/Contents.json"), ios_imageset_json(logo_dark.is_some()).into_bytes()));
-            changes.push(Change::Write(format!("{IMAGESET}/mobiler-splash-logo@3x.png"), png_at(l, 3, &mut report)?));
-        }
-        None => {
-            changes.push(Change::Remove(LOGO_PNG.into()));
-            changes.push(Change::Remove(ICON.into()));
-            changes.push(Change::Remove(IMAGESET.into()));
-        }
-    }
-    match &logo_dark {
-        Some(l) => {
-            changes.push(Change::Write(LOGO_DARK_PNG.into(), png_at(l, 4, &mut report)?));
-            changes.push(Change::Write(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png"), png_at(l, 3, &mut report)?));
-        }
-        None => {
-            changes.push(Change::Remove(LOGO_DARK_PNG.into()));
-            changes.push(Change::Remove(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png")));
-        }
-    }
+    logo_changes(logo.as_ref(), logo_dark.as_ref(), &mut changes, &mut report)?;
     // Marker blocks in framework files: filled, never inserted.
     for t in THEMES {
-        block_change(root, t, XML_BEGIN, XML_END, android_theme_icon_lines(logo.is_some()), &mut changes, &mut report);
+        block_change(root, t, XML_BEGIN, XML_END, &android_theme_icon_lines(logo.is_some()), &mut changes, &mut report);
     }
-    block_change(root, PROJECT_YML, YML_BEGIN, YML_END, ios_plist_lines(logo.is_some()), &mut changes, &mut report);
-    // Web (only an app with a web shell): a block before </head> and the logo copies.
-    if root.join(WEB_INDEX).exists() {
-        let html = fs::read_to_string(root.join(WEB_INDEX)).with_context(|| format!("reading {WEB_INDEX}"))?;
-        let lines = web_lines(splash.light, splash.dark, box_dp, logo_dark.is_some());
-        match crate::fonts::replace_block(&html, XML_BEGIN, XML_END, "</head>", |indent| {
-            lines.iter().map(|l| format!("{indent}{l}")).collect()
-        }) {
-            Ok(text) => changes.push(Change::Write(WEB_INDEX.into(), text.into_bytes())),
-            Err(e) => report.warnings.push(format!("{WEB_INDEX}: {e} — web splash not synced")),
-        }
-        match &logo {
-            Some(l) => changes.push(Change::Write(format!("{WEB_DIR}/mobiler-splash-logo.png"), png_at(l, 2, &mut report)?)),
-            None => changes.push(Change::Remove(WEB_DIR.into())),
-        }
-        match &logo_dark {
-            Some(l) => changes.push(Change::Write(format!("{WEB_DIR}/mobiler-splash-logo-dark.png"), png_at(l, 2, &mut report)?)),
-            None => changes.push(Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo-dark.png"))),
-        }
-    }
+    block_change(root, PROJECT_YML, YML_BEGIN, YML_END, &ios_plist_lines(logo.is_some()), &mut changes, &mut report);
+    web_changes(root, &splash, logo.as_ref(), logo_dark.as_ref(), &mut changes, &mut report)?;
     let ledger_json = serde_json::to_string_pretty(&serde_json::json!({ "seeds": new_ledger }))? + "\n";
     changes.push(Change::Write(LEDGER.into(), ledger_json.into_bytes()));
     apply(root, changes, &mut report)?;
     report.warnings.dedup();
     Ok(report)
+}
+
+/// The sync's own logo files: written with a logo, removed without one.
+fn logo_changes(logo: Option<&Logo>, logo_dark: Option<&Logo>, changes: &mut Vec<Change>, report: &mut SyncReport) -> anyhow::Result<()> {
+    if let Some(l) = logo {
+        changes.push(Change::Write(LOGO_PNG.into(), png_at(l, 4, report)?));
+        changes.push(Change::Write(ICON.into(), android_icon_xml(l.box_dp.0, l.box_dp.1).into_bytes()));
+        changes.push(Change::Write(format!("{IMAGESET}/Contents.json"), ios_imageset_json(logo_dark.is_some()).into_bytes()));
+        changes.push(Change::Write(format!("{IMAGESET}/mobiler-splash-logo@3x.png"), png_at(l, 3, report)?));
+    } else {
+        changes.extend([Change::Remove(LOGO_PNG.into()), Change::Remove(ICON.into()), Change::Remove(IMAGESET.into())]);
+    }
+    if let Some(l) = logo_dark {
+        changes.push(Change::Write(LOGO_DARK_PNG.into(), png_at(l, 4, report)?));
+        changes.push(Change::Write(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png"), png_at(l, 3, report)?));
+    } else {
+        changes.push(Change::Remove(LOGO_DARK_PNG.into()));
+        changes.push(Change::Remove(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png")));
+    }
+    Ok(())
+}
+
+/// Web (only an app with a web shell): a block before `</head>` and the logo copies at 2×.
+fn web_changes(
+    root: &Path,
+    splash: &Splash,
+    logo: Option<&Logo>,
+    logo_dark: Option<&Logo>,
+    changes: &mut Vec<Change>,
+    report: &mut SyncReport,
+) -> anyhow::Result<()> {
+    let Ok(html) = fs::read_to_string(root.join(WEB_INDEX)) else { return Ok(()) };
+    let lines = web_lines(splash.light, splash.dark, logo.map(|l| l.box_dp), logo_dark.is_some());
+    match crate::fonts::replace_block(&html, XML_BEGIN, XML_END, "</head>", |indent| {
+        lines.iter().map(|l| format!("{indent}{l}")).collect()
+    }) {
+        Ok(text) => changes.push(Change::Write(WEB_INDEX.into(), text.into_bytes())),
+        Err(e) => report.warnings.push(format!("{WEB_INDEX}: {e} — web splash not synced")),
+    }
+    if let Some(l) = logo {
+        changes.push(Change::Write(format!("{WEB_DIR}/mobiler-splash-logo.png"), png_at(l, 2, report)?));
+    } else {
+        changes.push(Change::Remove(WEB_DIR.into()));
+    }
+    if let Some(l) = logo_dark {
+        changes.push(Change::Write(format!("{WEB_DIR}/mobiler-splash-logo-dark.png"), png_at(l, 2, report)?));
+    } else {
+        changes.push(Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo-dark.png")));
+    }
+    Ok(())
 }
 
 /// `[splash]` removed after a sync: the sync's own files go, blocks empty (the web block goes), the
@@ -414,13 +425,13 @@ fn undo(root: &Path, report: &mut SyncReport) -> anyhow::Result<()> {
         changes.push(Change::Write(LAUNCH.into(), android_launch_xml(None).into_bytes()));
     }
     for t in THEMES {
-        block_change(root, t, XML_BEGIN, XML_END, Vec::new(), &mut changes, report);
+        block_change(root, t, XML_BEGIN, XML_END, &[], &mut changes, report);
     }
-    block_change(root, PROJECT_YML, YML_BEGIN, YML_END, Vec::new(), &mut changes, report);
-    if let Ok(html) = fs::read_to_string(root.join(WEB_INDEX)) {
-        if let Some(text) = remove_block(&html, XML_BEGIN, XML_END) {
-            changes.push(Change::Write(WEB_INDEX.into(), text.into_bytes()));
-        }
+    block_change(root, PROJECT_YML, YML_BEGIN, YML_END, &[], &mut changes, report);
+    if let Ok(html) = fs::read_to_string(root.join(WEB_INDEX))
+        && let Some(text) = remove_block(&html, XML_BEGIN, XML_END)
+    {
+        changes.push(Change::Write(WEB_INDEX.into(), text.into_bytes()));
     }
     // An app without the markers needs no warning when there is nothing to undo there.
     report.warnings.retain(|w| !w.contains("mobiler upgrade --apply"));
@@ -428,7 +439,7 @@ fn undo(root: &Path, report: &mut SyncReport) -> anyhow::Result<()> {
 }
 
 /// Fill a framework file's marker block; a file without the markers gets a warning, never an insert.
-fn block_change(root: &Path, rel: &str, begin: &str, end: &str, lines: Vec<String>, changes: &mut Vec<Change>, report: &mut SyncReport) {
+fn block_change(root: &Path, rel: &str, begin: &str, end: &str, lines: &[String], changes: &mut Vec<Change>, report: &mut SyncReport) {
     let Ok(text) = fs::read_to_string(root.join(rel)) else { return };
     if !text.contains(begin) || !text.contains(end) {
         if !lines.is_empty() {
@@ -531,6 +542,72 @@ fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::
         }
     }
     Ok(())
+}
+
+// ---------------- CLI ----------------
+
+fn read_spec(root: &Path) -> Result<Option<SplashSpec>, String> {
+    let Ok(text) = fs::read_to_string(root.join("mobiler.toml")) else { return Ok(None) };
+    toml::from_str::<Manifest>(&text).map(|m| m.splash).map_err(|e| e.to_string())
+}
+
+/// `mobiler splash sync` — run the sync from the app root and print what happened.
+pub fn run_sync_cli() -> anyhow::Result<()> {
+    let root = std::env::current_dir().context("reading current directory")?;
+    let report = sync(&root)?;
+    for w in &report.warnings {
+        eprintln!("warning: splash: {w}");
+    }
+    for p in &report.written {
+        println!("  wrote   {p}");
+    }
+    for p in &report.removed {
+        println!("  removed {p}");
+    }
+    if report.written.is_empty() && report.removed.is_empty() {
+        match read_spec(&root) {
+            Ok(Some(_)) => println!("Splash up to date."),
+            _ => println!("No [splash] in mobiler.toml — the template launch screen is used."),
+        }
+    }
+    Ok(())
+}
+
+/// Called at the start of `mobiler build` / `dev` / `watch`: sync and print warnings, never fail.
+pub fn sync_for_build(root: &Path) {
+    match sync(root) {
+        Ok(r) => {
+            for w in r.warnings {
+                eprintln!("warning: splash: {w}");
+            }
+        }
+        Err(e) => eprintln!("warning: splash: {e:#} — splash not synced"),
+    }
+}
+
+/// What `mobiler watch` should also watch for the splash: `mobiler.toml` and the logos' directories.
+pub fn watch_paths(root: &Path) -> (Vec<std::path::PathBuf>, Vec<std::path::PathBuf>) {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(Some(spec)) = read_spec(root) {
+        for logo in spec.logo.iter().chain(spec.logo_dark.iter()) {
+            if let Some(parent) = root.join(logo).parent().map(Path::to_path_buf).filter(|p| !dirs.contains(p)) {
+                dirs.push(parent);
+            }
+        }
+    }
+    (dirs, vec![root.join("mobiler.toml")])
+}
+
+/// One `mobiler doctor` line about `[splash]`.
+pub fn doctor_line(root: &Path) -> String {
+    match read_spec(root).and_then(|s| s.map(|s| validate(&s).map(|v| (s, v))).transpose()) {
+        Ok(None) => "splash: not set (template launch screen)".into(),
+        Ok(Some((spec, v))) => {
+            let logo = if spec.logo.is_some() { format!(", logo {}dp", v.size) } else { String::new() };
+            format!("splash: {} / {}{logo}", v.light.css(), v.dark.css())
+        }
+        Err(e) => format!("splash: mobiler.toml [splash] invalid: {e}"),
+    }
 }
 
 #[cfg(test)]
@@ -863,6 +940,27 @@ mod tests {
         let r = sync(&root).unwrap();
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
         assert_eq!(dims(&root, LOGO_PNG), (480, 480));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+
+    #[test]
+    fn watch_paths_include_logo_files() {
+        let root = logo_app();
+        let (dirs, files) = watch_paths(&root);
+        assert!(files.contains(&root.join("mobiler.toml")));
+        assert!(dirs.contains(&root.join("assets")), "{dirs:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn doctor_line_reports_state() {
+        let root = app("[fonts]\n");
+        assert_eq!(doctor_line(&root), "splash: not set (template launch screen)");
+        put(&root, "mobiler.toml", LOGO_TOML.as_bytes());
+        assert_eq!(doctor_line(&root), "splash: #FFFBFE / #1C1B1F, logo 120dp");
+        put(&root, "mobiler.toml", b"[splash]\nbackground = \"blue\"\n");
+        assert!(doctor_line(&root).starts_with("splash: mobiler.toml [splash] invalid: "), "{}", doctor_line(&root));
         let _ = std::fs::remove_dir_all(&root);
     }
 
