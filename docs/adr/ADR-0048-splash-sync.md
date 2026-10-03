@@ -31,7 +31,7 @@ The rules that make that hold:
   equal to what the sync recorded in `.mobiler/splash.json`. Otherwise the sync warns and leaves the file.
 - **Framework files** (the v31 themes, `project.yml`) only have their `mobiler:splash` marker blocks filled. A file
   without the markers gets a warning naming `mobiler upgrade --apply` and is never edited.
-- **The sync's own files** (the logo PNGs, the Android 12 inset icon, the iOS imageset, `web/splash/`, the web block)
+- **The sync's own files** (the logo PNGs, the Android 12 inset icon, the iOS imageset, the web logos and block)
   are written with a logo and removed without one.
 - **Nothing is written until everything validates:** a bad colour, size or logo writes nothing.
 - **Removing `[splash]`** undoes the sync's own files and blocks, and keeps the colours. The kept files then say they
@@ -72,14 +72,16 @@ The rules that make that hold:
 Option D.
 - **Android:** the logo is resized with the `image` crate (PNG only, Lanczos3, never upscaled; at most 16384 px per
   side) to xxxhdpi (4×). The launch layer-list centres it at its dp size.
-  - The Android 12 icon is an `inset` with percentage insets. It keeps the logo's dp size up to the square inscribed
-    in the icon circle (0.4714 of the icon box), so it is right in either box: 288 dp without an icon background, or
-    240 dp with one. A non-square logo keeps its shape.
+  - The Android 12 icon is an `inset` with percentage insets. In the 288 dp icon box (no icon background, which
+    mobiler never sets), it keeps the logo's dp size up to the square inscribed in the icon circle (0.4714 of the
+    box). If an app adds an icon background, the box is 240 dp and the logo is proportionally smaller (×5/6). A
+    non-square logo keeps its shape in either box. Verified on an API 36 emulator: a square and a 2:1 logo at about
+    120 dp, aspect kept, nothing clipped.
   - It is named `mobiler_splash_logo_icon`, because `mobiler_splash_icon` already exists as an alias in the colour
     seed.
 - **iOS:** the logo goes into a `MobilerSplashLogo` imageset at @3x, and `UIImageName` is written into the
   `UILaunchScreen` block.
-- **Web:** a `<style>` block (background via `prefers-color-scheme`, the logo on `body:empty`) and copies at 2×.
+- **Web:** a `<style>` block (background via `prefers-color-scheme`, the logo on `body:not(:has(*))`, since the parser puts the whitespace after `</body>` into the body) and copies at 2×.
 
 **Mutation proof:**
 - Removing a template theme's begin marker failed `adr_0048_splash_markers_and_seeds`.

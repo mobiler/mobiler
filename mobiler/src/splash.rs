@@ -130,7 +130,8 @@ pub fn android_launch_xml(logo: Option<(u32, u32)>) -> String {
 
 /// `drawable/mobiler_splash_logo_icon.xml`: the Android 12+ splash icon — the logo (box `w`×`h` dp) at
 /// its own size, but no larger than the icon circle's inscribed square, centred. Insets are percentages,
-/// so the shape and size hold in either icon box (288dp, or 240dp with an icon background).
+/// so the shape holds in either icon box. The size is exact in the 288dp box (no icon background, which mobiler
+/// never sets), and ×5/6 in the 240dp box an icon background would give.
 pub fn android_icon_xml(w: u32, h: u32) -> String {
     let long = f64::from(w.max(h).max(1));
     let frac = (long / ANDROID12_BOX_DP).min(ANDROID12_SQUARE_FRACTION);
@@ -440,6 +441,11 @@ fn undo(root: &Path, seeds: &BTreeMap<String, String>, report: &mut SyncReport) 
     // back still recognises them). The launch drawable goes back to colour-only.
     for rel in [COLORS[0], COLORS[1], LAUNCH] {
         let Ok(text) = fs::read_to_string(root.join(rel)) else { continue };
+        if text.contains(APP_OWNED) {
+            // Already handed back by an undo that stopped before its ledger write: record it now.
+            seeds.insert(rel.into(), crate::upgrade::fingerprint(text.as_bytes()));
+            continue;
+        }
         if !text.contains(HEADER) {
             continue;
         }
@@ -457,10 +463,18 @@ fn undo(root: &Path, seeds: &BTreeMap<String, String>, report: &mut SyncReport) 
     {
         changes.push(Change::Write(WEB_INDEX.into(), text.into_bytes()));
     }
+    // A hand-edited launch drawable that still shows the logo keeps it (the build needs it).
+    let launch_uses_logo = fs::read_to_string(root.join(LAUNCH))
+        .is_ok_and(|t| !t.contains(HEADER) && !t.contains(APP_OWNED) && t.contains("mobiler_splash_logo"));
+    if launch_uses_logo {
+        report.warnings.push(format!(
+            "{LAUNCH} (edited by hand) still uses @drawable/mobiler_splash_logo — remove that item, then delete the drawable-*xxxhdpi/mobiler_splash_logo.png files"
+        ));
+    } else {
+        changes.extend([Change::Remove(LOGO_PNG.into()), Change::Remove(LOGO_DARK_PNG.into())]);
+    }
     changes.extend([
         Change::Remove(ICON.into()),
-        Change::Remove(LOGO_PNG.into()),
-        Change::Remove(LOGO_DARK_PNG.into()),
         Change::Remove(IMAGESET.into()),
         Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo.png")),
         Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo-dark.png")),
@@ -725,7 +739,7 @@ mod tests {
 
         // Android 12's icon box (288dp without an icon background, 240dp with one) is masked to a circle
         // of 2/3 its width: the logo keeps its dp size up to the circle's inscribed square (~47% of the box),
-        // as percentages, so it is right in either box and a non-square logo keeps its shape.
+        // as percentages (exact in the 288dp box), so a non-square logo keeps its shape.
         let icon = android_icon_xml(120, 60);
         assert!(icon.contains("<inset") && icon.contains("@drawable/mobiler_splash_logo"));
         assert!(icon.contains(r#"android:insetLeft="29.2%""#), "{icon}"); // 120/288 wide → (1 - 0.417) / 2
@@ -1083,6 +1097,36 @@ mod tests {
         put(&root, "mobiler.toml", b"[splash]\nbackground = \"#FFFBFE\"\n");
         let r = sync(&root).unwrap();
         assert!(r.warnings.iter().any(|w| w.contains(LAUNCH) && w.contains("mobiler_splash_logo")), "{:?}", r.warnings);
+        assert!(root.join(LOGO_PNG).exists() && root.join(LOGO_DARK_PNG).exists(), "the logo the drawable uses is kept");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn removing_splash_keeps_a_logo_a_hand_edited_launch_uses() {
+        let root = logo_app();
+        sync(&root).unwrap();
+        let mine = read(&root, LAUNCH).replace(HEADER, "mine");
+        put(&root, LAUNCH, mine.as_bytes());
+        put(&root, "mobiler.toml", b"");
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(LAUNCH) && w.contains("mobiler_splash_logo")), "{:?}", r.warnings);
+        assert!(root.join(LOGO_PNG).exists() && root.join(LOGO_DARK_PNG).exists(), "the build still needs them");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_interrupted_undo_retried_still_records_the_seeds() {
+        // The undo rewrote the seeds but stopped before the ledger: a retry must record them.
+        let root = app("[splash]\nbackground = \"#123456\"\n");
+        sync(&root).unwrap();
+        let ledger_before = read(&root, LEDGER);
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        put(&root, LEDGER, ledger_before.as_bytes()); // as if the ledger write never happened
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", b"[splash]\nbackground = \"#000000\"\n");
+        let r = sync(&root).unwrap();
+        assert!(!r.warnings.iter().any(|w| w.contains("edited by hand")), "{:?}", r.warnings);
         let _ = std::fs::remove_dir_all(&root);
     }
 

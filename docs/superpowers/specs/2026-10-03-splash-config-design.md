@@ -185,10 +185,17 @@ must produce an APK, with no file inside `res/` other than resources.
 - **2026-10-03 (review of the implementation):**
   - **Android 12 icon geometry:** without an icon background the box is 288 dp, masked to a 192 dp circle, so the
     icon uses percentage insets. The logo keeps its dp size up to the inscribed square (0.4714 of the box, about
-    136 dp at 288), in either box.
+    136 dp at 288). The size is exact in the 288 dp box (no icon background, which mobiler never sets); the shape
+    holds in either box.
   - **`web/splash/`** loses only the sync's own logos.
   - **The ledger** stays inactive after removal, and kept seeds say they are app-owned.
   - **Stock detection** reads CRLF as LF.
   - **The fonts sync** no longer touches an app whose `mobiler.toml` has no `[fonts]`.
   - **Undo** runs only when the ledger is active. A missing ledger leaves the sync's files as they are: consistent,
     but stale. This deviates from the plan.
+- **2026-10-03 (emulator check):** the web logo uses `body:not(:has(*))` instead of `body:empty`. The parser puts
+  the whitespace after `</body>` into the body, so `:empty` never matched. A browser without `:has` shows only the
+  colour.
+- **2026-10-03 (fix-pass review):** removing `[splash]` keeps the logo files while a hand-edited launch drawable still
+  uses them (with a warning), as removing only the logo already did. An undo interrupted before its ledger write
+  records the handed-back seeds on retry.
