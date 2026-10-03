@@ -72,7 +72,7 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     // HTTP capability (Core.kt HttpPlugin)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // Photo options (cx.pick_photo_with): EXIF orientation and the metadata check.
+    // Photo options (cx.pick_photo_with): the EXIF orientation.
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("com.google.android.play:review:2.0.2")
     implementation("androidx.browser:browser:1.8.0")
