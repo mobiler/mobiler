@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The window behind the app until its first frame. App-owned, like values/mobiler_splash.xml. -->
+<!-- generated from mobiler.toml [splash]; edit mobiler.toml, not this file. The window behind the app until its first frame. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/mobiler_splash_background" />
+    <item android:gravity="center" android:width="120dp" android:height="120dp" android:drawable="@drawable/mobiler_splash_logo" />
 </layer-list>
