@@ -132,6 +132,10 @@ struct Report {
     new_review: Vec<String>,
     /// The `mobiler-core` bump a review run would make: (from, to).
     deps_would: Option<(String, String)>,
+    /// Pending records for paths the template no longer produces: deleted, nothing left to review.
+    dropped: Vec<String>,
+    /// Every managed path this run visited (to find records for paths no longer produced).
+    managed: std::collections::HashSet<String>,
     /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
     /// automatically (they may carry user edits) — reported so the mismatch is not silent.
     plugins: Vec<String>,
@@ -156,6 +160,14 @@ fn upgrade_at(root: &Path, apply: bool) -> Result<Report> {
     bump_core_dep(root, apply, &mut report)?;
     sync_dir(&TEMPLATES, root, &subs, apply, &mut report)?;
     report.plugins = crate::plugin::drifted(root, &subs);
+    // A record for a path this template no longer produces (a dropped file, a renamed package, a
+    // file now app-owned) has nothing left to review.
+    for (rel, _) in list_pending(root) {
+        if !report.managed.contains(&rel) {
+            clear_pending(root, Path::new(&rel));
+            report.dropped.push(rel);
+        }
+    }
     report.pending = list_pending(root);
     write_stamp(root, &mut report)?;
     Ok(report)
@@ -268,16 +280,30 @@ fn sync_file(
 
     // A file left for review by an earlier run: changed since then and marker-free means the user
     // resolved it, so what was offered becomes its baseline (ADR-0046). Unchanged: merge again below.
-    if let Some(rec) = read_pending(root, &rel) {
-        let now = fs::read(&dst).unwrap_or_default();
-        if fingerprint(&now) != rec.file_hash {
-            if has_conflict_markers(&String::from_utf8_lossy(&now)) {
+    report.managed.insert(rel_disp.clone());
+    if let Some(rec) = read_pending(root, &rel)
+        && dst.exists()
+    {
+        let now_bytes = fs::read(&dst).with_context(|| format!("reading {}", dst.display()))?;
+        if fingerprint(&now_bytes) != rec.file_hash {
+            let now = String::from_utf8_lossy(&now_bytes);
+            if has_conflict_markers(&now) {
                 report.markers.push(rel_disp);
                 return Ok(());
             }
-            write_baseline(root, &rel, rec.template.as_bytes())?;
-            clear_pending(root, &rel);
-            report.resolved.push(rel_disp.clone());
+            // Only a change the offer can't be layered onto is a resolution. If the offered template
+            // still merges cleanly onto the edited file (an unrelated edit: plugin add, git pull, a
+            // formatter), the normal merge below brings it in instead of dropping it. Without a
+            // baseline only a new or unsplicable file can be resolved by hand.
+            let resolved = match read_baseline(root, &rel) {
+                Some(base) => diffy::merge(&base, &now, &rec.template).is_err(),
+                None => rec.kind == "new" || rec.kind == "merge",
+            };
+            if resolved {
+                write_baseline(root, &rel, rec.template.as_bytes())?;
+                clear_pending(root, &rel);
+                report.resolved.push(rel_disp.clone());
+            }
         }
     }
 
@@ -474,7 +500,11 @@ fn pending_path(root: &Path, rel: &Path) -> PathBuf {
 /// security hash; the same across Rust versions and machines, unlike `DefaultHasher`.
 fn fingerprint(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in bytes {
+    for (i, b) in bytes.iter().enumerate() {
+        // CRLF hashes as LF: a teammate's Windows checkout (core.autocrlf) is not a change.
+        if *b == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
+            continue;
+        }
         h ^= u64::from(*b);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -517,7 +547,9 @@ fn clear_pending(root: &Path, rel: &Path) {
 
 /// Whether `text` still holds a merge conflict: a whole line that is a marker.
 fn has_conflict_markers(text: &str) -> bool {
-    text.lines().any(|l| l.starts_with("<<<<<<< ") || l == "=======" || l.starts_with(">>>>>>> "))
+    text.lines().any(|l| {
+        l.starts_with("<<<<<<< ") || l.starts_with("||||||| ") || l == "=======" || l.starts_with(">>>>>>> ")
+    })
 }
 
 /// Every pending record under `.mobiler/pending/`: (the file's path, its kind), sorted.
@@ -526,7 +558,8 @@ fn list_pending(root: &Path) -> Vec<(String, String)> {
         let Ok(entries) = fs::read_dir(dir) else { return };
         for e in entries.flatten() {
             let p = e.path();
-            if p.is_dir() {
+            // Don't follow a symlink: a committed link must not walk the tree outside the records.
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
                 walk(&p, base, root, out);
             } else if let Some(rel) = p.strip_prefix(base).ok().and_then(|r| r.to_str()).and_then(|r| r.strip_suffix(".json"))
                 && let Some(rec) = read_pending(root, Path::new(rel))
@@ -753,6 +786,9 @@ impl Report {
         }
         for m in &self.markers {
             println!("  ‼ markers  {m}  (conflict markers left in the file)");
+        }
+        for d in &self.dropped {
+            println!("  - dropped  {d}  (no longer part of the template; its pending review was removed)");
         }
         for p in &self.plugins {
             println!("  ! plugin  {p}  has shell updates in this release");
@@ -1122,8 +1158,62 @@ mod test {
     }
 
     #[test]
+    fn review_offer_survives_an_unrelated_edit() {
+        // A clean change offered by a plain run, then the file is touched for another reason
+        // (plugin add, git pull, a formatter) before --apply: the change must still land.
+        let root = skeleton();
+        let t = toolchain();
+        fs::create_dir_all(root.join(".mobiler/base")).unwrap();
+        fs::write(root.join(".mobiler/base/rust-toolchain.toml"), format!("{t}# old tail\n")).unwrap();
+        fs::write(root.join("rust-toolchain.toml"), format!("{t}# old tail\n")).unwrap();
+        upgrade_at(&root, false).unwrap();
+        assert!(read_pending(&root, Path::new("rust-toolchain.toml")).is_some_and(|r| r.kind == "review"));
+
+        let edited = format!("{t}# old tail\n").replacen("[toolchain]", "[toolchain] # mine", 1);
+        fs::write(root.join("rust-toolchain.toml"), &edited).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.resolved.is_empty(), "an unrelated edit is not a resolution: {:?}", r.resolved);
+        let after = read(&root, "rust-toolchain.toml");
+        assert!(after.contains("[toolchain] # mine"), "the user's edit is kept");
+        assert!(!after.contains("# old tail"), "the framework change landed: {after}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn orphan_record_is_dropped() {
+        // A record for a path the template no longer produces (dropped file, renamed package).
+        let root = skeleton();
+        upgrade_at(&root, true).unwrap();
+        write_pending(&root, Path::new("gone/Old.kt"), "x\n", b"", "conflict").unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert_eq!(r.dropped, ["gone/Old.kt"]);
+        assert!(r.pending.is_empty(), "{:?}", r.pending);
+        assert!(!root.join(".mobiler/pending/gone/Old.kt.json").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deleted_pending_file_is_not_resolved() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        fs::remove_file(root.join("rust-toolchain.toml")).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.resolved.is_empty(), "{:?}", r.resolved);
+        assert!(r.added.iter().any(|a| a == "rust-toolchain.toml"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fingerprint_ignores_line_endings() {
+        // A teammate's Windows checkout (core.autocrlf) is not a change.
+        assert_eq!(fingerprint(b"a\r\nb\r\n"), fingerprint(b"a\nb\n"));
+        assert_ne!(fingerprint(b"a\nb\n"), fingerprint(b"a\nc\n"));
+    }
+
+    #[test]
     fn markers_are_whole_lines() {
         assert!(has_conflict_markers("a\n<<<<<<< ours\nb\n=======\nc\n>>>>>>> theirs\n"));
+        assert!(has_conflict_markers("x\n||||||| original\ny\n"), "a diff3 ancestor block is unresolved");
         assert!(!has_conflict_markers("// ======= section =======\nlet x = \"<<<<<<<\";\n"));
     }
 

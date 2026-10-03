@@ -139,3 +139,12 @@ three things:
     `DefaultHasher`.
   - The template `.gitignore` is left unchanged. It already doesn't ignore `.mobiler/pending/`, and editing it would put
     a review copy into every app.
+- **2026-10-03 (review of the implementation):**
+  - **Resolution:** a changed, marker-free file counts as resolved only when the offered template no longer merges
+    cleanly onto it against the old baseline. Otherwise an unrelated edit (`plugin add`, `git pull`) would drop a clean
+    offer. Without a baseline, only a `new` or `merge` record resolves this way.
+  - **A deleted file:** offered again as new, not resolved.
+  - **Orphan records:** a record for a path the template no longer produces is deleted and reported as `dropped`.
+  - **Markers and fingerprint:** marker lines include diff3's `||||||| `, and the fingerprint treats CRLF as LF.
+  - **Kinds and wording:** the kinds are `conflict`, `merge`, `review` and `new`. A new file prints as
+    `+ new <file> -> <copy>`. The warning header is "⚠ N file(s) still need your review from an upgrade:".
