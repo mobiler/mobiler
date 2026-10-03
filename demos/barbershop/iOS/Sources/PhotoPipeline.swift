@@ -91,8 +91,11 @@ enum PhotoPipeline {
         case .none, .noneSkipLast, .noneSkipFirst: return image
         default: break
         }
+        // The image's own RGB space (e.g. Display P3) where it can be drawn into, else sRGB.
+        let space = image.colorSpace.flatMap { $0.model == .rgb && $0.supportsOutput ? $0 : nil }
+            ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+                                  space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
         else { return image }
         let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
@@ -120,6 +123,8 @@ enum PhotoPipeline {
             // A copy in the pipeline's folder, so it is pruned like any output (the caller removes the source).
             let out = photosDir.appendingPathComponent(UUID().uuidString + "." + (utType?.preferredFilenameExtension ?? "jpg"))
             guard (try? FileManager.default.copyItem(at: url, to: out)) != nil else { return PluginResponse(ok: false, output: "unavailable") }
+            // A copy (an APFS clone) keeps the original's date: stamp it now, or the next call would prune it.
+            try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: out.path)
             return ok(out, mime, size, w, h)
         }
         let png = o.format == "png" || (o.format == "original" && utType == .png)
@@ -148,14 +153,13 @@ enum PhotoPipeline {
         return PluginResponse(ok: false, output: "too_large")
     }
 
-    /// `process`, then delete `source` unless it is the returned handle (a pass-through): it is an
-    /// intermediate copy that may still carry the original's metadata.
+    /// `process`, then delete `source`: it is an intermediate copy that may still
+    /// carry the original's metadata.
     static func processReplacing(_ source: URL, input: String) -> PluginResponse {
         let result = process(source, input: input)
-        // Keep `source` only when it is the returned handle (a pass-through); a failed re-encode
-        // leaves nothing the app was given, so the copy goes too.
-        let passedThrough = result.ok && (try? Photo.bincodeDeserialize(input: result.output))?.handle == source.absoluteString
-        if !passedThrough { try? FileManager.default.removeItem(at: source) }
+        // `source` is an intermediate copy that may still carry the original's metadata; every outcome
+        // returns a new file in `photosDir` (a pass-through is copied there too), so it always goes.
+        try? FileManager.default.removeItem(at: source)
         return result
     }
 

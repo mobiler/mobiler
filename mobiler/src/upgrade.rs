@@ -950,7 +950,7 @@ impl Report {
         }
         let offered = self.changed.len() + self.new_review.len() + self.merge.len() + self.conflict.len();
         if offered == 0 && self.updated.is_empty() {
-            if self.plugins.is_empty() && self.pending.is_empty() && self.deps_would.is_none() {
+            if self.plugins.is_empty() && self.pending.is_empty() && self.deps_would.is_none() && self.skipped.is_empty() {
                 println!("Up to date. ✓");
             }
             return;

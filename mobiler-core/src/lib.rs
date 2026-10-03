@@ -358,7 +358,8 @@ impl<E> Cx<E> {
     /// [`pick_photo`](Self::pick_photo) with per-call options: the shell re-encodes the picked image to
     /// the format and limits asked for (applying its orientation and, by default, dropping its EXIF and
     /// GPS data) and delivers a [`Photo`] (a new file handle plus MIME, size and dimensions), or a
-    /// [`PhotoError`]. The rules are ADR-0045's; `pick_photo` itself is unchanged.
+    /// [`PhotoError`]. The rules are ADR-0045's; `pick_photo` itself is unchanged. The handle is
+    /// short-lived (ADR-0049, see [`Photo`]): upload it soon, don't keep it in saved state.
     pub fn pick_photo_with(&mut self, options: PhotoOptions, then: impl FnOnce(Result<Photo, PhotoError>) -> E + Send + 'static) {
         self.plugin("photo", "pick", options.to_input(), move |r| then(photo::from_response(&r)));
     }
