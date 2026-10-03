@@ -278,33 +278,9 @@ fn sync_file(
     let dst = root.join(&rel);
     let rel_disp = rel.to_string_lossy().to_string();
 
-    // A file left for review by an earlier run: changed since then and marker-free means the user
-    // resolved it, so what was offered becomes its baseline (ADR-0046). Unchanged: merge again below.
     report.managed.insert(rel_disp.clone());
-    if let Some(rec) = read_pending(root, &rel)
-        && dst.exists()
-    {
-        let now_bytes = fs::read(&dst).with_context(|| format!("reading {}", dst.display()))?;
-        if fingerprint(&now_bytes) != rec.file_hash {
-            let now = String::from_utf8_lossy(&now_bytes);
-            if has_conflict_markers(&now) {
-                report.markers.push(rel_disp);
-                return Ok(());
-            }
-            // Only a change the offer can't be layered onto is a resolution. If the offered template
-            // still merges cleanly onto the edited file (an unrelated edit: plugin add, git pull, a
-            // formatter), the normal merge below brings it in instead of dropping it. Without a
-            // baseline only a new or unsplicable file can be resolved by hand.
-            let resolved = match read_baseline(root, &rel) {
-                Some(base) => diffy::merge(&base, &now, &rec.template).is_err(),
-                None => rec.kind == "new" || rec.kind == "merge",
-            };
-            if resolved {
-                write_baseline(root, &rel, rec.template.as_bytes())?;
-                clear_pending(root, &rel);
-                report.resolved.push(rel_disp.clone());
-            }
-        }
+    if check_pending(root, &rel, &dst, &rel_disp, report)? {
+        return Ok(());
     }
 
     if !dst.exists() {
@@ -312,7 +288,8 @@ fn sync_file(
         // still wait as review copies (e.g. a type registered in codegen.rs).
         if !apply && let Ok(text) = std::str::from_utf8(&desired) {
             write_review(report.app_root.as_deref(), &dst, &desired)?;
-            write_pending(root, &rel, text, b"", "new")?;
+            let offer = Offer { template: text, current: b"", kind: "new", offered: &desired, conflict: None };
+            write_pending(root, &rel, &offer)?;
             report.new_review.push(rel_disp);
             return Ok(());
         }
@@ -359,9 +336,54 @@ fn sync_file(
         } else {
             "review"
         };
-        write_pending(root, &rel, &pristine, &current, kind)?;
+        let offered = fs::read(root.join(review_rel(&rel_disp))).unwrap_or_default();
+        let conflict = match (kind, read_baseline(root, &rel)) {
+            ("conflict", Some(base)) => diffy::merge(&base, &current_s, &pristine).err(),
+            _ => None,
+        };
+        let offer = Offer { template: &pristine, current: &current, kind, offered: &offered, conflict: conflict.as_deref() };
+        write_pending(root, &rel, &offer)?;
     }
     Ok(())
+}
+
+/// Settle a file an earlier run left for review (ADR-0046). Resolved: what was offered becomes its
+/// baseline and the record goes. Returns true when the file still has conflict markers, so the caller
+/// leaves it untouched; otherwise the normal merge follows.
+fn check_pending(root: &Path, rel: &Path, dst: &Path, rel_disp: &str, report: &mut Report) -> Result<bool> {
+    // A file left for review by an earlier run: changed since then and marker-free means the user
+    // may have resolved it. Unchanged: the normal merge offers it again.
+    if let Some(rec) = read_pending(root, rel)
+        && dst.exists()
+    {
+        let now_bytes = fs::read(dst).with_context(|| format!("reading {}", dst.display()))?;
+        if fingerprint(&now_bytes) != rec.file_hash {
+            let now = String::from_utf8_lossy(&now_bytes);
+            if has_conflict_markers(&now) {
+                report.markers.push(rel_disp.to_string());
+                return Ok(true);
+            }
+            // Resolved means the user dealt with the offer itself: took the review copy as offered, or
+            // changed a conflict's own lines. Any other edit (plugin add, git pull, a formatter) goes
+            // through the normal merge below, which applies the offer or reports a real conflict,
+            // never drops it. Without a baseline only a new or unsplicable file is resolved by hand.
+            let resolved = fingerprint(&now_bytes) == rec.offered_hash
+                || match (read_baseline(root, rel), rec.kind.as_str()) {
+                    (Some(base), "conflict") => match diffy::merge(&base, &now, &rec.template) {
+                        Ok(_) => false,
+                        Err(c) => Some(fingerprint(conflict_blocks(&c).as_bytes())) != rec.conflict_hash,
+                    },
+                    (Some(_), _) => false,
+                    (None, kind) => kind == "new" || kind == "merge",
+                };
+            if resolved {
+                write_baseline(root, rel, rec.template.as_bytes())?;
+                clear_pending(root, rel);
+                report.resolved.push(rel_disp.to_string());
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// True 3-way merge of a single file. Returns whether the on-disk file now incorporates the new
@@ -519,6 +541,10 @@ struct PendingRecord {
     file_hash: String,
     /// "conflict", "merge", "review" or "new".
     kind: String,
+    /// `fingerprint` of the review copy as offered: the file equal to it means the user took it.
+    offered_hash: String,
+    /// For a conflict, `fingerprint` of its conflict blocks: the same blocks again mean untouched.
+    conflict_hash: Option<String>,
 }
 
 /// The pending record for `rel`; a missing or unreadable one is no record.
@@ -529,15 +555,34 @@ fn read_pending(root: &Path, rel: &Path) -> Option<PendingRecord> {
         template: v["template"].as_str()?.to_string(),
         file_hash: v["file_hash"].as_str()?.to_string(),
         kind: v["kind"].as_str()?.to_string(),
+        offered_hash: v["offered_hash"].as_str().unwrap_or_default().to_string(),
+        conflict_hash: v["conflict_hash"].as_str().map(str::to_string),
     })
 }
 
-fn write_pending(root: &Path, rel: &Path, template: &str, current: &[u8], kind: &str) -> Result<()> {
+/// A pending record's inputs: what was offered for a file and the file as it was then.
+struct Offer<'a> {
+    template: &'a str,
+    current: &'a [u8],
+    kind: &'a str,
+    /// The review copy as written (the template itself for a new file).
+    offered: &'a [u8],
+    /// For a conflict, the conflict-marked merge.
+    conflict: Option<&'a str>,
+}
+
+fn write_pending(root: &Path, rel: &Path, offer: &Offer<'_>) -> Result<()> {
     let path = pending_path(root, rel);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
-    let json = serde_json::json!({ "template": template, "file_hash": fingerprint(current), "kind": kind });
+    let json = serde_json::json!({
+        "template": offer.template,
+        "file_hash": fingerprint(offer.current),
+        "kind": offer.kind,
+        "offered_hash": fingerprint(offer.offered),
+        "conflict_hash": offer.conflict.map(|c| fingerprint(conflict_blocks(c).as_bytes())),
+    });
     fs::write(&path, serde_json::to_string_pretty(&json)?).with_context(|| format!("writing {}", path.display()))
 }
 
@@ -550,6 +595,26 @@ fn has_conflict_markers(text: &str) -> bool {
     text.lines().any(|l| {
         l.starts_with("<<<<<<< ") || l.starts_with("||||||| ") || l == "=======" || l.starts_with(">>>>>>> ")
     })
+}
+
+/// The conflict blocks of a conflict-marked merge (each `<<<<<<<` … `>>>>>>>` run, markers included):
+/// what the user must change to resolve it.
+fn conflict_blocks(text: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for l in text.lines() {
+        if l.starts_with("<<<<<<< ") {
+            inside = true;
+        }
+        if inside {
+            out.push_str(l);
+            out.push('\n');
+        }
+        if l.starts_with(">>>>>>> ") {
+            inside = false;
+        }
+    }
+    out
 }
 
 /// Every pending record under `.mobiler/pending/`: (the file's path, its kind), sorted.
@@ -1180,11 +1245,57 @@ mod test {
     }
 
     #[test]
+    fn conflict_with_an_edit_elsewhere_stays_pending() {
+        // `plugin add` / a pull touches the file but not the conflict: still unresolved.
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        let edited = format!("# mine\n{}# added elsewhere\n", toolchain());
+        fs::write(root.join("rust-toolchain.toml"), &edited).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.resolved.is_empty(), "the conflict itself is untouched: {:?}", r.resolved);
+        assert!(r.conflict.iter().any(|c| c == "rust-toolchain.toml"), "offered again: {:?}", r.conflict);
+        assert_eq!(read(&root, ".mobiler/base/rust-toolchain.toml"), format!("# old\n{}", toolchain()), "baseline kept");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn clean_offer_with_an_adjacent_edit_becomes_a_conflict() {
+        // `plugin add` inserts right next to the offered change: report a conflict, never "resolved".
+        let root = skeleton();
+        let t = toolchain();
+        fs::create_dir_all(root.join(".mobiler/base")).unwrap();
+        fs::write(root.join(".mobiler/base/rust-toolchain.toml"), format!("{t}# old tail\n")).unwrap();
+        fs::write(root.join("rust-toolchain.toml"), format!("{t}# old tail\n")).unwrap();
+        upgrade_at(&root, false).unwrap();
+        fs::write(root.join("rust-toolchain.toml"), format!("{t}# plugin line\n# old tail\n")).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.resolved.is_empty(), "{:?}", r.resolved);
+        assert!(r.conflict.iter().any(|c| c == "rust-toolchain.toml"), "{:?}", r.conflict);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn accepted_review_copy_is_resolved() {
+        let root = skeleton();
+        let t = toolchain();
+        fs::create_dir_all(root.join(".mobiler/base")).unwrap();
+        fs::write(root.join(".mobiler/base/rust-toolchain.toml"), format!("{t}# old tail\n")).unwrap();
+        fs::write(root.join("rust-toolchain.toml"), format!("{t}# old tail\n")).unwrap();
+        upgrade_at(&root, false).unwrap();
+        fs::rename(root.join("rust-toolchain.toml.mobiler-new"), root.join("rust-toolchain.toml")).unwrap();
+        let r = upgrade_at(&root, false).unwrap();
+        assert!(!r.pending.iter().any(|(f, _)| f == "rust-toolchain.toml"), "{:?}", r.pending);
+        assert_eq!(read(&root, "rust-toolchain.toml"), t);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn orphan_record_is_dropped() {
         // A record for a path the template no longer produces (dropped file, renamed package).
         let root = skeleton();
         upgrade_at(&root, true).unwrap();
-        write_pending(&root, Path::new("gone/Old.kt"), "x\n", b"", "conflict").unwrap();
+        let offer = Offer { template: "x\n", current: b"", kind: "conflict", offered: b"", conflict: None };
+        write_pending(&root, Path::new("gone/Old.kt"), &offer).unwrap();
         let r = upgrade_at(&root, true).unwrap();
         assert_eq!(r.dropped, ["gone/Old.kt"]);
         assert!(r.pending.is_empty(), "{:?}", r.pending);

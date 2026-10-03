@@ -148,3 +148,9 @@ three things:
   - **Markers and fingerprint:** marker lines include diff3's `||||||| `, and the fingerprint treats CRLF as LF.
   - **Kinds and wording:** the kinds are `conflict`, `merge`, `review` and `new`. A new file prints as
     `+ new <file> -> <copy>`. The warning header is "⚠ N file(s) still need your review from an upgrade:".
+- **2026-10-03 (second review):** the resolution rule is narrowed to "the user dealt with the offer".
+  - A file counts as resolved when it equals the review copy as offered.
+  - A conflict also counts as resolved when its conflict lines changed. The record fingerprints the conflict blocks.
+  - Any other edit goes through the normal merge, which applies the offer or reports a real conflict. This closes
+    two gaps: a conflict plus an edit elsewhere was counted as resolved, and a clean offer plus an adjacent edit
+    (`plugin add` at an anchor) was counted as resolved.

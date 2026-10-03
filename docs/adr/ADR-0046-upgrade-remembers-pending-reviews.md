@@ -5,7 +5,7 @@ Date decided:  2026-10-03
 Deciding PRs:  #280
 Supersedes:    ADR-0043
 Code anchor:   mobiler/src/upgrade.rs (sync_file, read_pending, write_pending, clear_pending, fingerprint, has_conflict_markers, list_pending, Report::pending_lines, bump_core_dep), plus ADR-0043's anchors (classify, three_way, two_way, merge_anchors, seed_baseline, write_review, review_rel, write_backup), mobiler/src/new.rs (seeds the baseline)
-Conformance:   mobiler/src/upgrade.rs::resolved_conflict_stays_resolved, mobiler/src/upgrade.rs::unresolved_conflict_is_reported_on_every_run, mobiler/src/upgrade.rs::markers_left_in_file_stay_pending, mobiler/src/upgrade.rs::review_run_never_touches_build_inputs, mobiler/src/upgrade.rs::review_offer_survives_an_unrelated_edit, mobiler/src/upgrade.rs::orphan_record_is_dropped, mobiler/src/upgrade.rs::three_way_applies_framework_change_preserves_edit_and_flags_conflict, mobiler/src/upgrade.rs::new_seeds_baseline_so_upgrade_is_idempotent, mobiler/src/upgrade.rs::bumps_dep_stamps_and_leaves_app_code_untouched, mobiler/src/upgrade.rs::review_copies_of_android_resources_go_outside_res
+Conformance:   mobiler/src/upgrade.rs::resolved_conflict_stays_resolved, mobiler/src/upgrade.rs::unresolved_conflict_is_reported_on_every_run, mobiler/src/upgrade.rs::markers_left_in_file_stay_pending, mobiler/src/upgrade.rs::review_run_never_touches_build_inputs, mobiler/src/upgrade.rs::review_offer_survives_an_unrelated_edit, mobiler/src/upgrade.rs::conflict_with_an_edit_elsewhere_stays_pending, mobiler/src/upgrade.rs::clean_offer_with_an_adjacent_edit_becomes_a_conflict, mobiler/src/upgrade.rs::orphan_record_is_dropped, mobiler/src/upgrade.rs::three_way_applies_framework_change_preserves_edit_and_flags_conflict, mobiler/src/upgrade.rs::new_seeds_baseline_so_upgrade_is_idempotent, mobiler/src/upgrade.rs::bumps_dep_stamps_and_leaves_app_code_untouched, mobiler/src/upgrade.rs::review_copies_of_android_resources_go_outside_res
 
 ## 1. Context (The Problem)
 
@@ -37,12 +37,16 @@ The record is `.mobiler/pending/<file>.json`, committed with the app. It holds t
 resolved), a fingerprint of the app's file when the review was offered, and the kind: `conflict`, `merge`, `review`
 or `new`. On each run, before merging a file with a record:
 
-- **Changed since offered, no conflict marker lines left, and the offered template no longer merges cleanly onto it**
-  (against the old baseline): the user resolved it. The recorded template becomes its baseline, the record is deleted,
-  the report says `✓ resolved`, and the normal merge then runs.
-  - If the offer still merges cleanly, the change was unrelated (`plugin add`, a `git pull`, a formatter), and the
-    normal merge brings the offered change in.
-  - Without a baseline, only a `new` or `merge` record can be resolved this way.
+- **Changed since offered, no conflict marker lines left, and the user dealt with the offer itself:** the file counts
+  as resolved. The recorded template becomes its baseline, the record is deleted, the report says `✓ resolved`, and
+  the normal merge then runs. "Dealt with the offer" means one of:
+  - the file equals the review copy as offered (the record keeps its fingerprint);
+  - for a conflict, merging the offer onto the file still conflicts, but in different lines than the recorded
+    conflict blocks (the record keeps their fingerprint). The user changed the conflict itself.
+  - Without a baseline, a `new` or `merge` record resolves on any change.
+- **Changed for another reason** (`plugin add`, a `git pull`, a formatter): not resolved. The normal merge runs
+  against the old baseline. It applies the offer if it still merges cleanly, or reports a real conflict, such as an
+  edit right next to the offered change. Either way, the offer is never dropped.
   - Marker lines are `<<<<<<< `, `||||||| `, `=======` and `>>>>>>> `. The fingerprint treats CRLF as LF, so a Windows
     checkout is not a change.
 - **Unchanged:** the merge runs again against the old baseline. The review copy and the record are rewritten, which
@@ -72,8 +76,10 @@ copies of Android resources under `.mobiler/new/`, backups under `.mobiler/backu
   - **Validation Metric:** `markers_left_in_file_stay_pending`.
 - **Condition 4: a run without `--apply` writes no build input.**
   - **Validation Metric:** `review_run_never_touches_build_inputs`.
-- **Condition 5: an unrelated edit to a file with a clean offer doesn't drop the offer.**
-  - **Validation Metric:** `review_offer_survives_an_unrelated_edit`.
+- **Condition 5: an edit that doesn't deal with the offer never drops it.** That covers an edit elsewhere in the
+  file, an edit next to a clean offer, and an edit to a file with a pending conflict that leaves the conflict alone.
+  - **Validation Metric:** `review_offer_survives_an_unrelated_edit`, `clean_offer_with_an_adjacent_edit_becomes_a_conflict`,
+    `conflict_with_an_edit_elsewhere_stays_pending`.
 - **Condition 6: a record the template no longer produces doesn't warn forever.**
   - **Validation Metric:** `orphan_record_is_dropped`.
 - **Condition 7: ADR-0043's merge and side-file rules hold.**
@@ -110,8 +116,12 @@ anything) and shows the pending count. The template `.gitignore` is unchanged: i
 - Writing new files in place without `--apply` failed `review_run_never_touches_build_inputs` (and
   `accepted_new_file_is_resolved`).
 - Treating every changed file as resolved, without the re-merge check, failed `review_offer_survives_an_unrelated_edit`.
+- Treating any still-conflicting edit as a resolution (ignoring the recorded conflict blocks) failed
+  `conflict_with_an_edit_elsewhere_stays_pending`.
+- Treating any change to a clean offer as a resolution failed `clean_offer_with_an_adjacent_edit_becomes_a_conflict`
+  and `review_offer_survives_an_unrelated_edit`.
 - Never dropping records for unproduced paths failed `orphan_record_is_dropped`.
-- Reverting restored green (109/109). The four tests carried over from ADR-0043 are not re-proven here.
+- Reverting restored green (112/112). The four tests carried over from ADR-0043 are not re-proven here.
 
 ## 5. Consequences (Positive and Negative Predictions)
 
@@ -119,10 +129,12 @@ anything) and shows the pending count. The template `.gitignore` is unchanged: i
   changes.
 - **Positive:** pending reviews are visible on every run and on every clone.
 - **Positive:** "upgrade, build, then review" works again without `--apply`.
-- **Negative:** editing the conflicting region of a pending conflict for another reason, without resolving it, counts
-  as resolved, and the framework change there is dropped. The report names the file (`✓ resolved`), so it is visible
-  but not prevented. An edit elsewhere in the file, or to a file with a clean offer, doesn't do this: the offer still
-  merges.
+- **Negative:** an edit inside a pending conflict's own lines counts as resolving it, even when made for another
+  reason, and the framework change there is dropped. The report names the file (`✓ resolved`), so it is visible but
+  not prevented. Edits elsewhere never resolve anything.
+- **Negative:** keeping only your own side of a conflict leaves the file unchanged, so it is offered again on every
+  run. Delete its record to stop that.
+- **Negative:** an edit right next to a pending clean offer turns it into a conflict to resolve by hand.
 - **Negative:** a pending review is abandoned by deleting its record (`.mobiler/pending/<file>.json`). No command
   does it.
 - **Negative:** a review run (no `--apply`) no longer bumps `mobiler-core` or adds new files. A user who relied on a
