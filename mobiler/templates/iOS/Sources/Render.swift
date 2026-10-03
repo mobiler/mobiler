@@ -585,11 +585,75 @@ private func isLargeDensity() -> Bool {
     return false
 }
 
-/// Renders a `[Widget]` as sibling views (children of a stack/grid).
+/// A widget's own id, for the kinds that have one.
+fileprivate func ownId(_ w: SharedTypes.Widget) -> String? {
+    switch w {
+    case .textField(let id, _, _, _, _), .searchField(let id, _, _), .toggle(let id, _, _),
+         .checkbox(let id, _, _), .slider(let id, _, _), .map(let id, _, _, _, _, _, _):
+        return id
+    case .video(_, let id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _):
+        return id
+    default:
+        return nil
+    }
+}
+
+/// The first id in a widget's subtree (depth first): how an id-less container is known by what it holds.
+fileprivate func firstId(_ w: SharedTypes.Widget) -> String? {
+    if let id = ownId(w) { return id }
+    switch w {
+    case .row(let children), .column(let children):
+        return children.lazy.compactMap(firstId).first
+    case .box(let children, _, _), .grid(let children, _), .scroller(let children, _):
+        return children.lazy.compactMap(firstId).first
+    case .lazyList(let children, _, _, _, _, _, _, _):
+        return children.lazy.compactMap(firstId).first
+    case .card(let child, _, _, _), .a11y(let child, _, _, _), .swipeAction(let child, _):
+        return firstId(child)
+    case .split(let primary, let detail, _, _):
+        return firstId(primary) ?? firstId(detail)
+    default:
+        return nil
+    }
+}
+
+/// A child's identity across renders (ADR-0047): its id; else its kind, plus the first id inside it
+/// for a container (`row[email]`); then `#n` for its place among siblings with the same base, so keys
+/// are unique. A row appearing above a field, or above the row or card holding it, never changes the
+/// field's identity, so SwiftUI keeps its text and focus.
+fileprivate func childKeys(_ children: [SharedTypes.Widget]) -> [String] {
+    var seen: [String: Int] = [:]
+    return children.map { w in
+        let base: String
+        if let id = ownId(w) {
+            base = "id:\(id)"
+        } else {
+            // The case name: a case with values reflects as one labelled child.
+            let kind = Mirror(reflecting: w).children.first?.label ?? String(describing: w)
+            base = kind + (firstId(w).map { "[\($0)]" } ?? "")
+        }
+        let n = seen[base, default: 0]
+        seen[base] = n + 1
+        return "\(base)#\(n)"
+    }
+}
+
+/// A sibling with its `childKeys` identity and its position, for `ForEach`.
+fileprivate struct KeyedChild: Identifiable {
+    let id: String
+    let offset: Int
+    let element: SharedTypes.Widget
+}
+
+fileprivate func keyedChildren(_ children: [SharedTypes.Widget]) -> [KeyedChild] {
+    zip(childKeys(children), children.enumerated()).map { KeyedChild(id: $0, offset: $1.offset, element: $1.element) }
+}
+
+/// Renders a `[Widget]` as sibling views (children of a stack/grid), each under its identity.
 @ViewBuilder
 private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Action) -> Void) -> some View {
-    ForEach(Array(children.enumerated()), id: \.offset) { _, child in
-        render(child, send)
+    ForEach(keyedChildren(children)) { item in
+        render(item.element, send)
     }
 }
 
@@ -1152,7 +1216,8 @@ private struct LazyListView: View {
                 if refreshing {
                     ProgressView().frame(maxWidth: .infinity).padding(.bottom, 4)
                 }
-                ForEach(Array(children.enumerated()), id: \.offset) { idx, child in
+                ForEach(keyedChildren(children)) { item in
+                    let (idx, child) = (item.offset, item.element)
                     render(child, send)
                         .environment(\.fillList, false)
                         .onAppear {
@@ -1492,7 +1557,8 @@ private struct ScaffoldView: View {
                         if fillIndex == -1 {
                             render(self.content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
                         } else if case .column(let children) = self.content {
-                            ForEach(Array(children.enumerated()), id: \.offset) { i, child in
+                            ForEach(keyedChildren(children)) { item in
+                                let (i, child) = (item.offset, item.element)
                                 if i == fillIndex {
                                     render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
                                 } else {
@@ -1548,8 +1614,8 @@ private struct ScaffoldView: View {
             if let bar = bottomBar, !bar.isEmpty {
                 PaletteDivider()
                 HStack(spacing: 12) {
-                    ForEach(Array(bar.enumerated()), id: \.offset) { _, w in
-                        render(w, send).frame(maxWidth: .infinity)
+                    ForEach(keyedChildren(bar)) { item in
+                        render(item.element, send).frame(maxWidth: .infinity)
                     }
                 }
                 .padding(.horizontal, 16)

@@ -261,3 +261,60 @@ fn adr_0041_no_shell_sets_an_app_level_night_mode() {
     }
     assert!(files.len() > 20, "ADR-0041: expected the shells' Kotlin sources, checked {}", files.len());
 }
+
+/// ADR-0047: the reference shell and the template render a container's children under a stable
+/// identity (`childKeys`: the widget's id, else its kind plus the first id inside it, numbered among
+/// siblings with the same base), never
+/// by position, so a widget appearing above a field doesn't rebuild the field (focus, text) and a
+/// player or map keeps its state.
+#[test]
+fn adr_0047_shells_key_children_by_identity_not_position() {
+    let kotlin = [
+        "demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt",
+        "mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt",
+    ];
+    let swift = ["demos/barbershop/iOS/Sources/Render.swift", "mobiler/templates/iOS/Sources/Render.swift"];
+    // A child list walked by position: `children.forEach`, `kids.drop(1).forEach`, `pinned.forEachIndexed`,
+    // `children.chunked(...)` — unless that same line wraps each child in `key(...)` (the helper itself)
+    // or walks `.indices` (the Grid chunks indices to look each child's key up).
+    let positional = |code: &str| {
+        ["children", "kids", "pinned"].iter().any(|list| {
+            code.match_indices(list).any(|(at, _)| {
+                let word_start = at == 0 || !code.as_bytes()[at - 1].is_ascii_alphanumeric();
+                let rest = &code[at + list.len()..];
+                word_start && (rest.contains(".forEach") || rest.contains(".chunked("))
+            })
+        }) && !code.contains("key(keys[") && !code.contains(".indices.chunked(")
+    };
+    for path in kotlin {
+        let text = std::fs::read_to_string(root().join(path)).expect(path);
+        assert!(text.contains("private fun childKeys("), "ADR-0047: {path} has no childKeys");
+        for (n, line) in text.lines().enumerate() {
+            let code = kotlin_code(line);
+            assert!(!positional(code), "ADR-0047: {path}:{} walks children by position: {line}", n + 1);
+            let lazy_items = code.contains("items(") || code.contains("itemsIndexed(");
+            assert!(
+                !(lazy_items && code.contains("children") && !code.contains("key =")),
+                "ADR-0047: {path}:{} lazy list over children without a key: {line}",
+                n + 1
+            );
+        }
+    }
+    for path in swift {
+        let text = std::fs::read_to_string(root().join(path)).expect(path);
+        assert!(text.contains("func childKeys("), "ADR-0047: {path} has no childKeys");
+        // Every ForEach over a child list (`children`, `kids`, `bar`) goes through keyedChildren.
+        for (n, line) in text.lines().enumerate() {
+            let over_children = ["children", "kids", "bar"].iter().any(|list| {
+                line.match_indices(list).any(|(at, _)| {
+                    let before = line[..at].chars().last();
+                    let after = line[at + list.len()..].chars().next();
+                    !before.is_some_and(|c| c.is_alphanumeric()) && !after.is_some_and(|c| c.is_alphanumeric())
+                })
+            });
+            if line.contains("ForEach(") && over_children {
+                assert!(line.contains("keyedChildren("), "ADR-0047: {path}:{} renders children by position: {line}", n + 1);
+            }
+        }
+    }
+}
