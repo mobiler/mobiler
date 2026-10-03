@@ -356,6 +356,7 @@ cargo install mobiler   # get the newer CLI first
 cd myapp
 mobiler upgrade         # 3-way merge; review results as *.mobiler-new
 mobiler upgrade --apply # …or write the merged shells in place (old versions go to .mobiler/backup/)
+mobiler upgrade --resolved path/to/File.kt  # a conflict you resolved, or an offer you decline
 ```
 
 **True 3-way merge.** `mobiler new` snapshots the pristine shells into `.mobiler/base/` (the merge
@@ -363,10 +364,23 @@ mobiler upgrade --apply # …or write the merged shells in place (old versions g
 and the new template — exactly like `git merge`. Framework improvements apply **and** your edits and
 plugin injections are preserved; only genuinely overlapping changes become a conflict, written as
 `<file>.mobiler-new` with `<<<<<<<`/`>>>>>>>` markers (never auto-applied). It **never** touches your
-Rust app code (`shared/src/`). It also bumps your `mobiler-core` dependency. By default a clean merge
-is offered as `<file>.mobiler-new`; `--apply` writes it in place after saving the old file under `.mobiler/backup/`. Commit
-`.mobiler/` so the baseline (and version stamp) travel with the repo; `.mobiler/backup/` and `.mobiler/new/` are
-skipped by the template's `.gitignore`. Review copies of Android resource files, clean or conflicted, go under `.mobiler/new/`
+Rust app code (`shared/src/`).
+
+Without `--apply`, nothing your build reads changes, apart from creating missing app-owned seed files. Clean
+merges, new files and conflicts are offered as `<file>.mobiler-new`, and the `mobiler-core` bump is reported, not
+made. `--apply` writes clean merges and new files
+in place, after saving the old file under `.mobiler/backup/`, and bumps `mobiler-core`. It never applies a conflict.
+
+Everything left for review is recorded in `.mobiler/pending/`. Every `mobiler upgrade` ends with a warning listing
+those files and what to do with each. A review copy you put in place as it is gets
+confirmed by the next run (`✓ resolved`). A conflict is settled only when you say so: resolve its review copy, which
+can mean keeping your own side, put the result in place, then run `mobiler upgrade --resolved <file>`. From then on
+it stays resolved, and later upgrades merge only newer changes. The same command declines an offered change to a file
+you have, and keeps your version. Any other edit doesn't settle anything, for example
+from `mobiler plugin add`: the offered change is still merged in, or reported as a conflict.
+
+Commit `.mobiler/` so the baseline, the version stamp and the pending reviews travel with the repo. The template's
+`.gitignore` skips `.mobiler/backup/` and `.mobiler/new/`. Review copies of Android resource files, clean or conflicted, go under `.mobiler/new/`
 instead of next to the file: a stray file in `res/` breaks the Android build. The upgrade report prints
 each copy's path. Apps scaffolded before baselines
 existed fall back to a conservative reconcile and get a baseline written for next time. A few
