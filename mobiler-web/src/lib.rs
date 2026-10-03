@@ -1206,30 +1206,48 @@ async fn take_photo_with(capture: bool, input: &str) -> PluginResponse {
     }
 }
 
-async fn process_photo(file: &web_sys::File, o: &mobiler_core::PhotoOptions) -> Result<mobiler_core::Photo, String> {
-    use mobiler_core::photo::{needs_reencode, output_format, png_is_clean, quality_ladder, target_size};
-    use wasm_bindgen::JsCast;
-    let window = web_sys::window().ok_or("unavailable")?;
-    let size = file.size() as u64;
-    // The bytes decide whether the file is a clean PNG (its type comes from the file name).
-    let buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await.map_err(|_| "unsupported_image".to_string())?;
-    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-    let mime = sniffed_mime(&file.type_(), &bytes);
-    // createImageBitmap applies the EXIF orientation by default (imageOrientation "from-image").
-    let promise = window.create_image_bitmap_with_blob(file).map_err(|_| "unsupported_image".to_string())?;
-    let bitmap: web_sys::ImageBitmap = wasm_bindgen_futures::JsFuture::from(promise)
-        .await
-        .map_err(|_| "unsupported_image".to_string())?
-        .unchecked_into();
-    let (w, h) = (bitmap.width(), bitmap.height());
-    let fits = o.max_dimension_opt().is_none_or(|m| w.max(h) <= m) && within_limit(size, o.max_bytes_opt());
-    if !needs_reencode(o.format(), fits, o.strip_metadata(), !png_is_clean(&bytes)) {
-        bitmap.close();
-        let handle = web_sys::Url::create_object_url_with_blob(file).map_err(|_| "unavailable".to_string())?;
-        return Ok(mobiler_core::Photo { handle, mime, bytes: size, width: w, height: h });
+/// How many `blob:` URLs the photo pipeline keeps alive: older ones are released (a page can't age
+/// files out like the native caches do), so a long session doesn't hold every photo in memory.
+const PRODUCED_KEPT: usize = 32;
+
+thread_local! {
+    static PRODUCED: std::cell::RefCell<std::collections::VecDeque<String>> = const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+/// Record a produced URL; returns the oldest one to release once more than `PRODUCED_KEPT` are kept.
+fn remember_produced(list: &mut std::collections::VecDeque<String>, url: String) -> Option<String> {
+    list.push_back(url);
+    if list.len() > PRODUCED_KEPT { list.pop_front() } else { None }
+}
+
+/// A photo the pipeline returns: its URL is remembered, and the oldest beyond `PRODUCED_KEPT` released.
+fn produced_url(blob: &web_sys::Blob) -> Result<String, String> {
+    let url = web_sys::Url::create_object_url_with_blob(blob).map_err(|_| "unavailable".to_string())?;
+    if let Some(old) = PRODUCED.with(|p| remember_produced(&mut p.borrow_mut(), url.clone())) {
+        let _ = web_sys::Url::revoke_object_url(&old);
     }
-    let format = output_format(o.format(), bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
-    let (tw, th) = target_size(w, h, o.max_dimension_opt());
+    Ok(url)
+}
+
+/// Whether the metadata check needs the whole file: only a PNG can pass through as proven clean, so any
+/// other file is decided by its first bytes alone.
+fn needs_full_bytes(signature: &[u8]) -> bool {
+    signature.starts_with(b"\x89PNG\r\n\x1a\n")
+}
+
+async fn read_bytes(blob: &web_sys::Blob) -> Result<Vec<u8>, String> {
+    let buffer = wasm_bindgen_futures::JsFuture::from(blob.array_buffer()).await.map_err(|_| "unsupported_image".to_string())?;
+    Ok(js_sys::Uint8Array::new(&buffer).to_vec())
+}
+
+/// Draw the bitmap scaled onto a new canvas; a JPEG gets a white background first (it has no alpha).
+fn draw_scaled(
+    window: &web_sys::Window,
+    bitmap: &web_sys::ImageBitmap,
+    (tw, th): (u32, u32),
+    opaque: bool,
+) -> Result<web_sys::HtmlCanvasElement, String> {
+    use wasm_bindgen::JsCast;
     let doc = window.document().ok_or("unavailable")?;
     let canvas: web_sys::HtmlCanvasElement = doc.create_element("canvas").map_err(|_| "unavailable".to_string())?.unchecked_into();
     canvas.set_width(tw);
@@ -1240,14 +1258,50 @@ async fn process_photo(file: &web_sys::File, o: &mobiler_core::PhotoOptions) -> 
         .flatten()
         .ok_or("unavailable")?
         .unchecked_into();
-    let drawn = ctx.draw_image_with_image_bitmap_and_dw_and_dh(&bitmap, 0.0, 0.0, f64::from(tw), f64::from(th));
+    if opaque {
+        ctx.set_fill_style_str("#FFFFFF");
+        ctx.fill_rect(0.0, 0.0, f64::from(tw), f64::from(th));
+    }
+    ctx.draw_image_with_image_bitmap_and_dw_and_dh(bitmap, 0.0, 0.0, f64::from(tw), f64::from(th))
+        .map_err(|_| "unsupported_image".to_string())?;
+    Ok(canvas)
+}
+
+async fn process_photo(file: &web_sys::File, o: &mobiler_core::PhotoOptions) -> Result<mobiler_core::Photo, String> {
+    use mobiler_core::photo::{needs_reencode, output_format, png_is_clean, quality_ladder, target_size};
+    use wasm_bindgen::JsCast;
+    let window = web_sys::window().ok_or("unavailable")?;
+    let size = file.size() as u64;
+    // The bytes decide whether the file is a clean PNG (its type comes from the file name). Only a PNG is
+    // read whole, for the chunk check; any other file needs just its signature.
+    let signature = read_bytes(&file.slice_with_i32_and_i32(0, 8).map_err(|_| "unsupported_image".to_string())?).await?;
+    let mime = sniffed_mime(&file.type_(), &signature);
+    let is_png = needs_full_bytes(&signature);
+    let clean = is_png && png_is_clean(&read_bytes(file).await?);
+    // createImageBitmap applies the EXIF orientation by default (imageOrientation "from-image").
+    let promise = window.create_image_bitmap_with_blob(file).map_err(|_| "unsupported_image".to_string())?;
+    let bitmap: web_sys::ImageBitmap = wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .map_err(|_| "unsupported_image".to_string())?
+        .unchecked_into();
+    let (w, h) = (bitmap.width(), bitmap.height());
+    let fits = o.max_dimension_opt().is_none_or(|m| w.max(h) <= m) && within_limit(size, o.max_bytes_opt());
+    if !needs_reencode(o.format(), fits, o.strip_metadata(), !clean) {
+        bitmap.close();
+        let handle = produced_url(file)?;
+        return Ok(mobiler_core::Photo { handle, mime, bytes: size, width: w, height: h });
+    }
+    let format = output_format(o.format(), is_png);
+    let (tw, th) = target_size(w, h, o.max_dimension_opt());
+    // The bitmap is released whatever happens while drawing.
+    let drawn = draw_scaled(&window, &bitmap, (tw, th), format == mobiler_core::PhotoFormat::Jpeg);
     bitmap.close();
-    drawn.map_err(|_| "unsupported_image".to_string())?;
+    let canvas = drawn?;
     let ladder = if format == mobiler_core::PhotoFormat::Png { vec![100] } else { quality_ladder(o.quality_value()) };
     for q in ladder {
         let blob = canvas_to_blob(&canvas, format.mime(), f64::from(q) / 100.0).await?;
         if within_limit(blob.size() as u64, o.max_bytes_opt()) {
-            let handle = web_sys::Url::create_object_url_with_blob(&blob).map_err(|_| "unavailable".to_string())?;
+            let handle = produced_url(&blob)?;
             return Ok(mobiler_core::Photo { handle, mime: blob.type_(), bytes: blob.size() as u64, width: tw, height: th });
         }
         // A browser that can't encode the format (Safari has no WebP) writes PNG and ignores the
@@ -3731,6 +3785,23 @@ mod photo_tests {
         assert_eq!(sniffed_mime("", b"????"), "application/octet-stream");
         assert_eq!(sniffed_mime("image/png", b"\xff\xd8\xff"), "image/jpeg"); // a JPEG renamed .png
         assert_eq!(sniffed_mime("image/webp", b"RIFF"), "image/webp");
+    }
+
+    #[test]
+    fn produced_urls_keep_the_32_most_recent() {
+        let mut list = std::collections::VecDeque::new();
+        for n in 0..32 {
+            assert_eq!(remember_produced(&mut list, format!("blob:{n}")), None);
+        }
+        assert_eq!(remember_produced(&mut list, "blob:32".into()), Some("blob:0".into()), "the oldest is released");
+        assert_eq!(list.len(), 32);
+    }
+
+    #[test]
+    fn only_a_png_needs_its_full_bytes() {
+        assert!(needs_full_bytes(b"\x89PNG\r\n\x1a\n"));
+        assert!(!needs_full_bytes(b"\xff\xd8\xff\xe0\x00\x10JF"));
+        assert!(!needs_full_bytes(b""));
     }
 
     #[test]

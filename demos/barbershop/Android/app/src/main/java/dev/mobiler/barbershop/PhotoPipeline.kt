@@ -3,6 +3,8 @@ package dev.mobiler.barbershop
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
@@ -92,9 +94,20 @@ internal object PhotoPipeline {
         fail("too_large")
     }
 
+    /** How long a photo the pipeline produced stays in the cache: long enough to upload or show it. */
+    private const val KEEP_MS = 24L * 60 * 60 * 1000
+
+    /** Delete pipeline output older than `KEEP_MS` (the OS may evict the cache, but needn't). */
+    private fun prune(dir: File) {
+        val cutoff = System.currentTimeMillis() - KEEP_MS
+        dir.listFiles()?.filter { it.isFile && it.lastModified() < cutoff }?.forEach { it.delete() }
+    }
+
     @Suppress("DEPRECATION")
     private fun processOrThrow(context: Context, source: Uri, input: String): PluginResponse {
         val o = parse(input)
+        val dir = File(context.cacheDir, "photos").apply { mkdirs() }
+        prune(dir)
         val cr = context.contentResolver
         val original = cr.openInputStream(source)?.use { it.readBytes() } ?: return fail("unsupported_image")
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -109,7 +122,6 @@ internal object PhotoPipeline {
         // Fail closed (ADR-0045): only a PNG proven clean by its chunks counts as metadata-free.
         val hasMetadata = !pngIsClean(original)
         val fits = (o.maxDimension == null || maxOf(w, h) <= o.maxDimension) && (o.maxBytes == null || original.size <= o.maxBytes)
-        val dir = File(context.cacheDir, "photos").apply { mkdirs() }
         if (o.format == "original" && fits && !(o.strip && hasMetadata)) {
             val ext = when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/heic", "image/heif" -> "heic"; else -> "jpg" }
             val out = File(dir, "${UUID.randomUUID()}.$ext").apply { writeBytes(original) }
@@ -138,8 +150,16 @@ internal object PhotoPipeline {
         val rotatedW = if (swaps) decoded.height else decoded.width
         val rotatedH = if (swaps) decoded.width else decoded.height
         matrix.postScale(tw.toFloat() / rotatedW, th.toFloat() / rotatedH)
-        val scaled = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-        if (scaled !== decoded) decoded.recycle()
+        val transformed = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+        if (transformed !== decoded) decoded.recycle()
+        val jpeg = !png && !webp
+        // JPEG has no alpha: a transparent image goes onto white (it would turn black).
+        val scaled = if (jpeg && transformed.hasAlpha()) {
+            Bitmap.createBitmap(transformed.width, transformed.height, Bitmap.Config.ARGB_8888).also { white ->
+                Canvas(white).apply { drawColor(Color.WHITE); drawBitmap(transformed, 0f, 0f, null) }
+                transformed.recycle()
+            }
+        } else transformed
         val (format, outMime, ext) = when {
             png -> Triple(Bitmap.CompressFormat.PNG, "image/png", "png")
             webp && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Triple(Bitmap.CompressFormat.WEBP_LOSSY, "image/webp", "webp")
