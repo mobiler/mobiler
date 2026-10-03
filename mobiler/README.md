@@ -134,21 +134,56 @@ version; where Android itself only has a feature on newer versions, older phones
 | `Video` picture-in-picture | Not available | Auto-entering PiP (12+) |
 | `sqlite` | The phone's own SQLite: 3.18 on Android 8.0, 3.19 on 8.1, 3.22 on 9–10, 3.28 on 11 | Newer SQL (e.g. UPSERT needs 3.24, `RETURNING` 3.35): use `INSERT OR REPLACE` and friends to stay portable |
 
-## Launch window colours
+## Launch screen — `mobiler.toml` `[splash]`
 
-Before an app draws its first frame, the phone shows a launch window (and, on Android 12+, the system
-splash) in the app's background colour. It follows the phone's light/dark setting. Set the two colours to
-your design's backgrounds:
+Before an app draws its first frame, the phone shows a launch screen: Android's launch window (and, on
+Android 12+, the system splash), iOS's launch screen, and the web page before the app loads. Describe it
+once in `mobiler.toml`:
 
-| | Light | Dark |
-|---|---|---|
-| Android | `Android/app/src/main/res/values/mobiler_splash.xml` | `Android/app/src/main/res/values-night/mobiler_splash.xml` |
-| iOS | `iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset` (any appearance) | same file (dark appearance) |
+```toml
+[splash]
+background      = "#FFFBFE"                      # light; #RRGGBB or #AARRGGBB
+background_dark = "#1C1B1F"                      # optional; default = background
+logo            = "assets/splash/logo.png"       # optional; a PNG, transparent background
+logo_dark       = "assets/splash/logo-dark.png"  # optional; default = logo
+logo_size       = 120                            # optional; dp/pt, 24-288, default 120
+```
 
-These files belong to your app: `mobiler upgrade` creates them when they are missing and never changes them. A
-later release will write them from `mobiler.toml`. To open in the app's own light/dark choice from the first
-frame, keep that choice in your `cx.save` state. Your own Android theme items go in
-`res/values/themes.xml`; they apply in light and dark mode and on every Android version.
+`mobiler build`, `mobiler dev` and `mobiler watch` sync it into the shells. `mobiler splash sync` does it
+on demand and prints what it wrote. A problem never fails a build: a bad colour or an unreadable logo
+prints a warning and leaves the last synced files unchanged.
+
+- **Colours** follow the phone's light/dark setting. A launch screen can't be translucent, so an alpha
+  below `FF` is used as opaque, with a warning.
+- **The logo** is fitted inside a `logo_size` square, keeping its proportions. The CLI resizes it (4× on
+  Android, 3× on iOS, 2× on the web) and never scales it up: a smaller source is used at its own size,
+  with a warning.
+- **Android 8–11** show the logo centred on the background.
+- **Android 12+:** the system splash shows the logo in the icon area. Android masks that area to a
+  circle, so a logo larger than about 113 dp shows smaller there.
+- **iOS** shows the logo as the launch screen image. An app made before CLI 0.65 gets the marker this needs
+  with `mobiler upgrade --apply`; until then only the colours apply on iOS.
+- **The web** (when the app has `web/index.html`) shows the colours and the logo until the app's first
+  render.
+
+| What the sync writes | |
+|---|---|
+| Android | `res/values{,-night}/mobiler_splash.xml`, `res/drawable/mobiler_launch.xml`, `res/drawable-{,night-}xxxhdpi/mobiler_splash_logo.png`, `res/drawable/mobiler_splash_logo_icon.xml`, a marked block in `res/values{,-night}-v31/mobiler_themes.xml` |
+| iOS | `MobilerSplashBackground.colorset`, `MobilerSplashLogo.imageset`, a marked block under `UILaunchScreen` in `project.yml` |
+| web | a marked block in `web/index.html`, `web/splash/` |
+| bookkeeping | `.mobiler/splash.json` (commit it) |
+
+**Your edits are safe.** The colour and launch files belong to your app: `mobiler upgrade` creates them
+when missing and never changes them. The sync rewrites one only while it is the template's stock version
+or carries the sync's own "generated from mobiler.toml [splash]" header. If you edit one by hand, the sync
+leaves it alone and warns; delete the file to hand it back.
+
+**Removing `[splash]`** removes the logo files and blocks and puts the launch drawable back to colour
+only. The colours stay as last synced.
+
+Without `[splash]`, the colours are yours to edit directly in the files above. To open in the app's own
+light/dark choice from the first frame, keep that choice in your `cx.save` state. Your own Android theme
+items go in `res/values/themes.xml`; they apply in light and dark mode and on every Android version.
 
 ## Debugging a text field on Android
 
