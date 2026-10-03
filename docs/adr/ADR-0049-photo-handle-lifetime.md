@@ -1,4 +1,4 @@
-# ADR-0049: A photo the pipeline produces is a short-lived handle — kept at least 24 hours on Android and iOS (then pruned by a later photo call), the 32 most recent valid on the web — and an app uploads or copies it rather than keeping it in saved state
+# ADR-0049: A photo the pipeline produces is a short-lived handle — on Android and iOS pruned by a later `pick_photo_with` / `capture_photo_with` call once more than 24 hours old (the OS may clear its cache sooner), the 32 most recent valid on the web — and an app uploads or copies it rather than keeping it in saved state
 
 Status:        Accepted
 Date decided:  2026-10-03
@@ -48,8 +48,9 @@ uses a photo the way photos are used: shown, then uploaded within the session. T
 - **Option C: a size-based cache (LRU by bytes)** `[reconstructed]`
   Rejected. An app could not know when its handle expires: a burst of large photos could evict one it is about to
   upload. A time bound is predictable.
-- **Option D: 24 hours on native, the 32 most recent on web** `[recorded: maintainer-approved plan, 2026-10-03]`
-  Chosen. 24 hours covers any realistic show-then-upload flow, including an app sent to the background. 32 URLs cover
+- **Option D: 24 hours on native, the 32 most recent on web** `[recorded: maintainer, 2026-10-03, quoted here]`
+  Proposed as "each photo call first deletes pipeline output older than 24 hours" and "the web keeps the 32 most
+  recent photos the pipeline produced and releases older ones". The maintainer's reply: "yes please". Chosen. 24 hours covers any realistic show-then-upload flow, including an app sent to the background. 32 URLs cover
   a multi-photo form, and a page's memory use stays bounded.
 
 ## 4. Decision & Rationale for Corroboration
@@ -66,7 +67,8 @@ Option D.
 **Mutation proof:**
 - Keeping 33 URLs instead of 32 failed `produced_urls_keep_the_32_most_recent`.
 - Reverting restored green.
-- The native pruning has no unit harness in the shells; Condition 2 is its runtime check.
+- The native pruning has no unit harness in the shells. Condition 2 checks it at runtime on Android. On iOS, the
+  pruning and the pass-through date stamp are checked by review only, pending a device check.
 
 ## 5. Consequences (Positive and Negative Predictions)
 

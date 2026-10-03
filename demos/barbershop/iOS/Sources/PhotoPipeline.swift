@@ -94,9 +94,12 @@ enum PhotoPipeline {
         // The image's own RGB space (e.g. Display P3) where it can be drawn into, else sRGB.
         let space = image.colorSpace.flatMap { $0.model == .rgb && $0.supportsOutput ? $0 : nil }
             ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-        else { return image }
+        let context = { (space: CGColorSpace) in
+            CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        }
+        // A space an 8-bit context can't use (e.g. extended range) falls back to sRGB, never to black.
+        guard let ctx = context(space) ?? CGColorSpace(name: CGColorSpace.sRGB).flatMap(context) else { return image }
         let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
         ctx.fill(rect)

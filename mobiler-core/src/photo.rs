@@ -162,8 +162,9 @@ impl PhotoOptions {
 /// A delivered photo: a new file the shell wrote (`file://` on native, `blob:` on web) that
 /// `image(…)` and `cx.upload` accept, with what the app needs to label an upload.
 ///
-/// The handle is short-lived (ADR-0049). On Android and iOS it is kept at least 24 hours, then pruned
-/// by a later photo call. On the web the 32 most recent stay valid, and none outlives a page reload.
+/// The handle is short-lived (ADR-0049). On Android and iOS a later `pick_photo_with` /
+/// `capture_photo_with` call removes it once it is more than 24 hours old, and the OS may clear its cache
+/// sooner. On the web the 32 most recent stay valid, and none outlives a page reload.
 /// Upload it, or copy what you need, soon after; don't keep it in saved state (`cx.save`) for later.
 #[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[repr(C)]
