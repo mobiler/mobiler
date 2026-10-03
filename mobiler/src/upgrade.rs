@@ -126,6 +126,8 @@ struct Report {
     resolved: Vec<String>,
     /// Files left for review whose conflict markers are still in the file (never touched).
     markers: Vec<String>,
+    /// Every file still waiting for the user's review after this run: (path, kind).
+    pending: Vec<(String, String)>,
     /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
     /// automatically (they may carry user edits) — reported so the mismatch is not silent.
     plugins: Vec<String>,
@@ -150,6 +152,7 @@ fn upgrade_at(root: &Path, apply: bool) -> Result<Report> {
     bump_core_dep(root, &mut report)?;
     sync_dir(&TEMPLATES, root, &subs, apply, &mut report)?;
     report.plugins = crate::plugin::drifted(root, &subs);
+    report.pending = list_pending(root);
     write_stamp(root, &mut report)?;
     Ok(report)
 }
@@ -500,6 +503,28 @@ fn has_conflict_markers(text: &str) -> bool {
     text.lines().any(|l| l.starts_with("<<<<<<< ") || l == "=======" || l.starts_with(">>>>>>> "))
 }
 
+/// Every pending record under `.mobiler/pending/`: (the file's path, its kind), sorted.
+fn list_pending(root: &Path) -> Vec<(String, String)> {
+    fn walk(dir: &Path, base: &Path, root: &Path, out: &mut Vec<(String, String)>) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, base, root, out);
+            } else if let Some(rel) = p.strip_prefix(base).ok().and_then(|r| r.to_str()).and_then(|r| r.strip_suffix(".json")) {
+                if let Some(rec) = read_pending(root, Path::new(rel)) {
+                    out.push((rel.to_string(), rec.kind));
+                }
+            }
+        }
+    }
+    let base = root.join(PENDING_REL);
+    let mut out = Vec::new();
+    walk(&base, &base, root, &mut out);
+    out.sort();
+    out
+}
+
 /// Snapshot every managed (non-OWN, text) template file into `.mobiler/base/` as the merge
 /// ancestor. Called by `mobiler new` so a freshly-scaffolded app upgrades via a true 3-way merge.
 pub(crate) fn seed_baseline(root: &Path, subs: &Subs) -> Result<()> {
@@ -653,6 +678,30 @@ fn write_stamp(root: &Path, report: &mut Report) -> Result<()> {
 // ---------------- report ----------------
 
 impl Report {
+    /// The end-of-run warning while anything waits for review (empty when nothing does).
+    fn pending_lines(&self) -> Vec<String> {
+        if self.pending.is_empty() {
+            return Vec::new();
+        }
+        let mut lines = vec![format!("⚠ {} file(s) still need your review from an upgrade:", self.pending.len())];
+        for (rel, kind) in &self.pending {
+            let copy = review_rel(rel);
+            let what = if self.markers.contains(rel) {
+                "conflict markers left in the file — finish resolving them".to_string()
+            } else {
+                match kind.as_str() {
+                    "conflict" => format!("conflict — resolve {copy}, then replace the file"),
+                    "merge" => format!("plugin/user state — merge {copy} by hand"),
+                    "new" => format!("new file — move {copy} into place, or run with --apply"),
+                    _ => format!("review {copy} and replace the file, or run with --apply"),
+                }
+            };
+            lines.push(format!("    {rel}   {what}"));
+        }
+        lines.push("  Run `mobiler upgrade` again after resolving; it will confirm.".to_string());
+        lines
+    }
+
     fn print(&self, apply: bool) {
         match (&self.deps, &self.deps_note) {
             (Some((from, to)), _) => println!("  deps: mobiler-core {from} -> {to} (updated)"),
@@ -674,18 +723,32 @@ impl Report {
         for c in &self.conflict {
             println!("  ‼ conflict {c}  (overlapping edits) -> {}", review_rel(c));
         }
+        for r in &self.resolved {
+            println!("  ✓ resolved {r}  (baseline advanced)");
+        }
+        for m in &self.markers {
+            println!("  ‼ markers  {m}  (conflict markers left in the file)");
+        }
         for p in &self.plugins {
             println!("  ! plugin  {p}  has shell updates in this release");
         }
         println!("  = {} file(s) up to date", self.up_to_date);
         if let Some((prev, cur)) = &self.stamp {
+            let waiting = if self.pending.is_empty() {
+                String::new()
+            } else {
+                format!(" ({} file(s) pending)", self.pending.len())
+            };
             match prev {
-                Some(p) if p != cur => println!("  stamp: {p} -> {cur}"),
-                _ => println!("  stamp: v{cur}"),
+                Some(p) if p != cur => println!("  stamp: {p} -> {cur}{waiting}"),
+                _ => println!("  stamp: v{cur}{waiting}"),
             }
         }
 
         println!();
+        for line in self.pending_lines() {
+            println!("{line}");
+        }
         // A drifted plugin is pending work too: its Rust-side API arrives with the core bump
         // while its shell half stays behind, so "Up to date. ✓" would be a lie.
         if !self.plugins.is_empty() {
@@ -702,9 +765,9 @@ impl Report {
                  edits first (registrations and other files are left alone)."
             );
         }
-        let pending = self.changed.len() + self.merge.len() + self.conflict.len();
-        if pending == 0 && self.updated.is_empty() {
-            if self.plugins.is_empty() {
+        let offered = self.changed.len() + self.merge.len() + self.conflict.len();
+        if offered == 0 && self.updated.is_empty() {
+            if self.plugins.is_empty() && self.pending.is_empty() {
                 println!("Up to date. ✓");
             }
             return;
@@ -979,6 +1042,21 @@ mod test {
         let r = upgrade_at(&root, true).unwrap();
         assert!(r.conflict.is_empty());
         assert!(!root.join(".mobiler/pending/rust-toolchain.toml.json").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unresolved_conflict_is_reported_on_every_run() {
+        let root = conflicted_app();
+        upgrade_at(&root, true).unwrap();
+        // A fresh clone: the record is committed, the review copy (gitignored) is not.
+        fs::remove_file(root.join("rust-toolchain.toml.mobiler-new")).unwrap();
+        let r = upgrade_at(&root, false).unwrap();
+        assert!(r.pending.contains(&("rust-toolchain.toml".to_string(), "conflict".to_string())), "{:?}", r.pending);
+        let lines = r.pending_lines();
+        assert!(lines[0].starts_with('⚠'), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("rust-toolchain.toml") && l.contains("conflict")), "{lines:?}");
+        assert!(root.join("rust-toolchain.toml.mobiler-new").exists(), "the review copy is offered again");
         let _ = fs::remove_dir_all(&root);
     }
 
