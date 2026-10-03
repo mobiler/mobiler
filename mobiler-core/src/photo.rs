@@ -276,7 +276,7 @@ const CLEAN_PNG_CHUNKS: [&[u8; 4]; 13] =
     [b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"iCCP", b"sBIT", b"pHYs", b"bKGD", b"cICP"];
 
 /// ADR-0045 rule: a file is proven free of metadata only when it is a PNG (by its bytes, not its
-/// name) whose every chunk is one of [`CLEAN_PNG_CHUNKS`]. Everything else (a JPEG, WebP or HEIC, a
+/// name) whose every chunk is one of `CLEAN_PNG_CHUNKS`. Everything else (a JPEG, WebP or HEIC, a
 /// PNG with `eXIf`, `tEXt`, `iTXt` or `zTXt`, a truncated file) counts as carrying metadata.
 pub fn png_is_clean(bytes: &[u8]) -> bool {
     const MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
