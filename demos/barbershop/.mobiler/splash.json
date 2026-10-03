@@ -1,0 +1,9 @@
+{
+  "active": true,
+  "seeds": {
+    "Android/app/src/main/res/drawable/mobiler_launch.xml": "dbbf41f77cc73912",
+    "Android/app/src/main/res/values-night/mobiler_splash.xml": "440a37d861b8d481",
+    "Android/app/src/main/res/values/mobiler_splash.xml": "a430115eaf7df708",
+    "iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset/Contents.json": "7cdda6c93f15a9a7"
+  }
+}

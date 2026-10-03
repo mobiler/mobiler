@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The launch window and splash in dark mode. App-owned, like values/mobiler_splash.xml. -->
+<!-- generated from mobiler.toml [splash]; edit mobiler.toml, not this file. The launch window and splash background. -->
 <resources>
     <color name="mobiler_splash_background">#FF231F20</color>
 </resources>

@@ -63,7 +63,9 @@ pub fn run(no_install: bool, no_run: bool, device: Option<&str>) -> Result<()> {
 
     // Custom fonts: mobiler.toml + the font source dirs (the rebuild re-syncs them into the shells).
     let (font_dirs, font_files) = crate::fonts::watch_paths(&project.root);
-    let watch_dirs: Vec<_> = watch_dirs.into_iter().chain(font_dirs).collect();
+    // The splash logos too (mobiler.toml is already watched for fonts).
+    let (splash_dirs, _) = crate::splash::watch_paths(&project.root);
+    let watch_dirs: Vec<_> = watch_dirs.into_iter().chain(font_dirs).chain(splash_dirs).collect();
     let watch_files: Vec<_> = watch_files.into_iter().chain(font_files).collect();
 
     for dir in &watch_dirs {

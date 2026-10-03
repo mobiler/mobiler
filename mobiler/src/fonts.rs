@@ -149,7 +149,13 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     let section = if manifest_path.exists() {
         let text = fs::read_to_string(&manifest_path).with_context(|| format!("reading {}", manifest_path.display()))?;
         let manifest: Manifest = toml::from_str(&text).with_context(|| format!("parsing {}", manifest_path.display()))?;
-        manifest.fonts.unwrap_or_default()
+        match manifest.fonts {
+            Some(fonts) => fonts,
+            // [fonts] removed after a sync: clean up like an empty [fonts].
+            None if previously_synced(root) => FontsSection::default(),
+            // A mobiler.toml without [fonts] (e.g. only [splash]) that never used fonts: touch nothing.
+            None => return Ok(report),
+        }
     } else if previously_synced(root) {
         // mobiler.toml was removed after a sync: clean up like an empty [fonts].
         FontsSection::default()
@@ -383,7 +389,7 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// Replace the `begin`..`end` block (inclusive, one per file) with begin + `body(indent)` + end, or insert
 /// it just above the `anchor` line (indented like it). Keeps the file's line endings (LF or CRLF).
 /// `Err` (nothing written) when the markers are unbalanced or there is neither a block nor the anchor.
-fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn(&str) -> Vec<String>) -> Result<String, &'static str> {
+pub(crate) fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn(&str) -> Vec<String>) -> Result<String, &'static str> {
     let lines: Vec<&str> = text.lines().collect();
     let indent_of = |l: &str| l[..l.len() - l.trim_start().len()].to_string();
     let begins: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains(begin)).map(|(i, _)| i).collect();
@@ -391,10 +397,10 @@ fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn
     let (start, stop, indent) = match (begins.as_slice(), ends.as_slice()) {
         ([b], [e]) if e > b => (*b, e + 1, indent_of(lines[*b])),
         ([], []) => {
-            let a = lines.iter().position(|l| l.contains(anchor)).ok_or("no anchor to insert the fonts block at")?;
+            let a = lines.iter().position(|l| l.contains(anchor)).ok_or("no anchor to insert the block at")?;
             (a, a, indent_of(lines[a]))
         }
-        _ => return Err("unbalanced mobiler:fonts marker lines (fix them by hand)"),
+        _ => return Err("unbalanced marker lines (fix them by hand)"),
     };
     let mut out: Vec<String> = lines[..start].iter().map(|l| (*l).to_string()).collect();
     out.push(format!("{indent}{begin}"));
@@ -572,6 +578,18 @@ mod tests {
 
     fn read(root: &std::path::Path, rel: &str) -> String {
         fs::read_to_string(root.join(rel)).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_mobiler_toml_without_fonts_touches_nothing() {
+        // e.g. only [splash]: the fonts sync must not add empty font blocks to project.yml / index.html.
+        let root = app("nofonts", true);
+        fs::write(root.join("mobiler.toml"), "[splash]\nbackground = \"#FFFFFF\"\n").unwrap();
+        let (yml, html) = (read(&root, "iOS/project.yml"), read(&root, "web/index.html"));
+        sync(&root).unwrap();
+        assert_eq!(read(&root, "iOS/project.yml"), yml);
+        assert_eq!(read(&root, "web/index.html"), html);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

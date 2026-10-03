@@ -38,6 +38,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: {{PACKAGE}}
         UILaunchScreen:
           UIColorName: MobilerSplashBackground
+          # mobiler:splash-begin
+          # mobiler:splash-end
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four

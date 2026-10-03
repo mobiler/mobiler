@@ -318,3 +318,35 @@ fn adr_0047_shells_key_children_by_identity_not_position() {
         }
     }
 }
+
+/// ADR-0048: the `[splash]` sync fills marker blocks in the template's framework files (never inserts
+/// them), and every app-owned file it writes is an upgrade seed (ADR-0042), so `upgrade` never merges
+/// or overwrites what the sync wrote.
+#[test]
+fn adr_0048_splash_markers_and_seeds() {
+    let read = |p: &str| std::fs::read_to_string(root().join(p)).expect(p);
+    for theme in ["values-v31", "values-night-v31"] {
+        let path = format!("mobiler/templates/Android/app/src/main/res/{theme}/mobiler_themes.xml");
+        let text = read(&path);
+        assert_eq!(text.matches("<!-- mobiler:splash-begin -->").count(), 1, "ADR-0048: {path} splash begin marker");
+        assert_eq!(text.matches("<!-- mobiler:splash-end -->").count(), 1, "ADR-0048: {path} splash end marker");
+        let style_end = text.find("</style>").expect("a style");
+        assert!(text.find("mobiler:splash-end").unwrap() < style_end, "ADR-0048: {path} markers must sit inside the theme");
+    }
+    let yml = read("mobiler/templates/iOS/project.yml");
+    let launch = yml.find("UILaunchScreen:").expect("UILaunchScreen in project.yml");
+    let begin = yml.find("# mobiler:splash-begin").expect("ADR-0048: project.yml splash begin marker");
+    let end = yml.find("# mobiler:splash-end").expect("ADR-0048: project.yml splash end marker");
+    assert!(launch < begin && begin < end, "ADR-0048: project.yml markers must sit under UILaunchScreen");
+    let upgrade = read("mobiler/src/upgrade.rs");
+    let seeds = &upgrade[upgrade.find("const SEED_PATHS").expect("SEED_PATHS")..];
+    let seeds = &seeds[..seeds.find("];").expect("end of SEED_PATHS")];
+    for written in [
+        "Android/app/src/main/res/values/mobiler_splash.xml",
+        "Android/app/src/main/res/values-night/mobiler_splash.xml",
+        "Android/app/src/main/res/drawable/mobiler_launch.xml",
+        "iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset/Contents.json",
+    ] {
+        assert!(seeds.contains(&format!("\"{written}\"")), "ADR-0048: {written} is written by the sync but isn't a seed");
+    }
+}

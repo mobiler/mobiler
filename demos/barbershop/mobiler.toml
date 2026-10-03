@@ -3,3 +3,11 @@
 [fonts]
 display = { family = "Space Grotesk", files = ["assets/fonts/SpaceGrotesk-Regular.ttf", "assets/fonts/SpaceGrotesk-Medium.ttf", "assets/fonts/SpaceGrotesk-SemiBold.ttf"], license = "assets/fonts/SpaceGrotesk-OFL.txt" }
 body = { family = "Roboto", files = ["assets/fonts/Roboto-Regular.ttf", "assets/fonts/Roboto-Medium.ttf", "assets/fonts/Roboto-Bold.ttf"], license = "assets/fonts/Roboto-OFL.txt" }
+
+# The launch screen (mobiler build/dev/splash sync write it into the Android, iOS and web shells).
+[splash]
+background = "#FAF7F0"
+background_dark = "#231F20"
+logo = "assets/splash/logo.png"
+logo_dark = "assets/splash/logo-dark.png"
+logo_size = 120

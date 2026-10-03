@@ -7,6 +7,7 @@ mod display_name;
 mod doctor;
 mod new;
 mod plugin;
+mod splash;
 mod templating;
 mod upgrade;
 mod watch;
@@ -76,6 +77,11 @@ enum Command {
         #[command(subcommand)]
         cmd: FontsCmd,
     },
+    /// The launch screen from `mobiler.toml` `[splash]` (synced automatically by build/dev/watch).
+    Splash {
+        #[command(subcommand)]
+        cmd: SplashCmd,
+    },
     /// Manage plugins (add a capability package to this app).
     Plugin {
         #[command(subcommand)]
@@ -103,6 +109,12 @@ enum Command {
         #[arg(long, value_name = "FILE")]
         resolved: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum SplashCmd {
+    /// Write `[splash]` (background colours, logo) into the Android, iOS and web shells (idempotent).
+    Sync,
 }
 
 #[derive(Subcommand)]
@@ -137,6 +149,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Build { platform } => match build::run(platform) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::Splash { cmd: SplashCmd::Sync } => match splash::run_sync_cli() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

@@ -38,6 +38,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.barbershop
         UILaunchScreen:
           UIColorName: MobilerSplashBackground
+          # mobiler:splash-begin
+          UIImageName: MobilerSplashLogo
+          # mobiler:splash-end
         # Allow landscape so the Widget::Split master-detail can show its side-by-side (regular size
         # class) layout on an iPad or a Plus/Max iPhone in landscape. UIRequiresFullScreen keeps the
         # app full-screen (opts out of iPad multitasking) so it gets the regular class, not Slide Over.

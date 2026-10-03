@@ -285,8 +285,8 @@ font files (`mobiler.toml` `[fonts]`, synced into every shell by the CLI), and a
 weight and font role per text style, including the `display(...)` / `headline(...)` styles).
 `with_appearance(Light | Dark | System)` follows the phone's light/dark setting live. Anything you
 leave unset keeps the stock look. The launch window and Android 12+ splash follow the phone's
-light/dark setting too, in colours you set once (see *Launch window colours* in the
-[CLI README](mobiler/README.md)).
+light/dark setting too: describe it once in `mobiler.toml` `[splash]` (background colours and a logo,
+see *Launch screen* in the [CLI README](mobiler/README.md)).
 
 **Fade House** ([`demos/barbershop`](demos/barbershop/)) — a barbershop booking demo: a
 brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar
@@ -385,7 +385,8 @@ instead of next to the file: a stray file in `res/` breaks the Android build. Th
 each copy's path. Apps scaffolded before baselines
 existed fall back to a conservative reconcile and get a baseline written for next time. A few
 app-owned files the template provides defaults for (the launch window colours) are created when
-missing and never changed after that.
+missing and never changed by `upgrade` after that; `mobiler.toml` `[splash]` writes them while they are
+stock or its own.
 
 ### Breaking changes in your app code
 
