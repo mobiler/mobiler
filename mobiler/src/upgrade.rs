@@ -128,6 +128,10 @@ struct Report {
     markers: Vec<String>,
     /// Every file still waiting for the user's review after this run: (path, kind).
     pending: Vec<(String, String)>,
+    /// New template files offered as review copies (no `--apply`): not written in place.
+    new_review: Vec<String>,
+    /// The `mobiler-core` bump a review run would make: (from, to).
+    deps_would: Option<(String, String)>,
     /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
     /// automatically (they may carry user edits) — reported so the mismatch is not silent.
     plugins: Vec<String>,
@@ -149,7 +153,7 @@ fn upgrade_at(root: &Path, apply: bool) -> Result<Report> {
     }
     let subs = Subs::from_app_root(root)?;
     let mut report = Report { app_root: Some(root.to_path_buf()), ..Report::default() };
-    bump_core_dep(root, &mut report)?;
+    bump_core_dep(root, apply, &mut report)?;
     sync_dir(&TEMPLATES, root, &subs, apply, &mut report)?;
     report.plugins = crate::plugin::drifted(root, &subs);
     report.pending = list_pending(root);
@@ -174,7 +178,7 @@ fn extract_dep_version(cargo: &str, dep: &str) -> Option<String> {
     })
 }
 
-fn bump_core_dep(root: &Path, report: &mut Report) -> Result<()> {
+fn bump_core_dep(root: &Path, apply: bool, report: &mut Report) -> Result<()> {
     let Some(want) = template_core_version() else {
         return Ok(());
     };
@@ -192,6 +196,11 @@ fn bump_core_dep(root: &Path, report: &mut Report) -> Result<()> {
         return Ok(());
     };
     if have == want {
+        return Ok(());
+    }
+    if !apply {
+        // A review run never changes what the build reads (ADR-0046): the bump waits for --apply.
+        report.deps_would = Some((have, want));
         return Ok(());
     }
     let updated = content.replacen(
@@ -273,7 +282,15 @@ fn sync_file(
     }
 
     if !dst.exists() {
-        // A file the new version introduces — additive, safe to create (and baseline).
+        // A file the new version introduces. A review run offers it instead: it may need edits that
+        // still wait as review copies (e.g. a type registered in codegen.rs).
+        if !apply && let Ok(text) = std::str::from_utf8(&desired) {
+            write_review(report.app_root.as_deref(), &dst, &desired)?;
+            write_pending(root, &rel, text, b"", "new")?;
+            report.new_review.push(rel_disp);
+            return Ok(());
+        }
+        // With --apply it is additive, safe to create (and baseline).
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
@@ -511,10 +528,10 @@ fn list_pending(root: &Path) -> Vec<(String, String)> {
             let p = e.path();
             if p.is_dir() {
                 walk(&p, base, root, out);
-            } else if let Some(rel) = p.strip_prefix(base).ok().and_then(|r| r.to_str()).and_then(|r| r.strip_suffix(".json")) {
-                if let Some(rec) = read_pending(root, Path::new(rel)) {
-                    out.push((rel.to_string(), rec.kind));
-                }
+            } else if let Some(rel) = p.strip_prefix(base).ok().and_then(|r| r.to_str()).and_then(|r| r.strip_suffix(".json"))
+                && let Some(rec) = read_pending(root, Path::new(rel))
+            {
+                out.push((rel.to_string(), rec.kind));
             }
         }
     }
@@ -702,14 +719,22 @@ impl Report {
         lines
     }
 
-    fn print(&self, apply: bool) {
-        match (&self.deps, &self.deps_note) {
-            (Some((from, to)), _) => println!("  deps: mobiler-core {from} -> {to} (updated)"),
-            (None, Some(note)) => println!("  deps: {note}"),
-            (None, None) => println!("  deps: up to date"),
+    /// One line per file this run touched, offered or resolved (`  + added …`, `  ‼ conflict …`).
+    fn print_files(&self) {
+        if let Some((from, to)) = &self.deps_would {
+            println!("  deps: would bump mobiler-core {from} -> {to} (run with --apply)");
+        } else {
+            match (&self.deps, &self.deps_note) {
+                (Some((from, to)), _) => println!("  deps: mobiler-core {from} -> {to} (updated)"),
+                (None, Some(note)) => println!("  deps: {note}"),
+                (None, None) => println!("  deps: up to date"),
+            }
         }
         for a in &self.added {
             println!("  + added   {a}");
+        }
+        for n in &self.new_review {
+            println!("  + new     {n}  -> {}", review_rel(n));
         }
         for u in &self.updated {
             println!("  ~ updated {u}  (previous version in .mobiler/backup/)");
@@ -732,6 +757,10 @@ impl Report {
         for p in &self.plugins {
             println!("  ! plugin  {p}  has shell updates in this release");
         }
+    }
+
+    fn print(&self, apply: bool) {
+        self.print_files();
         println!("  = {} file(s) up to date", self.up_to_date);
         if let Some((prev, cur)) = &self.stamp {
             let waiting = if self.pending.is_empty() {
@@ -767,7 +796,7 @@ impl Report {
         }
         let offered = self.changed.len() + self.merge.len() + self.conflict.len();
         if offered == 0 && self.updated.is_empty() {
-            if self.plugins.is_empty() && self.pending.is_empty() {
+            if self.plugins.is_empty() && self.pending.is_empty() && self.deps_would.is_none() {
                 println!("Up to date. ✓");
             }
             return;
@@ -1061,6 +1090,38 @@ mod test {
     }
 
     #[test]
+    fn review_run_never_touches_build_inputs() {
+        let root = skeleton();
+        let cargo_before = read(&root, "shared/Cargo.toml");
+        let r = upgrade_at(&root, false).unwrap();
+        assert_eq!(read(&root, "shared/Cargo.toml"), cargo_before, "no core bump without --apply");
+        assert!(r.deps_would.is_some());
+        assert!(!root.join("iOS/Sources/Render.swift").exists(), "a new file is not written in place");
+        assert!(root.join("iOS/Sources/Render.swift.mobiler-new").exists(), "it is offered for review");
+        assert!(r.pending.iter().any(|(f, k)| f == "iOS/Sources/Render.swift" && k == "new"), "{:?}", r.pending);
+
+        let r2 = upgrade_at(&root, true).unwrap();
+        assert!(root.join("iOS/Sources/Render.swift").exists());
+        let want = template_core_version().unwrap();
+        assert!(read(&root, "shared/Cargo.toml").contains(&format!("mobiler-core = \"{want}\"")));
+        assert!(r2.pending.is_empty(), "--apply leaves nothing pending: {:?}", r2.pending);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn accepted_new_file_is_resolved() {
+        let root = skeleton();
+        upgrade_at(&root, false).unwrap();
+        // The user moves the review copy into place by hand.
+        fs::rename(root.join("iOS/Sources/Render.swift.mobiler-new"), root.join("iOS/Sources/Render.swift")).unwrap();
+        let r = upgrade_at(&root, false).unwrap();
+        assert!(r.resolved.iter().any(|f| f == "iOS/Sources/Render.swift"), "{:?}", r.resolved);
+        assert!(!r.pending.iter().any(|(f, _)| f == "iOS/Sources/Render.swift"));
+        assert!(root.join(".mobiler/base/iOS/Sources/Render.swift").exists(), "baselined");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn markers_are_whole_lines() {
         assert!(has_conflict_markers("a\n<<<<<<< ours\nb\n=======\nc\n>>>>>>> theirs\n"));
         assert!(!has_conflict_markers("// ======= section =======\nlet x = \"<<<<<<<\";\n"));
@@ -1190,7 +1251,7 @@ mod test {
     fn bumps_dep_stamps_and_leaves_app_code_untouched() {
         let root = skeleton();
         let want = template_core_version().expect("templates pin mobiler-core");
-        let report = upgrade_at(&root, false).unwrap();
+        let report = upgrade_at(&root, true).unwrap();
 
         // dep bumped to the template's version, other deps preserved.
         let cargo = read(&root, "shared/Cargo.toml");
