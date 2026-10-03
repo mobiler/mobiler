@@ -5,10 +5,12 @@ use serde::Deserialize;
 
 /// Marks a file the sync wrote, so a later sync may rewrite it (a seed without it was edited by hand).
 pub const HEADER: &str = "generated from mobiler.toml [splash]; edit mobiler.toml, not this file";
-/// Android 12+ draws the splash icon in a 240dp box masked to a 160dp circle; a logo must fit the
-/// circle's inscribed square to show whole.
-const ANDROID12_BOX_DP: u32 = 240;
-const ANDROID12_SQUARE_DP: u32 = 113;
+/// What a seed says once `[splash]` is removed: it is the app's again.
+const APP_OWNED: &str = "app-owned: edit freely (last written from mobiler.toml [splash])";
+/// Android 12+ draws the splash icon in a box (288dp without an icon background) masked to a circle
+/// 2/3 its width; a logo shows whole inside the circle's inscribed square: (2/3)/√2 of the box.
+const ANDROID12_BOX_DP: f64 = 288.0;
+const ANDROID12_SQUARE_FRACTION: f64 = 0.4714;
 
 /// `[splash]` as written in mobiler.toml.
 #[derive(Deserialize, Debug, Clone)]
@@ -77,6 +79,9 @@ pub fn validate(spec: &SplashSpec) -> Result<Splash, String> {
         return Err(format!("logo_size {size}: must be in 24..=288 (dp/pt)"));
     }
     let mut warnings = Vec::new();
+    if spec.logo.is_none() && (spec.logo_size.is_some() || spec.logo_dark.is_some()) {
+        warnings.push("logo_size / logo_dark without logo are ignored".into());
+    }
     if light.a != 0xFF || dark.a != 0xFF {
         warnings.push("a translucent background is used as opaque (a launch screen can't be translucent)".into());
     }
@@ -96,11 +101,6 @@ pub fn fit(w: u32, h: u32, size: u32) -> (u32, u32) {
     let scale = f64::from(size) / f64::from(w.max(h).max(1));
     let scaled = |v: u32| ((f64::from(v) * scale).round() as u32).max(1);
     (scaled(w), scaled(h))
-}
-
-#[allow(clippy::cast_possible_truncation)] // a whole number of dp below 240
-fn dp(v: f64) -> String {
-    if v.fract() == 0.0 { format!("{}dp", v as i64) } else { format!("{v:.1}dp") }
 }
 
 /// `values{,-night}/mobiler_splash.xml`. Only the default one carries the `mobiler_splash_icon` alias
@@ -128,12 +128,14 @@ pub fn android_launch_xml(logo: Option<(u32, u32)>) -> String {
     )
 }
 
-/// `drawable/mobiler_splash_logo_icon.xml`: the Android 12+ splash icon — the logo (box `w`×`h` dp)
-/// fitted into the icon circle's inscribed square, centred in the 240dp icon box.
+/// `drawable/mobiler_splash_logo_icon.xml`: the Android 12+ splash icon — the logo (box `w`×`h` dp) at
+/// its own size, but no larger than the icon circle's inscribed square, centred. Insets are percentages,
+/// so the shape and size hold in either icon box (288dp, or 240dp with an icon background).
 pub fn android_icon_xml(w: u32, h: u32) -> String {
-    let (fw, fh) = fit(w, h, ANDROID12_SQUARE_DP);
-    let box_dp = f64::from(ANDROID12_BOX_DP);
-    let (x, y) = (dp((box_dp - f64::from(fw)) / 2.0), dp((box_dp - f64::from(fh)) / 2.0));
+    let long = f64::from(w.max(h).max(1));
+    let frac = (long / ANDROID12_BOX_DP).min(ANDROID12_SQUARE_FRACTION);
+    let pct = |side: u32| format!("{:.1}%", (1.0 - frac * f64::from(side) / long) / 2.0 * 100.0);
+    let (x, y) = (pct(w), pct(h));
     format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- {HEADER}. The Android 12+ splash icon. -->\n<inset xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    android:drawable=\"@drawable/mobiler_splash_logo\"\n    android:insetLeft=\"{x}\"\n    android:insetRight=\"{x}\"\n    android:insetTop=\"{y}\"\n    android:insetBottom=\"{y}\" />\n"
     )
@@ -271,6 +273,8 @@ struct Logo {
 enum Change {
     Write(String, Vec<u8>),
     Remove(String),
+    /// A directory the sync shares with the app (`web/splash`): removed only once it is empty.
+    RemoveDirIfEmpty(String),
 }
 
 /// Sync `mobiler.toml` `[splash]` into the shells (ADR-0048). No section and nothing synced before:
@@ -292,8 +296,8 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     };
     let ledger = read_ledger(root);
     let Some(spec) = spec else {
-        if ledger.is_some() {
-            undo(root, &mut report)?;
+        if let Some(ledger) = ledger.filter(|l| l.active) {
+            undo(root, &ledger.seeds, &mut report)?;
         }
         return Ok(report);
     };
@@ -317,14 +321,14 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     };
     let Ok(logo) = load(&splash.logo, &mut report) else { return Ok(report) };
     let Ok(logo_dark) = load(&splash.logo_dark, &mut report) else { return Ok(report) };
-    if logo.is_none() && logo_dark.is_some() {
-        report.warnings.push("logo_dark without logo is ignored".into());
-    }
     let logo_dark = logo_dark.filter(|_| logo.is_some());
 
-    let mut changes = Vec::new();
+    // Order matters if a write fails part-way: assets before the files that reference them, references
+    // cleared before the files they name are removed, the ledger last.
+    let (mut writes, mut removes) = (Vec::new(), Vec::new());
+    logo_changes(logo.as_ref(), logo_dark.as_ref(), &mut writes, &mut removes, &mut report)?;
     // Seeds: written only while they are the sync's (or the template's) own.
-    let ledger = ledger.unwrap_or_default();
+    let ledger = ledger.map(|l| l.seeds).unwrap_or_default();
     let mut new_ledger = BTreeMap::new();
     let box_dp = logo.as_ref().map(|l| l.box_dp);
     let seeds: [(&str, String); 4] = [
@@ -336,7 +340,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     for (rel, content) in seeds {
         if owned_seed(root, rel, &ledger) {
             new_ledger.insert(rel.to_string(), crate::upgrade::fingerprint(content.as_bytes()));
-            changes.push(Change::Write(rel.into(), content.into_bytes()));
+            writes.push(Change::Write(rel.into(), content.into_bytes()));
         } else {
             report.warnings.push(format!(
                 "{rel} was edited by hand — remove your edits (or delete the file) to let [splash] manage it"
@@ -344,85 +348,104 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             if let Some(f) = ledger.get(rel) {
                 new_ledger.insert(rel.to_string(), f.clone());
             }
+            // A hand-edited launch drawable that still shows the logo keeps it (the build needs it).
+            if rel == LAUNCH && logo.is_none() && fs::read_to_string(root.join(LAUNCH)).is_ok_and(|t| t.contains("mobiler_splash_logo")) {
+                report.warnings.push(format!(
+                    "{LAUNCH} (edited by hand) still uses @drawable/mobiler_splash_logo, which [splash] no longer provides — remove that item; the logo files are kept until then"
+                ));
+                removes.retain(|c| !matches!(c, Change::Remove(r) if r == LOGO_PNG || r == LOGO_DARK_PNG));
+            }
         }
     }
-    logo_changes(logo.as_ref(), logo_dark.as_ref(), &mut changes, &mut report)?;
     // Marker blocks in framework files: filled, never inserted.
     for t in THEMES {
-        block_change(root, t, XML_BEGIN, XML_END, &android_theme_icon_lines(logo.is_some()), &mut changes, &mut report);
+        block_change(root, t, XML_BEGIN, XML_END, &android_theme_icon_lines(logo.is_some()), &mut writes, &mut report);
     }
-    block_change(root, PROJECT_YML, YML_BEGIN, YML_END, &ios_plist_lines(logo.is_some()), &mut changes, &mut report);
-    web_changes(root, &splash, logo.as_ref(), logo_dark.as_ref(), &mut changes, &mut report)?;
-    let ledger_json = serde_json::to_string_pretty(&serde_json::json!({ "seeds": new_ledger }))? + "\n";
-    changes.push(Change::Write(LEDGER.into(), ledger_json.into_bytes()));
-    apply(root, changes, &mut report)?;
+    block_change(root, PROJECT_YML, YML_BEGIN, YML_END, &ios_plist_lines(logo.is_some()), &mut writes, &mut report);
+    web_changes(root, &splash, logo.as_ref(), logo_dark.as_ref(), &mut writes, &mut removes, &mut report)?;
+    writes.extend(removes);
+    writes.push(Change::Write(LEDGER.into(), ledger_json(true, &new_ledger)?));
+    apply(root, writes, &mut report)?;
     report.warnings.dedup();
     Ok(report)
 }
 
 /// The sync's own logo files: written with a logo, removed without one.
-fn logo_changes(logo: Option<&Logo>, logo_dark: Option<&Logo>, changes: &mut Vec<Change>, report: &mut SyncReport) -> anyhow::Result<()> {
+fn logo_changes(
+    logo: Option<&Logo>,
+    logo_dark: Option<&Logo>,
+    writes: &mut Vec<Change>,
+    removes: &mut Vec<Change>,
+    report: &mut SyncReport,
+) -> anyhow::Result<()> {
     if let Some(l) = logo {
-        changes.push(Change::Write(LOGO_PNG.into(), png_at(l, 4, report)?));
-        changes.push(Change::Write(ICON.into(), android_icon_xml(l.box_dp.0, l.box_dp.1).into_bytes()));
-        changes.push(Change::Write(format!("{IMAGESET}/Contents.json"), ios_imageset_json(logo_dark.is_some()).into_bytes()));
-        changes.push(Change::Write(format!("{IMAGESET}/mobiler-splash-logo@3x.png"), png_at(l, 3, report)?));
+        writes.push(Change::Write(LOGO_PNG.into(), png_at(l, 4, report)?));
+        writes.push(Change::Write(format!("{IMAGESET}/mobiler-splash-logo@3x.png"), png_at(l, 3, report)?));
+        writes.push(Change::Write(format!("{IMAGESET}/Contents.json"), ios_imageset_json(logo_dark.is_some()).into_bytes()));
+        writes.push(Change::Write(ICON.into(), android_icon_xml(l.box_dp.0, l.box_dp.1).into_bytes()));
     } else {
-        changes.extend([Change::Remove(LOGO_PNG.into()), Change::Remove(ICON.into()), Change::Remove(IMAGESET.into())]);
+        removes.extend([Change::Remove(ICON.into()), Change::Remove(LOGO_PNG.into()), Change::Remove(IMAGESET.into())]);
     }
     if let Some(l) = logo_dark {
-        changes.push(Change::Write(LOGO_DARK_PNG.into(), png_at(l, 4, report)?));
-        changes.push(Change::Write(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png"), png_at(l, 3, report)?));
+        writes.insert(0, Change::Write(LOGO_DARK_PNG.into(), png_at(l, 4, report)?));
+        writes.insert(1, Change::Write(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png"), png_at(l, 3, report)?));
     } else {
-        changes.push(Change::Remove(LOGO_DARK_PNG.into()));
-        changes.push(Change::Remove(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png")));
+        removes.push(Change::Remove(LOGO_DARK_PNG.into()));
+        removes.push(Change::Remove(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png")));
     }
     Ok(())
 }
 
-/// Web (only an app with a web shell): a block before `</head>` and the logo copies at 2×.
+/// Web (only an app with a web shell): the logo copies at 2×, then the block before `</head>` that uses
+/// them. `web/splash/` may hold the app's own files: only the sync's two logos are ever removed there.
 fn web_changes(
     root: &Path,
     splash: &Splash,
     logo: Option<&Logo>,
     logo_dark: Option<&Logo>,
-    changes: &mut Vec<Change>,
+    writes: &mut Vec<Change>,
+    removes: &mut Vec<Change>,
     report: &mut SyncReport,
 ) -> anyhow::Result<()> {
     let Ok(html) = fs::read_to_string(root.join(WEB_INDEX)) else { return Ok(()) };
+    let light = format!("{WEB_DIR}/mobiler-splash-logo.png");
+    let dark = format!("{WEB_DIR}/mobiler-splash-logo-dark.png");
+    match logo {
+        Some(l) => writes.push(Change::Write(light, png_at(l, 2, report)?)),
+        None => removes.push(Change::Remove(light)),
+    }
+    match logo_dark {
+        Some(l) => writes.push(Change::Write(dark, png_at(l, 2, report)?)),
+        None => removes.push(Change::Remove(dark)),
+    }
+    removes.push(Change::RemoveDirIfEmpty(WEB_DIR.into()));
     let lines = web_lines(splash.light, splash.dark, logo.map(|l| l.box_dp), logo_dark.is_some());
     match crate::fonts::replace_block(&html, XML_BEGIN, XML_END, "</head>", |indent| {
         lines.iter().map(|l| format!("{indent}{l}")).collect()
     }) {
-        Ok(text) => changes.push(Change::Write(WEB_INDEX.into(), text.into_bytes())),
+        Ok(text) => writes.push(Change::Write(WEB_INDEX.into(), text.into_bytes())),
         Err(e) => report.warnings.push(format!("{WEB_INDEX}: {e} — web splash not synced")),
-    }
-    if let Some(l) = logo {
-        changes.push(Change::Write(format!("{WEB_DIR}/mobiler-splash-logo.png"), png_at(l, 2, report)?));
-    } else {
-        changes.push(Change::Remove(WEB_DIR.into()));
-    }
-    if let Some(l) = logo_dark {
-        changes.push(Change::Write(format!("{WEB_DIR}/mobiler-splash-logo-dark.png"), png_at(l, 2, report)?));
-    } else {
-        changes.push(Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo-dark.png")));
     }
     Ok(())
 }
 
-/// `[splash]` removed after a sync: the sync's own files go, blocks empty (the web block goes), the
-/// launch drawable back to colour-only if the sync wrote it; the colours stay (app-owned again).
-fn undo(root: &Path, report: &mut SyncReport) -> anyhow::Result<()> {
-    let mut changes = vec![
-        Change::Remove(LOGO_PNG.into()),
-        Change::Remove(LOGO_DARK_PNG.into()),
-        Change::Remove(ICON.into()),
-        Change::Remove(IMAGESET.into()),
-        Change::Remove(WEB_DIR.into()),
-        Change::Remove(LEDGER.into()),
-    ];
-    if fs::read_to_string(root.join(LAUNCH)).is_ok_and(|t| t.contains(HEADER)) {
-        changes.push(Change::Write(LAUNCH.into(), android_launch_xml(None).into_bytes()));
+/// `[splash]` removed after a sync: blocks emptied (the web block removed) and the launch drawable back to
+/// colour-only if the sync wrote it, then the sync's own files go; the colours stay (app-owned again). The
+/// ledger is kept, inactive, so adding `[splash]` back still recognises the seeds it wrote.
+fn undo(root: &Path, seeds: &BTreeMap<String, String>, report: &mut SyncReport) -> anyhow::Result<()> {
+    let mut changes = Vec::new();
+    let mut seeds = seeds.clone();
+    // The seeds the sync wrote become the app's again: say so (and record that, so adding [splash]
+    // back still recognises them). The launch drawable goes back to colour-only.
+    for rel in [COLORS[0], COLORS[1], LAUNCH] {
+        let Ok(text) = fs::read_to_string(root.join(rel)) else { continue };
+        if !text.contains(HEADER) {
+            continue;
+        }
+        let base = if rel == LAUNCH { android_launch_xml(None) } else { text };
+        let owned = base.replace(HEADER, APP_OWNED);
+        seeds.insert(rel.into(), crate::upgrade::fingerprint(owned.as_bytes()));
+        changes.push(Change::Write(rel.into(), owned.into_bytes()));
     }
     for t in THEMES {
         block_change(root, t, XML_BEGIN, XML_END, &[], &mut changes, report);
@@ -433,8 +456,16 @@ fn undo(root: &Path, report: &mut SyncReport) -> anyhow::Result<()> {
     {
         changes.push(Change::Write(WEB_INDEX.into(), text.into_bytes()));
     }
-    // An app without the markers needs no warning when there is nothing to undo there.
-    report.warnings.retain(|w| !w.contains("mobiler upgrade --apply"));
+    changes.extend([
+        Change::Remove(ICON.into()),
+        Change::Remove(LOGO_PNG.into()),
+        Change::Remove(LOGO_DARK_PNG.into()),
+        Change::Remove(IMAGESET.into()),
+        Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo.png")),
+        Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo-dark.png")),
+        Change::RemoveDirIfEmpty(WEB_DIR.into()),
+    ]);
+    changes.push(Change::Write(LEDGER.into(), ledger_json(false, &seeds)?));
     apply(root, changes, report)
 }
 
@@ -465,27 +496,42 @@ fn remove_block(text: &str, begin: &str, end: &str) -> Option<String> {
 
 fn owned_seed(root: &Path, rel: &str, ledger: &BTreeMap<String, String>) -> bool {
     let Ok(bytes) = fs::read(root.join(rel)) else { return true };
-    stock_seeds().iter().any(|(p, stock)| *p == rel && *stock == bytes.as_slice())
+    let mine = crate::upgrade::fingerprint(&bytes); // CRLF reads as LF: a Windows checkout is still stock
+    stock_seeds().iter().any(|(p, stock)| *p == rel && crate::upgrade::fingerprint(stock) == mine)
         || String::from_utf8_lossy(&bytes).contains(HEADER)
         || ledger.get(rel).is_some_and(|f| *f == crate::upgrade::fingerprint(&bytes))
 }
 
-fn read_ledger(root: &Path) -> Option<BTreeMap<String, String>> {
+/// The ledger: whether `[splash]` was active at the last sync, and what it last wrote to each seed. Kept
+/// (inactive) when the section is removed, so adding it back still recognises the seeds it wrote.
+struct Ledger {
+    active: bool,
+    seeds: BTreeMap<String, String>,
+}
+
+fn read_ledger(root: &Path) -> Option<Ledger> {
     let text = fs::read_to_string(root.join(LEDGER)).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    Some(
-        v["seeds"]
-            .as_object()
-            .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
-            .unwrap_or_default(),
-    )
+    let seeds = v["seeds"]
+        .as_object()
+        .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+        .unwrap_or_default();
+    Some(Ledger { active: v["active"].as_bool().unwrap_or(true), seeds })
+}
+
+fn ledger_json(active: bool, seeds: &BTreeMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    Ok((serde_json::to_string_pretty(&serde_json::json!({ "active": active, "seeds": seeds }))? + "\n").into_bytes())
 }
 
 fn load_logo(path: &Path, size: u32) -> Result<Logo, String> {
-    let reader = image::ImageReader::open(path)
+    let mut reader = image::ImageReader::open(path)
         .map_err(|e| format!("can't read it ({e})"))?
         .with_guessed_format()
         .map_err(|e| format!("can't read it ({e})"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    reader.limits(limits);
     if reader.format() != Some(image::ImageFormat::Png) {
         return Err("not a PNG".into());
     }
@@ -532,6 +578,11 @@ fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::
                     report.written.push(rel);
                 }
             }
+            Change::RemoveDirIfEmpty(rel) => {
+                if fs::remove_dir(root.join(&rel)).is_ok() {
+                    report.removed.push(rel);
+                }
+            }
             Change::Remove(rel) => {
                 let path = root.join(&rel);
                 let removed = if path.is_dir() { fs::remove_dir_all(&path).is_ok() } else { fs::remove_file(&path).is_ok() };
@@ -567,7 +618,7 @@ pub fn run_sync_cli() -> anyhow::Result<()> {
     if report.written.is_empty() && report.removed.is_empty() {
         match read_spec(&root) {
             Ok(Some(_)) => println!("Splash up to date."),
-            _ => println!("No [splash] in mobiler.toml — the template launch screen is used."),
+            _ => println!("No [splash] in mobiler.toml — the launch files are the app's own to edit."),
         }
     }
     Ok(())
@@ -671,11 +722,16 @@ mod tests {
         assert!(with.contains(r#"android:width="120dp""#) && with.contains(r#"android:height="60dp""#));
         assert!(with.contains(r#"android:gravity="center""#) && with.contains("@drawable/mobiler_splash_logo"));
 
-        // Android 12 shows the icon in a 240dp box masked to a 160dp circle: fit inside its 113dp square.
+        // Android 12's icon box (288dp without an icon background, 240dp with one) is masked to a circle
+        // of 2/3 its width: the logo keeps its dp size up to the circle's inscribed square (~47% of the box),
+        // as percentages, so it is right in either box and a non-square logo keeps its shape.
         let icon = android_icon_xml(120, 60);
         assert!(icon.contains("<inset") && icon.contains("@drawable/mobiler_splash_logo"));
-        assert!(icon.contains(r#"android:insetLeft="63.5dp""#), "{icon}"); // (240 - 113) / 2
-        assert!(icon.contains(r#"android:insetTop="91.5dp""#), "{icon}"); // (240 - 57) / 2
+        assert!(icon.contains(r#"android:insetLeft="29.2%""#), "{icon}"); // 120/288 wide → (1 - 0.417) / 2
+        assert!(icon.contains(r#"android:insetTop="39.6%""#), "{icon}"); // 60/288 tall → (1 - 0.208) / 2
+        // A small logo isn't blown up; a large one is capped at the inscribed square (0.4714 of the box).
+        assert!(android_icon_xml(48, 48).contains(r#"android:insetLeft="41.7%""#), "{}", android_icon_xml(48, 48));
+        assert!(android_icon_xml(288, 288).contains(r#"android:insetLeft="26.4%""#), "{}", android_icon_xml(288, 288));
         assert_eq!(android_theme_icon_lines(false), Vec::<String>::new());
         assert_eq!(
             android_theme_icon_lines(true),
@@ -900,9 +956,10 @@ mod tests {
         put(&root, "mobiler.toml", b"");
         let r = sync(&root).unwrap();
         assert!(!r.removed.is_empty());
-        for gone in [LOGO_PNG, ICON, IMAGESET, WEB_DIR, LEDGER] {
+        for gone in [LOGO_PNG, ICON, IMAGESET, WEB_DIR] {
             assert!(!root.join(gone).exists(), "{gone}");
         }
+        assert!(read(&root, LEDGER).contains("\"active\": false"), "the ledger stays, inactive");
         assert!(!read(&root, WEB_INDEX).contains("mobiler:splash"), "web block removed");
         assert!(!read(&root, LAUNCH).contains("mobiler_splash_logo"), "launch back to colour-only");
         assert!(read(&root, COLORS[1]).contains("#FF1C1B1F"), "colours stay");
@@ -962,6 +1019,96 @@ mod tests {
         put(&root, "mobiler.toml", b"[splash]\nbackground = \"blue\"\n");
         assert!(doctor_line(&root).starts_with("splash: mobiler.toml [splash] invalid: "), "{}", doctor_line(&root));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+
+    #[test]
+    fn foreign_files_in_web_splash_survive() {
+        let root = app("[splash]\nbackground = \"#FFFFFF\"\n");
+        put(&root, WEB_INDEX, b"<html>\n<head>\n</head>\n<body></body>\n</html>\n");
+        put(&root, "web/splash/user-hero.jpg", b"mine");
+        sync(&root).unwrap();
+        assert!(root.join("web/splash/user-hero.jpg").exists(), "a file the sync didn't create is never deleted");
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        assert!(root.join("web/splash/user-hero.jpg").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn splash_removed_and_added_back_still_owns_its_seeds() {
+        let root = app("[splash]\nbackground = \"#FFFFFF\"\n");
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", b"[splash]\nbackground = \"#000000\"\n");
+        let r = sync(&root).unwrap();
+        assert!(!r.warnings.iter().any(|w| w.contains("edited by hand")), "{:?}", r.warnings);
+        assert!(read(&root, COLORSET).contains("\"red\" : \"0x00\""));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn header_marks_xml_seeds_without_a_ledger() {
+        // A teammate's clone without the ledger: the XML seeds still carry the header.
+        let root = app("[splash]\nbackground = \"#FFFFFF\"\n");
+        sync(&root).unwrap();
+        std::fs::remove_file(root.join(LEDGER)).unwrap();
+        put(&root, "mobiler.toml", b"[splash]\nbackground = \"#000000\"\n");
+        sync(&root).unwrap();
+        assert!(read(&root, COLORS[0]).contains("#FF000000"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_crlf_stock_seed_is_still_stock() {
+        let root = app("[splash]\nbackground = \"#123456\"\n");
+        let stock = read(&root, COLORS[0]).replace('\n', "\r\n");
+        put(&root, COLORS[0], stock.as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(!r.warnings.iter().any(|w| w.contains("edited by hand")), "{:?}", r.warnings);
+        assert!(read(&root, COLORS[0]).contains("#FF123456"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hand_edited_launch_that_uses_the_logo_warns_before_it_goes() {
+        let root = logo_app();
+        sync(&root).unwrap();
+        let mine = read(&root, LAUNCH).replace(HEADER, "mine");
+        put(&root, LAUNCH, mine.as_bytes());
+        put(&root, "mobiler.toml", b"[splash]\nbackground = \"#FFFBFE\"\n");
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(LAUNCH) && w.contains("mobiler_splash_logo")), "{:?}", r.warnings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+
+    #[test]
+    fn seeds_kept_after_removal_say_they_are_the_apps() {
+        let root = app("[splash]\nbackground = \"#123456\"\n");
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        for rel in [COLORS[0], COLORS[1], LAUNCH] {
+            let text = read(&root, rel);
+            assert!(!text.contains(HEADER), "{rel} still says it is generated");
+            assert!(text.contains("app-owned"), "{rel}: {text}");
+        }
+        assert!(read(&root, COLORS[0]).contains("#FF123456"), "colours kept");
+        // ...and adding [splash] back still owns them (the ledger tracks what undo wrote).
+        put(&root, "mobiler.toml", b"[splash]\nbackground = \"#000000\"\n");
+        let r = sync(&root).unwrap();
+        assert!(!r.warnings.iter().any(|w| w.contains("edited by hand")), "{:?}", r.warnings);
+        assert!(read(&root, COLORS[0]).contains("#FF000000"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn logo_settings_without_a_logo_warn() {
+        let mut s = spec("#FFFFFF");
+        s.logo_size = Some(96);
+        assert!(validate(&s).unwrap().warnings.iter().any(|w| w.contains("logo_size")), "logo_size alone");
     }
 
 }

@@ -149,7 +149,13 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     let section = if manifest_path.exists() {
         let text = fs::read_to_string(&manifest_path).with_context(|| format!("reading {}", manifest_path.display()))?;
         let manifest: Manifest = toml::from_str(&text).with_context(|| format!("parsing {}", manifest_path.display()))?;
-        manifest.fonts.unwrap_or_default()
+        match manifest.fonts {
+            Some(fonts) => fonts,
+            // [fonts] removed after a sync: clean up like an empty [fonts].
+            None if previously_synced(root) => FontsSection::default(),
+            // A mobiler.toml without [fonts] (e.g. only [splash]) that never used fonts: touch nothing.
+            None => return Ok(report),
+        }
     } else if previously_synced(root) {
         // mobiler.toml was removed after a sync: clean up like an empty [fonts].
         FontsSection::default()
@@ -572,6 +578,18 @@ mod tests {
 
     fn read(root: &std::path::Path, rel: &str) -> String {
         fs::read_to_string(root.join(rel)).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_mobiler_toml_without_fonts_touches_nothing() {
+        // e.g. only [splash]: the fonts sync must not add empty font blocks to project.yml / index.html.
+        let root = app("nofonts", true);
+        fs::write(root.join("mobiler.toml"), "[splash]\nbackground = \"#FFFFFF\"\n").unwrap();
+        let (yml, html) = (read(&root, "iOS/project.yml"), read(&root, "web/index.html"));
+        sync(&root).unwrap();
+        assert_eq!(read(&root, "iOS/project.yml"), yml);
+        assert_eq!(read(&root, "web/index.html"), html);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -159,12 +159,14 @@ prints a warning and leaves the last synced files unchanged.
   Android, 3× on iOS, 2× on the web) and never scales it up: a smaller source is used at its own size,
   with a warning.
 - **Android 8–11** show the logo centred on the background.
-- **Android 12+:** the system splash shows the logo in the icon area. Android masks that area to a
-  circle, so a logo larger than about 113 dp shows smaller there.
-- **iOS** shows the logo as the launch screen image. An app made before CLI 0.65 gets the marker this needs
-  with `mobiler upgrade --apply`; until then only the colours apply on iOS.
+- **Android 12+:** the system splash shows the logo in the icon area, at its own size. Android masks
+  that area to a circle, so a logo larger than about 136 dp shows smaller there.
+- **iOS** shows the logo as the launch screen image. iOS draws it at its own size, so give a logo at
+  least 3× `logo_size` in pixels. An app made before CLI 0.65 gets the marker this needs with
+  `mobiler upgrade --apply`; until then only the colours apply on iOS.
 - **The web** (when the app has `web/index.html`) shows the colours and the logo until the app's first
-  render.
+  render. Keep `<body></body>` empty in `index.html` for the logo to show. A web-only workflow (`trunk serve`)
+  doesn't run the sync: run `mobiler splash sync` after changing `[splash]`.
 
 | What the sync writes | |
 |---|---|
@@ -179,7 +181,8 @@ or carries the sync's own "generated from mobiler.toml [splash]" header. If you 
 leaves it alone and warns; delete the file to hand it back.
 
 **Removing `[splash]`** removes the logo files and blocks and puts the launch drawable back to colour
-only. The colours stay as last synced.
+only. Only the sync's own two logos are ever removed from `web/splash/`. The colours stay as last synced, and
+their files say they are the app's own again.
 
 Without `[splash]`, the colours are yours to edit directly in the files above. To open in the app's own
 light/dark choice from the first frame, keep that choice in your `cx.save` state. Your own Android theme

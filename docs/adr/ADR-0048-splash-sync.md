@@ -5,7 +5,7 @@ Date decided:  2026-10-03
 Deciding PRs:  #282
 Supersedes:    none
 Code anchor:   mobiler/src/splash.rs (validate, fit, the generators, sync, undo, owned_seed, block_change), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/values{,-night}-v31/mobiler_themes.xml and mobiler/templates/iOS/project.yml (the marker blocks)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0048_splash_markers_and_seeds, mobiler/src/splash.rs::hand_edited_seed_is_left_alone_with_a_warning, mobiler/src/splash.rs::broken_logo_leaves_everything_unchanged, mobiler/src/splash.rs::removing_splash_undoes_the_sync_but_keeps_colours
+Conformance:   xtask/tests/adr_conformance.rs::adr_0048_splash_markers_and_seeds, mobiler/src/splash.rs::hand_edited_seed_is_left_alone_with_a_warning, mobiler/src/splash.rs::broken_logo_leaves_everything_unchanged, mobiler/src/splash.rs::removing_splash_undoes_the_sync_but_keeps_colours, mobiler/src/splash.rs::foreign_files_in_web_splash_survive, mobiler/src/splash.rs::splash_removed_and_added_back_still_owns_its_seeds
 
 ## 1. Context (The Problem)
 
@@ -34,7 +34,12 @@ The rules that make that hold:
 - **The sync's own files** (the logo PNGs, the Android 12 inset icon, the iOS imageset, `web/splash/`, the web block)
   are written with a logo and removed without one.
 - **Nothing is written until everything validates:** a bad colour, size or logo writes nothing.
-- **Removing `[splash]`** undoes the sync's own files and blocks, and keeps the colours (app-owned again).
+- **Removing `[splash]`** undoes the sync's own files and blocks, and keeps the colours. The kept files then say they
+  are app-owned. The ledger stays, marked inactive, so adding `[splash]` back still recognises them.
+- **A directory the sync shares with the app** (`web/splash/`) loses only the sync's own logos, and goes only when
+  empty.
+- **Write order:** assets are written before the files that reference them, references are cleared before the files
+  they name are removed, and the ledger is written last.
 
 ### 2.1. Refutation Conditions
 
@@ -65,10 +70,13 @@ The rules that make that hold:
 ## 4. Decision & Rationale for Corroboration
 
 Option D.
-- **Android:** the logo is resized with the `image` crate (PNG only, Lanczos3, never upscaled) to xxxhdpi (4×). The
-  launch layer-list centres it at its dp size. The Android 12 icon is an `inset` that fits it into the 113 dp square
-  inscribed in the 160 dp icon circle, inside the 240 dp box. It is named `mobiler_splash_logo_icon`, because
-  `mobiler_splash_icon` already exists as an alias in the colour seed.
+- **Android:** the logo is resized with the `image` crate (PNG only, Lanczos3, never upscaled; at most 16384 px per
+  side) to xxxhdpi (4×). The launch layer-list centres it at its dp size.
+  - The Android 12 icon is an `inset` with percentage insets. It keeps the logo's dp size up to the square inscribed
+    in the icon circle (0.4714 of the icon box), so it is right in either box: 288 dp without an icon background, or
+    240 dp with one. A non-square logo keeps its shape.
+  - It is named `mobiler_splash_logo_icon`, because `mobiler_splash_icon` already exists as an alias in the colour
+    seed.
 - **iOS:** the logo goes into a `MobilerSplashLogo` imageset at @3x, and `UIImageName` is written into the
   `UILaunchScreen` block.
 - **Web:** a `<style>` block (background via `prefers-color-scheme`, the logo on `body:empty`) and copies at 2×.
@@ -80,6 +88,11 @@ Option D.
   `hand_edited_seed_is_left_alone_with_a_warning`.
 - Writing despite an unreadable logo failed `broken_logo_leaves_everything_unchanged`.
 - Skipping the undo when the section is gone failed `removing_splash_undoes_the_sync_but_keeps_colours`.
+- From the review fix pass:
+  - removing all of `web/splash/` failed `foreign_files_in_web_splash_survive`;
+  - dropping the ledger on undo failed `splash_removed_and_added_back_still_owns_its_seeds`;
+  - ignoring the header failed `header_marks_xml_seeds_without_a_ledger`;
+  - comparing stock seeds byte for byte failed `a_crlf_stock_seed_is_still_stock`.
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
@@ -88,8 +101,9 @@ Option D.
   following light/dark.
 - **Positive:** an app's hand-edited launch files are never overwritten, and a framework file changes only inside its
   markers.
-- **Negative:** on Android 12+ a logo larger than about 113 dp is shown smaller than on Android 8–11, because Android
+- **Negative:** on Android 12+ a logo larger than about 136 dp is shown smaller than on Android 8–11, because Android
   masks the icon to a circle.
+- **Negative:** iOS draws the launch image at its own size, so a logo smaller than 3× `logo_size` shows smaller there.
 - **Negative:** an app made before CLI 0.65 shows the logo on Android 12+ and iOS only after `mobiler upgrade --apply`
   adds the markers; the colours work at once.
 - **Negative:** a translucent background is used as opaque.

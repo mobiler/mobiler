@@ -182,3 +182,13 @@ must produce an APK, with no file inside `res/` other than resources.
   icon drawable is `mobiler_splash_logo_icon`, because `mobiler_splash_icon` is already an alias in the seed
   `values/mobiler_splash.xml`. iOS JSON seeds are recognised as the sync's own through a ledger
   (`.mobiler/splash.json`), since JSON has no comments for a header.
+- **2026-10-03 (review of the implementation):**
+  - **Android 12 icon geometry:** without an icon background the box is 288 dp, masked to a 192 dp circle, so the
+    icon uses percentage insets. The logo keeps its dp size up to the inscribed square (0.4714 of the box, about
+    136 dp at 288), in either box.
+  - **`web/splash/`** loses only the sync's own logos.
+  - **The ledger** stays inactive after removal, and kept seeds say they are app-owned.
+  - **Stock detection** reads CRLF as LF.
+  - **The fonts sync** no longer touches an app whose `mobiler.toml` has no `[fonts]`.
+  - **Undo** runs only when the ledger is active. A missing ledger leaves the sync's files as they are: consistent,
+    but stale. This deviates from the plan.
