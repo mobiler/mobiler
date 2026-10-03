@@ -42,7 +42,7 @@ covers a conflict, or a clean merge offered as a review copy without `--apply`. 
 
 ```json
 { "template": "<the new template text: the baseline once resolved>",
-  "file_sha256": "<hash of the app's file when the review was offered>",
+  "file_hash": "<fingerprint of the app's file when the review was offered>",
   "kind": "conflict" | "review" }
 ```
 
@@ -50,7 +50,7 @@ covers a conflict, or a clean merge offered as a review copy without `--apply`. 
 
 On each run, before merging a file that has a pending record:
 
-- **Resolved:** the file's hash differs from `file_sha256` and the file has no conflict marker lines (`<<<<<<< `,
+- **Resolved:** the file's fingerprint differs from `file_hash` and the file has no conflict marker lines (`<<<<<<< `,
   `=======`, `>>>>>>> ` at the start of a line).
   - The recorded `template` becomes the baseline, and the record is deleted.
   - The report lists `✓ resolved <file>`.
@@ -93,7 +93,7 @@ With `--apply`, both behave as today. Seed files keep ADR-0042's rule (created w
 untouched.
 
 A new file accepted by hand (the review copy moved into place) is resolved by rule 2. A pending record for a file that
-didn't exist has `file_sha256` = the hash of the empty file, so "the file now exists" counts as changed.
+didn't exist has `file_hash` = the fingerprint of empty bytes, so "the file now exists" counts as changed.
 
 ## Testing
 
@@ -130,3 +130,12 @@ three things:
 - the pending record (commit `.mobiler/pending/`);
 - the end-of-run warning;
 - the rule that a review run never changes a file the build reads.
+
+## Amendments
+
+- **2026-10-03 (plan):**
+  - The record's fingerprint is FNV-1a 64-bit (`file_hash`), not SHA-256. It only tells "changed since offered" apart,
+    is not a security check, and the CLI has no SHA dependency. It is stable across Rust versions, unlike
+    `DefaultHasher`.
+  - The template `.gitignore` is left unchanged. It already doesn't ignore `.mobiler/pending/`, and editing it would put
+    a review copy into every app.
