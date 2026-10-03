@@ -112,6 +112,7 @@ version; where Android itself only has a feature on newer versions, older phones
 | Back button / gesture | Works everywhere (Compose `BackHandler`) | The predictive-back animation isn't enabled by the shell on any version |
 | App language | Set by the app itself (`ShellLabels`, your own strings) on every version | Android's per-app language setting (13+) isn't used |
 | Photo picker (`cx.pick_photo`) | The system file picker | The system photo picker (Android 11+ with current updates) |
+| Photo options (`cx.pick_photo_with` / `capture_photo_with`) | JPEG, PNG and WebP are decoded; a HEIC photo answers `unsupported_image` | HEIC decoded (9+); lossy WebP written as `WEBP_LOSSY` (11+) |
 | Notification permission (push, notifications, geofence) | No prompt: notifications need no runtime grant | The runtime prompt (13+) |
 | `biometric` | Any enrolled biometric, or the device PIN/pattern, on 8–10 | Strong biometrics or the device credential (11+) |
 | `bluetooth` | The legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` permissions (declared up to 11) | `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` (12+) |
