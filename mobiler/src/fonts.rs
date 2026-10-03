@@ -383,7 +383,7 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// Replace the `begin`..`end` block (inclusive, one per file) with begin + `body(indent)` + end, or insert
 /// it just above the `anchor` line (indented like it). Keeps the file's line endings (LF or CRLF).
 /// `Err` (nothing written) when the markers are unbalanced or there is neither a block nor the anchor.
-fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn(&str) -> Vec<String>) -> Result<String, &'static str> {
+pub(crate) fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn(&str) -> Vec<String>) -> Result<String, &'static str> {
     let lines: Vec<&str> = text.lines().collect();
     let indent_of = |l: &str| l[..l.len() - l.trim_start().len()].to_string();
     let begins: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains(begin)).map(|(i, _)| i).collect();
@@ -391,10 +391,10 @@ fn replace_block(text: &str, begin: &str, end: &str, anchor: &str, body: impl Fn
     let (start, stop, indent) = match (begins.as_slice(), ends.as_slice()) {
         ([b], [e]) if e > b => (*b, e + 1, indent_of(lines[*b])),
         ([], []) => {
-            let a = lines.iter().position(|l| l.contains(anchor)).ok_or("no anchor to insert the fonts block at")?;
+            let a = lines.iter().position(|l| l.contains(anchor)).ok_or("no anchor to insert the block at")?;
             (a, a, indent_of(lines[a]))
         }
-        _ => return Err("unbalanced mobiler:fonts marker lines (fix them by hand)"),
+        _ => return Err("unbalanced marker lines (fix them by hand)"),
     };
     let mut out: Vec<String> = lines[..start].iter().map(|l| (*l).to_string()).collect();
     out.push(format!("{indent}{begin}"));

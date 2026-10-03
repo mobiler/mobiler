@@ -19,7 +19,7 @@ use include_dir::{Dir, include_dir};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
+pub(crate) static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
 /// Project-relative path of the version stamp written by `new` + `upgrade`.
 pub(crate) const STAMP_REL: &str = ".mobiler/version";
@@ -63,7 +63,7 @@ enum Class {
 }
 
 /// Seed files (ADR-0042): the launch-window values a later `[splash]` sync writes, app-owned meanwhile.
-const SEED_PATHS: &[&str] = &[
+pub(crate) const SEED_PATHS: &[&str] = &[
     "Android/app/src/main/res/values/mobiler_splash.xml",
     "Android/app/src/main/res/values-night/mobiler_splash.xml",
     "Android/app/src/main/res/drawable/mobiler_launch.xml",
@@ -529,7 +529,7 @@ fn pending_path(root: &Path, rel: &Path) -> PathBuf {
 
 /// A stable fingerprint of a file's bytes (FNV-1a 64): tells "changed since offered" apart. Not a
 /// security hash; the same across Rust versions and machines, unlike `DefaultHasher`.
-fn fingerprint(bytes: &[u8]) -> String {
+pub(crate) fn fingerprint(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for (i, b) in bytes.iter().enumerate() {
         // CRLF hashes as LF: a teammate's Windows checkout (core.autocrlf) is not a change.
