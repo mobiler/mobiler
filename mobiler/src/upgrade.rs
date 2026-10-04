@@ -134,7 +134,7 @@ struct Report {
     deps_would: Option<(String, String)>,
     /// Pending records for paths the template no longer produces: deleted, nothing left to review.
     dropped: Vec<String>,
-    /// Managed paths holding a symlink that points nowhere: never written through, left for the user.
+    /// Managed paths holding a symlink (live or dangling): never read or written through, left for the user.
     skipped: Vec<String>,
     /// Every managed path this run visited (to find records for paths no longer produced).
     managed: std::collections::HashSet<String>,
@@ -301,15 +301,16 @@ fn sync_file(
     let rel_disp = rel.to_string_lossy().to_string();
 
     report.managed.insert(rel_disp.clone());
+    // A symlink (to a real file or to nothing): upgrade never writes through links — its target may be
+    // outside the app — so the path is reported and left alone, with any pending review kept as is.
+    if dst.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+        report.skipped.push(rel_disp);
+        return Ok(());
+    }
     if check_pending(root, &rel, &dst, &rel_disp, report)? {
         return Ok(());
     }
 
-    if dst.symlink_metadata().is_ok() && !dst.exists() {
-        // A symlink pointing nowhere: writing would create its target, possibly outside the app.
-        report.skipped.push(rel_disp);
-        return Ok(());
-    }
     if !dst.exists() {
         // A file the new version introduces. A review run offers it instead: it may need edits that
         // still wait as review copies (e.g. a type registered in codegen.rs).
@@ -903,7 +904,7 @@ impl Report {
             println!("  ‼ markers  {m}  (conflict markers left in the file)");
         }
         for k in &self.skipped {
-            println!("  ! skipped  {k}  (a symlink that points nowhere — remove it, then run upgrade again)");
+            println!("  ! skipped  {k}  (a symlink — upgrade never writes through links; replace it with a real file to get updates)");
         }
         for d in &self.dropped {
             println!("  - dropped  {d}  (no longer part of the template; its pending review was removed)");
@@ -1520,6 +1521,27 @@ mod test {
         fs::remove_file(root.join("rust-toolchain.toml")).unwrap();
         let err = upgrade_with(&root, true, &["rust-toolchain.toml"]).err().expect("refused");
         assert!(format!("{err:#}").contains("doesn't exist"), "{err:#}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_live_symlink_at_a_managed_path_is_never_written_through() {
+        // A symlink to a real file outside the app: upgrade must not read-merge it, overwrite its target,
+        // or write a backup or review copy through it.
+        let root = skeleton();
+        let outside = root.with_extension("outside-toolchain");
+        fs::write(&outside, "MINE\n").unwrap();
+        let dst = root.join("rust-toolchain.toml");
+        std::os::unix::fs::symlink(&outside, &dst).unwrap();
+        for apply in [false, true] {
+            let r = upgrade_at(&root, apply).unwrap();
+            assert_eq!(fs::read_to_string(&outside).unwrap(), "MINE\n", "the link's target was changed (apply={apply})");
+            assert!(r.skipped.iter().any(|s| s.contains("rust-toolchain.toml")), "{:?}", r.skipped);
+            assert!(fs::symlink_metadata(&dst).unwrap().file_type().is_symlink(), "the link itself is left alone");
+            assert!(!root.join("rust-toolchain.toml.mobiler-new").exists(), "no review copy");
+        }
+        let _ = fs::remove_file(&outside);
         let _ = fs::remove_dir_all(&root);
     }
 
