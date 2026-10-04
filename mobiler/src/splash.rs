@@ -227,6 +227,8 @@ pub(crate) const LAUNCH: &str = "Android/app/src/main/res/drawable/mobiler_launc
 pub(crate) const COLORSET: &str = "iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset/Contents.json";
 pub(crate) const LOGO_PNG: &str = "Android/app/src/main/res/drawable-xxxhdpi/mobiler_splash_logo.png";
 pub(crate) const LOGO_DARK_PNG: &str = "Android/app/src/main/res/drawable-night-xxxhdpi/mobiler_splash_logo.png";
+/// The density folders the logos live in: removed with the logos once nothing else is in them.
+const LOGO_DIRS: [&str; 2] = ["Android/app/src/main/res/drawable-xxxhdpi", "Android/app/src/main/res/drawable-night-xxxhdpi"];
 pub(crate) const ICON: &str = "Android/app/src/main/res/drawable/mobiler_splash_logo_icon.xml";
 pub(crate) const THEMES: [&str; 2] = [
     "Android/app/src/main/res/values-v31/mobiler_themes.xml",
@@ -395,6 +397,7 @@ fn logo_changes(
         removes.push(Change::Remove(LOGO_DARK_PNG.into()));
         removes.push(Change::Remove(format!("{IMAGESET}/mobiler-splash-logo-dark@3x.png")));
     }
+    removes.extend(LOGO_DIRS.map(|d| Change::RemoveDirIfEmpty(d.into())));
     Ok(())
 }
 
@@ -480,6 +483,7 @@ fn undo(root: &Path, seeds: &BTreeMap<String, String>, report: &mut SyncReport) 
         Change::Remove(format!("{WEB_DIR}/mobiler-splash-logo-dark.png")),
         Change::RemoveDirIfEmpty(WEB_DIR.into()),
     ]);
+    changes.extend(LOGO_DIRS.map(|d| Change::RemoveDirIfEmpty(d.into())));
     changes.push(Change::Write(LEDGER.into(), ledger_json(false, &seeds)?));
     apply(root, changes, report)
 }
@@ -957,6 +961,9 @@ mod tests {
         let r = sync(&root).unwrap();
         for gone in [LOGO_PNG, LOGO_DARK_PNG, ICON, IMAGESET, WEB_DIR] {
             assert!(!root.join(gone).exists(), "{gone} still there ({r:?})");
+        }
+        for dir in ["Android/app/src/main/res/drawable-xxxhdpi", "Android/app/src/main/res/drawable-night-xxxhdpi"] {
+            assert!(!root.join(dir).exists(), "empty {dir} left behind");
         }
         assert!(!read(&root, LAUNCH).contains("mobiler_splash_logo"));
         assert!(!read(&root, THEMES[1]).contains("windowSplashScreenAnimatedIcon"));

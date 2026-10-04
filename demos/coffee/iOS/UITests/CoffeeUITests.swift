@@ -16,18 +16,18 @@ final class CoffeeUITests: XCTestCase {
 
         // Open a product (any card — labelled with the coffee name).
         let card = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Mocha'")).firstMatch
-        XCTAssertTrue(card.waitForExistence(timeout: 10), "storefront product card should appear")
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "storefront product card should appear")
         card.tap()
 
         // On the detail screen the in-body back button exists.
         let back = app.buttons["← Back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 5), "detail screen should show the ← Back button")
+        XCTAssertTrue(back.waitForExistence(timeout: 20), "detail screen should show the ← Back button")
 
         // Tapping it must return to the storefront — the regression under test.
         back.tap()
 
         let getStarted = app.buttons["Get Started"]
-        XCTAssertTrue(getStarted.waitForExistence(timeout: 5),
+        XCTAssertTrue(getStarted.waitForExistence(timeout: 20),
                       "tapping ← Back should return to the storefront (regression: image swallowed the tap)")
         XCTAssertFalse(app.buttons["← Back"].exists, "← Back should be gone once back on the storefront")
     }

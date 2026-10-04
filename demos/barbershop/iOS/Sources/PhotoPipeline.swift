@@ -67,8 +67,49 @@ enum PhotoPipeline {
         }
     }
 
+    /// Where the pipeline writes, and how long its output stays there: long enough to upload or show it.
+    private static let keep: TimeInterval = 24 * 60 * 60
+    private static var photosDir: URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("photos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Delete pipeline output older than `keep` (iOS may clear tmp, but needn't).
+    private static func prune() {
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-keep)
+        let files = (try? fm.contentsOfDirectory(at: photosDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for f in files where ((try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()) < cutoff {
+            try? fm.removeItem(at: f)
+        }
+    }
+
+    /// JPEG has no alpha: a transparent image goes onto white (it would turn black).
+    private static func onWhite(_ image: CGImage) -> CGImage {
+        switch image.alphaInfo {
+        case .none, .noneSkipLast, .noneSkipFirst: return image
+        default: break
+        }
+        // The image's own RGB space (e.g. Display P3) where it can be drawn into, else sRGB.
+        let space = image.colorSpace.flatMap { $0.model == .rgb && $0.supportsOutput ? $0 : nil }
+            ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let context = { (space: CGColorSpace) in
+            CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        }
+        // A space an 8-bit context can't use (e.g. extended range) falls back to sRGB, never to black.
+        guard let ctx = context(space) ?? CGColorSpace(name: CGColorSpace.sRGB).flatMap(context) else { return image }
+        let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        ctx.fill(rect)
+        ctx.draw(image, in: rect)
+        return ctx.makeImage() ?? image
+    }
+
     static func process(_ url: URL, input: String) -> PluginResponse {
         let o = parse(input)
+        prune()
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
               var w = props[kCGImagePropertyPixelWidth] as? Int, var h = props[kCGImagePropertyPixelHeight] as? Int
@@ -82,7 +123,12 @@ enum PhotoPipeline {
         let hasMetadata = !pngIsClean((try? Data(contentsOf: url)) ?? Data())
         let fits = (o.maxDimension.map { max(w, h) <= $0 } ?? true) && (o.maxBytes.map { size <= $0 } ?? true)
         if o.format == "original" && fits && !(o.strip && hasMetadata) {
-            return ok(url, mime, size, w, h)
+            // A copy in the pipeline's folder, so it is pruned like any output (the caller removes the source).
+            let out = photosDir.appendingPathComponent(UUID().uuidString + "." + (utType?.preferredFilenameExtension ?? "jpg"))
+            guard (try? FileManager.default.copyItem(at: url, to: out)) != nil else { return PluginResponse(ok: false, output: "unavailable") }
+            // A copy (an APFS clone) keeps the original's date: stamp it now, or the next call would prune it.
+            try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: out.path)
+            return ok(out, mime, size, w, h)
         }
         let png = o.format == "png" || (o.format == "original" && utType == .png)
         let (tw, th) = target(w, h, o.maxDimension)
@@ -91,17 +137,18 @@ enum PhotoPipeline {
             kCGImageSourceCreateThumbnailWithTransform: true, // applies the orientation
             kCGImageSourceThumbnailMaxPixelSize: max(tw, th),
         ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts as CFDictionary) else {
+        guard let thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts as CFDictionary) else {
             return PluginResponse(ok: false, output: "unsupported_image")
         }
         let outType: UTType = png ? .png : .jpeg // iOS can't encode WebP → JPEG
+        let image = png ? thumb : onWhite(thumb)
         for q in png ? [100] : ladder(o.quality) {
             let data = NSMutableData()
             guard let dest = CGImageDestinationCreateWithData(data as CFMutableData, outType.identifier as CFString, 1, nil) else { break }
             CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: Double(q) / 100] as CFDictionary)
             guard CGImageDestinationFinalize(dest) else { break }
             if o.maxBytes.map({ data.length <= $0 }) ?? true {
-                let out = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + (png ? ".png" : ".jpg"))
+                let out = photosDir.appendingPathComponent(UUID().uuidString + (png ? ".png" : ".jpg"))
                 guard (try? data.write(to: out)) != nil else { return PluginResponse(ok: false, output: "unavailable") }
                 return ok(out, outType.preferredMIMEType ?? "image/jpeg", data.length, image.width, image.height)
             }
@@ -109,14 +156,13 @@ enum PhotoPipeline {
         return PluginResponse(ok: false, output: "too_large")
     }
 
-    /// `process`, then delete `source` unless it is the returned handle (a pass-through): it is an
-    /// intermediate copy that may still carry the original's metadata.
+    /// `process`, then delete `source`: it is an intermediate copy that may still
+    /// carry the original's metadata.
     static func processReplacing(_ source: URL, input: String) -> PluginResponse {
         let result = process(source, input: input)
-        // Keep `source` only when it is the returned handle (a pass-through); a failed re-encode
-        // leaves nothing the app was given, so the copy goes too.
-        let passedThrough = result.ok && (try? Photo.bincodeDeserialize(input: result.output))?.handle == source.absoluteString
-        if !passedThrough { try? FileManager.default.removeItem(at: source) }
+        // `source` is an intermediate copy that may still carry the original's metadata; every outcome
+        // returns a new file in `photosDir` (a pass-through is copied there too), so it always goes.
+        try? FileManager.default.removeItem(at: source)
         return result
     }
 
