@@ -383,7 +383,7 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     if fs::read(path).is_ok_and(|old| old == bytes) {
         return Ok(());
     }
-    fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
+    crate::fsguard::write(path, bytes)
 }
 
 /// Replace the `begin`..`end` block (inclusive, one per file) with begin + `body(indent)` + end, or insert
