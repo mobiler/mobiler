@@ -449,7 +449,7 @@ fn copy_source(src: &Source, rel: &str, dst_dir: &Path, subs: &Subs, root: &Path
     let name = Path::new(rel)
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("plugin source `{rel}` has no file name"))?;
-    fs::create_dir_all(dst_dir).with_context(|| format!("creating {}", dst_dir.display()))?;
+    // The guard creates the folders, after checking none on the way is a symlink.
     let dst = dst_dir.join(name);
     crate::fsguard::write_from_cwd(&dst, substitute(&raw, subs))?;
     println!("  + {}", dst.strip_prefix(root).unwrap_or(&dst).display());

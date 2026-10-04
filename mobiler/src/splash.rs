@@ -582,11 +582,11 @@ fn png_at(logo: &Logo, scale: u32, report: &mut SyncReport) -> anyhow::Result<Ve
 }
 
 fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::Result<()> {
-    // All or nothing: a symlink on the way to any target stops the sync before it writes anything.
+    // All or nothing: a symlink on the way to any target (written or removed) stops the sync before it
+    // touches anything.
     for change in &changes {
-        if let Change::Write(rel, _) = change {
-            crate::fsguard::check(root, &root.join(rel))?;
-        }
+        let (Change::Write(rel, _) | Change::Remove(rel) | Change::RemoveDirIfEmpty(rel)) = change;
+        crate::fsguard::check(root, &root.join(rel))?;
     }
     for change in changes {
         match change {
