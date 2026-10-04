@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 mod build;
 mod dev;
 mod fonts;
+mod fsguard;
 mod display_name;
 mod doctor;
 mod new;

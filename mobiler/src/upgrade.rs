@@ -149,7 +149,8 @@ struct Report {
 pub fn run(apply: bool, resolved: &[String]) -> Result<()> {
     let root = std::env::current_dir().context("reading current directory")?;
     let resolved: Vec<&str> = resolved.iter().map(String::as_str).collect();
-    let report = upgrade_with(&root, apply, &resolved)?;
+    let report = upgrade_with(&root, apply, &resolved)
+        .context("upgrade stopped — files reported before this point may already be updated")?;
     report.print(apply);
     Ok(())
 }
@@ -242,7 +243,7 @@ fn bump_core_dep(root: &Path, apply: bool, report: &mut Report) -> Result<()> {
         &format!("mobiler-core = \"{want}\""),
         1,
     );
-    fs::write(&path, updated).with_context(|| format!("writing {}", path.display()))?;
+    crate::fsguard::write(root, &path, updated)?;
     report.deps = Some((have, want));
     Ok(())
 }
@@ -284,6 +285,7 @@ fn sync_file(
         // refuses to follow one created in between.
         let dst = root.join(&rel);
         if dst.symlink_metadata().is_err() {
+            crate::fsguard::check(root, &dst)?; // no symlinked folder on the way either
             if let Some(parent) = dst.parent() {
                 fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
             }
@@ -322,10 +324,7 @@ fn sync_file(
             return Ok(());
         }
         // With --apply it is additive, safe to create (and baseline).
-        if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-        }
-        fs::write(&dst, &desired).with_context(|| format!("writing {}", dst.display()))?;
+        crate::fsguard::write(root, &dst, &desired)?;
         report.added.push(rel_disp);
         write_baseline(root, &rel, &desired)?;
         clear_pending(root, &rel);
@@ -426,7 +425,7 @@ fn three_way(
         }
         Ok(merged) if apply => {
             write_backup(report.app_root.as_deref(), dst, current.as_bytes())?;
-            fs::write(dst, &merged).with_context(|| format!("writing {}", dst.display()))?;
+            crate::fsguard::write(guard_root(report.app_root.as_deref(), dst), dst, &merged)?;
             report.updated.push(rel_disp.to_string());
             Ok(true)
         }
@@ -499,7 +498,7 @@ fn shell_write(
 ) -> Result<bool> {
     if apply {
         write_backup(report.app_root.as_deref(), dst, current)?;
-        fs::write(dst, desired).with_context(|| format!("writing {}", dst.display()))?;
+        crate::fsguard::write(guard_root(report.app_root.as_deref(), dst), dst, desired)?;
         report.updated.push(rel_disp.to_string());
         Ok(true)
     } else {
@@ -507,6 +506,11 @@ fn shell_write(
         report.changed.push(rel_disp.to_string());
         Ok(false)
     }
+}
+
+/// The root the write guard checks folders from: the app root, or (tests without one) the file's folder.
+fn guard_root<'a>(app_root: Option<&'a Path>, dst: &'a Path) -> &'a Path {
+    app_root.or_else(|| dst.parent()).unwrap_or(Path::new("."))
 }
 
 /// Path of a file's recorded ancestor under `.mobiler/base/`.
@@ -522,10 +526,7 @@ fn read_baseline(root: &Path, rel: &Path) -> Option<String> {
 /// Record `bytes` as the ancestor for `rel` (the pristine new template).
 fn write_baseline(root: &Path, rel: &Path, bytes: &[u8]) -> Result<()> {
     let path = baseline_path(root, rel);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
-    fs::write(&path, bytes).with_context(|| format!("writing baseline {}", path.display()))
+    crate::fsguard::write(root, &path, bytes)
 }
 
 /// Path of `rel`'s pending record: `.mobiler/pending/<rel>.json`.
@@ -585,16 +586,13 @@ struct Offer<'a> {
 
 fn write_pending(root: &Path, rel: &Path, offer: &Offer<'_>) -> Result<()> {
     let path = pending_path(root, rel);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
     let json = serde_json::json!({
         "template": offer.template,
         "file_hash": fingerprint(offer.current),
         "kind": offer.kind,
         "offered_hash": fingerprint(offer.offered),
     });
-    fs::write(&path, serde_json::to_string_pretty(&json)?).with_context(|| format!("writing {}", path.display()))
+    crate::fsguard::write(root, &path, serde_json::to_string_pretty(&json)?)
 }
 
 fn clear_pending(root: &Path, rel: &Path) {
@@ -772,10 +770,7 @@ fn write_backup(app_root: Option<&Path>, dst: &Path, bytes: &[u8]) -> Result<()>
         return write_sidecar(dst, "mobiler-bak", bytes);
     };
     let backup = root.join(".mobiler/backup").join(rel);
-    if let Some(parent) = backup.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
-    fs::write(&backup, bytes).with_context(|| format!("writing {}", backup.display()))
+    crate::fsguard::write(root, &backup, bytes)
 }
 
 /// Whether `rel` is an Android resource (`…/src/<sourceSet>/res/…`). Gradle's resource merge rejects
@@ -798,16 +793,13 @@ fn write_review(app_root: Option<&Path>, dst: &Path, bytes: &[u8]) -> Result<()>
         return write_sidecar(dst, "mobiler-new", bytes);
     };
     let side = root.join(review_rel(&rel.to_string_lossy()));
-    if let Some(parent) = side.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
-    fs::write(&side, bytes).with_context(|| format!("writing {}", side.display()))
+    crate::fsguard::write(root, &side, bytes)
 }
 
 /// Write `<dst>.<suffix>` next to `dst` (e.g. `Render.swift.mobiler-new`).
 fn write_sidecar(dst: &Path, suffix: &str, bytes: &[u8]) -> Result<()> {
     let side = PathBuf::from(format!("{}.{suffix}", dst.display()));
-    fs::write(&side, bytes).with_context(|| format!("writing {}", side.display()))?;
+    crate::fsguard::write(dst.parent().unwrap_or(Path::new(".")), &side, bytes)?;
     Ok(())
 }
 
@@ -821,11 +813,7 @@ pub(crate) fn write_version_stamp(root: &Path) -> Result<Option<String>> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
-    fs::write(&path, format!("{}\n", env!("CARGO_PKG_VERSION")))
-        .with_context(|| format!("writing {}", path.display()))?;
+    crate::fsguard::write(root, &path, format!("{}\n", env!("CARGO_PKG_VERSION")))?;
     Ok(prev)
 }
 
@@ -1521,6 +1509,38 @@ mod test {
         fs::remove_file(root.join("rust-toolchain.toml")).unwrap();
         let err = upgrade_with(&root, true, &["rust-toolchain.toml"]).err().expect("refused");
         assert!(format!("{err:#}").contains("doesn't exist"), "{err:#}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upgrade_never_writes_its_own_files_through_a_symlink() {
+        // The version stamp (or any .mobiler/ side file) linked outside the app: refused, target untouched.
+        let root = skeleton();
+        let outside = root.with_extension("outside-stamp");
+        fs::write(&outside, "MINE\n").unwrap();
+        fs::create_dir_all(root.join(".mobiler")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(STAMP_REL)).unwrap();
+        let err = upgrade_at(&root, true).err().expect("refused");
+        assert!(format!("{err:#}").contains("symlink"), "{err:#}");
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "MINE\n");
+        let _ = fs::remove_file(&outside);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upgrade_never_writes_into_a_symlinked_folder() {
+        // `.mobiler/` linked outside the app: no stamp, baseline, backup or record lands there.
+        let root = skeleton();
+        let outside = root.with_extension("outside-mobiler");
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".mobiler")).unwrap();
+        let err = upgrade_at(&root, true).err().expect("refused");
+        assert!(format!("{err:#}").contains(".mobiler is a symlink"), "{err:#}");
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0, "nothing written through the link");
+        let _ = fs::remove_dir_all(&outside);
         let _ = fs::remove_dir_all(&root);
     }
 
