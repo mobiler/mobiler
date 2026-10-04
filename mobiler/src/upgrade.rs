@@ -904,7 +904,7 @@ impl Report {
             println!("  ‼ markers  {m}  (conflict markers left in the file)");
         }
         for k in &self.skipped {
-            println!("  ! skipped  {k}  (a symlink — upgrade never writes through links; replace it with a real file to get updates)");
+            println!("  ! skipped  {k}  (a symlink at this path — upgrade doesn't write through it; replace it with a real file to get updates)");
         }
         for d in &self.dropped {
             println!("  - dropped  {d}  (no longer part of the template; its pending review was removed)");
