@@ -50,8 +50,8 @@ pub(crate) fn set(root: &Path, name: &str) -> Result<()> {
     if name.contains(['\n', '\r']) {
         bail!("display name must be a single line");
     }
-    set_android(&root.join(STRINGS_REL), name)?;
-    set_ios(&root.join(PROJECT_YML_REL), name)?;
+    set_android(root, &root.join(STRINGS_REL), name)?;
+    set_ios(root, &root.join(PROJECT_YML_REL), name)?;
     Ok(())
 }
 
@@ -71,17 +71,17 @@ fn current(root: &Path) -> (Option<String>, Option<String>) {
     (android, ios)
 }
 
-fn set_android(path: &Path, name: &str) -> Result<()> {
+fn set_android(root: &Path, path: &Path, name: &str) -> Result<()> {
     let content = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let Some(line) = content.lines().find(|l| l.contains("name=\"app_name\"")) else {
         bail!("no <string name=\"app_name\"> in {}", path.display());
     };
     let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
     let new_line = format!("{indent}<string name=\"app_name\">{}</string>", escape_android(name));
-    crate::fsguard::write_from_cwd(path, content.replacen(line, &new_line, 1))
+    crate::fsguard::write(root, path, content.replacen(line, &new_line, 1))
 }
 
-fn set_ios(path: &Path, name: &str) -> Result<()> {
+fn set_ios(root: &Path, path: &Path, name: &str) -> Result<()> {
     let content = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let value = format!("\"{}\"", escape_yaml(name));
     let updated = if let Some(line) = content.lines().find(|l| l.trim_start().starts_with(PLIST_KEY)) {
@@ -104,7 +104,7 @@ fn set_ios(path: &Path, name: &str) -> Result<()> {
         }
         joined
     };
-    crate::fsguard::write_from_cwd(path, updated)
+    crate::fsguard::write(root, path, updated)
 }
 
 /// Android string resource escaping: XML entities plus aapt's own `'`/`"`/leading `@`/`?` rules.
@@ -171,6 +171,23 @@ mod tests {
         fs::write(root.join(STRINGS_REL), "<resources>\n    <string name=\"app_name\">MobileScaffold</string>\n</resources>\n").unwrap();
         fs::write(root.join(PROJECT_YML_REL), PROJECT_YML).unwrap();
         root
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn never_writes_into_a_symlinked_folder() {
+        let root = app();
+        let values = root.join("Android/app/src/main/res/values");
+        let outside = root.with_extension("outside-values");
+        let _ = fs::remove_dir_all(&outside);
+        fs::rename(&values, &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &values).unwrap();
+        let before = fs::read_to_string(outside.join("strings.xml")).unwrap();
+        let err = set(&root, "Elsewhere").err().expect("refused");
+        assert!(format!("{err:#}").contains("values is a symlink"), "{err:#}");
+        assert_eq!(fs::read_to_string(outside.join("strings.xml")).unwrap(), before);
+        let _ = fs::remove_dir_all(&outside);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

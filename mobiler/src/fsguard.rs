@@ -40,14 +40,6 @@ pub(crate) fn write(root: &Path, path: impl AsRef<Path>, bytes: impl AsRef<[u8]>
     std::fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
 }
 
-/// [`write`] for commands that run from the app root (`plugin add`, `display-name`): the current
-/// directory is the root the folders are checked from.
-pub(crate) fn write_from_cwd(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> anyhow::Result<()> {
-    let path = path.as_ref();
-    let root = std::env::current_dir().unwrap_or_else(|_| path.parent().unwrap_or(Path::new(".")).to_path_buf());
-    write(&root, path, bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

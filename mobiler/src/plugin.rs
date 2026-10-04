@@ -200,37 +200,37 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
             copy_source(&src, rel, &dst_dir, &subs, root)?;
         }
         let core_kt = dst_dir.join("Core.kt");
-        report(insert_before(&core_kt, "// mobiler:plugins", &format!("{},", a.register), &a.register)?, "Android registration");
+        report(insert_before(root, &core_kt, "// mobiler:plugins", &format!("{},", a.register), &a.register)?, "Android registration");
         let manifest_xml = root.join("Android/app/src/main/AndroidManifest.xml");
         for perm in &a.permissions {
             let (name, line) = permission_line(perm);
             // The quoted attribute, so BLUETOOTH isn't taken as present because BLUETOOTH_SCAN is.
             let needle = format!("android:name=\"{name}\"");
-            report(insert_before(&manifest_xml, "mobiler:permissions", &line, &needle)?, "Android permission");
+            report(insert_before(root, &manifest_xml, "mobiler:permissions", &line, &needle)?, "Android permission");
         }
         let gradle = root.join("Android/app/build.gradle.kts");
         for dep in &a.gradle_deps {
             let line = format!("implementation(\"{dep}\")");
-            report(insert_before(&gradle, "mobiler:gradle-deps", &line, dep)?, "Android Gradle dependency");
+            report(insert_before(root, &gradle, "mobiler:gradle-deps", &line, dep)?, "Android Gradle dependency");
         }
         let gradle_proj = root.join("Android/build.gradle.kts");
         for gp in &a.gradle_plugins {
             // "plugin.id:version" → applied in the app block + declared (apply false) at project level.
             let (id, ver) = gp.split_once(':').unwrap_or((gp.as_str(), ""));
             let needle = format!("id(\"{id}\")");
-            report(insert_before(&gradle, "mobiler:gradle-plugins", &needle, &needle)?, "Android Gradle plugin (app)");
+            report(insert_before(root, &gradle, "mobiler:gradle-plugins", &needle, &needle)?, "Android Gradle plugin (app)");
             let proj_line = if ver.is_empty() {
                 format!("id(\"{id}\") apply false")
             } else {
                 format!("id(\"{id}\") version \"{ver}\" apply false")
             };
-            report(insert_before(&gradle_proj, "mobiler:gradle-plugins-classpath", &proj_line, &needle)?, "Android Gradle plugin (project)");
+            report(insert_before(root, &gradle_proj, "mobiler:gradle-plugins-classpath", &proj_line, &needle)?, "Android Gradle plugin (project)");
         }
         for xml in &a.manifest_application {
             // Idempotency key: the snippet's android:name (unique per receiver/service/provider),
             // falling back to the trimmed snippet if it has none.
             let needle = manifest_name(xml).unwrap_or_else(|| xml.trim().to_string());
-            report(insert_before(&manifest_xml, "mobiler:manifest-application", xml.trim(), &needle)?, "Android manifest entry");
+            report(insert_before(root, &manifest_xml, "mobiler:manifest-application", xml.trim(), &needle)?, "Android manifest entry");
         }
     }
 
@@ -240,16 +240,16 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
             copy_source(&src, rel, &dst_dir, &subs, root)?;
         }
         let core_swift = root.join("iOS/Sources/Core.swift");
-        report(insert_before(&core_swift, "// mobiler:plugins", &i.register, &i.register)?, "iOS registration");
+        report(insert_before(root, &core_swift, "// mobiler:plugins", &i.register, &i.register)?, "iOS registration");
         if let Some(rs) = &i.register_stream {
-            report(insert_before(&core_swift, "// mobiler:plugins-stream", rs, rs)?, "iOS streaming registration");
+            report(insert_before(root, &core_swift, "// mobiler:plugins-stream", rs, rs)?, "iOS streaming registration");
         }
         // Launch-time hooks (BGTaskScheduler.register, CLLocationManager re-arm) injected into
         // App.swift's didFinishLaunchingWithOptions — the only place that runs before the OS
         // delivers a queued background event.
         let app_swift = root.join("iOS/Sources/App.swift");
         for line in &i.app_launch {
-            report(insert_before(&app_swift, "// mobiler:app-launch", line, line)?, "iOS app-launch hook");
+            report(insert_before(root, &app_swift, "// mobiler:app-launch", line, line)?, "iOS app-launch hook");
         }
 
         let project_yml = root.join("iOS/project.yml");
@@ -260,16 +260,16 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
                 // [fetch]) must union, not skip (insert_before's key-name idempotency would drop one).
                 toml::Value::Array(arr) => {
                     let items: Vec<String> = arr.iter().map(yaml_scalar).collect();
-                    report(merge_plist_array(&project_yml, key, &items)?, "iOS Info.plist key");
+                    report(merge_plist_array(root, &project_yml, key, &items)?, "iOS Info.plist key");
                 }
                 _ => {
                     let line = format!("{key}: {}", yaml_scalar(val));
-                    report(insert_before(&project_yml, "# mobiler:info-plist", &line, key)?, "iOS Info.plist key");
+                    report(insert_before(root, &project_yml, "# mobiler:info-plist", &line, key)?, "iOS Info.plist key");
                 }
             }
         }
         if !i.entitlements.is_empty() {
-            install_entitlements(&project_yml, &i.entitlements, &mut notes)?;
+            install_entitlements(root, &project_yml, &i.entitlements, &mut notes)?;
             notes.push(
                 "iOS: enable the matching capability on your App ID in the Apple Developer \
                  portal (the one step that can't be automated)."
@@ -277,7 +277,7 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
             );
         }
         for entry in &i.spm_packages {
-            install_spm_package(&project_yml, entry)?;
+            install_spm_package(root, &project_yml, entry)?;
         }
     }
 
@@ -449,9 +449,9 @@ fn copy_source(src: &Source, rel: &str, dst_dir: &Path, subs: &Subs, root: &Path
     let name = Path::new(rel)
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("plugin source `{rel}` has no file name"))?;
-    // The guard creates the folders, after checking none on the way is a symlink.
+    // The guard creates the folders, after checking none between the app root and them is a symlink.
     let dst = dst_dir.join(name);
-    crate::fsguard::write_from_cwd(&dst, substitute(&raw, subs))?;
+    crate::fsguard::write(root, &dst, substitute(&raw, subs))?;
     println!("  + {}", dst.strip_prefix(root).unwrap_or(&dst).display());
     Ok(())
 }
@@ -482,7 +482,7 @@ fn line_has_marker(line: &str, marker: &str) -> bool {
 
 /// Insert `payload` (one logical line) immediately before the line containing `marker` (matched at
 /// a token boundary), with the marker's indentation. Idempotent: skip if `needle` is already present.
-fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Result<Insert> {
+fn insert_before(root: &Path, path: &Path, marker: &str, payload: &str, needle: &str) -> Result<Insert> {
     let content = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     // Only live lines count: a template's commented-out opt-in line (ADR-0035) must not stop the
     // plugin that needs it from inserting the real one.
@@ -495,7 +495,7 @@ fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Resu
     let indent: String = marker_line.chars().take_while(|c| c.is_whitespace()).collect();
     let anchor = format!("{marker_line}\n");
     let updated = content.replacen(&anchor, &format!("{indent}{payload}\n{anchor}"), 1);
-    crate::fsguard::write_from_cwd(path, updated)?;
+    crate::fsguard::write(root, path, updated)?;
     Ok(Insert::Inserted)
 }
 
@@ -556,7 +556,7 @@ fn without_comments(path: &Path, content: &str) -> String {
 /// same items reports AlreadyPresent. Two plugins (geofence `[location]` + background-fetch `[fetch]`)
 /// or a plugin layered on a hand-authored block must union, not silently drop one (which would leave a
 /// background capability undeclared).
-fn merge_plist_array(project_yml: &Path, key: &str, items: &[String]) -> Result<Insert> {
+fn merge_plist_array(root: &Path, project_yml: &Path, key: &str, items: &[String]) -> Result<Insert> {
     let content =
         fs::read_to_string(project_yml).with_context(|| format!("reading {}", project_yml.display()))?;
 
@@ -579,7 +579,7 @@ fn merge_plist_array(project_yml: &Path, key: &str, items: &[String]) -> Result<
         }
         let new_line = format!("{indent}{key}: [{}]", merged.join(", "));
         let updated = content.replacen(existing, &new_line, 1);
-        crate::fsguard::write_from_cwd(project_yml, updated)?;
+        crate::fsguard::write(root, project_yml, updated)?;
         return Ok(Insert::Inserted);
     }
 
@@ -610,18 +610,19 @@ fn merge_plist_array(project_yml: &Path, key: &str, items: &[String]) -> Result<
             let anchor = format!("{anchor_line}\n");
             let replacement = format!("{anchor}{}\n", additions.join("\n"));
             let updated = content.replacen(&anchor, &replacement, 1);
-            crate::fsguard::write_from_cwd(project_yml, updated)?;
+            crate::fsguard::write(root, project_yml, updated)?;
             return Ok(Insert::Inserted);
         }
     }
 
     let line = format!("{key}: [{}]", items.join(", "));
-    insert_before(project_yml, "# mobiler:info-plist", &line, key)
+    insert_before(root, project_yml, "# mobiler:info-plist", &line, key)
 }
 
 /// Add an xcodegen target-level `entitlements:` block at the `# mobiler:target-extra` anchor.
 /// v1 handles the create case; if a block already exists, leaves a note to merge by hand.
 fn install_entitlements(
+    root: &Path,
     project_yml: &Path,
     entitlements: &BTreeMap<String, toml::Value>,
     notes: &mut Vec<String>,
@@ -646,7 +647,7 @@ fn install_entitlements(
     }
     let anchor = format!("{marker_line}\n");
     let updated = content.replacen(&anchor, &format!("{block}{anchor}"), 1);
-    crate::fsguard::write_from_cwd(project_yml, updated)?;
+    crate::fsguard::write(root, project_yml, updated)?;
     println!("  + iOS entitlements block");
     Ok(())
 }
@@ -655,7 +656,7 @@ fn install_entitlements(
 /// in the top-level `packages:` block (at `# mobiler:spm-packages`) + a target product dependency in
 /// `dependencies:` (at `# mobiler:spm-dependencies`). Idempotent — skips the package if its `url` is
 /// already present, and the dependency if `product: <product>` is. The iOS twin of `gradle_plugins`.
-fn install_spm_package(project_yml: &Path, entry: &str) -> Result<()> {
+fn install_spm_package(root: &Path, project_yml: &Path, entry: &str) -> Result<()> {
     let parts: Vec<&str> = entry.split('|').collect();
     let [name, url, version, product] = parts[..] else {
         bail!("spm_packages entry must be 'name|url|version|product', got `{entry}`");
@@ -692,7 +693,7 @@ fn install_spm_package(project_yml: &Path, entry: &str) -> Result<()> {
         }
     }
 
-    crate::fsguard::write_from_cwd(project_yml, content)?;
+    crate::fsguard::write(root, project_yml, content)?;
     Ok(())
 }
 
@@ -782,6 +783,24 @@ mod test {
         assert!(core_kt.contains("\"battery\" to BatteryPlugin(application),"));
         let core_swift = read(&root, "iOS/Sources/Core.swift");
         assert!(core_swift.contains("case \"battery\": return await BatteryPlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plugin_add_never_writes_into_a_symlinked_folder() {
+        // iOS/Sources linked outside the app: no plugin source or registration lands there.
+        let root = skeleton();
+        let outside = root.with_extension("outside-sources");
+        let _ = fs::remove_dir_all(&outside);
+        fs::rename(root.join("iOS/Sources"), &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("iOS/Sources")).unwrap();
+        let core_before = fs::read_to_string(outside.join("Core.swift")).unwrap();
+        let err = add_at(&root, "battery").err().expect("refused");
+        assert!(format!("{err:#}").contains("iOS/Sources is a symlink"), "{err:#}");
+        assert!(!outside.join("BatteryPlugin.swift").exists(), "no plugin source written through the link");
+        assert_eq!(fs::read_to_string(outside.join("Core.swift")).unwrap(), core_before);
+        let _ = fs::remove_dir_all(&outside);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -887,10 +906,10 @@ mod test {
         let yml = dir.join("project.yml");
         fs::write(&yml, "    info:\n        # NSCameraUsageDescription: \"Take photos.\"\n        # mobiler:info-plist\n").unwrap();
         let line = "NSCameraUsageDescription: \"Scan codes.\"";
-        assert!(matches!(insert_before(&yml, "# mobiler:info-plist", line, "NSCameraUsageDescription").unwrap(), Insert::Inserted));
+        assert!(matches!(insert_before(yml.parent().unwrap(), &yml, "# mobiler:info-plist", line, "NSCameraUsageDescription").unwrap(), Insert::Inserted));
         assert!(read(&dir, "project.yml").contains(&format!("        {line}\n        # mobiler:info-plist")));
         // A live key is still detected, so re-adding stays a no-op.
-        assert!(matches!(insert_before(&yml, "# mobiler:info-plist", line, "NSCameraUsageDescription").unwrap(), Insert::AlreadyPresent));
+        assert!(matches!(insert_before(yml.parent().unwrap(), &yml, "# mobiler:info-plist", line, "NSCameraUsageDescription").unwrap(), Insert::AlreadyPresent));
 
         let xml = dir.join("AndroidManifest.xml");
         fs::write(
@@ -899,8 +918,8 @@ mod test {
         )
         .unwrap();
         let perm = "<uses-permission android:name=\"android.permission.VIBRATE\" />";
-        assert!(matches!(insert_before(&xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::Inserted));
-        assert!(matches!(insert_before(&xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::AlreadyPresent));
+        assert!(matches!(insert_before(xml.parent().unwrap(), &xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::Inserted));
+        assert!(matches!(insert_before(xml.parent().unwrap(), &xml, "mobiler:permissions", perm, "android.permission.VIBRATE").unwrap(), Insert::AlreadyPresent));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1449,14 +1468,14 @@ mod test {
         // Hand-authored YAML block form (the PiP UIBackgroundModes opt-in pattern).
         fs::write(&yml, "      properties:\n        UIBackgroundModes:\n          - audio\n        # mobiler:info-plist\n").unwrap();
         // A plugin must UNION its mode into the existing block, not skip it.
-        assert!(matches!(merge_plist_array(&yml, "UIBackgroundModes", &["\"location\"".into()]).unwrap(), Insert::Inserted));
+        assert!(matches!(merge_plist_array(yml.parent().unwrap(), &yml, "UIBackgroundModes", &["\"location\"".into()]).unwrap(), Insert::Inserted));
         let c = fs::read_to_string(&yml).unwrap();
         assert!(c.contains("- audio") && c.contains("- \"location\""), "block union kept both:\n{c}");
         assert_eq!(c.matches("UIBackgroundModes:").count(), 1, "still one key");
         // Idempotent.
-        assert!(matches!(merge_plist_array(&yml, "UIBackgroundModes", &["\"location\"".into()]).unwrap(), Insert::AlreadyPresent));
+        assert!(matches!(merge_plist_array(yml.parent().unwrap(), &yml, "UIBackgroundModes", &["\"location\"".into()]).unwrap(), Insert::AlreadyPresent));
         // A brand-new array key inserts inline at the anchor.
-        assert!(matches!(merge_plist_array(&yml, "BGTaskSchedulerPermittedIdentifiers", &["\"mobiler.refresh\"".into()]).unwrap(), Insert::Inserted));
+        assert!(matches!(merge_plist_array(yml.parent().unwrap(), &yml, "BGTaskSchedulerPermittedIdentifiers", &["\"mobiler.refresh\"".into()]).unwrap(), Insert::Inserted));
         assert!(fs::read_to_string(&yml).unwrap().contains("BGTaskSchedulerPermittedIdentifiers: [\"mobiler.refresh\"]"));
         let _ = fs::remove_dir_all(&dir);
     }
