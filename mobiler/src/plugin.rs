@@ -451,7 +451,7 @@ fn copy_source(src: &Source, rel: &str, dst_dir: &Path, subs: &Subs, root: &Path
         .ok_or_else(|| anyhow::anyhow!("plugin source `{rel}` has no file name"))?;
     fs::create_dir_all(dst_dir).with_context(|| format!("creating {}", dst_dir.display()))?;
     let dst = dst_dir.join(name);
-    fs::write(&dst, substitute(&raw, subs)).with_context(|| format!("writing {}", dst.display()))?;
+    crate::fsguard::write_from_cwd(&dst, substitute(&raw, subs))?;
     println!("  + {}", dst.strip_prefix(root).unwrap_or(&dst).display());
     Ok(())
 }
@@ -495,7 +495,7 @@ fn insert_before(path: &Path, marker: &str, payload: &str, needle: &str) -> Resu
     let indent: String = marker_line.chars().take_while(|c| c.is_whitespace()).collect();
     let anchor = format!("{marker_line}\n");
     let updated = content.replacen(&anchor, &format!("{indent}{payload}\n{anchor}"), 1);
-    fs::write(path, updated).with_context(|| format!("writing {}", path.display()))?;
+    crate::fsguard::write_from_cwd(path, updated)?;
     Ok(Insert::Inserted)
 }
 
@@ -579,7 +579,7 @@ fn merge_plist_array(project_yml: &Path, key: &str, items: &[String]) -> Result<
         }
         let new_line = format!("{indent}{key}: [{}]", merged.join(", "));
         let updated = content.replacen(existing, &new_line, 1);
-        fs::write(project_yml, updated).with_context(|| format!("writing {}", project_yml.display()))?;
+        crate::fsguard::write_from_cwd(project_yml, updated)?;
         return Ok(Insert::Inserted);
     }
 
@@ -610,7 +610,7 @@ fn merge_plist_array(project_yml: &Path, key: &str, items: &[String]) -> Result<
             let anchor = format!("{anchor_line}\n");
             let replacement = format!("{anchor}{}\n", additions.join("\n"));
             let updated = content.replacen(&anchor, &replacement, 1);
-            fs::write(project_yml, updated).with_context(|| format!("writing {}", project_yml.display()))?;
+            crate::fsguard::write_from_cwd(project_yml, updated)?;
             return Ok(Insert::Inserted);
         }
     }
@@ -646,7 +646,7 @@ fn install_entitlements(
     }
     let anchor = format!("{marker_line}\n");
     let updated = content.replacen(&anchor, &format!("{block}{anchor}"), 1);
-    fs::write(project_yml, updated)?;
+    crate::fsguard::write_from_cwd(project_yml, updated)?;
     println!("  + iOS entitlements block");
     Ok(())
 }
@@ -692,7 +692,7 @@ fn install_spm_package(project_yml: &Path, entry: &str) -> Result<()> {
         }
     }
 
-    fs::write(project_yml, content).with_context(|| format!("writing {}", project_yml.display()))?;
+    crate::fsguard::write_from_cwd(project_yml, content)?;
     Ok(())
 }
 

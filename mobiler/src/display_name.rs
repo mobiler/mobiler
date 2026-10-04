@@ -78,7 +78,7 @@ fn set_android(path: &Path, name: &str) -> Result<()> {
     };
     let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
     let new_line = format!("{indent}<string name=\"app_name\">{}</string>", escape_android(name));
-    fs::write(path, content.replacen(line, &new_line, 1)).with_context(|| format!("writing {}", path.display()))
+    crate::fsguard::write_from_cwd(path, content.replacen(line, &new_line, 1))
 }
 
 fn set_ios(path: &Path, name: &str) -> Result<()> {
@@ -104,7 +104,7 @@ fn set_ios(path: &Path, name: &str) -> Result<()> {
         }
         joined
     };
-    fs::write(path, updated).with_context(|| format!("writing {}", path.display()))
+    crate::fsguard::write_from_cwd(path, updated)
 }
 
 /// Android string resource escaping: XML entities plus aapt's own `'`/`"`/leading `@`/`?` rules.

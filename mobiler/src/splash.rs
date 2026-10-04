@@ -582,6 +582,12 @@ fn png_at(logo: &Logo, scale: u32, report: &mut SyncReport) -> anyhow::Result<Ve
 }
 
 fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::Result<()> {
+    // All or nothing: a symlink on the way to any target stops the sync before it writes anything.
+    for change in &changes {
+        if let Change::Write(rel, _) = change {
+            crate::fsguard::check(root, &root.join(rel))?;
+        }
+    }
     for change in changes {
         match change {
             Change::Write(rel, bytes) => {
@@ -589,10 +595,7 @@ fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::
                 if fs::read(&path).is_ok_and(|old| old == bytes) {
                     continue;
                 }
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-                }
-                crate::fsguard::write(&path, bytes)?;
+                crate::fsguard::write(root, &path, bytes)?;
                 if rel != LEDGER {
                     report.written.push(rel);
                 }
@@ -1176,7 +1179,8 @@ mod tests {
         std::fs::write(&outside, stock).unwrap();
         std::fs::remove_file(root.join(LAUNCH)).unwrap();
         std::os::unix::fs::symlink(&outside, root.join(LAUNCH)).unwrap();
-        let _ = sync(&root); // an error or a warning, but never a write through the link
+        let err = sync(&root).err().expect("refused before writing anything");
+        assert!(format!("{err:#}").contains("symlink"), "{err:#}");
         assert_eq!(std::fs::read(&outside).unwrap(), stock);
         let _ = std::fs::remove_file(&outside);
         let _ = std::fs::remove_dir_all(&root);
