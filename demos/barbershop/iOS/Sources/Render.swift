@@ -1707,6 +1707,7 @@ private struct ScaffoldView: View {
         } else {
             Text(b.text)
                 .font(.system(size: isLargeDensity() ? 13 : 11, weight: .semibold))
+                .fontWeight(.semibold)
                 .foregroundColor(role(pal?.onErrorFill, else: .white))
                 .padding(.horizontal, 4)
                 .frame(minWidth: 16, minHeight: 16)

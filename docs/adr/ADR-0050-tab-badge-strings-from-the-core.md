@@ -45,7 +45,7 @@ shell draws `text` and speaks `label` (else `text`) after the tab's name, in the
 - **Option B — a `ShellLabels` template such as `"{n} new"` for the spoken text** `[recorded: docs/superpowers/specs/2026-10-05-tab-badge-design.md, Decision 3]`
   Rejected. It can't express plurals ("1 nova poruka / 2 nove poruke / 5 novih poruka"), and the core has no plural
   rules.
-- **Option C — finished `text` and `label` on the badge** `[recorded: the same spec, approved by the maintainer 2026-10-05]`
+- **Option C — finished `text` and `label` on the badge** `[recorded: docs/superpowers/specs/2026-10-05-tab-badge-design.md, Decisions 1 and 3]`
   Chosen.
 
 ## 4. Decision & Rationale for Corroboration
@@ -56,13 +56,15 @@ can't, so this is a deliberate, scoped exception. ADR-0028 stays in force.
 The Android dot is sized to 8 dp explicitly, because Material 3's content-less `Badge` is 6 dp; this makes the dot
 match the web and iOS shells.
 
-**Mutation proof:** the invariant was broken twice on purpose and failed each time (each file was then restored with
+**Mutation proof:** the invariant was broken three times on purpose and failed each time (each file was then restored with
 `git checkout -- <file>` and the test passed again).
 - Kotlin: in barbershop's `MainActivity.kt`, the `NavigationRailItem`'s `icon = { TabIcon(t) }` was replaced with
   `icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } }`. The test failed with
   `ADR-0050: demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt NavigationRailItem( doesn't draw the badge`.
 - Swift: in barbershop's `Render.swift`, the `.accessibilityValue(tabSpoken(tab))` line in `navRail` was deleted. The
   test failed with `ADR-0050: demos/barbershop/iOS/Sources/Render.swift rail doesn't draw the badge`.
+- Web: in `mobiler-web/src/lib.rs`, the `tabbar` block's call `tab_badge(tab.badge.as_ref())` was replaced with
+  `tab_badge(None)`. The test failed with `ADR-0050: the web tabbar doesn't draw the badge`.
 
 ## 5. Consequences (Positive and Negative Predictions)
 

@@ -398,6 +398,8 @@ stock or its own.
   compiles. Write `Theme { seed, ..Default::default() }` and set only what you need.
 - **Breaking in mobiler-ui 0.30 / mobiler-core 0.41:** `ColorRoles` gained `selection`, `error`,
   `error_fill` and `on_error_fill`. A full `ColorRoles { … }` literal needs `..Default::default()`.
+- **Breaking in mobiler-ui 0.31 / mobiler-core 0.44:** `Tab` gained `badge: Option<TabBadge>`. A
+  `Tab { … }` literal needs `badge: None`. `tab` and `tab_icon` are unaffected.
 
 ## License
 
