@@ -362,7 +362,10 @@ fn adr_0050_every_tab_bar_and_rail_draws_the_badge() {
         let rest = &text[at..];
         rest[..rest.find(end).unwrap_or_else(|| panic!("ADR-0050: {path} has no {end} after {start}"))].to_string()
     };
-    let kotlin = ["demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt"];
+    let kotlin = [
+        "demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt",
+        "mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt",
+    ];
     for path in kotlin {
         let text = read(path);
         for item in ["NavigationRailItem(", "NavigationBarItem("] {
@@ -370,7 +373,7 @@ fn adr_0050_every_tab_bar_and_rail_draws_the_badge() {
             assert!(args.contains("TabIcon(t)") && args.contains("TabLabel(t)"), "ADR-0050: {path} {item} doesn't draw the badge");
         }
     }
-    let swift = ["demos/barbershop/iOS/Sources/Render.swift"];
+    let swift = ["demos/barbershop/iOS/Sources/Render.swift", "mobiler/templates/iOS/Sources/Render.swift"];
     for path in swift {
         let text = read(path);
         let bar = region(&text, "if showBottomTabs && !tabs.isEmpty", "private var navRail", path);
