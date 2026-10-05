@@ -350,3 +350,36 @@ fn adr_0048_splash_markers_and_seeds() {
         assert!(seeds.contains(&format!("\"{written}\"")), "ADR-0048: {written} is written by the sync but isn't a seed");
     }
 }
+
+/// ADR-0050: every shell draws a tab's badge in both the bottom bar and the wide-screen rail, through its one badge
+/// helper, so neither layout can lose it.
+#[test]
+fn adr_0050_every_tab_bar_and_rail_draws_the_badge() {
+    let read = |p: &str| std::fs::read_to_string(root().join(p)).expect(p);
+    // The text between `start` and the first `end` after it.
+    let region = |text: &str, start: &str, end: &str, path: &str| -> String {
+        let at = text.find(start).unwrap_or_else(|| panic!("ADR-0050: {path} has no {start}"));
+        let rest = &text[at..];
+        rest[..rest.find(end).unwrap_or_else(|| panic!("ADR-0050: {path} has no {end} after {start}"))].to_string()
+    };
+    let kotlin = ["demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt"];
+    for path in kotlin {
+        let text = read(path);
+        for item in ["NavigationRailItem(", "NavigationBarItem("] {
+            let args = region(&text, item, "colors =", path);
+            assert!(args.contains("TabIcon(t)") && args.contains("TabLabel(t)"), "ADR-0050: {path} {item} doesn't draw the badge");
+        }
+    }
+    let swift = ["demos/barbershop/iOS/Sources/Render.swift"];
+    for path in swift {
+        let text = read(path);
+        let bar = region(&text, "if showBottomTabs && !tabs.isEmpty", "private var navRail", path);
+        let rail = region(&text, "private var navRail", "private var navTransition", path);
+        for (name, part) in [("bottom bar", bar), ("rail", rail)] {
+            assert!(part.contains("tabBadgeMark(") && part.contains("tabSpoken(tab)"), "ADR-0050: {path} {name} doesn't draw the badge");
+        }
+    }
+    let web = read("mobiler-web/src/lib.rs");
+    let tabbar = region(&web, "let tabbar =", "<div class=\"tabbar\">", "mobiler-web/src/lib.rs");
+    assert!(tabbar.contains("tab_badge(tab.badge"), "ADR-0050: the web tabbar doesn't draw the badge");
+}
