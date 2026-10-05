@@ -64,7 +64,6 @@ pub type App = MobilerShell<Counter>;
   formatting via `Locale` + `Currency`, plus `weekday_short` / `month_year` and
   `Locale::week_start` for a localized `calendar_in`) and `i18n` (`negotiate` a device
   language + a tiny fallback-aware `Catalog` for translating UI strings in `view`).
-
 - **Tab badges** — `with_tab_dot(tab, label)` and `with_tab_count(tab, count, label)` put a dot or
   an unread count (`0` = none, above 99 = `99+`) on a tab; `label` is spoken after the tab's name
   (empty: the screen reader reads the number):
