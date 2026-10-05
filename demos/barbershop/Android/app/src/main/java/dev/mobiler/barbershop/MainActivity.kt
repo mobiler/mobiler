@@ -1944,7 +1944,7 @@ private fun TabBadgeMark(b: TabBadge) {
     val fill = pal?.errorFill?.color() ?: BadgeDefaults.containerColor
     val ink = pal?.onErrorFill?.color() ?: MaterialTheme.colorScheme.onError
     val quiet = Modifier.clearAndSetSemantics {}
-    if (b.text.isEmpty()) Badge(quiet, containerColor = fill, contentColor = ink)
+    if (b.text.isEmpty()) Badge(quiet.size(8.dp), containerColor = fill, contentColor = ink)
     else Badge(quiet, containerColor = fill, contentColor = ink) { Text(b.text, fontSize = if (isLarge) 13.sp else 11.sp) }
 }
 
