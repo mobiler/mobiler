@@ -35,7 +35,8 @@ tree, no per-platform UI code.
 
 What it exercises:
 
-- **Icon bottom-tab bar** — Home / Services / Bookings / Profile, each with an icon (`tab_icon`).
+- **Icon bottom-tab bar** — Home / Services / Bookings / Profile, each with an icon (`tab_icon`). Bookings carries an
+  upcoming-count **badge** (`with_tab_count`) and Profile a "New offer" dot (`with_tab_dot`).
 - **Floating action button** — a "book now" FAB over the body (`with_fab`).
 - **Expanded icon set** — scissors, calendar, bell, person, heart, … (the grown `Icon` enum).
 - **Theming** — a warm brass brand on a dark shell (`with_theme` + `dark_mode`), the classic
