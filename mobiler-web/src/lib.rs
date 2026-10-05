@@ -25,7 +25,7 @@ use mobiler_core::{
     A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, HttpHeader, HttpOutcome, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
-    ColorRoles, Rgb, ShellLabels, Spacing, TextStyle, Theme, Tone, TransferEvent, Widget,
+    ColorRoles, Rgb, ShellLabels, Spacing, TabBadge, TextStyle, Theme, Tone, TransferEvent, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -1455,6 +1455,17 @@ fn show_toast(text: &str) {
     gloo_timers::callback::Timeout::new(2600, move || el.remove()).forget();
 }
 
+/// A tab's badge (ADR-0050): the visible mark (hidden from screen readers) and the spoken suffix, which is
+/// `label`, else `text`, read after the tab's label.
+fn tab_badge(badge: Option<&TabBadge>) -> (Option<AnyView>, Option<AnyView>) {
+    let Some(b) = badge else { return (None, None) };
+    let class = if b.text.is_empty() { "tab-badge dot" } else { "tab-badge" };
+    let mark = view! { <span class=class aria-hidden="true">{b.text.clone()}</span> }.into_any();
+    let spoken = if b.label.is_empty() { &b.text } else { &b.label };
+    let spoken = (!spoken.is_empty()).then(|| view! { <span class="sr-only">{format!(", {spoken}")}</span> }.into_any());
+    (Some(mark), spoken)
+}
+
 /// What the `snackbar`/`show` request asks for (see `mobiler_core::Snackbar`): an empty or missing
 /// action label means no action; `"long"` stays 10 s, anything else 4 s.
 struct SnackbarAsk {
@@ -2543,12 +2554,16 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                         let (send, token) = (send.clone(), tab.on_select.clone());
                         let class = if tab.selected { "tab selected" } else { "tab" };
                         let label = tab.label.clone();
-                        // Optional leading icon → glyph above the label (icon tab bar).
-                        let icon = tab.icon.map(|i| view! { <span class="tab-icon">{icon_glyph(i)}</span> });
+                        let (mark, spoken) = tab_badge(tab.badge.as_ref());
+                        // Optional leading icon → glyph above the label (icon tab bar); the badge sits on the icon,
+                        // or after the label on a label-only tab.
+                        let (icon_mark, label_mark) = if tab.icon.is_some() { (mark, None) } else { (None, mark) };
+                        let icon = tab.icon.map(|i| view! { <span class="tab-icon">{icon_glyph(i)}{icon_mark}</span> });
                         view! {
                             <button class=class on:click=move |_| send(Action::Fired { token: token.clone() })>
                                 {icon}
-                                <span class="tab-label">{label}</span>
+                                <span class="tab-label">{label}{label_mark}</span>
+                                {spoken}
                             </button>
                         }
                         .into_any()
