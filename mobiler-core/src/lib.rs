@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use mobiler_ui::{
     A11yRole, Action, Appearance, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, ColorRoles, Corner, FamilyRole, Density, Fab, FieldKind, FontFamily, Icon,
-    ImageRatio, ImageShape, InputValue, MapMarker, Palette, ProjectColor, Radius, Rgb, Rgba, Segment, Shapes, Sheet, ShellLabels, Spacing, SwipeButton, Tab,
+    ImageRatio, ImageShape, InputValue, MapMarker, Palette, ProjectColor, Radius, Rgb, Rgba, Segment, Shapes, Sheet, ShellLabels, Spacing, SwipeButton, Tab, TabBadge,
     TextStyle, Theme, Tone, TonePair, TypeScale, TypeSpec, Widget,
 };
 
@@ -1287,13 +1287,13 @@ pub fn stepper<E: Serialize>(value: i32, on_decrement: E, on_increment: E) -> Wi
 /// A bottom-nav tab carrying a typed selection event (label-only).
 #[must_use]
 pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E) -> Tab {
-    Tab { label: label.into(), selected, on_select: tok(on_select), icon: None }
+    Tab { label: label.into(), selected, on_select: tok(on_select), icon: None, badge: None }
 }
 
 /// A bottom-nav tab with a leading icon (icon tab bar).
 #[must_use]
 pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bool, on_select: E) -> Tab {
-    Tab { label: label.into(), selected, on_select: tok(on_select), icon: Some(icon) }
+    Tab { label: label.into(), selected, on_select: tok(on_select), icon: Some(icon), badge: None }
 }
 
 /// App shell: top bar + bottom-nav `tabs` + scrollable `body`. `dark_mode` is
