@@ -15,7 +15,7 @@ events or widgets.
 
 The `Widget` vocabulary covers layout (rows/columns/grids/cards/scrollers, paged
 **lazy lists**), inputs (text fields, toggles, segmented, search, rating), navigation
-(scaffold + tabs + FAB + sheets, and a two-pane **master-detail** split), media (images,
+(scaffold + tabs with optional dot/count **badges** + FAB + sheets, and a two-pane **master-detail** split), media (images,
 avatars, a controllable **video player**, an embedded **web view**, an in-app **PDF viewer**,
 and an interactive **map**), gestures (tappable cards with **tap + long-press**, swipe actions),
 feedback (progress, skeleton), an inline calendar (localized title/weekday header/week

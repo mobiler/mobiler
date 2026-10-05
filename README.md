@@ -109,7 +109,8 @@ The `Widget` vocabulary renders identically on Android, iOS, and web:
   `ButtonOpts` add a `tone`, a leading icon, and full-width), text fields, toggles,
   segmented controls, search fields, rating.
 - **Navigation** — `Scaffold` with a top bar, bottom **tabs**, a **FAB**, and bottom **sheets**
-  (it goes adaptive on tablets: a side rail + capped width).
+  (it goes adaptive on tablets: a side rail + capped width). A tab can carry a **badge** — a dot
+  (`with_tab_dot`) or an unread count (`with_tab_count`, `99+` past 99) — read aloud after the tab's name.
 - **Media & feedback** — images, avatars, progress bars, shimmer skeletons, swipe actions,
   **long-press** on cards (press-and-hold for a secondary action),
   an inline month **calendar** (`calendar_in` localizes the title, weekday header, and

@@ -65,10 +65,19 @@ pub type App = MobilerShell<Counter>;
   `Locale::week_start` for a localized `calendar_in`) and `i18n` (`negotiate` a device
   language + a tiny fallback-aware `Catalog` for translating UI strings in `view`).
 
+- **Tab badges** — `with_tab_dot(tab, label)` and `with_tab_count(tab, count, label)` put a dot or
+  an unread count (`0` = none, above 99 = `99+`) on a tab; `label` is spoken after the tab's name
+  (empty: the screen reader reads the number):
+  `with_tab_count(tab_icon("Inbox", Icon::Mail, sel, Msg::Inbox), unread, format!("{unread} unread"))`.
+
 Most users go through the [`mobiler`](https://crates.io/crates/mobiler) CLI, which
 scaffolds a project wired to this crate and a generic native shell.
 
 ## Upgrading
+
+**Breaking in mobiler-ui 0.31 / mobiler-core 0.44:** `Tab` gained `badge: Option<TabBadge>`. A
+`Tab { … }` literal needs `badge: None`; `tab` / `tab_icon` are unaffected. Custom native shells
+should draw the badge (`mobiler upgrade --apply` updates generated ones once the CLI templates ship it).
 
 **Breaking in mobiler-ui 0.30 / mobiler-core 0.41:** `ColorRoles` gained `selection`, `error`,
 `error_fill` and `on_error_fill`. A full `ColorRoles { … }` literal needs `..Default::default()`.
