@@ -109,7 +109,8 @@ The `Widget` vocabulary renders identically on Android, iOS, and web:
   `ButtonOpts` add a `tone`, a leading icon, and full-width), text fields, toggles,
   segmented controls, search fields, rating.
 - **Navigation** — `Scaffold` with a top bar, bottom **tabs**, a **FAB**, and bottom **sheets**
-  (it goes adaptive on tablets: a side rail + capped width).
+  (it goes adaptive on tablets: a side rail + capped width). A tab can carry a **badge** — a dot
+  (`with_tab_dot`) or an unread count (`with_tab_count`, `99+` past 99) — read aloud after the tab's name.
 - **Media & feedback** — images, avatars, progress bars, shimmer skeletons, swipe actions,
   **long-press** on cards (press-and-hold for a secondary action),
   an inline month **calendar** (`calendar_in` localizes the title, weekday header, and
@@ -397,6 +398,8 @@ stock or its own.
   compiles. Write `Theme { seed, ..Default::default() }` and set only what you need.
 - **Breaking in mobiler-ui 0.30 / mobiler-core 0.41:** `ColorRoles` gained `selection`, `error`,
   `error_fill` and `on_error_fill`. A full `ColorRoles { … }` literal needs `..Default::default()`.
+- **Breaking in mobiler-ui 0.31 / mobiler-core 0.44:** `Tab` gained `badge: Option<TabBadge>`. A
+  `Tab { … }` literal needs `badge: None`. `tab` and `tab_icon` are unaffected.
 
 ## License
 

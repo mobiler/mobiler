@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use mobiler_ui::{
     A11yRole, Action, Appearance, BoxAlign, ButtonStyle, Caption, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, ColorRoles, Corner, FamilyRole, Density, Fab, FieldKind, FontFamily, Icon,
-    ImageRatio, ImageShape, InputValue, MapMarker, Palette, ProjectColor, Radius, Rgb, Rgba, Segment, Shapes, Sheet, ShellLabels, Spacing, SwipeButton, Tab,
+    ImageRatio, ImageShape, InputValue, MapMarker, Palette, ProjectColor, Radius, Rgb, Rgba, Segment, Shapes, Sheet, ShellLabels, Spacing, SwipeButton, Tab, TabBadge,
     TextStyle, Theme, Tone, TonePair, TypeScale, TypeSpec, Widget,
 };
 
@@ -1287,13 +1287,33 @@ pub fn stepper<E: Serialize>(value: i32, on_decrement: E, on_increment: E) -> Wi
 /// A bottom-nav tab carrying a typed selection event (label-only).
 #[must_use]
 pub fn tab<E: Serialize>(label: impl Into<String>, selected: bool, on_select: E) -> Tab {
-    Tab { label: label.into(), selected, on_select: tok(on_select), icon: None }
+    Tab { label: label.into(), selected, on_select: tok(on_select), icon: None, badge: None }
 }
 
 /// A bottom-nav tab with a leading icon (icon tab bar).
 #[must_use]
 pub fn tab_icon<E: Serialize>(label: impl Into<String>, icon: Icon, selected: bool, on_select: E) -> Tab {
-    Tab { label: label.into(), selected, on_select: tok(on_select), icon: Some(icon) }
+    Tab { label: label.into(), selected, on_select: tok(on_select), icon: Some(icon), badge: None }
+}
+
+/// Marks a tab with a small dot (ADR-0050). `label` is what a screen reader says after the tab's label
+/// (e.g. "Nove poruke"); it is the app's text, so it is in the app's language.
+#[must_use]
+pub fn with_tab_dot(mut tab: Tab, label: impl Into<String>) -> Tab {
+    tab.badge = Some(TabBadge { text: String::new(), label: label.into() });
+    tab
+}
+
+/// Marks a tab with a count (ADR-0050). 0 removes the badge, so an unread count passes straight through; above 99
+/// it reads "99+". `label` is the spoken text (e.g. "3 nove poruke"); empty = the screen reader reads the number.
+#[must_use]
+pub fn with_tab_count(mut tab: Tab, count: u32, label: impl Into<String>) -> Tab {
+    tab.badge = match count {
+        0 => None,
+        1..=99 => Some(TabBadge { text: count.to_string(), label: label.into() }),
+        _ => Some(TabBadge { text: "99+".into(), label: label.into() }),
+    };
+    tab
 }
 
 /// App shell: top bar + bottom-nav `tabs` + scrollable `body`. `dark_mode` is
@@ -1577,6 +1597,32 @@ pub fn with_fill(widget: Widget) -> Widget {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn with_tab_count_formats_and_caps() {
+        let t = || tab_icon("Nalog", Icon::Person, false, "Account");
+        assert_eq!(with_tab_count(t(), 7, "7 novih").badge, Some(TabBadge { text: "7".into(), label: "7 novih".into() }));
+        assert_eq!(with_tab_count(t(), 99, "").badge.unwrap().text, "99");
+        assert_eq!(with_tab_count(t(), 100, "").badge.unwrap().text, "99+");
+        assert_eq!(with_tab_count(t(), u32::MAX, "").badge.unwrap().text, "99+");
+    }
+
+    #[test]
+    fn with_tab_count_zero_clears_a_badge() {
+        let dotted = with_tab_dot(tab("Nalog", false, "Account"), "Nove poruke");
+        assert!(dotted.badge.is_some());
+        assert_eq!(with_tab_count(dotted, 0, "ignored").badge, None);
+    }
+
+    #[test]
+    fn with_tab_dot_has_empty_text_and_plain_tabs_have_no_badge() {
+        assert_eq!(with_tab_dot(tab("Nalog", false, "Account"), "Nove poruke").badge, Some(TabBadge { text: String::new(), label: "Nove poruke".into() }));
+        assert_eq!(tab("Nalog", false, "Account").badge, None);
+        assert_eq!(tab_icon("Nalog", Icon::Person, true, "Account").badge, None);
+        // A second call replaces the badge.
+        let t = with_tab_count(with_tab_dot(tab("Nalog", false, "Account"), "a"), 3, "b");
+        assert_eq!(t.badge, Some(TabBadge { text: "3".into(), label: "b".into() }));
+    }
+
     use super::*;
     use serde::Serialize;
 

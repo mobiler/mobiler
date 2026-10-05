@@ -1632,13 +1632,20 @@ private struct ScaffoldView: View {
                             VStack(spacing: 2) {
                                 if let icon = tab.icon {
                                     Image(systemName: sfSymbol(icon)).font(.system(size: 20))
+                                        .overlay(alignment: .topTrailing) {
+                                            if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
+                                        }
                                 }
-                                Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
+                                HStack(spacing: 4) {
+                                    Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
+                                    if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
+                                }
                             }
                             .fontWeight(tab.selected ? .semibold : .regular)
                             .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
                             .frame(maxWidth: .infinity)
                         }
+                        .accessibilityValue(tabSpoken(tab))
                     }
                 }
                 .padding(.vertical, 10)
@@ -1655,8 +1662,12 @@ private struct ScaffoldView: View {
                     HStack(spacing: 10) {
                         if let icon = tab.icon {
                             Image(systemName: sfSymbol(icon)).font(.system(size: 18))
+                                .overlay(alignment: .topTrailing) {
+                                    if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
+                                }
                         }
                         Text(tab.label)
+                        if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
                     }
                     .fontWeight(tab.selected ? .semibold : .regular)
                     .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
@@ -1667,6 +1678,7 @@ private struct ScaffoldView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
+                .accessibilityValue(tabSpoken(tab))
             }
             Spacer()
         }
@@ -1683,6 +1695,30 @@ private struct ScaffoldView: View {
             insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
             removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
         )
+    }
+
+    // ADR-0050: a tab's badge — palette error_fill / on_error_fill, else red on white. The mark is hidden from
+    // VoiceOver; tabSpoken (label, else text) is the tab button's accessibility value, read after its name.
+    @ViewBuilder
+    private func tabBadgeMark(_ b: SharedTypes.TabBadge) -> some View {
+        let fill = role(pal?.errorFill, else: .red)
+        if b.text.isEmpty {
+            Circle().fill(fill).frame(width: 8, height: 8).accessibilityHidden(true)
+        } else {
+            Text(b.text)
+                .font(.system(size: isLargeDensity() ? 13 : 11, weight: .semibold))
+                .fontWeight(.semibold)
+                .foregroundColor(role(pal?.onErrorFill, else: .white))
+                .padding(.horizontal, 4)
+                .frame(minWidth: 16, minHeight: 16)
+                .background(Capsule().fill(fill))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func tabSpoken(_ tab: SharedTypes.Tab) -> String {
+        guard let b = tab.badge else { return "" }
+        return b.label.isEmpty ? b.text : b.label
     }
 }
 

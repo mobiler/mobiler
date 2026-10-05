@@ -17,7 +17,7 @@ use mobiler_core::{
     pdf_view, row, scaffold, scroller, scroller_hinted, search_field, secure_field, segment, segmented, skeleton,
     spacer, split, stack, video_player, video_playlist, web_view,
     stacked_bar_chart, subtitle, swipe_action, tab_icon, text, text_field, title, toggle, with_captions, with_end_label, with_error,
-    with_fill, with_labels, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_theme,
+    with_fill, with_labels, with_long_press, with_muted, with_pip, with_poster, with_rate, with_refresh, with_seek_index, with_sheet, with_start_at, with_tab_count, with_tab_dot, with_theme,
     TransferEvent,
 };
 use mobiler_core::format::{self, Currency, Locale};
@@ -403,6 +403,13 @@ pub struct Model {
 /// One page (10 items) of synthetic feed rows starting at item `start` (1-based).
 fn feed_page(start: usize) -> Vec<String> {
     (start..start + 10).map(|i| format!("Booking #{i}")).collect()
+}
+
+impl Model {
+    /// How many bookings are upcoming (the Bookings tab's count badge).
+    fn upcoming_count(&self) -> u32 {
+        u32::try_from(self.bookings.len()).unwrap_or(u32::MAX)
+    }
 }
 
 impl Default for Model {
@@ -1258,9 +1265,13 @@ impl MobilerApp for FadeHouse {
         let tabs = vec![
             tab_icon("Home", Icon::Home, model.tab == Tab::Home, Msg::SelectTab(Tab::Home)),
             tab_icon("Services", Icon::Scissors, model.tab == Tab::Services, Msg::SelectTab(Tab::Services)),
-            tab_icon("Bookings", Icon::Calendar, model.tab == Tab::Bookings, Msg::SelectTab(Tab::Bookings)),
+            with_tab_count(
+                tab_icon("Bookings", Icon::Calendar, model.tab == Tab::Bookings, Msg::SelectTab(Tab::Bookings)),
+                model.upcoming_count(),
+                format!("{} upcoming", model.upcoming_count()),
+            ),
             tab_icon("Feed", Icon::Menu, model.tab == Tab::Feed, Msg::SelectTab(Tab::Feed)),
-            tab_icon("Profile", Icon::Person, model.tab == Tab::Profile, Msg::SelectTab(Tab::Profile)),
+            with_tab_dot(tab_icon("Profile", Icon::Person, model.tab == Tab::Profile, Msg::SelectTab(Tab::Profile)), "New offer"),
         ];
         let (title_text, body) = match model.tab {
             Tab::Home => ("Fade House", home(model)),

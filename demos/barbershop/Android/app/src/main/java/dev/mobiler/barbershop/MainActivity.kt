@@ -234,7 +234,12 @@ import dev.mobiler.barbershop.ui.theme.LocalPalette
 import dev.mobiler.barbershop.ui.theme.color
 import dev.mobiler.barbershop.ui.theme.applySpec
 import dev.mobiler.barbershop.ui.theme.radiusShape
+import dev.mobiler.barbershop.shared.types.Tab
+import dev.mobiler.barbershop.shared.types.TabBadge
 import dev.mobiler.barbershop.shared.types.TonePair
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgeDefaults
+import androidx.compose.material3.BadgedBox
 import dev.mobiler.barbershop.shared.types.A11yRole
 import dev.mobiler.barbershop.shared.types.Action
 import dev.mobiler.barbershop.shared.types.Appearance
@@ -1540,8 +1545,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 NavigationRailItem(
                                     selected = t.selected,
                                     onClick = { send(Action.Fired(t.onSelect)) },
-                                    label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
-                                    icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
+                                    label = { TabLabel(t) },
+                                    icon = { TabIcon(t) },
                                     colors = LocalPalette.current?.primaryText?.color()?.let { NavigationRailItemDefaults.colors(selectedTextColor = it) } ?: NavigationRailItemDefaults.colors(),
                                 )
                             }
@@ -1616,8 +1621,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                         NavigationBarItem(
                                             selected = t.selected,
                                             onClick = { send(Action.Fired(t.onSelect)) },
-                                            label = { Text(t.label, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified) },
-                                            icon = { t.icon?.let { Icon(iconFor(it), contentDescription = null) } },
+                                            label = { TabLabel(t) },
+                                            icon = { TabIcon(t) },
                                             // M3 colours the selected label with `secondary` (the brand accent); a palette uses primary_text.
                                             colors = LocalPalette.current?.primaryText?.color()?.let { NavigationBarItemDefaults.colors(selectedTextColor = it) } ?: NavigationBarItemDefaults.colors(),
                                         )
@@ -1928,6 +1933,38 @@ private fun toneColors(tone: Tone): Pair<Color, Color> {
         Tone.WARNING -> Color(0xFFE65100).copy(alpha = 0.15f) to Color(0xFFE65100)
         Tone.DANGER -> cs.errorContainer to cs.onErrorContainer
         Tone.INFO -> cs.tertiaryContainer to cs.onTertiaryContainer
+    }
+}
+
+// ADR-0050: a tab's badge. The mark is drawn in the palette's error_fill / on_error_fill (else M3's badge colours) and
+// is silent; the spoken suffix (label, else text) rides on the tab's label, so TalkBack reads "Nalog, 3 nove poruke".
+@Composable
+private fun TabBadgeMark(b: TabBadge) {
+    val pal = LocalPalette.current
+    val fill = pal?.errorFill?.color() ?: BadgeDefaults.containerColor
+    val ink = pal?.onErrorFill?.color() ?: MaterialTheme.colorScheme.onError
+    val quiet = Modifier.clearAndSetSemantics {}
+    if (b.text.isEmpty()) Badge(quiet.size(8.dp), containerColor = fill, contentColor = ink)
+    else Badge(quiet, containerColor = fill, contentColor = ink) { Text(b.text, fontSize = if (isLarge) 13.sp else 11.sp) }
+}
+
+@Composable
+private fun TabIcon(t: Tab) {
+    val icon = t.icon ?: return
+    val b = t.badge
+    if (b == null) Icon(iconFor(icon), contentDescription = null)
+    else BadgedBox(badge = { TabBadgeMark(b) }) { Icon(iconFor(icon), contentDescription = null) }
+}
+
+@Composable
+private fun TabLabel(t: Tab) {
+    val b = t.badge
+    val spoken = b?.let { it.label.ifEmpty { it.text } }.orEmpty()
+    val named = if (spoken.isEmpty()) Modifier else Modifier.semantics { contentDescription = "${t.label}, $spoken" }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(t.label, named, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified)
+        // A label-only tab has no icon to carry the badge: it follows the label.
+        if (b != null && t.icon == null) { Spacer(Modifier.width(4.dp)); TabBadgeMark(b) }
     }
 }
 

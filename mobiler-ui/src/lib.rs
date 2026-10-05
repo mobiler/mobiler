@@ -647,6 +647,19 @@ pub struct Tab {
     pub on_select: ActionToken,
     /// Optional leading icon (icon tab bar). `None` = label-only (the original look).
     pub icon: Option<Icon>,
+    /// A dot or short count on the tab (ADR-0050). `None` = no badge. BREAKING (tab badge release): `Tab { .. }`
+    /// literals need this field; `tab` / `tab_icon` set `None`, and `with_tab_dot` / `with_tab_count` set it.
+    pub badge: Option<TabBadge>,
+}
+
+/// A tab's badge (ADR-0050). Both strings are finished by the core: the shells draw `text` as-is and add no words.
+#[derive(Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct TabBadge {
+    /// Drawn inside the badge. Empty = a small dot with no text.
+    pub text: String,
+    /// What a screen reader says after the tab's label, e.g. "3 nove poruke". Empty = it reads `text`.
+    pub label: String,
 }
 
 /// A floating action button anchored over the scaffold body (the raised primary action).
@@ -1021,6 +1034,14 @@ mod tests {
     }
 
     #[test]
+    fn tab_badge_round_trips() {
+        let tab = |badge| Tab { label: "Nalog".into(), selected: false, on_select: "\"Account\"".into(), icon: Some(Icon::Person), badge };
+        round_trips(&tab(Some(TabBadge { text: String::new(), label: "Nove poruke".into() })));
+        round_trips(&tab(Some(TabBadge { text: "99+".into(), label: "Više od 99 novih poruka".into() })));
+        round_trips(&tab(None));
+    }
+
+    #[test]
     fn shapes_round_trip() {
         let shapes = Shapes { card: Some(Radius::Dp(12)), button: Some(Radius::Pill), ..Default::default() };
         round_trips(&Theme { shapes: Some(shapes), ..Default::default() });
@@ -1117,7 +1138,7 @@ mod tests {
         round_trips(&Widget::Scaffold {
             title: "T".to_string(),
             body: Box::new(Widget::Divider),
-            tabs: vec![Tab { label: "A".to_string(), selected: true, on_select: "t".to_string(), icon: Some(Icon::Home) }],
+            tabs: vec![Tab { label: "A".to_string(), selected: true, on_select: "t".to_string(), icon: Some(Icon::Home), badge: None }],
             back: Some("b".to_string()),
             dark_mode: true,
             theme: None,
