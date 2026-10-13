@@ -1583,4 +1583,24 @@ NFCReaderUsageDescription = "use nfc"
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&pkg);
     }
+
+    /// securestore's `ok:true` must mean "stored", because apps order work on it (store a rotated
+    /// refresh token, then replay). Android's `Editor.apply()` answers before the disk write and never
+    /// reports a failure; on iOS, deleting before the add lost the old value when the add failed, and
+    /// `delete` threw its status away.
+    #[test]
+    fn securestore_answers_a_write_only_once_it_is_stored() {
+        let src = resolve_source("securestore").unwrap();
+        let kt = src.read_text("android/SecureStorePlugin.kt").unwrap();
+        assert!(!kt.contains(".apply()"), "Android securestore must not write with Editor.apply()");
+        assert!(kt.contains("editor.commit()"), "Android securestore must write with Editor.commit()");
+        assert!(
+            kt.contains("newSingleThreadExecutor()") && kt.matches("withContext(lane)").count() == 2,
+            "Android securestore must keep call order: get and writes on one single-thread lane"
+        );
+        let swift = src.read_text("ios/SecureStorePlugin.swift").unwrap();
+        let set = &swift[swift.find("func set(").unwrap()..swift.find("func get(").unwrap()];
+        assert!(!set.contains("SecItemDelete"), "iOS set must update in place, not delete then add");
+        assert!(swift.contains("func delete(key: String) -> PluginResponse"), "iOS delete must report its status");
+    }
 }

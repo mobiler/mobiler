@@ -4,9 +4,10 @@ import SharedTypes
 
 // Secure key/value storage (free, bundled). Backed by the iOS Keychain (encrypted, app-scoped).
 // For secrets — auth tokens, API keys — NOT bulk data. `input` is JSON:
-//   set:    {"key": "...", "value": "..."}  → ok:true
+//   set:    {"key": "...", "value": "..."}  → ok:true once the Keychain holds it
 //   get:    {"key": "..."}                  → ok:true, output = value ("" if absent)
-//   delete: {"key": "..."}                  → ok:true
+//   delete: {"key": "..."}                  → ok:true once the key is gone (or was never there)
+// A Keychain call that fails comes back ok:false, output = its OSStatus.
 // Pair with the `biometric` plugin (gate a get behind an authenticate in your Rust core).
 enum SecureStorePlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
@@ -23,8 +24,7 @@ enum SecureStorePlugin {
         case "get":
             return get(key: key)
         case "delete":
-            delete(key: key)
-            return PluginResponse(ok: true, output: "")
+            return delete(key: key)
         default:
             return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
@@ -37,11 +37,20 @@ enum SecureStorePlugin {
     }
 
     private static func set(key: String, value: String) -> PluginResponse {
-        SecItemDelete(query(key) as CFDictionary) // overwrite semantics
-        var attrs = query(key)
-        attrs[kSecValueData as String] = Data(value.utf8)
-        attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(attrs as CFDictionary, nil)
+        // Update in place, and add only a key that isn't there yet. Deleting first and then adding
+        // would lose the old value whenever the add fails.
+        let attrs: [String: Any] = [
+            kSecValueData as String: Data(value.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        var status = SecItemUpdate(query(key) as CFDictionary, attrs as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(query(key).merging(attrs) { $1 } as CFDictionary, nil)
+            // Another `set` of the same new key added it between our update and add: update that one.
+            if status == errSecDuplicateItem {
+                status = SecItemUpdate(query(key) as CFDictionary, attrs as CFDictionary)
+            }
+        }
         return status == errSecSuccess
             ? PluginResponse(ok: true, output: "")
             : PluginResponse(ok: false, output: "keychain set failed (\(status))")
@@ -59,7 +68,11 @@ enum SecureStorePlugin {
         return PluginResponse(ok: true, output: value)
     }
 
-    private static func delete(key: String) {
-        SecItemDelete(query(key) as CFDictionary)
+    private static func delete(key: String) -> PluginResponse {
+        let status = SecItemDelete(query(key) as CFDictionary)
+        // A key that was never stored is absent either way: that is a successful delete.
+        return status == errSecSuccess || status == errSecItemNotFound
+            ? PluginResponse(ok: true, output: "")
+            : PluginResponse(ok: false, output: "keychain delete failed (\(status))")
     }
 }
