@@ -132,3 +132,17 @@ Kotlin, Swift and Rust files the ADR-0052 test reads. `kotlin_code` (used by ADR
 - **`strict` / refuse-if-unprotected** (§1, rejected).
 - **Changing the request** or `cx.copy`.
 - **A Kotlin test harness.** The Android pieces are checked on the emulator, as for ADR-0052.
+
+## Amendments
+
+- **2026-10-14, after the fresh reviews of the libraries PR:**
+  - ADR-0053 and its conformance test (with `live_code` and the mutation proofs) land in the libraries PR, not the
+    CLI PR: the template port and the wire contract are both here, and CLAUDE.md puts the record in the same PR as
+    the decision. The CLI PR only pins core 0.46 and bumps the CLI.
+  - `CopyExpiry::None` is `CopyExpiry::Never` (`"none"` on the wire stays), and the enum is `#[non_exhaustive]`, so
+    it never reads like `Option::None` ("unknown").
+  - §3: the foreground-only read applies on Android 10+ only (`SDK_INT < 29` reads from anywhere): Android 8–9 can
+    read the clipboard in the background, and gating them stopped an on-time clear (a regression, fixed).
+  - `sensitive` means "a marker was attached", not "the text is hidden"; the field docs and ADR-0053 say who honours
+    it. `expires` says who would remove it, not when.
+  - §2: the iOS marker's value is empty `Data()`, not `""`.

@@ -240,8 +240,8 @@ private fun expiresMs(o: JSONObject): Long =
     o.optDouble("expires_ms", 0.0).coerceIn(0.0, Long.MAX_VALUE.toDouble()).toLong()
 
 /** Clears a `clipboard_with` copy when its time is up, but only while the clipboard provably still holds it: since
- *  Android 10 a backgrounded app can't read the clipboard, so it re-checks every 5 s, reading the clipboard only while
- *  an activity is resumed (it clears within seconds of the user returning), and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
+ *  Android 10 a backgrounded app can't read the clipboard, so there it re-checks every 5 s, reading the clipboard only
+ *  while an activity is resumed (it clears within seconds of the user returning), and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
  *  Main-confined: call arm/disarm on the main thread only. Time is `SystemClock.elapsedRealtime()`, which keeps
  *  counting while the phone sleeps (`delay` alone counts uptime, which stops). */
 object ClipboardExpiry {
@@ -266,8 +266,9 @@ object ClipboardExpiry {
             }
             val giveUpAt = android.os.SystemClock.elapsedRealtime() + 60 * 60 * 1000L
             while (isActive && android.os.SystemClock.elapsedRealtime() < giveUpAt) {
-                // Read only while an activity is resumed: from the background Android 10+ denies the read and logs it.
-                if (MobilerActivity.current?.get() != null) {
+                // Android 10+ denies (and logs) a read from the background, so there read only while an activity is
+                // resumed; Android 8–9 can read from anywhere and clear on time.
+                if (Build.VERSION.SDK_INT < 29 || MobilerActivity.current?.get() != null) {
                     // Null when the clipboard is empty (or still unreadable, e.g. before the window has focus).
                     val desc = cm.primaryClipDescription
                     if (desc != null) {

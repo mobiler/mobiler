@@ -427,7 +427,7 @@ fn adr_0051_deep_link_registration_sits_between_markers() {
 /// (ADR-0015).
 #[test]
 fn adr_0052_every_shell_answers_clipboard_with() {
-    let answers = |path: &str, needle: &str| read(path).lines().any(|l| kotlin_code(l).contains(needle));
+    let answers = |path: &str, needle: &str| live_code(&read(path)).contains(needle);
     let kotlin = "\"clipboard_with\" to ClipboardWithPlugin(";
     let swift = "case \"clipboard_with\": return await ClipboardWithPlugin.handle(";
     let (tk, ts) = ("mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/Core.kt", "mobiler/templates/iOS/Sources/Core.swift");
@@ -447,4 +447,91 @@ fn adr_0052_every_shell_answers_clipboard_with() {
     let core = read("mobiler-core/src/lib.rs");
     assert!(core.contains("self.plugin(\"clipboard_with\", \"copy\""), "ADR-0052: cx.copy_with must target clipboard_with");
     assert!(core.contains("self.notify(\"clipboard\", \"copy\", text)"), "ADR-0007: cx.copy must stay a plain notification");
+}
+
+/// The live code in `src`: whole-line `//` comments, `/* … */` blocks (also across lines) and the dead branch of a
+/// Swift `#if false` (up to its `#else` or `#endif`, nested `#if`s included) are dropped, as are the `#if` / `#else` /
+/// `#endif` lines themselves; every other line is kept whole (a `//` later in a line may sit inside a string). Any
+/// other `#if` condition counts as live on both branches.
+fn live_code(src: &str) -> String {
+    // One frame per open `#if`: (inside a dead region already, is `#if false`, past its `#else`).
+    let mut frames: Vec<(bool, bool, bool)> = Vec::new();
+    let dead = |f: &[(bool, bool, bool)]| f.last().is_some_and(|&(outer, is_false, in_else)| outer || (is_false && !in_else));
+    let (mut out, mut in_block) = (String::new(), false);
+    for line in src.lines() {
+        let t = line.trim_start();
+        if t.starts_with("#if") {
+            frames.push((dead(&frames), t.starts_with("#if false"), false));
+            continue;
+        }
+        if t.starts_with("#else") {
+            if let Some(top) = frames.last_mut() {
+                top.2 = true;
+            }
+            continue;
+        }
+        if t.starts_with("#endif") {
+            frames.pop();
+            continue;
+        }
+        if dead(&frames) {
+            continue;
+        }
+        if in_block {
+            if let Some(end) = line.find("*/") {
+                in_block = false;
+                out.push_str(&line[end + 2..]);
+                out.push('\n');
+            }
+            continue;
+        }
+        if t.starts_with("//") || t.starts_with('*') {
+            continue;
+        }
+        if t.starts_with("/*") {
+            match line.find("*/") {
+                Some(end) => {
+                    out.push_str(&line[end + 2..]);
+                    out.push('\n');
+                }
+                None => in_block = true,
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+#[test]
+fn live_code_drops_comments_blocks_and_if_false() {
+    let src = "a\n// b\n/* c\n d\n*/ e\n#if false\nf\n#if X\ng\n#endif\nh\n#endif\ni\n  * j\nk // l\n\
+               #if false\nm\n#else\nn\n#endif\n#if os(iOS)\no\n#else\np\n#endif\n";
+    assert_eq!(live_code(src), "a\n e\ni\nk // l\nn\no\np\n");
+}
+
+/// ADR-0053: every shell's `clipboard_with` success path builds the report, in live code, and the core can read it.
+#[test]
+fn adr_0053_every_shell_reports_what_a_copy_got() {
+    for path in [
+        "mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/Core.kt",
+        "demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/Core.kt",
+    ] {
+        let code = live_code(&read(path));
+        for needle in [".put(\"sensitive\", sensitive)", ".put(\"expires\", ", ".put(\"local_only\", false)"] {
+            assert!(code.contains(needle), "ADR-0053: {path} doesn't report {needle}");
+        }
+    }
+    for path in ["mobiler/templates/iOS/Sources/Core.swift", "demos/barbershop/iOS/Sources/Core.swift"] {
+        let code = live_code(&read(path));
+        assert!(
+            code.contains("[\"sensitive\": sensitive, \"expires\": expires, \"local_only\": localOnly]"),
+            "ADR-0053: {path} doesn't report what a copy got"
+        );
+    }
+    let web = live_code(&read("mobiler-web/src/lib.rs"));
+    assert!(web.contains("Ok(_) => PluginResponse::text(true, WEB_COPY_REPORT)"), "ADR-0053: mobiler-web doesn't report");
+    let core = read("mobiler-core/src/clipboard.rs");
+    assert!(core.contains("pub fn from_response(resp: &crate::PluginResponse) -> Option<Self>"), "ADR-0053: core can't read the report");
 }

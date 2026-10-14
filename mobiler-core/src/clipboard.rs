@@ -8,12 +8,14 @@ use std::time::Duration;
 /// a reply); [`CopyOptions::sensitive`] is the preset for a password, a recovery code or a TOTP secret.
 ///
 /// What each platform honours:
-/// - `mark_sensitive`: Android hides the text in the clipboard preview (Android 13+) and asks keyboards not to keep it.
-///   iOS has no equivalent. The web can't.
+/// - `mark_sensitive`: Android hides the text in the clipboard preview (Android 13+) and asks keyboards not to keep it
+///   (some, e.g. Gboard, honour that). iOS has no system flag; it attaches the `org.nspasteboard.ConcealedType`
+///   convention, which only some Mac clipboard managers honour, and only if the copy reaches a Mac (`local_only` off).
+///   The web can't.
 /// - `expires_after`: iOS removes the item itself. On Android it is **best effort**: the shell clears the clipboard
 ///   when the time is up, but only while it still holds this copy. Android 10+ lets only the app in front read the
-///   clipboard, so after the user switches away (say, to paste the secret into another app) it clears within about
-///   5 s of the app coming back to the front, gives up an hour after the deadline, and never clears if the process dies first.
+///   clipboard, so there, after the user switches away (say, to paste the secret into another app), it clears within
+///   seconds of the app coming back to the front (Android 8–9 clear on time from the background), gives up an hour after the deadline, and never clears if the process dies first.
 ///   Android 13+ clears the clipboard itself after about an hour. The hidden preview is Android's dependable
 ///   protection. The web can't expire a copy.
 /// - `local_only`: iOS keeps the item out of Universal Clipboard. No effect on Android (an OEM or companion-app
@@ -47,7 +49,8 @@ impl CopyOptions {
         Self { sensitive: true, expires_after: Some(Duration::from_secs(120)), local_only: true }
     }
 
-    /// Hide the text in the clipboard preview and ask keyboards not to keep it (Android).
+    /// Mark the copy sensitive: Android hides the preview (13+) and asks keyboards not to keep it; iOS attaches the
+    /// `org.nspasteboard.ConcealedType` convention (see [`CopyOptions`]).
     #[must_use]
     pub fn mark_sensitive(mut self, on: bool) -> Self {
         self.sensitive = on;
@@ -92,24 +95,28 @@ impl CopyOptions {
 /// [`CopyApplied::from_response`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CopyApplied {
-    /// The copy carries the platform's sensitive marker: Android's `IS_SENSITIVE` extra (the preview hides it on 13+),
-    /// or iOS's `org.nspasteboard.ConcealedType` convention. Never on the web.
+    /// A sensitive marker was attached to the copy. Whether anything honours it depends on who reads the clipboard:
+    /// on Android the `IS_SENSITIVE` extra hides the preview on 13+ and asks keyboards not to keep it (some honour
+    /// it); on iOS `org.nspasteboard.ConcealedType` is honoured only by some Mac clipboard managers, and only if the
+    /// copy reaches a Mac (`local_only` off). Never on the web. It is not proof that the text is hidden.
     pub sensitive: bool,
-    /// Who removes the copy when its time is up.
+    /// Who removes the copy when its time is up: who would, not when. A huge `expires_after` is reported like any other.
     pub expires: CopyExpiry,
     /// The platform keeps the copy off the user's other devices (iOS `.localOnly`). Never on Android or the web.
     pub local_only: bool,
 }
 
-/// How a copy expires, as the shell reported it.
+/// How a copy expires, as the shell reported it. Non-exhaustive: a later shell may report a new kind, which this core
+/// reads as an unknown report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CopyExpiry {
     /// The OS removes it (iOS `.expirationDate`).
     System,
     /// The shell clears it if the clipboard still holds it (Android; ADR-0052).
     BestEffort,
-    /// It doesn't expire: none was asked, or the platform can't (the web).
-    None,
+    /// It doesn't expire: none was asked, or the platform can't (the web). `"none"` on the wire.
+    Never,
 }
 
 impl CopyApplied {
@@ -124,7 +131,7 @@ impl CopyApplied {
         let expires = match v.get("expires")?.as_str()? {
             "system" => CopyExpiry::System,
             "best_effort" => CopyExpiry::BestEffort,
-            "none" => CopyExpiry::None,
+            "none" => CopyExpiry::Never,
             _ => return None,
         };
         Some(Self { sensitive: v.get("sensitive")?.as_bool()?, expires, local_only: v.get("local_only")?.as_bool()? })
@@ -147,7 +154,13 @@ mod tests {
         let web = ok(r#"{"sensitive":false,"expires":"none","local_only":false}"#);
         assert_eq!(CopyApplied::from_response(&android), Some(CopyApplied { sensitive: true, expires: CopyExpiry::BestEffort, local_only: false }));
         assert_eq!(CopyApplied::from_response(&ios), Some(CopyApplied { sensitive: true, expires: CopyExpiry::System, local_only: true }));
-        assert_eq!(CopyApplied::from_response(&web), Some(CopyApplied { sensitive: false, expires: CopyExpiry::None, local_only: false }));
+        assert_eq!(CopyApplied::from_response(&web), Some(CopyApplied { sensitive: false, expires: CopyExpiry::Never, local_only: false }));
+    }
+
+    #[test]
+    fn copy_expiry_is_non_exhaustive_and_never_is_not_none() {
+        // A wildcard arm is required outside the crate; inside it, this only checks the name.
+        assert_ne!(format!("{:?}", CopyExpiry::Never), "None");
     }
 
     #[test]
