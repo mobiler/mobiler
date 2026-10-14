@@ -824,6 +824,22 @@ fn js_err(e: &wasm_bindgen::JsValue) -> String {
         .unwrap_or_else(|| "transfer error".to_string())
 }
 
+/// `clipboard_with` input → the text to copy. A browser can't mark, scope or expire a copy, so the options are only
+/// read to reject a malformed call (ADR-0052).
+fn copy_with_text(input: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(input).map_err(|_| "invalid input JSON".to_string())?;
+    v.get("text").and_then(serde_json::Value::as_str).map(str::to_string).ok_or_else(|| "missing text".to_string())
+}
+
+/// Write `text` with the async Clipboard API; `ok` follows the promise (it rejects when the page has no focus).
+async fn write_clipboard(text: &str) -> PluginResponse {
+    let Some(win) = web_sys::window() else { return PluginResponse::text(false, "no window") };
+    match wasm_bindgen_futures::JsFuture::from(win.navigator().clipboard().write_text(text)).await {
+        Ok(_) => PluginResponse::text(true, ""),
+        Err(e) => PluginResponse::text(false, format!("copy failed: {}", js_err(&e))),
+    }
+}
+
 /// A minimal async chunk reader over a `ReadableStreamDefaultReader`. `next()` resolves
 /// to `Ok(Some(bytes))` per chunk, `Ok(None)` when the stream is done, or `Err(message)`
 /// if the underlying `read()` rejects (e.g. the fetch was aborted mid-stream).
@@ -1009,6 +1025,16 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     }
     // Keep this branch await-free and ahead of any branch that awaits: window.open must run in the
     // click's task, or pop-up blockers treat it as unrequested and a real tap reads as "blocked".
+    // cx.copy_with / cx.copy_sensitive (ADR-0052): a plain copy on the web, answered from the promise.
+    if call.plugin == "clipboard_with" {
+        if call.op != "copy" {
+            return PluginResponse::text(false, format!("unknown clipboard_with op '{}'", call.op));
+        }
+        return match copy_with_text(&call.input) {
+            Ok(text) => write_clipboard(&text).await,
+            Err(e) => PluginResponse::text(false, e),
+        };
+    }
     if call.plugin == "browser" && call.op == "open" {
         // cx.open_url_then: a blocked pop-up (window.open → null) is the one failure a page can see.
         let opened = web_sys::window().and_then(|w| w.open_with_url_and_target(&call.input, "_blank").ok().flatten()).is_some();
@@ -3785,6 +3811,25 @@ mod device_info_tests {
         let r = web_device_info();
         assert!(!r.ok);
         assert_eq!(r.output, b"device info is not available on the web".to_vec());
+    }
+}
+
+#[cfg(test)]
+mod clipboard_with_tests {
+    use super::*;
+
+    #[test]
+    fn copy_with_text_reads_escaped_text() {
+        let input = r#"{"text":"a \"q\" \\ b\n🔑","sensitive":true,"expires_ms":120000,"local_only":true}"#;
+        assert_eq!(copy_with_text(input), Ok("a \"q\" \\ b\n🔑".to_string()));
+        assert_eq!(copy_with_text(r#"{"text":"","sensitive":false,"expires_ms":null,"local_only":false}"#), Ok(String::new()));
+    }
+
+    #[test]
+    fn copy_with_text_rejects_bad_input() {
+        assert_eq!(copy_with_text("not json"), Err("invalid input JSON".to_string()));
+        assert_eq!(copy_with_text(r#"{"sensitive":true}"#), Err("missing text".to_string()));
+        assert_eq!(copy_with_text(r#"{"text":5}"#), Err("missing text".to_string()));
     }
 }
 
