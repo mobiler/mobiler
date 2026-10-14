@@ -420,3 +420,23 @@ fn adr_0051_deep_link_registration_sits_between_markers() {
         assert!(!outside.contains("CFBundleURLTypes:"), "ADR-0051: {path} has a URL type outside the markers");
     }
 }
+
+/// ADR-0052: every shell answers `clipboard_with`, the capability `cx.copy_with` targets, so a copy with options never
+/// falls back to the plain `clipboard` handler (which ignores its op and would copy a secret as-is).
+#[test]
+fn adr_0052_every_shell_answers_clipboard_with() {
+    let kotlin = "\"clipboard_with\" to ClipboardWithPlugin(";
+    let swift = "case \"clipboard_with\": return await ClipboardWithPlugin.handle(";
+    for (path, needle) in [
+        ("mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/Core.kt", kotlin),
+        ("mobiler/templates/iOS/Sources/Core.swift", swift),
+        ("demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/Core.kt", kotlin),
+        ("demos/barbershop/iOS/Sources/Core.swift", swift),
+        ("mobiler-web/src/lib.rs", "call.plugin == \"clipboard_with\""),
+    ] {
+        assert!(read(path).contains(needle), "ADR-0052: {path} doesn't answer clipboard_with");
+    }
+    let core = read("mobiler-core/src/lib.rs");
+    assert!(core.contains("self.plugin(\"clipboard_with\", \"copy\""), "ADR-0052: cx.copy_with must target clipboard_with");
+    assert!(core.contains("self.notify(\"clipboard\", \"copy\", text)"), "ADR-0007: cx.copy must stay a plain notification");
+}
