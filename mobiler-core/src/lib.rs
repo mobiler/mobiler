@@ -18,7 +18,7 @@ pub mod http;
 pub mod i18n;
 pub mod transfer;
 pub use app_info::AppInfo;
-pub use clipboard::CopyOptions;
+pub use clipboard::{CopyApplied, CopyExpiry, CopyOptions};
 pub use device::DeviceInfo;
 pub use photo::{Photo, PhotoError, PhotoFormat, PhotoOptions};
 pub use dialog::{Confirm, Picker, Snackbar, SnackbarDuration};
@@ -235,7 +235,8 @@ impl<E> Cx<E> {
     /// `ok: false` with a reason means not copied at all, e.g. `"plugin 'clipboard_with' not available"` from a shell
     /// that predates it; don't fall back to `cx.copy` then, which would be the plain copy this avoids. On the web it
     /// is a plain copy: a browser can't mark, scope or expire one. Android's expiry is best effort (see
-    /// [`CopyOptions`]).
+    /// [`CopyOptions`]). On `ok: true`, [`CopyApplied::from_response`] says which options took effect on this
+    /// platform (ADR-0053); `None` there means unknown, e.g. a shell from CLI 0.68.
     pub fn copy_with(&mut self, text: impl Into<String>, options: CopyOptions, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         let input = options.to_input(&text.into());
         self.plugin("clipboard_with", "copy", input, then);

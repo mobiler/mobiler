@@ -87,3 +87,90 @@ impl CopyOptions {
         .to_string()
     }
 }
+
+/// What a `clipboard_with` shell applied to a copy it made (ADR-0053), read from an `ok: true` reply with
+/// [`CopyApplied::from_response`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CopyApplied {
+    /// The copy carries the platform's sensitive marker: Android's `IS_SENSITIVE` extra (the preview hides it on 13+),
+    /// or iOS's `org.nspasteboard.ConcealedType` convention. Never on the web.
+    pub sensitive: bool,
+    /// Who removes the copy when its time is up.
+    pub expires: CopyExpiry,
+    /// The platform keeps the copy off the user's other devices (iOS `.localOnly`). Never on Android or the web.
+    pub local_only: bool,
+}
+
+/// How a copy expires, as the shell reported it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyExpiry {
+    /// The OS removes it (iOS `.expirationDate`).
+    System,
+    /// The shell clears it if the clipboard still holds it (Android; ADR-0052).
+    BestEffort,
+    /// It doesn't expire: none was asked, or the platform can't (the web).
+    None,
+}
+
+impl CopyApplied {
+    /// The report in an `ok: true` reply, or `None` when there is none to trust: the copy failed, the output is
+    /// empty (a shell from CLI 0.68 reports nothing), it doesn't parse, or it names an expiry this core doesn't know.
+    /// `None` means *unknown*: an app that needs a protected copy treats it as not protected.
+    pub fn from_response(resp: &crate::PluginResponse) -> Option<Self> {
+        if !resp.ok {
+            return None;
+        }
+        let v: serde_json::Value = serde_json::from_slice(&resp.output).ok()?;
+        let expires = match v.get("expires")?.as_str()? {
+            "system" => CopyExpiry::System,
+            "best_effort" => CopyExpiry::BestEffort,
+            "none" => CopyExpiry::None,
+            _ => return None,
+        };
+        Some(Self { sensitive: v.get("sensitive")?.as_bool()?, expires, local_only: v.get("local_only")?.as_bool()? })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PluginResponse;
+
+    fn ok(s: &str) -> PluginResponse {
+        PluginResponse::text(true, s)
+    }
+
+    #[test]
+    fn each_shells_sensitive_report_parses() {
+        let android = ok(r#"{"sensitive":true,"expires":"best_effort","local_only":false}"#);
+        let ios = ok(r#"{"sensitive":true,"expires":"system","local_only":true}"#);
+        let web = ok(r#"{"sensitive":false,"expires":"none","local_only":false}"#);
+        assert_eq!(CopyApplied::from_response(&android), Some(CopyApplied { sensitive: true, expires: CopyExpiry::BestEffort, local_only: false }));
+        assert_eq!(CopyApplied::from_response(&ios), Some(CopyApplied { sensitive: true, expires: CopyExpiry::System, local_only: true }));
+        assert_eq!(CopyApplied::from_response(&web), Some(CopyApplied { sensitive: false, expires: CopyExpiry::None, local_only: false }));
+    }
+
+    #[test]
+    fn an_empty_report_is_unknown() {
+        // A shell from CLI 0.68 answers ok:true with an empty output.
+        assert_eq!(CopyApplied::from_response(&ok("")), None);
+    }
+
+    #[test]
+    fn a_failed_copy_has_no_report() {
+        let failed = PluginResponse::text(false, r#"{"sensitive":true,"expires":"system","local_only":true}"#);
+        assert_eq!(CopyApplied::from_response(&failed), None);
+    }
+
+    #[test]
+    fn an_unknown_expiry_is_unknown() {
+        assert_eq!(CopyApplied::from_response(&ok(r#"{"sensitive":true,"expires":"later","local_only":true}"#)), None);
+    }
+
+    #[test]
+    fn a_malformed_or_partial_report_is_unknown() {
+        assert_eq!(CopyApplied::from_response(&ok("not json")), None);
+        assert_eq!(CopyApplied::from_response(&ok(r#"{"sensitive":true,"expires":"system"}"#)), None);
+        assert_eq!(CopyApplied::from_response(&ok(r#"{"sensitive":"yes","expires":"system","local_only":true}"#)), None);
+    }
+}
