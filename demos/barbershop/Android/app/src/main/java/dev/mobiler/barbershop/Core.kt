@@ -196,6 +196,83 @@ class ClipboardPlugin(private val context: Context) : MobilerPlugin {
     }
 }
 
+/** Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052): a copy with options. */
+class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "copy") return PluginResponse(false, "unknown clipboard_with op '$op'")
+        val o = runCatching { JSONObject(input) }.getOrNull() ?: return PluginResponse(false, "invalid input JSON")
+        val text = o.opt("text") as? String ?: return PluginResponse(false, "missing text")
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        // A unique label is how ClipboardExpiry later proves the clipboard still holds this copy.
+        val label = "mobiler-copy-" + java.util.UUID.randomUUID()
+        val clip = ClipData.newPlainText(label, text)
+        if (o.optBoolean("sensitive")) {
+            // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); keyboards read the same key before.
+            clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+        }
+        return try {
+            // ClipboardExpiry is main-confined: arm/disarm only ever run here, on Main.
+            withContext(Dispatchers.Main) {
+                cm.setPrimaryClip(clip)
+                if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
+            }
+            PluginResponse(true, "")
+        } catch (e: Exception) {
+            PluginResponse(false, "copy failed: ${e.message ?: e.javaClass.simpleName}")
+        }
+    }
+}
+
+/** `expires_ms` as a Long: a value past Long.MAX_VALUE (the core sends up to u64::MAX) saturates instead of wrapping
+ *  to a negative delay, which would clear at once. */
+private fun expiresMs(o: JSONObject): Long =
+    o.optDouble("expires_ms", 0.0).coerceIn(0.0, Long.MAX_VALUE.toDouble()).toLong()
+
+/** Clears a `clipboard_with` copy when its time is up, but only while the clipboard provably still holds it: since
+ *  Android 10 a backgrounded app can't read the clipboard, so it re-checks every 5 s (it clears within seconds of the
+ *  user returning) and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
+ *  Main-confined: call arm/disarm on the main thread only. Time is `SystemClock.elapsedRealtime()`, which keeps
+ *  counting while the phone sleeps (`delay` alone counts uptime, which stops). */
+object ClipboardExpiry {
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
+    private var job: Job? = null
+
+    fun disarm() {
+        job?.cancel()
+        job = null
+    }
+
+    fun arm(cm: ClipboardManager, label: String, ms: Long) {
+        disarm()
+        val now = android.os.SystemClock.elapsedRealtime()
+        val deadline = if (ms > Long.MAX_VALUE - now) Long.MAX_VALUE else now + ms
+        job = scope.launch {
+            // Sleep in steps of at most 5 s, so a deadline passed while the phone slept is noticed within 5 s of waking.
+            while (true) {
+                val left = deadline - android.os.SystemClock.elapsedRealtime()
+                if (left <= 0) break
+                kotlinx.coroutines.delay(minOf(left, 5_000L))
+            }
+            val giveUpAt = android.os.SystemClock.elapsedRealtime() + 60 * 60 * 1000L
+            while (isActive && android.os.SystemClock.elapsedRealtime() < giveUpAt) {
+                // Null while the app can't read the clipboard (backgrounded on Android 10+), or when it's empty.
+                val desc = cm.primaryClipDescription
+                if (desc != null) {
+                    if (desc.label?.toString() == label) clear(cm)
+                    return@launch
+                }
+                kotlinx.coroutines.delay(5_000)
+            }
+        }
+    }
+
+    private fun clear(cm: ClipboardManager) {
+        if (Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() else cm.setPrimaryClip(ClipData.newPlainText("", ""))
+    }
+}
+
 /** Official, bundled plugin: open the system share sheet with `input` as text. */
 class SharePlugin(private val context: Context) : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
@@ -577,6 +654,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "storage" to StoragePlugin(application),
         "http" to HttpPlugin(),
         "clipboard" to ClipboardPlugin(application),
+        "clipboard_with" to ClipboardWithPlugin(application),
         "share" to SharePlugin(application),
         "browser" to BrowserPlugin(application),
         "haptics" to HapticsPlugin(application),

@@ -824,6 +824,39 @@ fn js_err(e: &wasm_bindgen::JsValue) -> String {
         .unwrap_or_else(|| "transfer error".to_string())
 }
 
+/// `clipboard_with` input → the text to copy. A browser can't mark, scope or expire a copy, so the options are only
+/// read to reject a malformed call (ADR-0052).
+fn copy_with_text(input: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(input).map_err(|_| "invalid input JSON".to_string())?;
+    v.get("text").and_then(serde_json::Value::as_str).map(str::to_string).ok_or_else(|| "missing text".to_string())
+}
+
+/// Write `text` with the async Clipboard API; `ok` follows the promise (it rejects when the page has no focus).
+async fn write_clipboard(text: &str) -> PluginResponse {
+    let Some(clipboard) = web_sys::window().and_then(|w| clipboard(&w)) else {
+        return PluginResponse::text(false, "the clipboard needs a secure page (https or localhost)");
+    };
+    match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text)).await {
+        Ok(_) => PluginResponse::text(true, ""),
+        Err(e) => {
+            use wasm_bindgen::JsCast;
+            let why = e
+                .as_string()
+                .or_else(|| e.dyn_ref::<js_sys::Error>().map(|err| String::from(err.message())))
+                .unwrap_or_else(|| "the browser refused the write".to_string());
+            PluginResponse::text(false, format!("copy failed: {why}"))
+        }
+    }
+}
+
+/// `navigator.clipboard`, or `None` where the page has none: it exists only in a secure context (https or
+/// localhost), so a plain-http page reached over the LAN has `undefined`, and calling into it would throw.
+fn clipboard(win: &web_sys::Window) -> Option<web_sys::Clipboard> {
+    use wasm_bindgen::JsCast;
+    let v = js_sys::Reflect::get(&win.navigator(), &wasm_bindgen::JsValue::from_str("clipboard")).ok()?;
+    if v.is_undefined() || v.is_null() { None } else { Some(v.unchecked_into()) }
+}
+
 /// A minimal async chunk reader over a `ReadableStreamDefaultReader`. `next()` resolves
 /// to `Ok(Some(bytes))` per chunk, `Ok(None)` when the stream is done, or `Err(message)`
 /// if the underlying `read()` rejects (e.g. the fetch was aborted mid-stream).
@@ -1005,6 +1038,16 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             "date" => take_datetime("date").await,
             "time" => take_datetime("time").await,
             other => PluginResponse::text(false, format!("unknown datetime op '{other}'")),
+        };
+    }
+    // cx.copy_with / cx.copy_sensitive (ADR-0052): a plain copy on the web, answered from the promise.
+    if call.plugin == "clipboard_with" {
+        if call.op != "copy" {
+            return PluginResponse::text(false, format!("unknown clipboard_with op '{}'", call.op));
+        }
+        return match copy_with_text(&call.input) {
+            Ok(text) => write_clipboard(&text).await,
+            Err(e) => PluginResponse::text(false, e),
         };
     }
     // Keep this branch await-free and ahead of any branch that awaits: window.open must run in the
@@ -1401,7 +1444,9 @@ fn perform_notify(notify: &PluginNotify) {
         }
         // Copy to the clipboard (write_text returns a Promise we let run).
         ("clipboard", "copy") => {
-            let _ = win.navigator().clipboard().write_text(&notify.input);
+            if let Some(c) = clipboard(&win) {
+                let _ = c.write_text(&notify.input);
+            }
         }
         // Open a URL in a new tab.
         ("browser", "open") => {
@@ -1410,7 +1455,9 @@ fn perform_notify(notify: &PluginNotify) {
         // No reliable cross-browser share sheet (navigator.share is mobile-only and
         // gesture-gated), so degrade to copying — a sane universal fallback.
         ("share", _) => {
-            let _ = win.navigator().clipboard().write_text(&notify.input);
+            if let Some(c) = clipboard(&win) {
+                let _ = c.write_text(&notify.input);
+            }
         }
         // Tear down a streaming subscription: close the WebSocket parked under this
         // key (input = the subscription key) and drop its closures. Paired with
@@ -3785,6 +3832,25 @@ mod device_info_tests {
         let r = web_device_info();
         assert!(!r.ok);
         assert_eq!(r.output, b"device info is not available on the web".to_vec());
+    }
+}
+
+#[cfg(test)]
+mod clipboard_with_tests {
+    use super::*;
+
+    #[test]
+    fn copy_with_text_reads_escaped_text() {
+        let input = r#"{"text":"a \"q\" \\ b\n🔑","sensitive":true,"expires_ms":120000,"local_only":true}"#;
+        assert_eq!(copy_with_text(input), Ok("a \"q\" \\ b\n🔑".to_string()));
+        assert_eq!(copy_with_text(r#"{"text":"","sensitive":false,"expires_ms":null,"local_only":false}"#), Ok(String::new()));
+    }
+
+    #[test]
+    fn copy_with_text_rejects_bad_input() {
+        assert_eq!(copy_with_text("not json"), Err("invalid input JSON".to_string()));
+        assert_eq!(copy_with_text(r#"{"sensitive":true}"#), Err("missing text".to_string()));
+        assert_eq!(copy_with_text(r#"{"text":5}"#), Err("missing text".to_string()));
     }
 }
 
