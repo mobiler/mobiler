@@ -213,8 +213,11 @@ class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
             }
         }
         return try {
-            withContext(Dispatchers.Main) { cm.setPrimaryClip(clip) }
-            if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
+            // ClipboardExpiry is main-confined: arm/disarm only ever run here, on Main.
+            withContext(Dispatchers.Main) {
+                cm.setPrimaryClip(clip)
+                if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
+            }
             PluginResponse(true, "")
         } catch (e: Exception) {
             PluginResponse(false, "copy failed: ${e.message ?: e.javaClass.simpleName}")
@@ -229,7 +232,9 @@ private fun expiresMs(o: JSONObject): Long =
 
 /** Clears a `clipboard_with` copy when its time is up, but only while the clipboard provably still holds it: since
  *  Android 10 a backgrounded app can't read the clipboard, so it re-checks every 5 s (it clears within seconds of the
- *  user returning) and gives up after an hour. A newer copy replaces the deadline; a process death drops it. */
+ *  user returning) and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
+ *  Main-confined: call arm/disarm on the main thread only. Time is `SystemClock.elapsedRealtime()`, which keeps
+ *  counting while the phone sleeps (`delay` alone counts uptime, which stops). */
 object ClipboardExpiry {
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
     private var job: Job? = null
@@ -241,10 +246,17 @@ object ClipboardExpiry {
 
     fun arm(cm: ClipboardManager, label: String, ms: Long) {
         disarm()
+        val now = android.os.SystemClock.elapsedRealtime()
+        val deadline = if (ms > Long.MAX_VALUE - now) Long.MAX_VALUE else now + ms
         job = scope.launch {
-            kotlinx.coroutines.delay(ms)
-            val giveUpAt = System.currentTimeMillis() + 60 * 60 * 1000L
-            while (isActive && System.currentTimeMillis() < giveUpAt) {
+            // Sleep in steps of at most 5 s, so a deadline passed while the phone slept is noticed within 5 s of waking.
+            while (true) {
+                val left = deadline - android.os.SystemClock.elapsedRealtime()
+                if (left <= 0) break
+                kotlinx.coroutines.delay(minOf(left, 5_000L))
+            }
+            val giveUpAt = android.os.SystemClock.elapsedRealtime() + 60 * 60 * 1000L
+            while (isActive && android.os.SystemClock.elapsedRealtime() < giveUpAt) {
                 // Null while the app can't read the clipboard (backgrounded on Android 10+), or when it's empty.
                 val desc = cm.primaryClipDescription
                 if (desc != null) {

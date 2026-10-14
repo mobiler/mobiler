@@ -833,11 +833,28 @@ fn copy_with_text(input: &str) -> Result<String, String> {
 
 /// Write `text` with the async Clipboard API; `ok` follows the promise (it rejects when the page has no focus).
 async fn write_clipboard(text: &str) -> PluginResponse {
-    let Some(win) = web_sys::window() else { return PluginResponse::text(false, "no window") };
-    match wasm_bindgen_futures::JsFuture::from(win.navigator().clipboard().write_text(text)).await {
+    let Some(clipboard) = web_sys::window().and_then(|w| clipboard(&w)) else {
+        return PluginResponse::text(false, "the clipboard needs a secure page (https or localhost)");
+    };
+    match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text)).await {
         Ok(_) => PluginResponse::text(true, ""),
-        Err(e) => PluginResponse::text(false, format!("copy failed: {}", js_err(&e))),
+        Err(e) => {
+            use wasm_bindgen::JsCast;
+            let why = e
+                .as_string()
+                .or_else(|| e.dyn_ref::<js_sys::Error>().map(|err| String::from(err.message())))
+                .unwrap_or_else(|| "the browser refused the write".to_string());
+            PluginResponse::text(false, format!("copy failed: {why}"))
+        }
     }
+}
+
+/// `navigator.clipboard`, or `None` where the page has none: it exists only in a secure context (https or
+/// localhost), so a plain-http page reached over the LAN has `undefined`, and calling into it would throw.
+fn clipboard(win: &web_sys::Window) -> Option<web_sys::Clipboard> {
+    use wasm_bindgen::JsCast;
+    let v = js_sys::Reflect::get(&win.navigator(), &wasm_bindgen::JsValue::from_str("clipboard")).ok()?;
+    if v.is_undefined() || v.is_null() { None } else { Some(v.unchecked_into()) }
 }
 
 /// A minimal async chunk reader over a `ReadableStreamDefaultReader`. `next()` resolves
@@ -1023,8 +1040,6 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             other => PluginResponse::text(false, format!("unknown datetime op '{other}'")),
         };
     }
-    // Keep this branch await-free and ahead of any branch that awaits: window.open must run in the
-    // click's task, or pop-up blockers treat it as unrequested and a real tap reads as "blocked".
     // cx.copy_with / cx.copy_sensitive (ADR-0052): a plain copy on the web, answered from the promise.
     if call.plugin == "clipboard_with" {
         if call.op != "copy" {
@@ -1035,6 +1050,8 @@ async fn perform(call: &PluginCall) -> PluginResponse {
             Err(e) => PluginResponse::text(false, e),
         };
     }
+    // Keep this branch await-free and ahead of any branch that awaits: window.open must run in the
+    // click's task, or pop-up blockers treat it as unrequested and a real tap reads as "blocked".
     if call.plugin == "browser" && call.op == "open" {
         // cx.open_url_then: a blocked pop-up (window.open → null) is the one failure a page can see.
         let opened = web_sys::window().and_then(|w| w.open_with_url_and_target(&call.input, "_blank").ok().flatten()).is_some();
@@ -1427,7 +1444,9 @@ fn perform_notify(notify: &PluginNotify) {
         }
         // Copy to the clipboard (write_text returns a Promise we let run).
         ("clipboard", "copy") => {
-            let _ = win.navigator().clipboard().write_text(&notify.input);
+            if let Some(c) = clipboard(&win) {
+                let _ = c.write_text(&notify.input);
+            }
         }
         // Open a URL in a new tab.
         ("browser", "open") => {
@@ -1436,7 +1455,9 @@ fn perform_notify(notify: &PluginNotify) {
         // No reliable cross-browser share sheet (navigator.share is mobile-only and
         // gesture-gated), so degrade to copying — a sane universal fallback.
         ("share", _) => {
-            let _ = win.navigator().clipboard().write_text(&notify.input);
+            if let Some(c) = clipboard(&win) {
+                let _ = c.write_text(&notify.input);
+            }
         }
         // Tear down a streaming subscription: close the WebSocket parked under this
         // key (input = the subscription key) and drop its closures. Paired with

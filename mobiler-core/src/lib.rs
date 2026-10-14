@@ -233,13 +233,16 @@ impl<E> Cx<E> {
     /// Copy `text` with `options` (built-in `clipboard_with` capability, ADR-0052); `then` learns whether it was
     /// copied. `ok: true` means copied, with every option this platform supports applied (see [`CopyOptions`]);
     /// `ok: false` with a reason means not copied at all, e.g. `"plugin 'clipboard_with' not available"` from a shell
-    /// that predates it. On the web it is a plain copy: a browser can't mark, scope or expire one.
+    /// that predates it; don't fall back to `cx.copy` then, which would be the plain copy this avoids. On the web it
+    /// is a plain copy: a browser can't mark, scope or expire one. Android's expiry is best effort (see
+    /// [`CopyOptions`]).
     pub fn copy_with(&mut self, text: impl Into<String>, options: CopyOptions, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         let input = options.to_input(&text.into());
         self.plugin("clipboard_with", "copy", input, then);
     }
 
     /// [`copy_with`](Self::copy_with) with [`CopyOptions::sensitive`]: for a password, a recovery code, a TOTP secret.
+    /// Sensitive, expires after 2 minutes (best effort on Android, plain on the web), kept off other devices (iOS).
     /// `cx.copy_sensitive(secret, |r| Msg::Copied(r.ok))`.
     pub fn copy_sensitive(&mut self, text: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
         self.copy_with(text, CopyOptions::sensitive(), then);

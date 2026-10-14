@@ -135,3 +135,17 @@ prove is its own:
 - **Auto-clearing a plain `cx.copy`.** It stays fire-and-forget and unchanged.
 - **Reading the clipboard** (`cx.paste`). It is a separate capability with its own permission prompts.
 - **Blind Android clearing** (clearing without proving the clip is ours). It would wipe what the user copied next.
+
+## Amendments
+
+- **2026-10-14, ADR-0052 moves to the CLI PR.** §6 put ADR-0052 in the libraries PR. The plan moves it, with its
+  conformance test, to the CLI PR: only there can the test cover every shell (the templates are ported after core
+  0.45 is live, ADR-0009), and its mutation proofs must be in the record before it merges (merged ADRs are
+  immutable). Until then the libraries' doc comments cite a record that lands with CLI 0.68.
+- **2026-10-14, after the fresh reviews:**
+  - Android's expiry is documented as best effort (Android 10+ reads the clipboard only in front; process death drops
+    it), and `local_only` as iOS only. The deadline runs on `SystemClock.elapsedRealtime()`, so sleep doesn't stretch
+    it.
+  - Web: on a page without a secure context (plain `http://` other than localhost) `navigator.clipboard` doesn't
+    exist; the shell answers `ok: false` instead of throwing (and never replying). The plain `cx.copy` path gets the
+    same guard.
