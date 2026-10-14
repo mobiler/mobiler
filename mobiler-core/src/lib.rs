@@ -9,6 +9,7 @@ use std::marker::PhantomData;
 
 pub mod app_info;
 pub mod bunny;
+pub mod clipboard;
 pub mod device;
 pub mod photo;
 pub mod dialog;
@@ -17,6 +18,7 @@ pub mod http;
 pub mod i18n;
 pub mod transfer;
 pub use app_info::AppInfo;
+pub use clipboard::CopyOptions;
 pub use device::DeviceInfo;
 pub use photo::{Photo, PhotoError, PhotoFormat, PhotoOptions};
 pub use dialog::{Confirm, Picker, Snackbar, SnackbarDuration};
@@ -226,6 +228,21 @@ impl<E> Cx<E> {
     /// Copy `text` to the system clipboard (built-in `clipboard` capability).
     pub fn copy(&mut self, text: impl Into<String>) {
         self.notify("clipboard", "copy", text);
+    }
+
+    /// Copy `text` with `options` (built-in `clipboard_with` capability, ADR-0052); `then` learns whether it was
+    /// copied. `ok: true` means copied, with every option this platform supports applied (see [`CopyOptions`]);
+    /// `ok: false` with a reason means not copied at all, e.g. `"plugin 'clipboard_with' not available"` from a shell
+    /// that predates it. On the web it is a plain copy: a browser can't mark, scope or expire one.
+    pub fn copy_with(&mut self, text: impl Into<String>, options: CopyOptions, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        let input = options.to_input(&text.into());
+        self.plugin("clipboard_with", "copy", input, then);
+    }
+
+    /// [`copy_with`](Self::copy_with) with [`CopyOptions::sensitive`]: for a password, a recovery code, a TOTP secret.
+    /// `cx.copy_sensitive(secret, |r| Msg::Copied(r.ok))`.
+    pub fn copy_sensitive(&mut self, text: impl Into<String>, then: impl FnOnce(PluginResponse) -> E + Send + 'static) {
+        self.copy_with(text, CopyOptions::sensitive(), then);
     }
 
     /// Open the system share sheet with `text` (built-in `share` capability).
@@ -2719,5 +2736,61 @@ mod tests {
     fn scroller_hint_is_opt_in() {
         assert!(matches!(scroller(vec![text("a")]), Widget::Scroller { edge_fade: false, .. }));
         assert!(matches!(scroller_hinted(vec![text("a")]), Widget::Scroller { edge_fade: true, ref children } if children.len() == 1));
+    }
+
+    /// The copy request's input as JSON (ADR-0052 wire).
+    fn copy_input(cx: &Cx<Ev>, i: usize) -> serde_json::Value {
+        let (call, _) = &cx.requests[i];
+        assert_eq!((call.plugin.as_str(), call.op.as_str()), ("clipboard_with", "copy"));
+        serde_json::from_str(&call.input).unwrap()
+    }
+
+    #[test]
+    fn copy_with_and_copy_sensitive_send_the_whole_options_object() {
+        let mut cx = Cx::<Ev>::default();
+        cx.copy_with("plain", CopyOptions::new(), |_| Ev::Tap);
+        cx.copy_sensitive("JBSWY3DPEHPK3PXP", |_| Ev::Tap);
+        cx.copy_with(
+            "",
+            CopyOptions::sensitive().expires_after(std::time::Duration::from_secs(30)).local_only(false),
+            |_| Ev::Tap,
+        );
+        cx.copy_with("x", CopyOptions::sensitive().never_expires().mark_sensitive(false), |_| Ev::Tap);
+        assert_eq!(copy_input(&cx, 0), serde_json::json!({"text":"plain","sensitive":false,"expires_ms":null,"local_only":false}));
+        assert_eq!(copy_input(&cx, 1), serde_json::json!({"text":"JBSWY3DPEHPK3PXP","sensitive":true,"expires_ms":120000,"local_only":true}));
+        assert_eq!(copy_input(&cx, 2), serde_json::json!({"text":"","sensitive":true,"expires_ms":30000,"local_only":false}));
+        assert_eq!(copy_input(&cx, 3), serde_json::json!({"text":"x","sensitive":false,"expires_ms":null,"local_only":true}));
+        assert!(cx.notifications.is_empty(), "copy_with is a request, never a notification");
+        assert_eq!(CopyOptions::default(), CopyOptions::new());
+    }
+
+    #[test]
+    fn expires_after_is_clamped_and_saturates() {
+        let mut cx = Cx::<Ev>::default();
+        cx.copy_with("a", CopyOptions::new().expires_after(std::time::Duration::from_millis(10)), |_| Ev::Tap);
+        cx.copy_with("b", CopyOptions::new().expires_after(std::time::Duration::MAX), |_| Ev::Tap);
+        assert_eq!(copy_input(&cx, 0)["expires_ms"], serde_json::json!(1000));
+        assert_eq!(copy_input(&cx, 1)["expires_ms"], serde_json::json!(u64::MAX));
+    }
+
+    #[test]
+    fn copy_with_input_round_trips_tricky_text() {
+        let tricky = "a \"quoted\" \\ back\nslash\t🔑 ćčž";
+        let mut cx = Cx::<Ev>::default();
+        cx.copy_with(tricky, CopyOptions::sensitive(), |_| Ev::Tap);
+        assert_eq!(copy_input(&cx, 0)["text"], serde_json::json!(tricky));
+    }
+
+    /// ADR-0007 / ADR-0052: the plain copy is unchanged, and no `Cx` call sends options to `clipboard`.
+    #[test]
+    fn plain_copy_is_unchanged_and_options_never_go_to_clipboard() {
+        let mut cx = Cx::<Ev>::default();
+        cx.copy("c");
+        cx.copy_with("o", CopyOptions::sensitive(), |_| Ev::Tap);
+        cx.copy_sensitive("s", |_| Ev::Tap);
+        let notes: Vec<(&str, &str, &str)> =
+            cx.notifications.iter().map(|n| (n.plugin.as_str(), n.op.as_str(), n.input.as_str())).collect();
+        assert_eq!(notes, vec![("clipboard", "copy", "c")]);
+        assert!(cx.requests.iter().all(|(c, _)| c.plugin == "clipboard_with"));
     }
 }
