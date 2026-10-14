@@ -152,7 +152,7 @@ all three platforms (Android, iOS, web), reached through typed `cx` helpers in y
 |---|---|---|
 | HTTP | `cx.get / cx.post / cx.put / cx.patch / cx.delete / cx.request (builder) / cx.upload / cx.download (streaming)` | headers + byte body/response; streaming upload/download with progress + cancel (native shells land in CLI 0.49); multipart upload via cx.upload().multipart() (all shells); an upload's Done carries the server's reply (up to 64 KB) |
 | Storage | `cx.save (+ restore on launch)` | persist the model |
-| Clipboard | `cx.copy(text)` | copy text |
+| Clipboard | `cx.copy(text) · cx.copy_with(text, CopyOptions, then) · cx.copy_sensitive(text, then)` | copy text; copy_with: sensitive (Android hides the preview), expires_after, local_only (iOS); a shell without clipboard_with answers ok:false |
 | Share | `cx.share(text)` | system share sheet |
 | Browser | `cx.open_url(url)` | open a link externally |
 | Toast | `cx.toast(text)` | transient message / snackbar |

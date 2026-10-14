@@ -68,6 +68,12 @@ pub type App = MobilerShell<Counter>;
   an unread count (`0` = none, above 99 = `99+`) on a tab; `label` is spoken after the tab's name
   (empty: the screen reader reads the number):
   `with_tab_count(tab_icon("Inbox", Icon::Mail, sel, Msg::Inbox), unread, format!("{unread} unread"))`.
+- **Copy with options** — `cx.copy_with(text, CopyOptions, then)` marks a copy sensitive, expires it,
+  or keeps it on the device; `cx.copy_sensitive(secret, then)` is the preset for a password, a recovery
+  code or a TOTP secret (sensitive, 2 minutes, this device only). Android hides it in the clipboard
+  preview and clears it when it expires (only while the clipboard still holds it); iOS keeps it out of
+  Universal Clipboard and lets the system remove it; the web copies it plainly. `then` gets `ok: false`
+  from a shell that predates it, never a plain copy. `cx.copy` is unchanged.
 
 Most users go through the [`mobiler`](https://crates.io/crates/mobiler) CLI, which
 scaffolds a project wired to this crate and a generic native shell.

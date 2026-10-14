@@ -39,6 +39,9 @@ fn main() {
   core that runs on Android/iOS renders identically on the web — including the **charts**
   (bar/line/stacked/pie/donut/rings/gauge + region/coverage), drawn with SVG + CSS here, the
   **video player** / **web view** / **PDF viewer**, and an interactive **map** (MapLibre-GL).
+- **What a browser can't do.** `cx.copy_with` / `cx.copy_sensitive` copy plainly here: a page can't
+  mark a copy sensitive, keep it off other devices, or expire it. `ok` follows the Clipboard API's
+  promise (it rejects when the page has no focus).
 
 Build and serve with [Trunk](https://trunkrs.dev): `trunk serve`. See the
 [`fullstack-todo`](https://github.com/mobiler/mobiler/tree/main/demos/fullstack-todo)
