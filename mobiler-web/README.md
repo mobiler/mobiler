@@ -42,7 +42,9 @@ fn main() {
 - **What a browser can't do.** `cx.copy_with` / `cx.copy_sensitive` copy plainly here: a page can't
   mark a copy sensitive, keep it off other devices, or expire it. `ok` follows the Clipboard API's
   promise (it rejects when the page has no focus), and is `false` on a page without a secure context
-  (plain `http://` other than localhost), where browsers have no clipboard API.
+  (plain `http://` other than localhost), where browsers have no clipboard API. The reply's report says
+  so (`sensitive: false, expires: none, local_only: false`); a plain `cx.copy` on such a page logs a
+  console warning.
 
 Build and serve with [Trunk](https://trunkrs.dev): `trunk serve`. See the
 [`fullstack-todo`](https://github.com/mobiler/mobiler/tree/main/demos/fullstack-todo)
