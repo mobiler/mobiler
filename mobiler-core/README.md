@@ -70,9 +70,9 @@ pub type App = MobilerShell<Counter>;
   `with_tab_count(tab_icon("Inbox", Icon::Mail, sel, Msg::Inbox), unread, format!("{unread} unread"))`.
 - **Copy with options** — `cx.copy_with(text, CopyOptions, then)` marks a copy sensitive, expires it,
   or keeps it on the device; `cx.copy_sensitive(secret, then)` is the preset for a password, a recovery
-  code or a TOTP secret (sensitive, 2 minutes, kept off other devices on iOS). Android hides it in the
-  clipboard preview; its expiry is best effort: Android 10+ lets only the app in front read the clipboard,
-  so once the user switches away it clears within seconds of the app coming back, gives up after an hour,
+  code or a TOTP secret (sensitive, 2 minutes, kept off other devices on iOS). Android 13+ hides it in
+  the clipboard preview; its expiry is best effort: Android 10+ lets only the app in front read the clipboard,
+  so once the user switches away it clears within seconds of the app coming back, gives up an hour after the deadline,
   and never clears if the process dies first. iOS keeps it out of Universal Clipboard and lets the system
   remove it; the web copies it plainly. `then` gets `ok: false` from a shell that predates it (don't fall
   back to `cx.copy`). `cx.copy` is unchanged.

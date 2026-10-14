@@ -13,7 +13,7 @@ use std::time::Duration;
 /// - `expires_after`: iOS removes the item itself. On Android it is **best effort**: the shell clears the clipboard
 ///   when the time is up, but only while it still holds this copy. Android 10+ lets only the app in front read the
 ///   clipboard, so after the user switches away (say, to paste the secret into another app) it clears within about
-///   5 s of the app coming back to the front, gives up after an hour, and never clears if the process dies first.
+///   5 s of the app coming back to the front, gives up an hour after the deadline, and never clears if the process dies first.
 ///   Android 13+ clears the clipboard itself after about an hour. The hidden preview is Android's dependable
 ///   protection. The web can't expire a copy.
 /// - `local_only`: iOS keeps the item out of Universal Clipboard. No effect on Android (an OEM or companion-app
