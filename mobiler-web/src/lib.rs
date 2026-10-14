@@ -831,13 +831,25 @@ fn copy_with_text(input: &str) -> Result<String, String> {
     v.get("text").and_then(serde_json::Value::as_str).map(str::to_string).ok_or_else(|| "missing text".to_string())
 }
 
-/// Write `text` with the async Clipboard API; `ok` follows the promise (it rejects when the page has no focus).
+/// What the web applied to a `clipboard_with` copy (ADR-0053): a browser can't mark, scope or expire one.
+const WEB_COPY_REPORT: &str = r#"{"sensitive":false,"expires":"none","local_only":false}"#;
+
+/// Why there is no clipboard to write to: no `window` (a worker), or no `navigator.clipboard` (no secure context).
+fn missing_clipboard_reason(has_window: bool) -> &'static str {
+    if has_window { "the clipboard needs a secure page (https or localhost)" } else { "no window" }
+}
+
+/// Write `text` with the async Clipboard API for `clipboard_with`; `ok` follows the promise (it rejects when the
+/// page has no focus), and on success the output is the report.
 async fn write_clipboard(text: &str) -> PluginResponse {
-    let Some(clipboard) = web_sys::window().and_then(|w| clipboard(&w)) else {
-        return PluginResponse::text(false, "the clipboard needs a secure page (https or localhost)");
+    let Some(win) = web_sys::window() else {
+        return PluginResponse::text(false, missing_clipboard_reason(false));
+    };
+    let Some(clipboard) = clipboard(&win) else {
+        return PluginResponse::text(false, missing_clipboard_reason(true));
     };
     match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text)).await {
-        Ok(_) => PluginResponse::text(true, ""),
+        Ok(_) => PluginResponse::text(true, WEB_COPY_REPORT),
         Err(e) => {
             use wasm_bindgen::JsCast;
             let why = e
@@ -1446,6 +1458,8 @@ fn perform_notify(notify: &PluginNotify) {
         ("clipboard", "copy") => {
             if let Some(c) = clipboard(&win) {
                 let _ = c.write_text(&notify.input);
+            } else {
+                web_sys::console::warn_1(&format!("mobiler: {}", missing_clipboard_reason(true)).into());
             }
         }
         // Open a URL in a new tab.
@@ -1457,6 +1471,8 @@ fn perform_notify(notify: &PluginNotify) {
         ("share", _) => {
             if let Some(c) = clipboard(&win) {
                 let _ = c.write_text(&notify.input);
+            } else {
+                web_sys::console::warn_1(&format!("mobiler: {}", missing_clipboard_reason(true)).into());
             }
         }
         // Tear down a streaming subscription: close the WebSocket parked under this
@@ -3851,6 +3867,19 @@ mod clipboard_with_tests {
         assert_eq!(copy_with_text("not json"), Err("invalid input JSON".to_string()));
         assert_eq!(copy_with_text(r#"{"sensitive":true}"#), Err("missing text".to_string()));
         assert_eq!(copy_with_text(r#"{"text":5}"#), Err("missing text".to_string()));
+    }
+
+    #[test]
+    fn the_web_reports_no_protection() {
+        let r = PluginResponse::text(true, WEB_COPY_REPORT);
+        let v: serde_json::Value = serde_json::from_slice(&r.output).unwrap();
+        assert_eq!(v, serde_json::json!({"sensitive": false, "expires": "none", "local_only": false}));
+    }
+
+    #[test]
+    fn a_missing_clipboard_names_its_cause() {
+        assert_eq!(missing_clipboard_reason(false), "no window");
+        assert_eq!(missing_clipboard_reason(true), "the clipboard needs a secure page (https or localhost)");
     }
 }
 

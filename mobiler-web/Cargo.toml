@@ -31,7 +31,7 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "KeyboardEvent", "DomTokenList", "DomRect",
     "Document", "HtmlHeadElement", "HtmlElement", "Element", "Node",
-    "Window", "Storage", "Navigator", "Clipboard", "EventTarget", "MediaQueryList", "MediaQueryListEvent",
+    "Window", "Storage", "Navigator", "Clipboard", "console", "EventTarget", "MediaQueryList", "MediaQueryListEvent",
     "HtmlInputElement", "FileList", "File", "Blob", "Url",
     # Photo options (pick_photo_with): decode with createImageBitmap, re-encode on a canvas.
     "HtmlCanvasElement", "CanvasRenderingContext2d", "ImageBitmap",
