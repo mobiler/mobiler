@@ -13,7 +13,14 @@ cx.plugin("securestore", "delete", r#"{"key":"token"}"#,               Msg::Clea
 ```
 
 - `input` is JSON. `set` → `ok:true`; `get` → `ok:true, output = value` (`""` if absent);
-  `delete` → `ok:true`.
+  `delete` → `ok:true` (also for a key that was never stored).
+- **`ok:true` means stored.** A `set` or `delete` answers only once the change is on disk (Android
+  `commit()`, the Keychain call on iOS). A write that fails answers `ok:false` with the reason in
+  `output`, so you can wait for a `set` before acting on it (store a rotated token, then replay).
+  On Android a failed write can still be held in memory until the app restarts, so treat `ok:false`
+  as "not stored", not as "unchanged".
+- **Order:** on Android, calls run one at a time in the order the core sent them. On iOS they can
+  run at the same time, so wait for one call's answer before sending the next for the same key.
 - **Android:** `EncryptedSharedPreferences` (AES-256, keys in the Android Keystore). Adds the
   `androidx.security:security-crypto` Gradle dep.
 - **iOS:** the **Keychain** (`Security` framework — no package), items `…ThisDeviceOnly`.
