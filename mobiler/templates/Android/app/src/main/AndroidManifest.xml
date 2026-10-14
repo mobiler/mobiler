@@ -34,13 +34,16 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Deep links: {{PACKAGE}}://… open the app (and route in-app via the `system` stream). -->
+            <!-- Deep links: {{PACKAGE}}://… open the app (and route in-app via the `system` stream).
+                 mobiler.toml `[deep_links] enabled = false` comments this filter out (ADR-0051). -->
+            <!-- mobiler:deep-links-begin -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="{{PACKAGE}}" />
             </intent-filter>
+            <!-- mobiler:deep-links-end -->
         </activity>
 
         <!-- Lets cx.capture_photo hand the system camera app a writable file URI.

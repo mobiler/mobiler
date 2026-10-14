@@ -45,12 +45,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <!-- Deep links: dev.mobiler.barbershop://… open the app (and route in-app via the `system` stream). -->
+            <!-- mobiler:deep-links-begin -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="dev.mobiler.barbershop" />
             </intent-filter>
+            <!-- mobiler:deep-links-end -->
         </activity>
 
         <!-- Lets cx.capture_photo hand the system camera app a writable file URI.
