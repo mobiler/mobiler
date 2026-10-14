@@ -451,8 +451,10 @@ fn adr_0052_every_shell_answers_clipboard_with() {
 
 /// The live code in `src`: whole-line `//` comments, `/* … */` blocks (also across lines) and the dead branch of a
 /// Swift `#if false` (up to its `#else` or `#endif`, nested `#if`s included) are dropped, as are the `#if` / `#else` /
-/// `#endif` lines themselves; every other line is kept whole (a `//` later in a line may sit inside a string). Any
-/// other `#if` condition counts as live on both branches.
+/// `#endif` lines themselves, and so is any line starting with `*` (a doc-comment body; a live `*x = …` line would be
+/// lost too, which can only make a check fail, never pass). Every other line is kept whole (a `//` later in a line may
+/// sit inside a string). Any other `#if` condition counts as live on both branches; `#elseif` counts as `#else`. Not
+/// handled: nested block comments and a `/*` opened mid-line, which the shells don't use around what is checked.
 fn live_code(src: &str) -> String {
     // One frame per open `#if`: (inside a dead region already, is `#if false`, past its `#else`).
     let mut frames: Vec<(bool, bool, bool)> = Vec::new();

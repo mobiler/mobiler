@@ -108,6 +108,19 @@ pub struct CopyApplied {
 
 /// How a copy expires, as the shell reported it. Non-exhaustive: a later shell may report a new kind, which this core
 /// reads as an unknown report.
+///
+/// An app's `match` needs a wildcard arm:
+///
+/// ```compile_fail
+/// use mobiler_core::CopyExpiry;
+/// fn who(e: CopyExpiry) -> &'static str {
+///     match e {
+///         CopyExpiry::System => "system",
+///         CopyExpiry::BestEffort => "best effort",
+///         CopyExpiry::Never => "never",
+///     }
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CopyExpiry {
@@ -155,12 +168,6 @@ mod tests {
         assert_eq!(CopyApplied::from_response(&android), Some(CopyApplied { sensitive: true, expires: CopyExpiry::BestEffort, local_only: false }));
         assert_eq!(CopyApplied::from_response(&ios), Some(CopyApplied { sensitive: true, expires: CopyExpiry::System, local_only: true }));
         assert_eq!(CopyApplied::from_response(&web), Some(CopyApplied { sensitive: false, expires: CopyExpiry::Never, local_only: false }));
-    }
-
-    #[test]
-    fn copy_expiry_is_non_exhaustive_and_never_is_not_none() {
-        // A wildcard arm is required outside the crate; inside it, this only checks the name.
-        assert_ne!(format!("{:?}", CopyExpiry::Never), "None");
     }
 
     #[test]

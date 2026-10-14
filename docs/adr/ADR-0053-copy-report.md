@@ -70,7 +70,10 @@ The rules:
   - **Validation Metric:** `mobiler-web/src/lib.rs::the_web_reports_no_protection`.
 - **Condition 4 (runtime).** Checked in PR #295:
   - Android emulator API 36: `copy_sensitive` → `{"sensitive":true,"expires":"best_effort","local_only":false}`,
-    a plain `copy_with` → all false/`"none"`, both parsed by the core.
+    a plain `copy_with` → all false/`"none"`, both parsed by the core; with the app away past an expiry, no
+    clipboard read (no "Denying clipboard access" line) and the clear on return.
+  - Android emulator API 26: a 5 s expiry with the app away clears at the deadline. Before the review fix
+    (the foreground gate on every API level) it didn't.
   - Headless Chrome: the all-false report on a secure page; `ok: false` with the reason on an insecure one.
   - iOS is compiled by CI; the marker and the report need a device.
 
@@ -87,7 +90,7 @@ The rules:
   Rejected: an app couldn't tell "not asked" from "an older shell that reports nothing". Every key is
   always present instead.
 - **Option D: report `sensitive` only where the OS itself hides the text (Android 13+)**
-  `[recorded: security review of PR #295]`
+  `[recorded: PR #295 body, security review]`
   Rejected: the field would hide that the marker reached keyboards on Android 8–12 and Mac clipboard
   managers from iOS. The field means "a marker was attached", and its doc says who honours it.
 - **Option E: the report, read by `CopyApplied::from_response`, `None` when unknown**
