@@ -57,10 +57,13 @@ targets:
         # `{{PACKAGE}}://…` opens the app — delivered to the core via the built-in `system` stream.
         # (Universal/App Links over https additionally need an associated-domains entitlement + a
         # server-side apple-app-site-association file — not auto-wired.)
+        # mobiler.toml `[deep_links] enabled = false` comments this registration out (ADR-0051).
+        # mobiler:deep-links-begin
         CFBundleURLTypes:
           - CFBundleURLName: {{PACKAGE}}
             CFBundleURLSchemes:
               - {{PACKAGE}}
+        # mobiler:deep-links-end
         # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
         # requires this usage string to access the camera; the App Store flags apps that
         # ship it without using the camera, so it's left off by default.

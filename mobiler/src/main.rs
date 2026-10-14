@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 mod build;
+mod deep_links;
 mod dev;
 mod fonts;
 mod fsguard;
@@ -83,6 +84,11 @@ enum Command {
         #[command(subcommand)]
         cmd: SplashCmd,
     },
+    /// Deep-link registration from `mobiler.toml` `[deep_links]` (synced automatically by build/dev/watch).
+    DeepLinks {
+        #[command(subcommand)]
+        cmd: DeepLinksCmd,
+    },
     /// Manage plugins (add a capability package to this app).
     Plugin {
         #[command(subcommand)]
@@ -115,6 +121,12 @@ enum Command {
 #[derive(Subcommand)]
 enum SplashCmd {
     /// Write `[splash]` (background colours, logo) into the Android, iOS and web shells (idempotent).
+    Sync,
+}
+
+#[derive(Subcommand)]
+enum DeepLinksCmd {
+    /// Switch the Android intent filter and the iOS URL type on or off per `[deep_links] enabled` (idempotent).
     Sync,
 }
 
@@ -157,6 +169,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Splash { cmd: SplashCmd::Sync } => match splash::run_sync_cli() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::DeepLinks { cmd: DeepLinksCmd::Sync } => match deep_links::run_sync_cli() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

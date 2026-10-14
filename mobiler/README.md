@@ -48,6 +48,7 @@ mobiler plugin add scanner   # install a plugin into the app
 mobiler upgrade         # pull the latest generic shells + mobiler-core into an existing app
 mobiler display-name "Appointments Admin"   # set the name users see (omit the name to print it)
 mobiler fonts sync      # copy mobiler.toml [fonts] into the shells (build/dev/watch do it too)
+mobiler deep-links sync # apply mobiler.toml [deep_links] to the shells (build/dev/watch do it too)
 ```
 
 **App display name.** `mobiler new myapp` derives the identifier `Myapp` (Gradle root, Xcode target,
@@ -187,6 +188,39 @@ their files say they are the app's own again.
 Without `[splash]`, the colours are yours to edit directly in the files above. To open in the app's own
 light/dark choice from the first frame, keep that choice in your `cx.save` state. Your own Android theme
 items go in `res/values/themes.xml`; they apply in light and dark mode and on every Android version.
+
+## Deep links — `mobiler.toml` `[deep_links]`
+
+A new app registers its custom URL scheme (the bundle id, e.g. `dev.example.myapp://…`), so a link or
+another app can open it. The link reaches your core on the built-in `system` stream when you subscribe
+to it. An app that doesn't use deep links can turn the registration off:
+
+```toml
+[deep_links]
+enabled = false
+```
+
+`mobiler build`, `mobiler dev` and `mobiler watch` apply it, and `mobiler deep-links sync` does it on its
+own. `enabled = false` comments out the Android intent filter in `AndroidManifest.xml` and the
+`CFBundleURLTypes` in `iOS/project.yml`, between their `mobiler:deep-links` markers. `enabled = true`
+uncomments them. The CLI never writes the scheme itself, so a scheme you changed by hand survives turning
+it off and on again. Without `[deep_links]` the CLI leaves these lines alone.
+
+- **Commit the two synced files** with `mobiler.toml`. A build that doesn't go through `mobiler build`
+  or `dev` (Android Studio, Xcode, `iOS/build-ios.sh` or `Android/build-android.sh` on a CI worker) uses
+  them as they are. On iOS the change reaches `Info.plist` when `xcodegen generate` runs.
+- **All or nothing.** If the switch can't be applied to both files (an app made before CLI 0.67 has no
+  markers yet: run `mobiler upgrade --apply`), nothing is written. `mobiler build` and `dev` warn;
+  `mobiler deep-links sync` fails with a non-zero exit, so a CI step can check it.
+- **The `oauth` plugin keeps the scheme open on Android.** Its redirect activity registers the same
+  scheme outside the markers, so with oauth installed the app can still be opened by that scheme. The
+  sync warns when it sees such a filter.
+- Lifecycle events still arrive on the `system` stream, and the web shell is unaffected.
+- Android still hands the core the URL of an intent sent straight to the app's activity by name. A
+  page or another app can't open the app by scheme any more, but an app that names your activity
+  can. Your core sees it only if it subscribes to `system`, and only routes it if your code does.
+- Between the markers, `<!-- off: … -->` and `# off: …` are the switch's own: `enabled = true` uncomments
+  any line written that way.
 
 ## Debugging a text field on Android
 
@@ -340,8 +374,8 @@ SDK; **experimental**), a controllable **video player** (`Video` — AVPlayer / 
 (`WebView`, + a `mobiler_core::bunny` URL helper), and **Video v2** (poster, start-offset, captions,
 playback rate/volume, full transport state, playlist/queue, Picture-in-Picture, and hls.js for web
 HLS on Chrome/Firefox), and **deep links + app lifecycle** (the built-in `system` stream —
-inbound deep-link URLs [custom scheme, default = the app's bundle id] + foreground/background events,
-on iOS/Android/web)._
+inbound deep-link URLs [custom scheme, default = the app's bundle id; `[deep_links] enabled = false`
+turns the registration off] + foreground/background events, on iOS/Android/web)._
 
 ## Links
 

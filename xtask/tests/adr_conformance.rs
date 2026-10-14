@@ -386,3 +386,37 @@ fn adr_0050_every_tab_bar_and_rail_draws_the_badge() {
     let tabbar = region(&web, "let tabbar =", "<div class=\"tabbar\">", "mobiler-web/src/lib.rs");
     assert!(tabbar.contains("tab_badge(tab.badge"), "ADR-0050: the web tabbar doesn't draw the badge");
 }
+
+/// ADR-0051: the deep-link registration sits between one pair of `mobiler:deep-links` markers in the
+/// Android manifest and in `project.yml`, the template and barbershop alike, so `[deep_links] enabled =
+/// false` can switch it off. The launcher filter stays outside, and the template has no other
+/// BROWSABLE filter or URL type left on.
+#[test]
+fn adr_0051_deep_link_registration_sits_between_markers() {
+    let read = |p: &str| std::fs::read_to_string(root().join(p)).expect(p);
+    // The text strictly between the one `begin` and the one `end` line, and the text outside it.
+    let split = |text: &str, begin: &str, end: &str, path: &str| -> (String, String) {
+        assert_eq!(text.matches(begin).count(), 1, "ADR-0051: {path} needs exactly one {begin}");
+        assert_eq!(text.matches(end).count(), 1, "ADR-0051: {path} needs exactly one {end}");
+        let (b, e) = (text.find(begin).unwrap(), text.find(end).unwrap());
+        assert!(b < e, "ADR-0051: {path} markers are out of order");
+        (text[b + begin.len()..e].to_string(), format!("{}{}", &text[..b], &text[e..]))
+    };
+    for (path, template) in [
+        ("mobiler/templates/Android/app/src/main/AndroidManifest.xml", true),
+        ("demos/barbershop/Android/app/src/main/AndroidManifest.xml", false),
+    ] {
+        let (inside, outside) = split(&read(path), "<!-- mobiler:deep-links-begin -->", "<!-- mobiler:deep-links-end -->", path);
+        assert!(inside.contains("android.intent.category.BROWSABLE") && inside.contains("android:scheme="), "ADR-0051: {path} markers must wrap the deep-link filter");
+        assert!(!inside.contains("LAUNCHER"), "ADR-0051: {path} markers must not wrap the launcher filter");
+        assert!(!inside.contains("--"), "ADR-0051: {path} deep-link block can't be commented out (it holds `--`)");
+        if template {
+            assert!(!outside.contains("BROWSABLE"), "ADR-0051: {path} has a BROWSABLE filter outside the markers");
+        }
+    }
+    for path in ["mobiler/templates/iOS/project.yml", "demos/barbershop/iOS/project.yml"] {
+        let (inside, outside) = split(&read(path), "# mobiler:deep-links-begin", "# mobiler:deep-links-end", path);
+        assert!(inside.contains("CFBundleURLTypes:") && inside.contains("CFBundleURLSchemes:"), "ADR-0051: {path} markers must wrap CFBundleURLTypes");
+        assert!(!outside.contains("CFBundleURLTypes:"), "ADR-0051: {path} has a URL type outside the markers");
+    }
+}

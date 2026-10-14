@@ -61,10 +61,13 @@ targets:
         # `dev.mobiler.barbershop://…` opens the app — delivered to the core via the built-in `system` stream.
         # (Universal/App Links over https additionally need an associated-domains entitlement + a
         # server-side apple-app-site-association file — not auto-wired.)
+        # mobiler.toml `[deep_links] enabled = false` comments this registration out (ADR-0051).
+        # mobiler:deep-links-begin
         CFBundleURLTypes:
           - CFBundleURLName: dev.mobiler.barbershop
             CFBundleURLSchemes:
               - dev.mobiler.barbershop
+        # mobiler:deep-links-end
         # Picture-in-Picture: an app that uses Widget::Video with allow_pip must declare the audio
         # background mode so playback (hence PiP) continues when the app is backgrounded. The Mobiler
         # template ships WITHOUT this (App Store review hygiene) — adding this one line is the
