@@ -219,6 +219,9 @@ class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
                 if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
             }
             PluginResponse(true, "")
+        } catch (e: CancellationException) {
+            // The copy may already be on the clipboard: never answer "not copied" for a cancelled call.
+            throw e
         } catch (e: Exception) {
             PluginResponse(false, "copy failed: ${e.message ?: e.javaClass.simpleName}")
         }

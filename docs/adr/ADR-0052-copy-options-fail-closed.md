@@ -5,7 +5,7 @@ Date decided:  2026-10-14
 Deciding PRs:  #293, #294
 Supersedes:    none
 Code anchor:   mobiler-core/src/clipboard.rs, mobiler-core/src/lib.rs (Cx::copy_with, Cx::copy_sensitive), mobiler-web/src/lib.rs (copy_with_text, write_clipboard, perform), mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/Core.kt and demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/Core.kt (ClipboardWithPlugin, ClipboardExpiry), mobiler/templates/iOS/Sources/Core.swift and demos/barbershop/iOS/Sources/Core.swift (ClipboardWithPlugin)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0052_every_shell_answers_clipboard_with, mobiler-core/src/lib.rs::plain_copy_is_unchanged_and_options_never_go_to_clipboard, mobiler-core/src/lib.rs::copy_with_and_copy_sensitive_send_the_whole_options_object
+Conformance:   xtask/tests/adr_conformance.rs::adr_0052_every_shell_answers_clipboard_with, mobiler-core/src/lib.rs::plain_copy_is_unchanged_and_options_never_go_to_clipboard, mobiler-core/src/lib.rs::copy_with_and_copy_sensitive_send_the_whole_options_object, mobiler-core/src/lib.rs::expires_after_is_clamped_and_saturates
 
 ## 1. Context (The Problem)
 
@@ -35,8 +35,8 @@ Two facts shaped the wire:
 If a copy with options is the request `("clipboard_with", "copy", <json>)`, a capability name no older
 shell knows, with the input `{"text","sensitive","expires_ms"(number or null),"local_only"}` (every key
 always present), then:
-- a shell that predates it answers `ok: false` ("plugin 'clipboard_with' not available in this build")
-  and copies nothing, on all three shells;
+- a shell that predates it answers `ok: false` ("plugin 'clipboard_with' not available …") and copies
+  nothing, on all three shells;
 - `cx.copy` stays byte-identical (ADR-0007), and no options ever reach the plain `clipboard` handler;
 - the options are general (`CopyOptions` builders), and appointments' ask is one preset,
   `CopyOptions::sensitive()` (sensitive, expires after 2 minutes, this device only), behind
@@ -46,6 +46,7 @@ The rules:
 - `cx.copy_with(text, options, then)` always replies. `ok: true` means copied, with every option this
   platform supports applied. `ok: false` with a reason means not copied at all (ADR-0013). An app must
   never fall back to `cx.copy` on `ok: false`: that is the plain copy this record exists to prevent.
+  `ok: true` doesn't say which options took effect: on the web it means copied with none of them.
 - `expires_after` is clamped to at least 1 s; a duration past `u64::MAX` ms saturates. Android saturates
   a value past `Long.MAX_VALUE` instead of wrapping it into an instant clear, and iOS caps the date at
   `Date.distantFuture`.
@@ -53,7 +54,7 @@ The rules:
 
 | Option | Android | iOS | Web |
 |---|---|---|---|
-| `sensitive` | `"android.content.extra.IS_SENSITIVE"` in the clip's extras (the preview shows dots on 13+; keyboards read the key before) | no equivalent | ignored |
+| `sensitive` | `"android.content.extra.IS_SENSITIVE"` in the clip's extras: the preview shows dots on 13+; it asks keyboards and clipboard managers not to keep or show it, which some (e.g. Gboard) honour and others may not | no system equivalent | ignored |
 | `expires_after` | best effort (below) | `.expirationDate`; the system removes it | ignored |
 | `local_only` | no effect (no system cross-device clipboard) | `.localOnly`; kept out of Universal Clipboard | ignored |
 
@@ -68,15 +69,17 @@ The rules:
 ### 2.1. Refutation Conditions
 
 - **Condition 1: every shell answers `clipboard_with`.** The Android and iOS templates, barbershop's
-  Android and iOS shells, and `mobiler-web` all route it; `cx.copy_with` targets it.
+  Android and iOS shells, and `mobiler-web` all route it in a line that isn't a comment; `cx.copy_with`
+  targets it; the templates' handler blocks are byte-identical to barbershop's.
   - **Validation Metric:** `xtask/tests/adr_conformance.rs::adr_0052_every_shell_answers_clipboard_with`.
 - **Condition 2: options never reach `clipboard`, and `cx.copy` is unchanged.** A plain `cx.copy` still
   emits exactly `("clipboard", "copy", text)`; every request carrying options goes to `clipboard_with`.
   - **Validation Metric:** `mobiler-core/src/lib.rs::plain_copy_is_unchanged_and_options_never_go_to_clipboard`,
     and the `cx.copy` assertion in the conformance test.
 - **Condition 3: the whole options object goes on the wire, with exact values.** The presets, each
-  builder, the 1 s clamp and `null` for never.
-  - **Validation Metric:** `mobiler-core/src/lib.rs::copy_with_and_copy_sensitive_send_the_whole_options_object`.
+  builder and `null` for never; the 1 s clamp and the `u64::MAX` saturation.
+  - **Validation Metric:** `mobiler-core/src/lib.rs::copy_with_and_copy_sensitive_send_the_whole_options_object`,
+    `mobiler-core/src/lib.rs::expires_after_is_clamped_and_saturates`.
 - **Condition 4 (runtime): an older shell fails closed.** With `clipboard_with` unregistered, a
   `copy_sensitive` answers `ok: false` and the clipboard keeps what it held. Checked on an Android
   emulator (API 36) in PR #293, together with: the sensitive preview shows dots; a 5 s expiry clears; a
@@ -106,7 +109,8 @@ The rules:
 Option E. It doesn't supersede ADR-0007 (`cx.copy` is untouched) and uses only ADR-0002 / ADR-0003's
 ordinary request and `PluginResponse`, so it needed no mobiler-ui release. Barbershop's shells came first
 (ADR-0015), and the templates were ported from barbershop's diff in the CLI PR, after core 0.45 and web
-0.45 were live (ADR-0009). The ported classes are byte-identical to barbershop's.
+0.45 were live (ADR-0009). The conformance test keeps the template blocks byte-identical to barbershop's,
+so a later fix lands in both or fails the test.
 
 **Mutation proof:** each mutation, reverted after, failed
 `adr_0052_every_shell_answers_clipboard_with` with its message:
@@ -118,6 +122,14 @@ ordinary request and `PluginResponse`, so it needed no mobiler-ui release. Barbe
   doesn't answer clipboard_with");
 - (d) pointing `copy_with` at `self.plugin("clipboard", "copy", …)` failed it ("ADR-0052: cx.copy_with must
   target clipboard_with") and also failed `plain_copy_is_unchanged_and_options_never_go_to_clipboard`.
+- From the review fix pass (the first version of the test was a plain `contains` and passed each of these):
+  - (e) commenting out the template `Core.kt` registration (`// "clipboard_with" to …`) failed it
+    ("… Core.kt doesn't answer clipboard_with");
+  - (f) commenting out the template Swift case failed it ("… Core.swift doesn't answer clipboard_with");
+  - (g) changing the template Kotlin's `delay(minOf(left, 5_000L))` to `9_000L` failed it ("… Core.kt's
+    clipboard_with handler differs from barbershop's");
+  - (h) changing the template Swift's `options[.localOnly] = true` to `false` failed it ("… Core.swift's
+    clipboard_with handler differs from barbershop's").
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
@@ -129,7 +141,13 @@ ordinary request and `PluginResponse`, so it needed no mobiler-ui release. Barbe
   itself clears the clipboard after about an hour). In the background it only clears within ~5 s of the
   user returning. An app whose clipboard is emptied by someone else keeps polling every 5 s until the hour
   is up.
-- **Negative:** iOS has no sensitive flag; its protection is `local_only` and the expiry.
+- **Negative:** iOS has no system sensitive flag; its protection is `local_only` and the expiry.
+- **Negative:** `ok: true` reports the copy, not the protection. An app that must not copy a secret
+  unprotected (on the web, or on Android before 13, where no preview is hidden) has to decide by platform
+  itself.
+- **Negative:** Android has no atomic compare-and-clear. Between reading the clip's label and clearing
+  it, another app could write the clipboard, and that newer clip would be cleared. The window is
+  microseconds.
 - **Negative:** the web honours no option: a browser can't mark, scope or expire a copy.
 - **Negative:** an existing app's `copy_with` answers `ok: false` until its shells are upgraded
   (`mobiler upgrade --apply`), and the app must show that failure rather than fall back to `cx.copy`.

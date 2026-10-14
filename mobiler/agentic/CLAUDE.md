@@ -61,6 +61,8 @@ ABI change in the framework, not app work).
   `depth`); render with `nav_scaffold(...)`. The core owns the stack; the shell animates it.
 - **Capabilities** = device/platform APIs as async effects via `cx`, fulfilled natively:
   - fire-and-forget: `cx.toast`, `cx.copy`, `cx.share`, `cx.open_url`, `cx.haptic`, `cx.save`
+  - a secret (password, recovery code, TOTP secret): `cx.copy_sensitive(text, then)` or
+    `cx.copy_with(text, CopyOptions, then)`, never `cx.copy`; on `ok: false` show it, don't fall back
   - request/response (take a `then: |resp| -> Msg` closure): `cx.get` / `cx.post` / `cx.patch`
     / `cx.delete` (HTTP/JSON), `cx.confirm`, `cx.pick_photo` / `cx.pick_photo_with`, `cx.capture_photo` / `cx.capture_photo_with`, `cx.device_model` / `cx.device_info`
   - **Data**: call whatever HTTP API you have with `cx.get` / `post` / `patch` / `delete`, **or**
