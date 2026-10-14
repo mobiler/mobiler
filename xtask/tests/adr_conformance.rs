@@ -420,3 +420,31 @@ fn adr_0051_deep_link_registration_sits_between_markers() {
         assert!(!outside.contains("CFBundleURLTypes:"), "ADR-0051: {path} has a URL type outside the markers");
     }
 }
+
+/// ADR-0052: every shell answers `clipboard_with`, the capability `cx.copy_with` targets, so a copy with options never
+/// falls back to the plain `clipboard` handler (which ignores its op and would copy a secret as-is). A commented-out
+/// line doesn't count, and the templates' handler stays byte-identical to barbershop's, where it is tested first
+/// (ADR-0015).
+#[test]
+fn adr_0052_every_shell_answers_clipboard_with() {
+    let answers = |path: &str, needle: &str| read(path).lines().any(|l| kotlin_code(l).contains(needle));
+    let kotlin = "\"clipboard_with\" to ClipboardWithPlugin(";
+    let swift = "case \"clipboard_with\": return await ClipboardWithPlugin.handle(";
+    let (tk, ts) = ("mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/Core.kt", "mobiler/templates/iOS/Sources/Core.swift");
+    let (bk, bs) = ("demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/Core.kt", "demos/barbershop/iOS/Sources/Core.swift");
+    for (path, needle) in [(tk, kotlin), (ts, swift), (bk, kotlin), (bs, swift), ("mobiler-web/src/lib.rs", "call.plugin == \"clipboard_with\"")] {
+        assert!(answers(path, needle), "ADR-0052: {path} doesn't answer clipboard_with");
+    }
+    // The handler block: from its doc comment up to the share plugin that follows it in every shell.
+    let block = |path: &str, end: &str| {
+        let s = read(path);
+        let from = s.find("Built-in `clipboard_with` capability").unwrap_or_else(|| panic!("ADR-0052: {path} has no clipboard_with handler"));
+        let to = from + s[from..].find(end).unwrap_or_else(|| panic!("ADR-0052: {path} has no {end} after the handler"));
+        s[from..to].to_string()
+    };
+    assert!(block(tk, "class SharePlugin") == block(bk, "class SharePlugin"), "ADR-0052: {tk}'s clipboard_with handler differs from barbershop's");
+    assert!(block(ts, "enum SharePlugin") == block(bs, "enum SharePlugin"), "ADR-0052: {ts}'s clipboard_with handler differs from barbershop's");
+    let core = read("mobiler-core/src/lib.rs");
+    assert!(core.contains("self.plugin(\"clipboard_with\", \"copy\""), "ADR-0052: cx.copy_with must target clipboard_with");
+    assert!(core.contains("self.notify(\"clipboard\", \"copy\", text)"), "ADR-0007: cx.copy must stay a plain notification");
+}

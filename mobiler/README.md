@@ -128,6 +128,7 @@ version; where Android itself only has a feature on newer versions, older phones
 | App language | Set by the app itself (`ShellLabels`, your own strings) on every version | Android's per-app language setting (13+) isn't used |
 | Photo picker (`cx.pick_photo`) | The system file picker | The system photo picker (Android 11+ with current updates) |
 | Photo options (`cx.pick_photo_with` / `capture_photo_with`) | JPEG, PNG and WebP are decoded; a HEIC photo answers `unsupported_image` | HEIC decoded (9+); lossy WebP written as `WEBP_LOSSY` (11+) |
+| Sensitive copy (`cx.copy_sensitive`, `CopyOptions`) | The clip carries the sensitive key, which asks keyboards not to keep it (some, e.g. Gboard, honour it); expiry is best effort everywhere and clears only a clip that is still this copy | The clipboard preview shows dots instead of the text (13+); from 10+ an expiry passed in the background clears once the app is back in front |
 | Notification permission (push, notifications, geofence) | No prompt: notifications need no runtime grant | The runtime prompt (13+) |
 | `biometric` | Any enrolled biometric, or the device PIN/pattern, on 8–10 | Strong biometrics or the device credential (11+) |
 | `bluetooth` | The legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` permissions (declared up to 11) | `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` (12+) |
@@ -328,6 +329,11 @@ every platform — adding one is a shell-registry entry, never an ABI change. Bu
 <!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
 HTTP, storage, clipboard, share, browser, toast, snackbar, device info, the app's version/build, the OS light/dark setting, haptics, a confirm dialog, the photo picker, camera capture, the date picker, and the time picker.
 <!-- capabilities:end -->
+
+A copy can be marked sensitive, expire, or stay on the device: `cx.copy_with(text, CopyOptions, then)`,
+or the preset `cx.copy_sensitive(secret, then)` (ADR-0052). It needs the updated shells: in an existing app, run
+`mobiler upgrade --apply`. Until then it answers `ok: false` and copies nothing; never fall back to `cx.copy`.
+`ok: true` means copied, not protected: the web applies none of the options.
 
 Navigation is a core-owned `Nav` stack; dark mode and theming are data in
 the `Widget` tree. A `Scaffold` can carry a `Theme` — brand color, corner

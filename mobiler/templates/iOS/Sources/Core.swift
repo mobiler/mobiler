@@ -283,6 +283,7 @@ enum Plugins {
         case "http": return await HttpPlugin.handle(op: op, input: input)
         case "storage": return StoragePlugin.handle(op: op, input: input)
         case "clipboard": return await ClipboardPlugin.handle(op: op, input: input)
+        case "clipboard_with": return await ClipboardWithPlugin.handle(op: op, input: input)
         case "share": return await SharePlugin.handle(op: op, input: input)
         case "browser": return await BrowserPlugin.handle(op: op, input: input)
         case "toast": return await ToastPlugin.handle(op: op, input: input)
@@ -380,6 +381,27 @@ enum StoragePlugin {
 enum ClipboardPlugin {
     static func handle(op: String, input: String) -> PluginResponse {
         UIPasteboard.general.string = input
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052). iOS has no "sensitive" flag;
+/// `local_only` keeps the item out of Universal Clipboard and `expires_ms` lets the system remove it.
+@MainActor
+enum ClipboardWithPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard op == "copy" else { return PluginResponse(ok: false, output: "unknown clipboard_with op '\(op)'") }
+        guard let data = input.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return PluginResponse(ok: false, output: "invalid input JSON") }
+        guard let text = obj["text"] as? String else { return PluginResponse(ok: false, output: "missing text") }
+        var options: [UIPasteboard.OptionsKey: Any] = [:]
+        if (obj["local_only"] as? Bool) == true { options[.localOnly] = true }
+        if let ms = (obj["expires_ms"] as? NSNumber)?.doubleValue {
+            // A huge value (the core sends up to u64::MAX) is capped at distantFuture, i.e. never.
+            options[.expirationDate] = min(Date().addingTimeInterval(ms / 1000), Date.distantFuture)
+        }
+        UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: text]], options: options)
         return PluginResponse(ok: true, output: "")
     }
 }

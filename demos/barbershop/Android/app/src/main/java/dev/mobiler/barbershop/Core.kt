@@ -207,7 +207,7 @@ class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
         val label = "mobiler-copy-" + java.util.UUID.randomUUID()
         val clip = ClipData.newPlainText(label, text)
         if (o.optBoolean("sensitive")) {
-            // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); keyboards read the same key before.
+            // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); the same key asks keyboards not to keep it.
             clip.description.extras = android.os.PersistableBundle().apply {
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
             }
@@ -219,6 +219,9 @@ class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
                 if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
             }
             PluginResponse(true, "")
+        } catch (e: CancellationException) {
+            // The copy may already be on the clipboard: never answer "not copied" for a cancelled call.
+            throw e
         } catch (e: Exception) {
             PluginResponse(false, "copy failed: ${e.message ?: e.javaClass.simpleName}")
         }
