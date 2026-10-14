@@ -207,7 +207,7 @@ class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
         val label = "mobiler-copy-" + java.util.UUID.randomUUID()
         val clip = ClipData.newPlainText(label, text)
         if (o.optBoolean("sensitive")) {
-            // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); keyboards read the same key before.
+            // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); the same key asks keyboards not to keep it.
             clip.description.extras = android.os.PersistableBundle().apply {
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
             }
