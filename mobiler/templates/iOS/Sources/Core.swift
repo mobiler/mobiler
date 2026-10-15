@@ -385,8 +385,9 @@ enum ClipboardPlugin {
     }
 }
 
-/// Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052). iOS has no "sensitive" flag;
-/// `local_only` keeps the item out of Universal Clipboard and `expires_ms` lets the system remove it.
+/// Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052). iOS has no system sensitive flag;
+/// a sensitive copy carries the `org.nspasteboard.ConcealedType` convention, `local_only` keeps it out of Universal
+/// Clipboard and `expires_ms` lets the system remove it. `ok: true` carries the report (ADR-0053).
 @MainActor
 enum ClipboardWithPlugin {
     static func handle(op: String, input: String) -> PluginResponse {
@@ -395,14 +396,24 @@ enum ClipboardWithPlugin {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return PluginResponse(ok: false, output: "invalid input JSON") }
         guard let text = obj["text"] as? String else { return PluginResponse(ok: false, output: "missing text") }
+        let sensitive = (obj["sensitive"] as? Bool) == true
+        let localOnly = (obj["local_only"] as? Bool) == true
+        var item: [String: Any] = [UTType.utf8PlainText.identifier: text]
+        // The nspasteboard.org convention (1Password, Bitwarden): a Mac's clipboard managers skip a concealed item.
+        if sensitive { item["org.nspasteboard.ConcealedType"] = Data() }
         var options: [UIPasteboard.OptionsKey: Any] = [:]
-        if (obj["local_only"] as? Bool) == true { options[.localOnly] = true }
+        if localOnly { options[.localOnly] = true }
+        var expires = "none"
         if let ms = (obj["expires_ms"] as? NSNumber)?.doubleValue {
             // A huge value (the core sends up to u64::MAX) is capped at distantFuture, i.e. never.
             options[.expirationDate] = min(Date().addingTimeInterval(ms / 1000), Date.distantFuture)
+            expires = "system"
         }
-        UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: text]], options: options)
-        return PluginResponse(ok: true, output: "")
+        UIPasteboard.general.setItems([item], options: options)
+        // What this copy got (ADR-0053).
+        let report: [String: Any] = ["sensitive": sensitive, "expires": expires, "local_only": localOnly]
+        let out = (try? JSONSerialization.data(withJSONObject: report)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        return PluginResponse(ok: true, output: out)
     }
 }
 

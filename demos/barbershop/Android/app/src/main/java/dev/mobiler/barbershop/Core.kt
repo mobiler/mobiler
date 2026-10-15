@@ -206,7 +206,8 @@ class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
         // A unique label is how ClipboardExpiry later proves the clipboard still holds this copy.
         val label = "mobiler-copy-" + java.util.UUID.randomUUID()
         val clip = ClipData.newPlainText(label, text)
-        if (o.optBoolean("sensitive")) {
+        val sensitive = o.optBoolean("sensitive")
+        if (sensitive) {
             // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); the same key asks keyboards not to keep it.
             clip.description.extras = android.os.PersistableBundle().apply {
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
@@ -218,7 +219,12 @@ class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
                 cm.setPrimaryClip(clip)
                 if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
             }
-            PluginResponse(true, "")
+            // What this copy got (ADR-0053): Android has no switch to keep a copy off other devices.
+            val report = JSONObject()
+                .put("sensitive", sensitive)
+                .put("expires", if (o.isNull("expires_ms")) "none" else "best_effort")
+                .put("local_only", false)
+            PluginResponse(true, report.toString())
         } catch (e: CancellationException) {
             // The copy may already be on the clipboard: never answer "not copied" for a cancelled call.
             throw e
@@ -234,8 +240,8 @@ private fun expiresMs(o: JSONObject): Long =
     o.optDouble("expires_ms", 0.0).coerceIn(0.0, Long.MAX_VALUE.toDouble()).toLong()
 
 /** Clears a `clipboard_with` copy when its time is up, but only while the clipboard provably still holds it: since
- *  Android 10 a backgrounded app can't read the clipboard, so it re-checks every 5 s (it clears within seconds of the
- *  user returning) and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
+ *  Android 10 a backgrounded app can't read the clipboard, so there it re-checks every 5 s, reading the clipboard only
+ *  while an activity is resumed (it clears within seconds of the user returning), and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
  *  Main-confined: call arm/disarm on the main thread only. Time is `SystemClock.elapsedRealtime()`, which keeps
  *  counting while the phone sleeps (`delay` alone counts uptime, which stops). */
 object ClipboardExpiry {
@@ -260,11 +266,15 @@ object ClipboardExpiry {
             }
             val giveUpAt = android.os.SystemClock.elapsedRealtime() + 60 * 60 * 1000L
             while (isActive && android.os.SystemClock.elapsedRealtime() < giveUpAt) {
-                // Null while the app can't read the clipboard (backgrounded on Android 10+), or when it's empty.
-                val desc = cm.primaryClipDescription
-                if (desc != null) {
-                    if (desc.label?.toString() == label) clear(cm)
-                    return@launch
+                // Android 10+ denies (and logs) a read from the background, so there read only while an activity is
+                // resumed; Android 8–9 can read from anywhere and clear on time.
+                if (Build.VERSION.SDK_INT < 29 || MobilerActivity.current?.get() != null) {
+                    // Null when the clipboard is empty (or still unreadable, e.g. before the window has focus).
+                    val desc = cm.primaryClipDescription
+                    if (desc != null) {
+                        if (desc.label?.toString() == label) clear(cm)
+                        return@launch
+                    }
                 }
                 kotlinx.coroutines.delay(5_000)
             }
