@@ -18,4 +18,4 @@ mobiler-core = { path = "../../../mobiler-core" }
 # (`Command::effects()`) — `Cx`'s internal request queue is private to mobiler-core, so
 # this is the only way to observe "how many requests were queued" from outside it.
 [dev-dependencies]
-crux_core = "0.18.0"
+crux_core = "0.20.0"
