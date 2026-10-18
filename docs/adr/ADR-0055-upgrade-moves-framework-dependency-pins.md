@@ -5,7 +5,7 @@ Date decided:  2026-10-18
 Deciding PRs:  #299
 Supersedes:    none
 Code anchor:   mobiler/src/upgrade.rs (move_framework_pins, set_pin, migrate_codegen_feature, add_codegen_deps, foreign_pins, FACET_PIN)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0055_template_crux_pin_matches_the_workspace, mobiler/src/upgrade.rs::set_pin_moves_a_string_pin_and_is_a_no_op_at_target, mobiler/src/upgrade.rs::set_pin_reports_a_table_form_pin, mobiler/src/upgrade.rs::codegen_feature_migrates_the_multiline_form_once, mobiler/src/upgrade.rs::codegen_feature_on_one_line_is_reported, mobiler/src/upgrade.rs::codegen_deps_are_added_after_uniffi_once, mobiler/src/upgrade.rs::crlf_manifests_keep_crlf, mobiler/src/upgrade.rs::upgrade_moves_a_069_app_and_rerun_is_a_no_op, mobiler/src/upgrade.rs::review_run_lists_manifest_edits_and_writes_nothing, mobiler/src/upgrade.rs::other_crates_pins_are_reported_not_edited
+Conformance:   xtask/tests/adr_conformance.rs::adr_0055_template_crux_pin_matches_the_workspace, mobiler/src/upgrade.rs::set_pin_moves_a_string_pin_and_is_a_no_op_at_target, mobiler/src/upgrade.rs::set_pin_reports_a_table_form_pin, mobiler/src/upgrade.rs::codegen_feature_migrates_the_multiline_form_once, mobiler/src/upgrade.rs::codegen_feature_on_one_line_is_reported, mobiler/src/upgrade.rs::codegen_deps_are_added_after_uniffi_once, mobiler/src/upgrade.rs::crlf_manifests_keep_crlf, mobiler/src/upgrade.rs::upgrade_moves_a_069_app_and_rerun_is_a_no_op, mobiler/src/upgrade.rs::review_run_lists_manifest_edits_and_writes_nothing, mobiler/src/upgrade.rs::other_crates_pins_are_reported_not_edited, mobiler/src/upgrade.rs::equivalent_pins_are_not_reported, mobiler/src/upgrade.rs::path_and_git_dependencies_are_left_alone
 
 ## 1. Context (The Problem)
 
@@ -64,7 +64,10 @@ An app whose manifests differ is told what to change, never given a guessed edit
 
 The dependency step is `move_framework_pins`: the four edits above, then `foreign_pins` for every
 other manifest (skipping `target/`, `node_modules/`, `build/`, `Pods/`, dot-dirs, and symlinks). A
-new framework-owned line joins only by being added to this list in the CLI, with its own test.
+pin that already accepts the target under Cargo's caret rules (`0.20` for `0.20.0`, `0.47.1` for
+`0.47`) is left as it is, and a `path`, `git` or `workspace` dependency is never touched or reported:
+neither is the framework's pin to move. A new framework-owned line joins only by being added to this
+list in the CLI, with its own test.
 mobiler-web is reported against the template's mobiler-core version, because the two publish in
 lockstep. Facet has no template line to read from, so its target is the `FACET_PIN` constant, held
 to mobiler-core's pin by the conformance test.
@@ -76,8 +79,19 @@ to mobiler-core's pin by the conformance test.
 - (b) setting `FACET_PIN` to `=0.46.4` gave "ADR-0055: upgrade tells apps facet =0.46.4, mobiler-core
   builds with =0.46.5".
 
-The `upgrade.rs` tests were written first and failed to compile, because the functions were missing,
-before the implementation existed (#299).
+The `upgrade.rs` tests were seen to fail under these mutations, each reverted after:
+- (c) `set_pin` returning `Unchanged` where it reported an unknown form failed
+  `set_pin_reports_a_table_form_pin` ("expected a note");
+- (d) `add_codegen_deps` ending its inserted lines with `"\n"` instead of the file's ending failed
+  `crlf_manifests_keep_crlf` (the output showed bare `\n` after `cargo_metadata` and `camino`);
+- (e) writing the manifests on a review run failed `review_run_lists_manifest_edits_and_writes_nothing`
+  (`deps_would` empty);
+- (f) scanning `target/` failed `other_crates_pins_are_reported_not_edited` (a fourth note for
+  `target/x/Cargo.toml`);
+- (g) comparing versions as strings instead of with `compatible` failed `equivalent_pins_are_not_reported`
+  ("crux_core 0.20 -> 0.20.0", "mobiler-web 0.47.1 -> 0.47");
+- (h) letting `migrate_codegen_feature` rewrite an already-migrated `"uniffi/bindgen",` line failed
+  `codegen_feature_migrates_the_multiline_form_once`.
 
 ## 5. Consequences (Positive and Negative Predictions)
 

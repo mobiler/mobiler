@@ -252,8 +252,50 @@ fn eol(content: &str) -> &'static str {
     if content.contains("\r\n") { "\r\n" } else { "\n" }
 }
 
-/// Move a string-form pin `dep = "X"` to `want`. Any other form is left alone and reported.
+/// Whether requirement `have` already accepts what `want` asks for under Cargo's caret rules:
+/// `0.20` and `^0.20.0` match `0.20.0`, `0.47.1` matches `0.47`. An exact `=X` pin matches only `X`;
+/// any other operator counts as different (so it gets reported).
+fn compatible(have: &str, want: &str) -> bool {
+    fn caret_key(v: &str) -> Option<Vec<u64>> {
+        let parts = v.split('.').map(|p| p.parse::<u64>().ok()).collect::<Option<Vec<_>>>()?;
+        let at = |i: usize| parts.get(i).copied().unwrap_or(0);
+        Some(match (at(0), at(1)) {
+            (0, 0) => vec![0, 0, at(2)],
+            (0, minor) => vec![0, minor],
+            (major, _) => vec![major],
+        })
+    }
+    let want = want.trim().trim_start_matches(['=', '^']);
+    let have = have.trim();
+    if let Some(exact) = have.strip_prefix('=') {
+        return exact.trim() == want;
+    }
+    match (caret_key(have.trim_start_matches('^')), caret_key(want)) {
+        (Some(h), Some(w)) => h == w,
+        _ => false,
+    }
+}
+
+/// Whether the manifest takes `dep` from somewhere other than crates.io (`path`, `git`, the
+/// workspace): not the framework's pin to move.
+fn non_registry(content: &str, dep: &str) -> bool {
+    content.lines().any(|l| {
+        let t = l.trim_start();
+        t.starts_with(&format!("{dep}.workspace"))
+            || t.starts_with(&format!("{dep}.path"))
+            || t.starts_with(&format!("{dep}.git"))
+            || t.strip_prefix(&format!("{dep} = {{")).is_some_and(|rest| {
+                rest.contains("path =") || rest.contains("git =") || rest.contains("workspace = true")
+            })
+    })
+}
+
+/// Move a string-form pin `dep = "X"` to `want`. A pin that already accepts `want` stays as it is;
+/// a path, git or workspace dependency is not touched; any other form is reported.
 fn set_pin(content: &str, dep: &str, want: &str) -> Edit {
+    if non_registry(content, dep) {
+        return Edit::Unchanged;
+    }
     let prefix = format!("{dep} = \"");
     let mut out = String::with_capacity(content.len());
     let mut moved = None;
@@ -262,7 +304,7 @@ fn set_pin(content: &str, dep: &str, want: &str) -> Edit {
             && let Some(rest) = line.trim_start().strip_prefix(&prefix)
             && let Some((have, tail)) = rest.split_once('"')
         {
-            if have == want {
+            if have == want || compatible(have, want) {
                 return Edit::Unchanged;
             }
             let indent = &line[..line.len() - line.trim_start().len()];
@@ -431,7 +473,7 @@ fn foreign_pins(root: &Path, skip: &[&Path]) -> Vec<String> {
         if !skip.contains(&path.as_path()) {
             for (dep, want) in &targets {
                 if let Some(have) = any_dep_version(&content, dep)
-                    && &have != want
+                    && !compatible(&have, want)
                 {
                     notes.push(format!("{rel}: {dep} {have} -> {want} (edit by hand)"));
                 }
@@ -2217,5 +2259,27 @@ mod test {
         assert_eq!(read(&root, "web/Cargo.toml"), web);
         assert_eq!(read(&root, "shared/Cargo.toml"), shared_cargo.replace("[dependencies]\n", "[dependencies]\nfacet = \"0.44\"\n"));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn equivalent_pins_are_not_reported() {
+        let (root, _, _) = app_with_template_manifests();
+        fs::create_dir_all(root.join("app-core")).unwrap();
+        fs::create_dir_all(root.join("web")).unwrap();
+        fs::write(root.join("app-core/Cargo.toml"), "[dependencies]\ncrux_core = \"0.20\"\n").unwrap();
+        fs::write(root.join("web/Cargo.toml"), "[dependencies]\nmobiler-web = { version = \"0.47.1\" }\n").unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
+        assert_eq!(set_pin("crux_core = \"^0.20\"\n", "crux_core", "0.20.0"), Edit::Unchanged);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn path_and_git_dependencies_are_left_alone() {
+        let c = "[dependencies]\nmobiler-core = { path = \"../../mobiler-core\" }\n";
+        assert_eq!(set_pin(c, "mobiler-core", "0.47"), Edit::Unchanged);
+        let g = "[dependencies]\ncrux_core = { git = \"https://example.com/crux\" }\n";
+        assert_eq!(set_pin(g, "crux_core", "0.20.0"), Edit::Unchanged);
+        assert_eq!(set_pin("[dependencies]\ncrux_core.workspace = true\n", "crux_core", "0.20.0"), Edit::Unchanged);
     }
 }
