@@ -1,6 +1,6 @@
 [package]
 name = "mobiler-ui"
-version = "0.31.0"
+version = "0.32.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ repository = "https://github.com/mobiler/mobiler"
 readme = "README.md"
 
 [dependencies]
-facet = { version = "=0.44", features = ["chrono"] }
+facet = { version = "=0.46.5", features = ["chrono"] }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
