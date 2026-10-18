@@ -47,7 +47,10 @@ pub fn run(platform: Platform) -> Result<()> {
                 .status()
                 .context("failed to run iOS/build-ios.sh")?;
             if !status.success() {
-                bail!("iOS build failed (see output above)");
+                return Err(crate::dev::with_lock_hint(
+                    anyhow::anyhow!("iOS build failed (see output above)"),
+                    &project.root,
+                ));
             }
             Ok(())
         }

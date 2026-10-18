@@ -13,8 +13,9 @@ set -euo pipefail
 APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$APP_ROOT"
 
-# 1) Build the Rust core (host): compiles it and produces the uniffi metadata the
-#    codegen step reads. (The Android-ABI .so is cross-compiled by gradle in step 3.)
+# 1) Build the Rust core (host) on its own, so a compile error in the core shows up
+#    here rather than inside codegen. (The Android-ABI .so is cross-compiled by gradle
+#    in step 3.)
 cargo build -p shared --features uniffi
 
 # 2) Generate the Kotlin ABI types + uniffi bindings.
