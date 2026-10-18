@@ -36,16 +36,18 @@ rm -rf "$GEN"; mkdir -p "$GEN/lib"
 ( cd "$SHARED" && cargo build --release --features uniffi --target "$RUST_TARGET" )
 cp "$APP_ROOT/target/$RUST_TARGET/release/libshared.a" "$GEN/lib/"
 
-# 2) Swift ABI types (SharedTypes package) + uniffi Swift FFI bindings. The codegen
-#    feature turns on uniffi, so this host build leaves the library the bindings are
-#    read from (target/debug/libshared) — not the static lib above.
+# 2) A host build of the core so uniffi's bindgen can introspect the library
+#    (it reads target/debug/libshared, not the static lib above).
+( cd "$APP_ROOT" && cargo build -p shared --features uniffi )
+
+# 3) Swift ABI types (SharedTypes package) + uniffi Swift FFI bindings (needs step 2).
 ( cd "$SHARED" && cargo run --bin codegen --features codegen -- --language swift --output-dir "$GEN" )
 
 # Clang only auto-discovers a module map literally named `module.modulemap`; the
 # codegen emits `sharedFFI.modulemap`, so expose it under the discoverable name.
 cp "$GEN/sharedFFI.modulemap" "$GEN/module.modulemap"
 
-# 3) Generate the Xcode project from project.yml.
+# 4) Generate the Xcode project from project.yml.
 ( cd "$IOS_DIR" && xcodegen generate )
 
 cd "$IOS_DIR"
