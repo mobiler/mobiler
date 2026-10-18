@@ -30,6 +30,11 @@ You usually don't depend on this crate directly. Use
 [`mobiler-core`](https://crates.io/crates/mobiler-core), which re-exports it and
 provides the `MobilerApp` trait plus the typed widget builders.
 
+## Upgrading
+
+**Breaking in mobiler-ui 0.32:** depends on `facet` `=0.46.5` (was `=0.44`), the version crux 0.20 pins. A crate of
+yours that depends on `facet` directly must use the same exact version.
+
 ## License
 
 Dual-licensed under either [MIT](https://github.com/mobiler/mobiler/blob/main/LICENSE-MIT) or [Apache-2.0](https://github.com/mobiler/mobiler/blob/main/LICENSE-APACHE), at your option.

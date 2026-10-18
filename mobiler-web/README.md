@@ -51,6 +51,11 @@ Build and serve with [Trunk](https://trunkrs.dev): `trunk serve`. See the
 and [`coffee`](https://github.com/mobiler/mobiler/tree/main/demos/coffee) demos for
 working examples (one core, three platforms).
 
+## Upgrading
+
+**Breaking in mobiler-web 0.47:** requires `crux_core` 0.20 and `mobiler-core` 0.47; move your app's `crux_core` pin
+with it (CLI 0.70's `mobiler upgrade --apply` does it for a scaffolded app).
+
 ## License
 
 Dual-licensed under either [MIT](https://github.com/mobiler/mobiler/blob/main/LICENSE-MIT) or [Apache-2.0](https://github.com/mobiler/mobiler/blob/main/LICENSE-APACHE), at your option.
