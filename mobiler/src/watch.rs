@@ -19,11 +19,7 @@ pub fn run(no_install: bool, no_run: bool, device: Option<&str>) -> Result<()> {
     let java_home = dev::resolve_java_home();
 
     println!("Mobiler watch");
-    println!(
-        "  Project:   {} ({})",
-        project.root.display(),
-        project.application_id
-    );
+    println!("  Project:   {}", project.root.display());
     if let Some(jh) = &java_home {
         println!("  JAVA_HOME: {jh}");
     }

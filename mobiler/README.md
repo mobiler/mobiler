@@ -51,6 +51,12 @@ mobiler fonts sync      # copy mobiler.toml [fonts] into the shells (build/dev/w
 mobiler deep-links sync # apply mobiler.toml [deep_links] to the shells (build/dev/watch do it too)
 ```
 
+**Application id.** `mobiler dev` and `watch` take the id from what gradle built
+(`Android/app/build/outputs/apk/debug/output-metadata.json`), and launch the activity the device
+resolves for the launcher (your `MainActivity` when there are several); `mobiler build android`
+prints it. So `build.gradle.kts` may compute `applicationId` (one store id per backend, a suffix)
+and leave `namespace` as it is: no literal `applicationId = "…"` line is needed.
+
 **App display name.** `mobiler new myapp` derives the identifier `Myapp` (Gradle root, Xcode target,
 theme) and uses it as the visible name too. `mobiler new myapp --display-name "My App"` or, later,
 `mobiler display-name "My App"` sets only what users see: Android `app_name` (the launcher label and
