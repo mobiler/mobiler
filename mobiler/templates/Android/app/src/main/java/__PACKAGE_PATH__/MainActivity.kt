@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -1663,15 +1665,22 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             contentKey = { it.route },
                             transitionSpec = {
                                 val dur = 280
+                                // A fade draws the screen into an off-screen layer, and a WebView drawn into one
+                                // crashes Android's renderer on some devices (Samsung, Android 13). A move to or
+                                // from a screen holding a WebView slides without fading; a lateral move (a tab)
+                                // switches at once.
+                                val fades = !holdsWebView(initialState) && !holdsWebView(targetState)
+                                val enterFade = if (fades) fadeIn(tween(dur)) else EnterTransition.None
+                                val exitFade = if (fades) fadeOut(tween(dur)) else ExitTransition.None
                                 when {
                                     targetState.depth > initialState.depth ->
-                                        (slideInHorizontally(tween(dur)) { it } + fadeIn(tween(dur))) togetherWith
-                                            (slideOutHorizontally(tween(dur)) { -it / 3 } + fadeOut(tween(dur)))
+                                        (slideInHorizontally(tween(dur)) { it } + enterFade) togetherWith
+                                            (slideOutHorizontally(tween(dur)) { -it / 3 } + exitFade)
                                     targetState.depth < initialState.depth ->
-                                        (slideInHorizontally(tween(dur)) { -it / 3 } + fadeIn(tween(dur))) togetherWith
-                                            (slideOutHorizontally(tween(dur)) { it } + fadeOut(tween(dur)))
+                                        (slideInHorizontally(tween(dur)) { -it / 3 } + enterFade) togetherWith
+                                            (slideOutHorizontally(tween(dur)) { it } + exitFade)
                                     else ->
-                                        fadeIn(tween(dur)) togetherWith fadeOut(tween(dur))
+                                        enterFade togetherWith exitFade
                                 }
                             },
                             label = "nav",
@@ -2427,4 +2436,23 @@ private class MapApplied {
     var latestId: String = ""
     var latestSend: (Action) -> Unit = {}
     var latestMarkers: List<MapMarker> = emptyList()
+}
+
+/** Whether a WebView is anywhere in this subtree, a Scaffold's sheet and bottom bar included. Such a
+ *  screen is never faded (see the Scaffold's transitionSpec). */
+private fun holdsWebView(w: Widget): Boolean = when (w) {
+    is Widget.WebView -> true
+    is Widget.Row -> w.children.any(::holdsWebView)
+    is Widget.Column -> w.children.any(::holdsWebView)
+    is Widget.Box -> w.children.any(::holdsWebView)
+    is Widget.Grid -> w.children.any(::holdsWebView)
+    is Widget.Scroller -> w.children.any(::holdsWebView)
+    is Widget.LazyList -> w.children.any(::holdsWebView)
+    is Widget.Card -> holdsWebView(w.child)
+    is Widget.A11y -> holdsWebView(w.child)
+    is Widget.SwipeAction -> holdsWebView(w.child)
+    is Widget.Split -> holdsWebView(w.primary) || holdsWebView(w.detail)
+    is Widget.Scaffold -> holdsWebView(w.body) || w.sheet?.let { holdsWebView(it.child) } == true ||
+        w.bottomBar.orEmpty().any(::holdsWebView)
+    else -> false
 }
