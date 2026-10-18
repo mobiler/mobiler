@@ -400,6 +400,8 @@ stock or its own.
   `error_fill` and `on_error_fill`. A full `ColorRoles { … }` literal needs `..Default::default()`.
 - **Breaking in mobiler-ui 0.31 / mobiler-core 0.44:** `Tab` gained `badge: Option<TabBadge>`. A
   `Tab { … }` literal needs `badge: None`. `tab` and `tab_icon` are unaffected.
+- **Breaking in mobiler-ui 0.32 / mobiler-core 0.47 / mobiler-web 0.47:** crux 0.20. Your workspace's
+  `crux_core` pin and the codegen's bindgen must move with it; CLI 0.70's `mobiler upgrade --apply` does both.
 
 ## License
 

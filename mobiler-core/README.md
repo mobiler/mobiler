@@ -84,6 +84,11 @@ scaffolds a project wired to this crate and a generic native shell.
 
 ## Upgrading
 
+**Breaking in mobiler-ui 0.32 / mobiler-core 0.47:** requires `crux_core` 0.20 (and `facet` `=0.46.5`, which
+crux 0.20 pins). Your workspace's `crux_core` pin must move with it, or the build pulls in two crux copies and fails
+with a type mismatch. CLI 0.70's `mobiler upgrade --apply` moves the pin and your codegen's bindgen for you. The wire
+is unchanged; the gain is crux 0.20's bridge fixes (no registry slot leaked per render, effect ids never reused).
+
 **Breaking in mobiler-ui 0.31 / mobiler-core 0.44:** `Tab` gained `badge: Option<TabBadge>`. A
 `Tab { … }` literal needs `badge: None`; `tab` / `tab_icon` are unaffected. Custom native shells
 should draw the badge (`mobiler upgrade --apply` updates generated ones once the CLI templates ship it).
