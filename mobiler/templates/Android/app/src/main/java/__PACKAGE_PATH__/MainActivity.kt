@@ -1252,7 +1252,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             }
         }
 
-        is Widget.Scroller -> if (!widget.edgeFade) {
+        // The edge fade is an off-screen layer, which a WebView must never be drawn into (see holdsWebView).
+        is Widget.Scroller -> if (!widget.edgeFade || widget.children.any(::holdsWebView)) {
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1672,12 +1673,14 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                                 val fades = !holdsWebView(initialState) && !holdsWebView(targetState)
                                 val enterFade = if (fades) fadeIn(tween(dur)) else EnterTransition.None
                                 val exitFade = if (fades) fadeOut(tween(dur)) else ExitTransition.None
+                                // Unfaded, the outgoing screen slides all the way out, so the two never overlap.
+                                val behind = if (fades) 3 else 1
                                 when {
                                     targetState.depth > initialState.depth ->
                                         (slideInHorizontally(tween(dur)) { it } + enterFade) togetherWith
-                                            (slideOutHorizontally(tween(dur)) { -it / 3 } + exitFade)
+                                            (slideOutHorizontally(tween(dur)) { -it / behind } + exitFade)
                                     targetState.depth < initialState.depth ->
-                                        (slideInHorizontally(tween(dur)) { -it / 3 } + enterFade) togetherWith
+                                        (slideInHorizontally(tween(dur)) { -it / behind } + enterFade) togetherWith
                                             (slideOutHorizontally(tween(dur)) { it } + exitFade)
                                     else ->
                                         enterFade togetherWith exitFade
@@ -2438,8 +2441,10 @@ private class MapApplied {
     var latestMarkers: List<MapMarker> = emptyList()
 }
 
-/** Whether a WebView is anywhere in this subtree, a Scaffold's sheet and bottom bar included. Such a
- *  screen is never faded (see the Scaffold's transitionSpec). */
+/** Whether a WebView is anywhere in this subtree. A WebView must never be drawn into an off-screen
+ *  layer (it crashes Android's renderer on some devices), so a screen holding one is never faded (the
+ *  Scaffold's transitionSpec) and a scroller holding one has no edge fade. A Scaffold's sheet and
+ *  bottom bar are not drawn in the faded content; they are checked only as a guard. */
 private fun holdsWebView(w: Widget): Boolean = when (w) {
     is Widget.WebView -> true
     is Widget.Row -> w.children.any(::holdsWebView)
