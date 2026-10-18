@@ -373,7 +373,12 @@ made. `--apply` writes clean merges and new files
 in place, after saving the old file under `.mobiler/backup/`, and moves the framework's own dependency lines
 (ADR-0055): `crux_core` in `Cargo.toml`; `mobiler-core`, the `codegen` feature and its `cargo_metadata` / `camino`
 dependencies in `shared/Cargo.toml`. A line in a form it doesn't recognise, a framework pin in another crate of your
-app, or a `facet` dependency of your own is left alone and listed as a hand edit. It never applies a conflict.
+app, or a `facet` dependency of your own is left alone and listed as a hand edit. That includes crates outside the
+app folder that it builds through `path` dependencies (an app core kept in your repository's main workspace, and that
+workspace's `[workspace.dependencies]`): upgrade reads them and lists their pins, but never edits outside the app
+(ADR-0056), so bump those by hand. It never applies a conflict. If a build still fails with trait errors after an
+upgrade, `mobiler doctor` (and the failed `mobiler dev` / `build` itself) says when `Cargo.lock` holds two versions of
+`crux_core` or `mobiler-core`, and which crate pulls the old one.
 
 Everything left for review is recorded in `.mobiler/pending/`. Every `mobiler upgrade` ends with a warning listing
 those files and what to do with each. A review copy you put in place as it is gets

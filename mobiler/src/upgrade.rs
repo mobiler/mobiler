@@ -467,27 +467,154 @@ fn foreign_pins(root: &Path, skip: &[&Path]) -> Vec<String> {
     collect_manifests(root, &mut manifests);
     manifests.sort();
     let mut notes = Vec::new();
-    for path in manifests {
+    for path in &manifests {
+        let Ok(content) = fs::read_to_string(path) else { continue };
+        let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        let targets: &[(&str, String)] = if skip.contains(&path.as_path()) { &[] } else { &targets };
+        notes.extend(pin_notes(&rel, &content, targets));
+    }
+    // Crates outside the app folder that the app builds through `path` dependencies (an app core
+    // kept in the repository's main workspace): read and reported, never written.
+    for path in outside_manifests(root, &manifests) {
         let Ok(content) = fs::read_to_string(&path) else { continue };
-        let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-        if !skip.contains(&path.as_path()) {
-            for (dep, want) in &targets {
-                if let Some(have) = any_dep_version(&content, dep)
-                    && !compatible(&have, want)
-                {
-                    notes.push(format!("{rel}: {dep} {have} -> {want} (edit by hand)"));
-                }
-            }
-        }
-        if let Some(have) = any_dep_version(&content, "facet")
-            && have != FACET_PIN
-        {
-            notes.push(format!(
-                "{rel}: declares facet {have}; it must be {FACET_PIN} to match crux_core 0.20 (edit by hand)"
-            ));
-        }
+        notes.extend(pin_notes(&relative_to(root, &path), &content, &targets));
     }
     notes
+}
+
+/// The hand-edit notes for one manifest: each framework dependency in `targets` that its version
+/// doesn't accept, and a `facet` dependency off the framework's.
+fn pin_notes(rel: &str, content: &str, targets: &[(&str, String)]) -> Vec<String> {
+    let mut notes = Vec::new();
+    for (dep, want) in targets {
+        if let Some(have) = any_dep_version(content, dep)
+            && !compatible(&have, want)
+        {
+            notes.push(format!("{rel}: {dep} {have} -> {want} (edit by hand)"));
+        }
+    }
+    if let Some(have) = any_dep_version(content, "facet")
+        && have != FACET_PIN
+    {
+        notes.push(format!("{rel}: declares facet {have}; it must be {FACET_PIN} to match crux_core 0.20 (edit by hand)"));
+    }
+    notes
+}
+
+/// Manifests outside `root` that the app reaches by following `path` dependencies from `inside`
+/// (transitively), plus the workspace root of any of them that inherits a framework dependency
+/// (`dep.workspace = true`), since that is where its version is written. Sorted, each once.
+fn outside_manifests(root: &Path, inside: &[PathBuf]) -> Vec<PathBuf> {
+    let Ok(root) = root.canonicalize() else { return Vec::new() };
+    let mut seen: std::collections::BTreeSet<PathBuf> = inside.iter().filter_map(|p| p.canonicalize().ok()).collect();
+    let mut queue: Vec<PathBuf> = seen.iter().cloned().collect();
+    let mut outside = std::collections::BTreeSet::new();
+    while let Some(manifest) = queue.pop() {
+        let Ok(content) = fs::read_to_string(&manifest) else { continue };
+        let Some(dir) = manifest.parent() else { continue };
+        // A local checkout of the framework itself (a `[patch]`, or a path to mobiler-core) is on
+        // its own versions: neither judged nor walked into.
+        if package_name(&content).is_some_and(is_framework_crate) {
+            continue;
+        }
+        let is_outside = !manifest.starts_with(&root);
+        if is_outside {
+            outside.insert(manifest.clone());
+            let inherits = ["crux_core", "mobiler-core", "mobiler-web", "facet"]
+                .iter()
+                .any(|dep| inherits_from_workspace(&content, dep));
+            if inherits
+                && let Some(ws) = workspace_root(dir)
+                && !ws.starts_with(&root)
+            {
+                outside.insert(ws);
+            }
+        }
+        for rel in path_values(&content) {
+            // `[lib] path = "src/lib.rs"` and friends name a file, so they have no Cargo.toml.
+            let Ok(next) = dir.join(rel).join("Cargo.toml").canonicalize() else { continue };
+            if next.is_file() && seen.insert(next.clone()) {
+                queue.push(next);
+            }
+        }
+    }
+    outside.into_iter().collect()
+}
+
+/// The `name` under a manifest's `[package]`.
+fn package_name(content: &str) -> Option<&str> {
+    let mut in_package = false;
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            in_package = t.split('#').next().is_some_and(|h| h.trim() == "[package]");
+        } else if in_package
+            && let Some(rest) = t.strip_prefix("name")
+            && let Some(value) = rest.trim_start().strip_prefix('=')
+        {
+            return value.trim().trim_matches(['"', '\'']).split(['"', '\'']).next();
+        }
+    }
+    None
+}
+
+/// The framework's own crates and the crates it builds on, whose versions it chooses.
+fn is_framework_crate(name: &str) -> bool {
+    matches!(name, "mobiler-core" | "mobiler-ui" | "mobiler-web") || name.starts_with("crux_") || name.starts_with("facet")
+}
+
+/// Every `path = "…"` value in a manifest (`dep = { path = … }`, `dep.path = …`, a
+/// `[dependencies.dep]` table's `path = …`, and target paths, which the caller filters out).
+fn path_values(content: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let line = line.split('#').next().unwrap_or("");
+        let mut rest = line;
+        while let Some(at) = rest.find("path") {
+            let before = rest[..at].chars().next_back();
+            let after = rest[at + 4..].trim_start();
+            rest = &rest[at + 4..];
+            if before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+                continue;
+            }
+            let Some(value) = after.strip_prefix('=').map(str::trim_start).and_then(|v| v.strip_prefix('"')) else {
+                continue;
+            };
+            if let Some(value) = value.split('"').next() {
+                out.push(value);
+            }
+        }
+    }
+    out
+}
+
+/// Whether `dep` takes its version from the workspace (`dep.workspace = true` or
+/// `dep = { workspace = true, … }`).
+fn inherits_from_workspace(content: &str, dep: &str) -> bool {
+    content.lines().any(|l| {
+        let t = l.trim_start();
+        t.strip_prefix(&format!("{dep}.workspace")).is_some_and(|r| r.trim_start().starts_with('='))
+            || t.strip_prefix(&format!("{dep} = {{")).is_some_and(|r| r.contains("workspace = true"))
+    })
+}
+
+/// The nearest manifest at or above `dir` that declares `[workspace]`.
+fn workspace_root(dir: &Path) -> Option<PathBuf> {
+    dir.ancestors().map(|d| d.join("Cargo.toml")).find(|m| {
+        fs::read_to_string(m).is_ok_and(|c| c.lines().any(|l| l.trim() == "[workspace]"))
+    })
+}
+
+/// `path` as seen from `base`, with `..` steps where it leaves `base` (both canonical when they
+/// can be), `/`-separated for the report.
+fn relative_to(base: &Path, path: &Path) -> String {
+    let base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let (b, p): (Vec<_>, Vec<_>) = (base.components().collect(), path.components().collect());
+    let common = b.iter().zip(&p).take_while(|(x, y)| x == y).count();
+    let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), b.len() - common).collect();
+    parts.extend(p[common..].iter().map(|c| c.as_os_str().to_string_lossy().into_owned()));
+    parts.join("/")
 }
 
 /// Every `Cargo.toml` under `dir`, skipping build output, dot-dirs (`.git`, `.mobiler`, `.gradle`) and
@@ -2259,6 +2386,83 @@ mod test {
         assert_eq!(read(&root, "web/Cargo.toml"), web);
         assert_eq!(read(&root, "shared/Cargo.toml"), shared_cargo.replace("[dependencies]\n", "[dependencies]\nfacet = \"0.44\"\n"));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A crate outside the app folder, as the appointments repo has it: `shared` depends by path on
+    /// `<outer>/crates/mobile-admin`, which depends by path on `domain`, which inherits mobiler-core
+    /// from `<outer>/Cargo.toml`'s `[workspace.dependencies]`.
+    fn app_with_outside_core(admin: &str, domain: &str, outer_ws: &str) -> (PathBuf, PathBuf) {
+        let (root, _, _) = app_069();
+        let outer = PathBuf::from(format!("{}_outer", root.display()));
+        let _ = fs::remove_dir_all(&outer);
+        fs::create_dir_all(outer.join("crates/mobile-admin/src")).unwrap();
+        fs::create_dir_all(outer.join("crates/domain")).unwrap();
+        fs::write(outer.join("Cargo.toml"), outer_ws).unwrap();
+        fs::write(outer.join("crates/mobile-admin/Cargo.toml"), admin).unwrap();
+        fs::write(outer.join("crates/domain/Cargo.toml"), domain).unwrap();
+        let rel = format!("../../{}/crates/mobile-admin", outer.file_name().unwrap().to_string_lossy());
+        let shared = read(&root, "shared/Cargo.toml")
+            .replace("[dependencies]\n", &format!("[dependencies]\nmobile-admin = {{ path = \"{rel}\" }}\n"));
+        fs::write(root.join("shared/Cargo.toml"), shared).unwrap();
+        (root, outer)
+    }
+
+    const ADMIN_046: &str = "[package]\nname = \"mobile-admin\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[dependencies]\n\
+        mobiler-core = \"0.46\"\ndomain = { path = \"../domain\" }\n\n[dev-dependencies]\ncrux_core = \"0.18\"\n";
+    // The dev-dependency back on mobile-admin closes a loop the walk must not follow forever.
+    const DOMAIN_046: &str = "[package]\nname = \"domain\"\n\n[dependencies]\nmobiler-core.workspace = true\n\n\
+        [dev-dependencies]\nmobile-admin = { path = \"../mobile-admin\" }\n";
+    const OUTER_046: &str = "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.dependencies]\nmobiler-core = \"0.46\"\n";
+
+    #[test]
+    fn crates_outside_the_app_reached_by_path_are_reported_not_edited() {
+        let (root, outer) = app_with_outside_core(ADMIN_046, DOMAIN_046, OUTER_046);
+        let r = upgrade_at(&root, true).unwrap();
+        let notes = &r.deps_notes;
+        let has = |suffix: &str| notes.iter().any(|n| n.starts_with("../") && n.contains(suffix));
+        assert!(has("/crates/mobile-admin/Cargo.toml: mobiler-core 0.46 -> 0.47 (edit by hand)"), "{notes:?}");
+        assert!(has("/crates/mobile-admin/Cargo.toml: crux_core 0.18 -> 0.20.0 (edit by hand)"), "{notes:?}");
+        assert!(has("_outer/Cargo.toml: mobiler-core 0.46 -> 0.47 (edit by hand)"), "{notes:?}");
+        assert_eq!(notes.len(), 3, "{notes:?}");
+        // Outside the app is read, never written.
+        assert_eq!(fs::read_to_string(outer.join("crates/mobile-admin/Cargo.toml")).unwrap(), ADMIN_046);
+        assert_eq!(fs::read_to_string(outer.join("crates/domain/Cargo.toml")).unwrap(), DOMAIN_046);
+        assert_eq!(fs::read_to_string(outer.join("Cargo.toml")).unwrap(), OUTER_046);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn a_local_framework_checkout_is_not_judged() {
+        // A [patch] to a local mobiler-core checkout whose workspace is a release ahead: the walk
+        // must not tell the user to move the framework's own pins back to the CLI's.
+        let (root, _, _) = app_with_template_manifests();
+        let outer = PathBuf::from(format!("{}_fw", root.display()));
+        let _ = fs::remove_dir_all(&outer);
+        fs::create_dir_all(outer.join("mobiler-core")).unwrap();
+        fs::write(outer.join("Cargo.toml"), "[workspace]\n\n[workspace.dependencies]\ncrux_core = \"0.21.0\"\nfacet = \"=0.47.0\"\n").unwrap();
+        fs::write(
+            outer.join("mobiler-core/Cargo.toml"),
+            "[package]\nname = \"mobiler-core\"\n\n[dependencies]\ncrux_core.workspace = true\nfacet = \"=0.47.0\"\n",
+        )
+        .unwrap();
+        let rel = format!("../{}/mobiler-core", outer.file_name().unwrap().to_string_lossy());
+        let cargo = read(&root, "Cargo.toml") + &format!("\n[patch.crates-io]\nmobiler-core = {{ path = \"{rel}\" }}\n");
+        fs::write(root.join("Cargo.toml"), cargo).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn crates_outside_the_app_at_target_are_quiet() {
+        let admin = ADMIN_046.replace("\"0.46\"", "\"0.47\"").replace("\"0.18\"", "\"0.20\"");
+        let (root, outer) = app_with_outside_core(&admin, DOMAIN_046, &OUTER_046.replace("0.46", "0.47"));
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outer);
     }
 
     #[test]

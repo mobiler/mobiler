@@ -100,6 +100,7 @@ pub fn run() -> ExitCode {
         println!("  {}", crate::fonts::doctor_line(&root));
         println!("  {}", crate::splash::doctor_line(&root));
     }
+    framework_crates(&mut warnings);
 
     // If neither platform is configured you can't build anything — nudge to set one up.
     if !android_on && !ios_on {
@@ -133,6 +134,23 @@ pub fn run() -> ExitCode {
             }
         }
         ExitCode::FAILURE
+    }
+}
+
+/// Run inside any app (with or without a mobiler.toml): one line for its `Cargo.lock`, and a warning
+/// for each framework crate resolved at two versions, naming the crate that pulls the old one
+/// (ADR-0056).
+fn framework_crates(warnings: &mut Vec<(&'static str, String)>) {
+    let Some(root) = env::current_dir().ok().and_then(|d| crate::dev::walk_up_for_project_root(&d)) else { return };
+    let Some(duplicates) = crate::lockcheck::check(&root) else {
+        println!("  framework crates: no Cargo.lock in {} yet (build once to check)", root.display());
+        return;
+    };
+    if duplicates.is_empty() {
+        println!("  framework crates: one crux_core and one mobiler-core in Cargo.lock");
+    } else {
+        println!("  framework crates: more than one version in Cargo.lock (see Warnings)");
+        warnings.extend(duplicates.into_iter().map(|d| ("Framework crates", d)));
     }
 }
 

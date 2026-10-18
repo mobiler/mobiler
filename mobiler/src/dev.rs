@@ -37,7 +37,8 @@ pub fn pipeline(
                 .args(["build", "-p", "shared", "--features", "uniffi"])
                 .current_dir(&project.root),
         )
-    })?;
+    })
+    .map_err(|e| with_lock_hint(e, &project.root))?;
 
     stage("Generating Kotlin types + uniffi bindings", || {
         let _ = fs::remove_dir_all(project.root.join("Android/generated"));
@@ -51,7 +52,8 @@ pub fn pipeline(
                 ])
                 .current_dir(&project.root),
         )
-    })?;
+    })
+    .map_err(|e| with_lock_hint(e, &project.root))?;
 
     // Pick the device first, so the APK carries only its Rust target (one cargo cross-build per
     // edit-run instead of two). No device, or --no-install: gradle's default (arm64 + x86_64).
@@ -191,7 +193,7 @@ impl Project {
     }
 }
 
-fn walk_up_for_project_root(start: &Path) -> Option<PathBuf> {
+pub fn walk_up_for_project_root(start: &Path) -> Option<PathBuf> {
     let mut cur = Some(start.to_path_buf());
     while let Some(p) = cur {
         if looks_like_project_root(&p) {
@@ -445,6 +447,15 @@ fn stale_libraries(packaged: &Path, target_dir: &Path, profile: &str, since: std
     }
     stale.sort();
     stale
+}
+
+/// A failed Rust build in an app that resolves two framework versions says so after the build's
+/// own output, where it is read first (ADR-0056).
+pub fn with_lock_hint(e: anyhow::Error, root: &Path) -> anyhow::Error {
+    match crate::lockcheck::build_hint(root) {
+        Some(hint) => anyhow::anyhow!("{e:#}\n\n{hint}"),
+        None => e,
+    }
 }
 
 fn stage<F>(label: &str, run: F) -> Result<()>
