@@ -113,8 +113,10 @@ fn classify(rel: &Path, desired: &[u8]) -> Class {
 /// Outcome of an upgrade run, for both the printed report and tests.
 #[derive(Default)]
 struct Report {
-    deps: Option<(String, String)>,
-    deps_note: Option<String>,
+    /// Framework pin edits written this run (`shared/Cargo.toml: mobiler-core 0.46 -> 0.47`).
+    deps: Vec<String>,
+    /// Framework pins upgrade can't place, for the user to edit by hand (ADR-0055).
+    deps_notes: Vec<String>,
     up_to_date: usize,
     added: Vec<String>,
     changed: Vec<String>,
@@ -130,8 +132,8 @@ struct Report {
     pending: Vec<(String, String)>,
     /// New template files offered as review copies (no `--apply`): not written in place.
     new_review: Vec<String>,
-    /// The `mobiler-core` bump a review run would make: (from, to).
-    deps_would: Option<(String, String)>,
+    /// The framework pin edits a review run would make.
+    deps_would: Vec<String>,
     /// Pending records for paths the template no longer produces: deleted, nothing left to review.
     dropped: Vec<String>,
     /// Managed paths holding a symlink (live or dangling): never read or written through, left for the user.
@@ -180,7 +182,7 @@ fn upgrade_with(root: &Path, apply: bool, resolved: &[&str]) -> Result<Report> {
         let _ = fs::remove_file(root.join(review_rel(&rel_disp)));
         report.resolved.push(rel_disp);
     }
-    bump_core_dep(root, apply, &mut report)?;
+    move_framework_pins(root, apply, &mut report)?;
     sync_dir(&TEMPLATES, root, &subs, apply, &mut report)?;
     report.plugins = crate::plugin::drifted(root, &subs);
     // A record for a path this template no longer produces (a dropped file, a renamed package, a
@@ -196,12 +198,29 @@ fn upgrade_with(root: &Path, apply: bool, resolved: &[&str]) -> Result<Report> {
     Ok(report)
 }
 
-// ---------------- dependency bump ----------------
+// ---------------- framework pins (ADR-0055) ----------------
 
-/// The `mobiler-core` version the CLI's templates pin (the target of the bump).
-fn template_core_version() -> Option<String> {
-    let f = TEMPLATES.get_file("shared/Cargo.toml.tmpl")?;
-    extract_dep_version(f.contents_utf8()?, "mobiler-core")
+/// The facet version `crux_core` 0.20 and `mobiler-core` require. The template declares no facet
+/// dependency, so an app that declares its own is told this rather than edited.
+const FACET_PIN: &str = "=0.46.5";
+
+/// One manifest edit: the new text and what changed, nothing to do, or a hand edit to report.
+#[derive(Debug, PartialEq, Eq)]
+enum Edit {
+    Changed(String, String),
+    Unchanged,
+    Unrecognised(String),
+}
+
+/// The version an embedded template pins for `dep` (string form `dep = "X"`): the upgrade target.
+fn template_pin(template: &str, dep: &str) -> Option<String> {
+    extract_dep_version(TEMPLATES.get_file(template)?.contents_utf8()?, dep)
+}
+
+/// A full dependency line from an embedded template (`cargo_metadata = { … }`), for insertion.
+fn template_dep_line(template: &str, dep: &str) -> Option<String> {
+    let prefix = format!("{dep} = ");
+    TEMPLATES.get_file(template)?.contents_utf8()?.lines().find(|l| l.starts_with(&prefix)).map(str::to_string)
 }
 
 /// Read the version of a string-form dependency: `dep = "X"` (ignores leading whitespace).
@@ -213,39 +232,280 @@ fn extract_dep_version(cargo: &str, dep: &str) -> Option<String> {
     })
 }
 
-fn bump_core_dep(root: &Path, apply: bool, report: &mut Report) -> Result<()> {
-    let Some(want) = template_core_version() else {
-        return Ok(());
-    };
-    let path = root.join("shared/Cargo.toml");
-    if !path.exists() {
-        report.deps_note = Some("no shared/Cargo.toml found — couldn't bump mobiler-core.".into());
-        return Ok(());
+/// The version a manifest gives `dep` in either form: `dep = "X"` or `dep = { version = "X", … }`.
+fn any_dep_version(cargo: &str, dep: &str) -> Option<String> {
+    let prefix = format!("{dep} = ");
+    cargo.lines().find_map(|l| {
+        let rest = l.trim_start().strip_prefix(&prefix)?.trim_start();
+        let quoted = if let Some(q) = rest.strip_prefix('"') {
+            q
+        } else {
+            let after = rest.strip_prefix('{')?.split("version").nth(1)?;
+            after.trim_start().strip_prefix('=')?.trim_start().strip_prefix('"')?
+        };
+        quoted.split('"').next().map(str::to_string)
+    })
+}
+
+/// The file's line ending, so inserted lines match it.
+fn eol(content: &str) -> &'static str {
+    if content.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
+/// Whether requirement `have` already accepts what `want` asks for under Cargo's caret rules:
+/// `0.20` and `^0.20.0` match `0.20.0`, `0.47.1` matches `0.47`. An exact `=X` pin matches only `X`;
+/// any other operator counts as different (so it gets reported).
+fn compatible(have: &str, want: &str) -> bool {
+    fn caret_key(v: &str) -> Option<Vec<u64>> {
+        let parts = v.split('.').map(|p| p.parse::<u64>().ok()).collect::<Option<Vec<_>>>()?;
+        let at = |i: usize| parts.get(i).copied().unwrap_or(0);
+        Some(match (at(0), at(1)) {
+            (0, 0) => vec![0, 0, at(2)],
+            (0, minor) => vec![0, minor],
+            (major, _) => vec![major],
+        })
     }
-    let content = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let Some(have) = extract_dep_version(&content, "mobiler-core") else {
-        report.deps_note = Some(
-            "couldn't find a `mobiler-core = \"…\"` dependency in shared/Cargo.toml — update it by hand."
+    let want = want.trim().trim_start_matches(['=', '^']);
+    let have = have.trim();
+    if let Some(exact) = have.strip_prefix('=') {
+        return exact.trim() == want;
+    }
+    match (caret_key(have.trim_start_matches('^')), caret_key(want)) {
+        (Some(h), Some(w)) => h == w,
+        _ => false,
+    }
+}
+
+/// Whether the manifest takes `dep` from somewhere other than crates.io (`path`, `git`, the
+/// workspace): not the framework's pin to move.
+fn non_registry(content: &str, dep: &str) -> bool {
+    content.lines().any(|l| {
+        let t = l.trim_start();
+        t.starts_with(&format!("{dep}.workspace"))
+            || t.starts_with(&format!("{dep}.path"))
+            || t.starts_with(&format!("{dep}.git"))
+            || t.strip_prefix(&format!("{dep} = {{")).is_some_and(|rest| {
+                rest.contains("path =") || rest.contains("git =") || rest.contains("workspace = true")
+            })
+    })
+}
+
+/// Move a string-form pin `dep = "X"` to `want`. A pin that already accepts `want` stays as it is;
+/// a path, git or workspace dependency is not touched; any other form is reported.
+fn set_pin(content: &str, dep: &str, want: &str) -> Edit {
+    if non_registry(content, dep) {
+        return Edit::Unchanged;
+    }
+    let prefix = format!("{dep} = \"");
+    let mut out = String::with_capacity(content.len());
+    let mut moved = None;
+    for line in content.split_inclusive('\n') {
+        if moved.is_none()
+            && let Some(rest) = line.trim_start().strip_prefix(&prefix)
+            && let Some((have, tail)) = rest.split_once('"')
+        {
+            if have == want || compatible(have, want) {
+                return Edit::Unchanged;
+            }
+            let indent = &line[..line.len() - line.trim_start().len()];
+            for piece in [indent, prefix.as_str(), want, "\"", tail] {
+                out.push_str(piece);
+            }
+            moved = Some(have.to_string());
+            continue;
+        }
+        out.push_str(line);
+    }
+    match moved {
+        Some(have) => Edit::Changed(out, format!("{dep} {have} -> {want}")),
+        None => Edit::Unrecognised(format!("couldn't find a `{dep} = \"…\"` line — set {dep} to \"{want}\" by hand.")),
+    }
+}
+
+/// crux 0.19 removed `crux_core/cli`: the codegen feature takes `UniFFI`'s bindgen and the two crates
+/// the codegen helper uses instead (ADR-0054). Only the one-entry-per-line form is rewritten.
+fn migrate_codegen_feature(content: &str) -> Edit {
+    let mut out = String::with_capacity(content.len() + 64);
+    let mut done = false;
+    for line in content.split_inclusive('\n') {
+        if !done && line.trim() == "\"crux_core/cli\"," {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            let end = if line.ends_with("\r\n") { "\r\n" } else if line.ends_with('\n') { "\n" } else { "" };
+            for entry in ["\"uniffi/bindgen\",", "\"dep:cargo_metadata\",", "\"dep:camino\","] {
+                for piece in [indent, entry, if end.is_empty() { eol(content) } else { end }] {
+                    out.push_str(piece);
+                }
+            }
+            done = true;
+            continue;
+        }
+        out.push_str(line);
+    }
+    if done {
+        Edit::Changed(out, "codegen feature: crux_core/cli -> uniffi/bindgen, cargo_metadata, camino".into())
+    } else if content.contains("\"crux_core/cli\"") {
+        Edit::Unrecognised(
+            "the codegen feature names \"crux_core/cli\" in a form upgrade doesn't rewrite — replace it with \
+             \"uniffi/bindgen\", \"dep:cargo_metadata\", \"dep:camino\" by hand."
                 .into(),
-        );
+        )
+    } else {
+        Edit::Unchanged
+    }
+}
+
+/// Add the codegen helper's two optional dependencies right after the `uniffi = { …, optional = true }`
+/// line, each only if missing.
+fn add_codegen_deps(content: &str) -> Edit {
+    let wanted: Vec<(&str, String)> = ["cargo_metadata", "camino"]
+        .into_iter()
+        .filter_map(|dep| template_dep_line("shared/Cargo.toml.tmpl", dep).map(|l| (dep, l)))
+        .collect();
+    let has = |dep: &str| {
+        content.lines().any(|l| {
+            let t = l.trim_start();
+            t.starts_with(&format!("{dep} =")) || t.starts_with(&format!("{dep}.")) || t.starts_with(&format!("{dep}="))
+        })
+    };
+    let missing: Vec<&(&str, String)> = wanted.iter().filter(|(dep, _)| !has(dep)).collect();
+    if missing.is_empty() {
+        return Edit::Unchanged;
+    }
+    let names = missing.iter().map(|(d, _)| *d).collect::<Vec<_>>().join(" and ");
+    let end = eol(content);
+    let mut out = String::with_capacity(content.len() + 128);
+    let mut done = false;
+    for line in content.split_inclusive('\n') {
+        out.push_str(line);
+        if !done && line.trim_start().starts_with("uniffi = {") && line.contains("optional = true") {
+            if !line.ends_with('\n') {
+                out.push_str(end);
+            }
+            for (_, dep_line) in &missing {
+                out.push_str(dep_line);
+                out.push_str(end);
+            }
+            done = true;
+        }
+    }
+    if done {
+        Edit::Changed(out, format!("added {names} (codegen)"))
+    } else {
+        let lines = missing.iter().map(|(_, l)| format!("`{l}`")).collect::<Vec<_>>().join(" and ");
+        Edit::Unrecognised(format!(
+            "couldn't find the `uniffi = {{ …, optional = true }}` line — add {lines} to [dependencies] by hand."
+        ))
+    }
+}
+
+/// Record one edit in the report and fold a change into `content`.
+fn take(edit: Edit, file: &str, content: &mut String, changes: &mut Vec<String>, report: &mut Report) {
+    match edit {
+        Edit::Changed(new, what) => {
+            *content = new;
+            changes.push(format!("{file}: {what}"));
+        }
+        Edit::Unchanged => {}
+        Edit::Unrecognised(note) => report.deps_notes.push(format!("{file}: {note}")),
+    }
+}
+
+/// Write the edited manifest on `--apply`; a review run only lists the edits (ADR-0046).
+fn commit_edits(root: &Path, file: &str, content: String, changes: Vec<String>, apply: bool, report: &mut Report) -> Result<()> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+    if apply {
+        crate::fsguard::write(root, root.join(file), content)?;
+        report.deps.extend(changes);
+    } else {
+        report.deps_would.extend(changes);
+    }
+    Ok(())
+}
+
+/// Move the dependency lines the framework owns in the app's two template manifests (ADR-0055), and
+/// report the framework pins elsewhere in the app that need a hand edit.
+fn move_framework_pins(root: &Path, apply: bool, report: &mut Report) -> Result<()> {
+    let (Some(crux), Some(core)) =
+        (template_pin("Cargo.toml.tmpl", "crux_core"), template_pin("shared/Cargo.toml.tmpl", "mobiler-core"))
+    else {
         return Ok(());
     };
-    if have == want {
-        return Ok(());
+    for file in ["Cargo.toml", "shared/Cargo.toml"] {
+        let path = root.join(file);
+        if !path.exists() {
+            report.deps_notes.push(format!("no {file} found — couldn't move the framework's pins."));
+            continue;
+        }
+        let mut content = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let mut changes = Vec::new();
+        if file == "Cargo.toml" {
+            take(set_pin(&content, "crux_core", &crux), file, &mut content, &mut changes, report);
+        } else {
+            take(set_pin(&content, "mobiler-core", &core), file, &mut content, &mut changes, report);
+            take(migrate_codegen_feature(&content), file, &mut content, &mut changes, report);
+            take(add_codegen_deps(&content), file, &mut content, &mut changes, report);
+        }
+        commit_edits(root, file, content, changes, apply, report)?;
     }
-    if !apply {
-        // A review run never changes what the build reads (ADR-0046): the bump waits for --apply.
-        report.deps_would = Some((have, want));
-        return Ok(());
-    }
-    let updated = content.replacen(
-        &format!("mobiler-core = \"{have}\""),
-        &format!("mobiler-core = \"{want}\""),
-        1,
-    );
-    crate::fsguard::write(root, &path, updated)?;
-    report.deps = Some((have, want));
+    let skip = [root.join("Cargo.toml"), root.join("shared/Cargo.toml")];
+    let skip: Vec<&Path> = skip.iter().map(PathBuf::as_path).collect();
+    report.deps_notes.extend(foreign_pins(root, &skip));
     Ok(())
+}
+
+/// Every other app manifest's framework pin that differs from the template's, and any facet
+/// dependency at all (the template declares none): one hand-edit note each, never an edit.
+/// `skip` manifests are checked for facet only (their framework pins are moved above).
+fn foreign_pins(root: &Path, skip: &[&Path]) -> Vec<String> {
+    let Some(crux) = template_pin("Cargo.toml.tmpl", "crux_core") else { return Vec::new() };
+    let Some(core) = template_pin("shared/Cargo.toml.tmpl", "mobiler-core") else { return Vec::new() };
+    // mobiler-web publishes in lockstep with mobiler-core, so it moves to the same version.
+    let targets = [("crux_core", crux), ("mobiler-core", core.clone()), ("mobiler-web", core)];
+    let mut manifests = Vec::new();
+    collect_manifests(root, &mut manifests);
+    manifests.sort();
+    let mut notes = Vec::new();
+    for path in manifests {
+        let Ok(content) = fs::read_to_string(&path) else { continue };
+        let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        if !skip.contains(&path.as_path()) {
+            for (dep, want) in &targets {
+                if let Some(have) = any_dep_version(&content, dep)
+                    && !compatible(&have, want)
+                {
+                    notes.push(format!("{rel}: {dep} {have} -> {want} (edit by hand)"));
+                }
+            }
+        }
+        if let Some(have) = any_dep_version(&content, "facet")
+            && have != FACET_PIN
+        {
+            notes.push(format!(
+                "{rel}: declares facet {have}; it must be {FACET_PIN} to match crux_core 0.20 (edit by hand)"
+            ));
+        }
+    }
+    notes
+}
+
+/// Every `Cargo.toml` under `dir`, skipping build output, dot-dirs (`.git`, `.mobiler`, `.gradle`) and
+/// symlinks (never followed).
+fn collect_manifests(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else { continue };
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if kind.is_dir() {
+            if !(name.starts_with('.') || matches!(name.as_ref(), "target" | "node_modules" | "build" | "Pods")) {
+                collect_manifests(&entry.path(), out);
+            }
+        } else if kind.is_file() && name == "Cargo.toml" {
+            out.push(entry.path());
+        }
+    }
 }
 
 // ---------------- shell sync ----------------
@@ -858,14 +1118,17 @@ impl Report {
 
     /// One line per file this run touched, offered or resolved (`  + added …`, `  ‼ conflict …`).
     fn print_files(&self) {
-        if let Some((from, to)) = &self.deps_would {
-            println!("  deps: would bump mobiler-core {from} -> {to} (run with --apply)");
-        } else {
-            match (&self.deps, &self.deps_note) {
-                (Some((from, to)), _) => println!("  deps: mobiler-core {from} -> {to} (updated)"),
-                (None, Some(note)) => println!("  deps: {note}"),
-                (None, None) => println!("  deps: up to date"),
-            }
+        for d in &self.deps_would {
+            println!("  deps: would change {d} (run with --apply)");
+        }
+        for d in &self.deps {
+            println!("  deps: {d} (updated)");
+        }
+        for n in &self.deps_notes {
+            println!("  deps: {n}");
+        }
+        if self.deps_would.is_empty() && self.deps.is_empty() && self.deps_notes.is_empty() {
+            println!("  deps: up to date");
         }
         for a in &self.added {
             println!("  + added   {a}");
@@ -939,7 +1202,7 @@ impl Report {
         }
         let offered = self.changed.len() + self.new_review.len() + self.merge.len() + self.conflict.len();
         if offered == 0 && self.updated.is_empty() {
-            if self.plugins.is_empty() && self.pending.is_empty() && self.deps_would.is_none() && self.skipped.is_empty() {
+            if self.plugins.is_empty() && self.pending.is_empty() && self.deps_would.is_empty() && self.deps_notes.is_empty() && self.skipped.is_empty() {
                 println!("Up to date. ✓");
             }
             return;
@@ -1244,14 +1507,14 @@ mod test {
         let cargo_before = read(&root, "shared/Cargo.toml");
         let r = upgrade_at(&root, false).unwrap();
         assert_eq!(read(&root, "shared/Cargo.toml"), cargo_before, "no core bump without --apply");
-        assert!(r.deps_would.is_some());
+        assert!(!r.deps_would.is_empty());
         assert!(!root.join("iOS/Sources/Render.swift").exists(), "a new file is not written in place");
         assert!(root.join("iOS/Sources/Render.swift.mobiler-new").exists(), "it is offered for review");
         assert!(r.pending.iter().any(|(f, k)| f == "iOS/Sources/Render.swift" && k == "new"), "{:?}", r.pending);
 
         let r2 = upgrade_at(&root, true).unwrap();
         assert!(root.join("iOS/Sources/Render.swift").exists());
-        let want = template_core_version().unwrap();
+        let want = template_pin("shared/Cargo.toml.tmpl", "mobiler-core").unwrap();
         assert!(read(&root, "shared/Cargo.toml").contains(&format!("mobiler-core = \"{want}\"")));
         assert!(r2.pending.is_empty(), "--apply leaves nothing pending: {:?}", r2.pending);
         let _ = fs::remove_dir_all(&root);
@@ -1742,14 +2005,14 @@ mod test {
     #[test]
     fn bumps_dep_stamps_and_leaves_app_code_untouched() {
         let root = skeleton();
-        let want = template_core_version().expect("templates pin mobiler-core");
+        let want = template_pin("shared/Cargo.toml.tmpl", "mobiler-core").expect("templates pin mobiler-core");
         let report = upgrade_at(&root, true).unwrap();
 
         // dep bumped to the template's version, other deps preserved.
         let cargo = read(&root, "shared/Cargo.toml");
         assert!(cargo.contains(&format!("mobiler-core = \"{want}\"")), "core bumped");
         assert!(cargo.contains("serde = \"1\""), "other deps preserved");
-        assert_eq!(report.deps, Some(("0.1.0".into(), want)));
+        assert!(report.deps.contains(&format!("shared/Cargo.toml: mobiler-core 0.1.0 -> {want}")), "{:?}", report.deps);
 
         // app code never touched.
         assert_eq!(read(&root, "shared/src/app.rs"), "// MY CUSTOM APP — do not touch\n");
@@ -1836,5 +2099,187 @@ mod test {
         let report = upgrade_at(&root, false).unwrap();
         assert_eq!(report.stamp, Some((Some("0.9.0".into()), env!("CARGO_PKG_VERSION").to_string())));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    // ---------------- framework pins (ADR-0055) ----------------
+
+    /// The manifests as the 0.69 template wrote them: crux 0.18, core 0.46, crux's bindgen feature,
+    /// no codegen deps.
+    fn as_069(root_cargo: &str, shared_cargo: &str) -> (String, String) {
+        let crux = template_pin("Cargo.toml.tmpl", "crux_core").unwrap();
+        let core = template_pin("shared/Cargo.toml.tmpl", "mobiler-core").unwrap();
+        let root_old = root_cargo.replace(&format!("crux_core = \"{crux}\""), "crux_core = \"0.18.0\"");
+        let shared_old = shared_cargo
+            .replace(&format!("mobiler-core = \"{core}\""), "mobiler-core = \"0.46\"")
+            .replace("    \"uniffi/bindgen\",\n    \"dep:cargo_metadata\",\n    \"dep:camino\",\n", "    \"crux_core/cli\",\n")
+            .lines()
+            .filter(|l| !l.starts_with("cargo_metadata = ") && !l.starts_with("camino = "))
+            .fold(String::new(), |mut acc, l| {
+                acc.push_str(l);
+                acc.push('\n');
+                acc
+            });
+        assert_ne!(root_old, root_cargo, "the template pins crux_core as a string");
+        assert!(shared_old.contains("\"crux_core/cli\",") && shared_old.contains("mobiler-core = \"0.46\""));
+        (root_old, shared_old)
+    }
+
+    /// An app on the current templates with its manifests rendered exactly as `mobiler new` writes them.
+    fn app_with_template_manifests() -> (PathBuf, String, String) {
+        let root = skeleton();
+        let subs = Subs::from_app_root(&root).unwrap();
+        let render = |t: &str| {
+            crate::templating::substitute(TEMPLATES.get_file(t).unwrap().contents_utf8().unwrap(), &subs)
+        };
+        let (root_cargo, shared_cargo) = (render("Cargo.toml.tmpl"), render("shared/Cargo.toml.tmpl"));
+        fs::write(root.join("Cargo.toml"), &root_cargo).unwrap();
+        fs::write(root.join("shared/Cargo.toml"), &shared_cargo).unwrap();
+        (root, root_cargo, shared_cargo)
+    }
+
+    fn app_069() -> (PathBuf, String, String) {
+        let (root, root_cargo, shared_cargo) = app_with_template_manifests();
+        let (root_old, shared_old) = as_069(&root_cargo, &shared_cargo);
+        fs::write(root.join("Cargo.toml"), root_old).unwrap();
+        fs::write(root.join("shared/Cargo.toml"), shared_old).unwrap();
+        (root, root_cargo, shared_cargo)
+    }
+
+    const CODEGEN_069: &str = "codegen = [\n    \"crux_core/cli\",\n    \"dep:clap\",\n    \"uniffi\",\n]\n";
+    const DEPS_069: &str = "[dependencies]\nclap = { version = \"4\", optional = true }\nuniffi = { version = \"=0.29.4\", optional = true }\n\n[dev-dependencies]\n";
+
+    #[test]
+    fn set_pin_moves_a_string_pin_and_is_a_no_op_at_target() {
+        let c = "[workspace.dependencies]\nanyhow = \"1\"\ncrux_core = \"0.18.0\"\nserde = \"1\"\n";
+        let Edit::Changed(out, what) = set_pin(c, "crux_core", "0.20.0") else { panic!("expected a change") };
+        assert_eq!(out, c.replace("0.18.0", "0.20.0"));
+        assert!(what.contains("0.18.0") && what.contains("0.20.0"), "{what}");
+        assert_eq!(set_pin(&out, "crux_core", "0.20.0"), Edit::Unchanged);
+    }
+
+    #[test]
+    fn set_pin_reports_a_table_form_pin() {
+        let c = "[workspace.dependencies]\ncrux_core = { version = \"0.18.0\", features = [\"x\"] }\n";
+        let Edit::Unrecognised(note) = set_pin(c, "crux_core", "0.20.0") else { panic!("expected a note") };
+        assert!(note.contains("crux_core") && note.contains("0.20.0"), "{note}");
+    }
+
+    #[test]
+    fn codegen_feature_migrates_the_multiline_form_once() {
+        let Edit::Changed(out, _) = migrate_codegen_feature(CODEGEN_069) else { panic!("expected a change") };
+        assert!(!out.contains("crux_core/cli"), "{out}");
+        assert!(
+            out.contains("    \"uniffi/bindgen\",\n    \"dep:cargo_metadata\",\n    \"dep:camino\",\n    \"dep:clap\",\n"),
+            "{out}"
+        );
+        assert_eq!(migrate_codegen_feature(&out), Edit::Unchanged);
+    }
+
+    #[test]
+    fn codegen_feature_on_one_line_is_reported() {
+        let c = "codegen = [\"crux_core/cli\", \"uniffi\"]\n";
+        assert!(matches!(migrate_codegen_feature(c), Edit::Unrecognised(_)));
+    }
+
+    #[test]
+    fn codegen_deps_are_added_after_uniffi_once() {
+        let Edit::Changed(out, _) = add_codegen_deps(DEPS_069) else { panic!("expected a change") };
+        assert!(
+            out.contains(
+                "uniffi = { version = \"=0.29.4\", optional = true }\n\
+                 cargo_metadata = { version = \"0.19\", optional = true }\n\
+                 camino = { version = \"1\", optional = true }\n\n[dev-dependencies]"
+            ),
+            "{out}"
+        );
+        assert_eq!(add_codegen_deps(&out), Edit::Unchanged);
+        assert!(matches!(add_codegen_deps("[dependencies]\nserde = \"1\"\n"), Edit::Unrecognised(_)));
+    }
+
+    #[test]
+    fn crlf_manifests_keep_crlf() {
+        let crlf = |s: &str| s.replace('\n', "\r\n");
+        let only_crlf = |s: &str| !s.replace("\r\n", "").contains('\n');
+        for edit in [
+            set_pin(&crlf("[workspace.dependencies]\ncrux_core = \"0.18.0\"\n"), "crux_core", "0.20.0"),
+            migrate_codegen_feature(&crlf(CODEGEN_069)),
+            add_codegen_deps(&crlf(DEPS_069)),
+        ] {
+            let Edit::Changed(out, _) = edit else { panic!("expected a change") };
+            assert!(only_crlf(&out), "{out:?}");
+        }
+    }
+
+    #[test]
+    fn upgrade_moves_a_069_app_and_rerun_is_a_no_op() {
+        let (root, root_cargo, shared_cargo) = app_069();
+        let r = upgrade_at(&root, true).unwrap();
+        assert_eq!(r.deps.len(), 4, "{:?}", r.deps);
+        assert_eq!(read(&root, "Cargo.toml"), root_cargo);
+        assert_eq!(read(&root, "shared/Cargo.toml"), shared_cargo);
+        assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
+        let r2 = upgrade_at(&root, true).unwrap();
+        assert!(r2.deps.is_empty() && r2.deps_would.is_empty(), "{:?} {:?}", r2.deps, r2.deps_would);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn review_run_lists_manifest_edits_and_writes_nothing() {
+        let (root, _, _) = app_069();
+        let (root_before, shared_before) = (read(&root, "Cargo.toml"), read(&root, "shared/Cargo.toml"));
+        let r = upgrade_at(&root, false).unwrap();
+        assert_eq!(r.deps_would.len(), 4, "{:?}", r.deps_would);
+        assert!(r.deps.is_empty());
+        assert_eq!(read(&root, "Cargo.toml"), root_before);
+        assert_eq!(read(&root, "shared/Cargo.toml"), shared_before);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn other_crates_pins_are_reported_not_edited() {
+        let (root, _, shared_cargo) = app_069();
+        let app_core = "[package]\nname = \"app-core\"\n\n[dependencies]\ncrux_core = \"0.18.0\"\n";
+        let web = "[package]\nname = \"web\"\n\n[dependencies]\nmobiler-web = \"0.46\"\n";
+        fs::create_dir_all(root.join("app-core")).unwrap();
+        fs::create_dir_all(root.join("web")).unwrap();
+        fs::write(root.join("app-core/Cargo.toml"), app_core).unwrap();
+        fs::write(root.join("web/Cargo.toml"), web).unwrap();
+        let shared_old = read(&root, "shared/Cargo.toml").replace("[dependencies]\n", "[dependencies]\nfacet = \"0.44\"\n");
+        fs::write(root.join("shared/Cargo.toml"), shared_old).unwrap();
+        // Build output and a dot-dir are never scanned.
+        fs::create_dir_all(root.join("target/x")).unwrap();
+        fs::write(root.join("target/x/Cargo.toml"), app_core).unwrap();
+
+        let r = upgrade_at(&root, true).unwrap();
+        assert_eq!(r.deps_notes.len(), 3, "{:?}", r.deps_notes);
+        assert!(r.deps_notes.iter().any(|n| n.starts_with("app-core/Cargo.toml: crux_core 0.18.0")), "{:?}", r.deps_notes);
+        assert!(r.deps_notes.iter().any(|n| n.starts_with("web/Cargo.toml: mobiler-web 0.46")), "{:?}", r.deps_notes);
+        assert!(r.deps_notes.iter().any(|n| n.starts_with("shared/Cargo.toml: declares facet 0.44")), "{:?}", r.deps_notes);
+        assert_eq!(read(&root, "app-core/Cargo.toml"), app_core);
+        assert_eq!(read(&root, "web/Cargo.toml"), web);
+        assert_eq!(read(&root, "shared/Cargo.toml"), shared_cargo.replace("[dependencies]\n", "[dependencies]\nfacet = \"0.44\"\n"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn equivalent_pins_are_not_reported() {
+        let (root, _, _) = app_with_template_manifests();
+        fs::create_dir_all(root.join("app-core")).unwrap();
+        fs::create_dir_all(root.join("web")).unwrap();
+        fs::write(root.join("app-core/Cargo.toml"), "[dependencies]\ncrux_core = \"0.20\"\n").unwrap();
+        fs::write(root.join("web/Cargo.toml"), "[dependencies]\nmobiler-web = { version = \"0.47.1\" }\n").unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
+        assert_eq!(set_pin("crux_core = \"^0.20\"\n", "crux_core", "0.20.0"), Edit::Unchanged);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn path_and_git_dependencies_are_left_alone() {
+        let c = "[dependencies]\nmobiler-core = { path = \"../../mobiler-core\" }\n";
+        assert_eq!(set_pin(c, "mobiler-core", "0.47"), Edit::Unchanged);
+        let g = "[dependencies]\ncrux_core = { git = \"https://example.com/crux\" }\n";
+        assert_eq!(set_pin(g, "crux_core", "0.20.0"), Edit::Unchanged);
+        assert_eq!(set_pin("[dependencies]\ncrux_core.workspace = true\n", "crux_core", "0.20.0"), Edit::Unchanged);
     }
 }

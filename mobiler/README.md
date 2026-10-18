@@ -104,9 +104,12 @@ injections survive; only overlapping changes become a conflict (written as `<fil
 with `<<<<<<<`/`>>>>>>>` markers, never auto-applied). It never touches your Rust app code (`shared/src/`).
 
 Without `--apply`, nothing your build reads changes, apart from creating missing app-owned seed files. Clean
-merges, new files and conflicts are offered as `<file>.mobiler-new`, and the `mobiler-core` bump is reported, not
+merges, new files and conflicts are offered as `<file>.mobiler-new`, and the dependency edits are reported, not
 made. `--apply` writes clean merges and new files
-in place, after saving the old file under `.mobiler/backup/`, and bumps `mobiler-core`. It never applies a conflict.
+in place, after saving the old file under `.mobiler/backup/`, and moves the framework's own dependency lines
+(ADR-0055): `crux_core` in `Cargo.toml`; `mobiler-core`, the `codegen` feature and its `cargo_metadata` / `camino`
+dependencies in `shared/Cargo.toml`. A line in a form it doesn't recognise, a framework pin in another crate of your
+app, or a `facet` dependency of your own is left alone and listed as a hand edit. It never applies a conflict.
 
 Everything left for review is recorded in `.mobiler/pending/`. Every `mobiler upgrade` ends with a warning listing
 those files and what to do with each. A review copy you put in place as it is gets
