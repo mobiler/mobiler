@@ -10,11 +10,7 @@ pub fn run(no_install: bool, no_run: bool, device: Option<&str>) -> Result<()> {
     let java_home = resolve_java_home();
 
     println!("Mobiler dev");
-    println!(
-        "  Project:   {} ({})",
-        project.root.display(),
-        project.application_id
-    );
+    println!("  Project:   {}", project.root.display());
     if let Some(jh) = &java_home {
         println!("  JAVA_HOME: {jh}");
     }
@@ -100,6 +96,15 @@ pub fn pipeline(
     }
     check_packaged_core(project, &target_dir, gradle_started)?;
     println!("  APK: {}", apk.display());
+    // The id comes from what gradle built, never from a literal in build.gradle.kts: an app may
+    // compute it (a store id per backend) or add a suffix.
+    let application_id = built_application_id(&apk);
+    match &application_id {
+        Ok(id) => println!("  App id:    {id}"),
+        // A build alone doesn't need the id; installing and launching do.
+        Err(e) if no_install => eprintln!("  warning: could not read the application id: {e:#}"),
+        Err(_) => {}
+    }
 
     if no_install {
         return Ok(());
@@ -117,6 +122,7 @@ pub fn pipeline(
         return Ok(());
     };
     println!("  Device:    {serial}");
+    let application_id = application_id?;
 
     stage("Installing APK on device", || {
         run_capture(Command::new(&adb).args(["-s", &serial, "install", "-r"]).arg(&apk))
@@ -126,16 +132,40 @@ pub fn pipeline(
         return Ok(());
     }
 
-    stage("Launching MainActivity", || {
-        run_capture(Command::new(&adb).args([
-            "-s",
-            &serial,
-            "shell",
-            "am",
-            "start",
-            "-n",
-            &format!("{}/.MainActivity", project.application_id),
-        ]))
+    // Ask the device for the launcher activity instead of assuming `<id>/.MainActivity`: the
+    // short form expands against the application id, but the class lives in the `namespace`
+    // package, and the two differ once an app computes its id.
+    let resolved = run_capture(Command::new(&adb).args([
+        "-s", &serial, "shell", "cmd", "package", "resolve-activity", "--brief",
+        "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER",
+        &application_id,
+    ]));
+    // A device whose `cmd package` misbehaves still gets the MainActivity fallback below.
+    let resolved = resolved.map_or_else(|e| format!("{e:#}"), |out| String::from_utf8_lossy(&out.stdout).into_owned());
+    // When the package has two launcher entries (LeakCanary's debug "Leaks" alias, an app's own
+    // alias), the device answers with the system chooser; fall back to our MainActivity, whose
+    // package is the one its source file lives in.
+    let component = if let Some(c) = launcher_component(&resolved, &application_id) {
+        c
+    } else {
+        let package = crate::templating::Subs::from_app_root(&project.root)
+            .map(|subs| subs.package)
+            .with_context(|| {
+                format!(
+                    "the device found no single launcher activity for {application_id} \
+                     (resolve-activity said: {:?})",
+                    resolved.trim()
+                )
+            })?;
+        format!("{application_id}/{package}.MainActivity")
+    };
+    // `adb shell` hands its arguments to the device's shell as one line: quote the component
+    // (a nested class has a `$`), after checking it holds nothing a quote can't carry.
+    if !component.chars().all(|c| c.is_ascii_alphanumeric() || "._$/".contains(c)) {
+        bail!("refusing to launch an unexpected component name {component:?}");
+    }
+    stage(&format!("Launching {component}"), || {
+        run_capture(Command::new(&adb).args(["-s", &serial, "shell", "am", "start", "-n", &format!("'{component}'")]))
     })?;
 
     Ok(())
@@ -145,7 +175,6 @@ pub fn pipeline(
 
 pub struct Project {
     pub root: PathBuf,
-    pub application_id: String,
 }
 
 impl Project {
@@ -158,9 +187,7 @@ impl Project {
                 start.display()
             )
         })?;
-        let application_id = parse_application_id(&root)
-            .with_context(|| "could not determine applicationId from Android/app/build.gradle.kts")?;
-        Ok(Self { root, application_id })
+        Ok(Self { root })
     }
 }
 
@@ -181,26 +208,47 @@ fn looks_like_project_root(p: &Path) -> bool {
         && p.join("shared").is_dir()
 }
 
-fn parse_application_id(root: &Path) -> Result<String> {
-    let path = root.join("Android/app/build.gradle.kts");
+/// The application id gradle actually built, from the `output-metadata.json` it writes next to
+/// the APK on every assemble.
+fn built_application_id(apk: &Path) -> Result<String> {
+    let path = apk.with_file_name("output-metadata.json");
     let text = fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
-    // Match: applicationId = "com.foo.bar"
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("applicationId") {
-            if let Some(value) = rest
-                .trim_start()
-                .strip_prefix('=')
-                .map(str::trim_start)
-                .and_then(|s| s.strip_prefix('"'))
-                .and_then(|s| s.split('"').next())
-            {
-                return Ok(value.to_string());
-            }
-        }
+        .with_context(|| format!("reading {} (gradle writes it next to the APK)", path.display()))?;
+    application_id_from_metadata(&text).with_context(|| format!("in {}", path.display()))
+}
+
+fn application_id_from_metadata(text: &str) -> Result<String> {
+    let json: serde_json::Value = serde_json::from_str(text).context("not valid JSON")?;
+    match json.get("applicationId").and_then(|v| v.as_str()).map(str::trim) {
+        Some(id) if is_package_name(id) => Ok(id.to_string()),
+        Some(id) if !id.is_empty() => bail!("{id:?} is not a valid Android application id"),
+        _ => bail!("no \"applicationId\" in the build output metadata"),
     }
-    bail!("no `applicationId = \"...\"` line found in {}", path.display());
+}
+
+/// Android's package-name grammar: two or more dot-separated segments, each a letter followed by
+/// letters, digits or `_`. (It also keeps the id safe to pass through `adb shell`.)
+fn is_package_name(id: &str) -> bool {
+    let segments: Vec<&str> = id.split('.').collect();
+    segments.len() >= 2
+        && segments.iter().all(|seg| {
+            let mut chars = seg.chars();
+            chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+}
+
+/// The `pkg/Class` component from `cmd package resolve-activity --brief` (its last line), when
+/// it is one of this package's activities. `None` when nothing resolved ("No activity found") or
+/// the device answered with the system chooser (several launcher entries).
+fn launcher_component(output: &str, application_id: &str) -> Option<String> {
+    let last = output.lines().map(str::trim).filter(|l| !l.is_empty()).next_back()?;
+    match last.split_once('/') {
+        Some((pkg, class)) if pkg == application_id && !class.is_empty() && !last.contains(' ') => {
+            Some(last.to_string())
+        }
+        _ => None,
+    }
 }
 
 // -------------------- env detection --------------------
@@ -476,6 +524,37 @@ mod tests {
         assert_eq!(super::rust_target_for_abi("arm64-v8a"), Some("arm64"));
         assert_eq!(super::rust_target_for_abi("x86_64"), Some("x86_64"));
         assert_eq!(super::rust_target_for_abi("riscv64"), None);
+    }
+
+    #[test]
+    fn the_application_id_comes_from_the_build_metadata() {
+        let meta = r#"{"version":3,"artifactType":{"type":"APK","kind":"Directory"},
+            "applicationId":"rs.mojtermin.admin","variantName":"debug","elements":[]}"#;
+        assert_eq!(super::application_id_from_metadata(meta).unwrap(), "rs.mojtermin.admin");
+        assert!(super::application_id_from_metadata(r#"{"variantName":"debug"}"#).is_err());
+        assert!(super::application_id_from_metadata(r#"{"applicationId":""}"#).is_err());
+        assert!(super::application_id_from_metadata("not json").is_err());
+        assert!(super::application_id_from_metadata(r#"{"applicationId":"com.foo;reboot"}"#).is_err());
+        assert!(super::application_id_from_metadata(r#"{"applicationId":"nodots"}"#).is_err());
+        assert!(super::application_id_from_metadata(r#"{"applicationId":"com.1foo"}"#).is_err());
+        assert_eq!(super::application_id_from_metadata(r#"{"applicationId":"com.foo_bar.debug"}"#).unwrap(), "com.foo_bar.debug");
+    }
+
+    #[test]
+    fn the_launcher_component_is_whatever_the_device_resolves() {
+        // An id that differs from the namespace: the class keeps its own package.
+        let out = "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\n\
+                   rs.mojtermin.admin/si.malimlin.appointments.MainActivity\n";
+        assert_eq!(
+            super::launcher_component(out, "rs.mojtermin.admin").as_deref(),
+            Some("rs.mojtermin.admin/si.malimlin.appointments.MainActivity")
+        );
+        // Same id and namespace: the device answers with the short form, which am accepts.
+        assert_eq!(super::launcher_component("x\r\ncom.foo/.MainActivity\r\n", "com.foo").as_deref(), Some("com.foo/.MainActivity"));
+        // Nothing resolved, or the chooser (two launcher entries): the caller falls back.
+        assert_eq!(super::launcher_component("No activity found\n", "com.foo"), None);
+        assert_eq!(super::launcher_component("android/com.android.internal.app.ResolverActivity", "com.foo"), None);
+        assert_eq!(super::launcher_component("", "com.foo"), None);
     }
 
     use super::select_device;

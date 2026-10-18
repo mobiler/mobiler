@@ -19,7 +19,7 @@ pub fn run(platform: Platform) -> Result<()> {
         Platform::Android => {
             let java_home = resolve_java_home();
             println!("Mobiler build (android)");
-            println!("  Project:   {} ({})", project.root.display(), project.application_id);
+            println!("  Project:   {}", project.root.display());
             if let Some(jh) = &java_home {
                 println!("  JAVA_HOME: {jh}");
             }
