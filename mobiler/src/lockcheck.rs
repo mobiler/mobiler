@@ -10,15 +10,17 @@ use std::path::Path;
 /// The crates an app must build exactly one version of.
 const FRAMEWORK: [&str; 2] = ["crux_core", "mobiler-core"];
 
-/// One message per framework crate with more than one version in `root/Cargo.lock`. Empty when
-/// there is no lock, it can't be read, or each crate has one version.
-pub fn check(root: &Path) -> Vec<String> {
-    std::fs::read_to_string(root.join("Cargo.lock")).map(|lock| duplicates(&lock)).unwrap_or_default()
+/// One message per framework crate with more than one version in `root/Cargo.lock` (empty when
+/// each has one), or `None` when there is no lock or it isn't a lock cargo wrote.
+pub fn check(root: &Path) -> Option<Vec<String>> {
+    let lock = std::fs::read_to_string(root.join("Cargo.lock")).ok()?;
+    toml::from_str::<Lock>(&lock).ok()?;
+    Some(duplicates(&lock))
 }
 
 /// Printed under a failed build: the duplicates, if any, as the likely cause.
 pub fn build_hint(root: &Path) -> Option<String> {
-    let found = check(root);
+    let found = check(root)?;
     (!found.is_empty()).then(|| {
         format!(
             "This app builds two versions of a framework crate, which fails with trait errors that \
@@ -147,7 +149,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             [[package]]\nname = \"crux_core\"\nversion = \"0.20.0\"\n\n[[package]]\nname = \"mobiler-core\"\nversion = \"0.47.0\"\n";
         assert!(duplicates(one).is_empty());
         assert!(duplicates("not toml [[").is_empty());
-        assert!(check(Path::new("/nonexistent/mobiler-app")).is_empty());
+        assert_eq!(check(Path::new("/nonexistent/mobiler-app")), None);
     }
 
     #[test]

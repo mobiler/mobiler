@@ -512,6 +512,11 @@ fn outside_manifests(root: &Path, inside: &[PathBuf]) -> Vec<PathBuf> {
     while let Some(manifest) = queue.pop() {
         let Ok(content) = fs::read_to_string(&manifest) else { continue };
         let Some(dir) = manifest.parent() else { continue };
+        // A local checkout of the framework itself (a `[patch]`, or a path to mobiler-core) is on
+        // its own versions: neither judged nor walked into.
+        if package_name(&content).is_some_and(is_framework_crate) {
+            continue;
+        }
         let is_outside = !manifest.starts_with(&root);
         if is_outside {
             outside.insert(manifest.clone());
@@ -534,6 +539,28 @@ fn outside_manifests(root: &Path, inside: &[PathBuf]) -> Vec<PathBuf> {
         }
     }
     outside.into_iter().collect()
+}
+
+/// The `name` under a manifest's `[package]`.
+fn package_name(content: &str) -> Option<&str> {
+    let mut in_package = false;
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            in_package = t.split('#').next().is_some_and(|h| h.trim() == "[package]");
+        } else if in_package
+            && let Some(rest) = t.strip_prefix("name")
+            && let Some(value) = rest.trim_start().strip_prefix('=')
+        {
+            return value.trim().trim_matches(['"', '\'']).split(['"', '\'']).next();
+        }
+    }
+    None
+}
+
+/// The framework's own crates and the crates it builds on, whose versions it chooses.
+fn is_framework_crate(name: &str) -> bool {
+    matches!(name, "mobiler-core" | "mobiler-ui" | "mobiler-web") || name.starts_with("crux_") || name.starts_with("facet")
 }
 
 /// Every `path = "…"` value in a manifest (`dep = { path = … }`, `dep.path = …`, a
@@ -2401,6 +2428,29 @@ mod test {
         assert_eq!(fs::read_to_string(outer.join("crates/mobile-admin/Cargo.toml")).unwrap(), ADMIN_046);
         assert_eq!(fs::read_to_string(outer.join("crates/domain/Cargo.toml")).unwrap(), DOMAIN_046);
         assert_eq!(fs::read_to_string(outer.join("Cargo.toml")).unwrap(), OUTER_046);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn a_local_framework_checkout_is_not_judged() {
+        // A [patch] to a local mobiler-core checkout whose workspace is a release ahead: the walk
+        // must not tell the user to move the framework's own pins back to the CLI's.
+        let (root, _, _) = app_with_template_manifests();
+        let outer = PathBuf::from(format!("{}_fw", root.display()));
+        let _ = fs::remove_dir_all(&outer);
+        fs::create_dir_all(outer.join("mobiler-core")).unwrap();
+        fs::write(outer.join("Cargo.toml"), "[workspace]\n\n[workspace.dependencies]\ncrux_core = \"0.21.0\"\nfacet = \"=0.47.0\"\n").unwrap();
+        fs::write(
+            outer.join("mobiler-core/Cargo.toml"),
+            "[package]\nname = \"mobiler-core\"\n\n[dependencies]\ncrux_core.workspace = true\nfacet = \"=0.47.0\"\n",
+        )
+        .unwrap();
+        let rel = format!("../{}/mobiler-core", outer.file_name().unwrap().to_string_lossy());
+        let cargo = read(&root, "Cargo.toml") + &format!("\n[patch.crates-io]\nmobiler-core = {{ path = \"{rel}\" }}\n");
+        fs::write(root.join("Cargo.toml"), cargo).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outer);
     }

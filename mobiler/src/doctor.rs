@@ -142,7 +142,10 @@ pub fn run() -> ExitCode {
 /// (ADR-0056).
 fn framework_crates(warnings: &mut Vec<(&'static str, String)>) {
     let Some(root) = env::current_dir().ok().and_then(|d| crate::dev::walk_up_for_project_root(&d)) else { return };
-    let duplicates = crate::lockcheck::check(&root);
+    let Some(duplicates) = crate::lockcheck::check(&root) else {
+        println!("  framework crates: no Cargo.lock in {} yet (build once to check)", root.display());
+        return;
+    };
     if duplicates.is_empty() {
         println!("  framework crates: one crux_core and one mobiler-core in Cargo.lock");
     } else {

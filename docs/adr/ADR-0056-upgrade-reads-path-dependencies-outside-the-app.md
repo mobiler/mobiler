@@ -4,8 +4,8 @@ Status:        Accepted
 Date decided:  2026-10-18
 Deciding PRs:  #300
 Supersedes:    none
-Code anchor:   mobiler/src/upgrade.rs (outside_manifests, path_values, workspace_root, pin_notes), mobiler/src/lockcheck.rs
-Conformance:   mobiler/src/upgrade.rs::crates_outside_the_app_reached_by_path_are_reported_not_edited, mobiler/src/upgrade.rs::crates_outside_the_app_at_target_are_quiet, mobiler/src/lockcheck.rs::two_versions_name_the_crates_that_need_the_old_one, mobiler/src/lockcheck.rs::one_version_each_is_quiet, mobiler/src/lockcheck.rs::an_old_framework_crate_is_named_with_its_version
+Code anchor:   mobiler/src/upgrade.rs (outside_manifests, path_values, workspace_root, pin_notes, is_framework_crate), mobiler/src/lockcheck.rs
+Conformance:   mobiler/src/upgrade.rs::crates_outside_the_app_reached_by_path_are_reported_not_edited, mobiler/src/upgrade.rs::crates_outside_the_app_at_target_are_quiet, mobiler/src/upgrade.rs::a_local_framework_checkout_is_not_judged, mobiler/src/lockcheck.rs::two_versions_name_the_crates_that_need_the_old_one, mobiler/src/lockcheck.rs::one_version_each_is_quiet, mobiler/src/lockcheck.rs::an_old_framework_crate_is_named_with_its_version
 
 ## 1. Context (The Problem)
 
@@ -36,12 +36,17 @@ crate that pulls it, at the moment the build fails and from `mobiler doctor`.
 - **Condition 2 — no false notes.** Outside crates already at the target produce nothing, and a
   `[lib] path = "src/lib.rs"` line is not taken for a dependency.
   - **Validation Metric:** `crates_outside_the_app_at_target_are_quiet`.
-- **Condition 3 — the lock names the culprit.** Two versions of `crux_core` or `mobiler-core` in
+- **Condition 3 — the framework's own source is not judged.** A path that reaches a local checkout
+  of the framework (a `[patch]` to mobiler-core, or this repo's demos pointing at `mobiler-core/`)
+  produces no note, even when that checkout is a release ahead of the CLI's templates.
+  - **Validation Metric:** `a_local_framework_checkout_is_not_judged`.
+- **Condition 4 — the lock names the culprit.** Two versions of `crux_core` or `mobiler-core` in
   `Cargo.lock` give one message per old version, naming the app crates that require it (not the
   old framework crate that comes with them, which is named with its version when it is the only
   one). One version each, no lock, or an unreadable lock
-  gives nothing.
-  - **Validation Metric:** `two_versions_name_the_crates_that_need_the_old_one`, `one_version_each_is_quiet`.
+  gives no message, and `doctor` says when there is no lock to read.
+  - **Validation Metric:** `two_versions_name_the_crates_that_need_the_old_one`, `one_version_each_is_quiet`,
+    `an_old_framework_crate_is_named_with_its_version`.
 
 ## 3. Considered Options & Rationale for Refutation
 
@@ -63,11 +68,14 @@ crate that pulls it, at the moment the build fails and from `mobiler doctor`.
 manifests, follows each `path = "…"` value whose directory holds a `Cargo.toml` (target paths name
 files, so they drop out), and keeps each manifest once by its canonical path. For an outside
 manifest that inherits `crux_core`, `mobiler-core`, `mobiler-web` or `facet` from its workspace, the
-nearest ancestor manifest declaring `[workspace]` is checked too. Notes use the same targets and
+nearest ancestor manifest declaring `[workspace]` is checked too. A reached manifest whose
+`[package]` is the framework's own (`mobiler-core`, `mobiler-ui`, `mobiler-web`, `crux_*`, `facet*`)
+is skipped and not walked into: it chooses its own versions, and judging it against the CLI's
+templates would ask for a downgrade whenever the checkout is ahead. Notes use the same targets and
 caret rules as ADR-0055. Upgrade only reads these files: nothing outside the app folder is written.
 
-`lockcheck` reads `Cargo.lock` as TOML. `mobiler doctor`, run from an app, prints one line and adds a
-warning per duplicate. `mobiler dev` and `mobiler build` add the duplicates as context to a failed
+`lockcheck` reads `Cargo.lock` as TOML. `mobiler doctor`, run from any app (with or without a
+`mobiler.toml`), prints one line (or that there is no lock yet) and adds a warning per duplicate. `mobiler dev` and `mobiler build` add the duplicates as context to a failed
 host Rust build, codegen step or iOS build. Resolution and the network are never involved.
 
 **Mutation proof:** each mutation was reverted afterwards:
@@ -76,7 +84,15 @@ host Rust build, codegen step or iOS build. Resolution and the network are never
 - (b) not checking the workspace root of an inheriting crate failed the same test (two notes, the
   `_outer/Cargo.toml` one missing);
 - (c) `if versions.len() < 3` in `duplicates` failed `two_versions_name_the_crates_that_need_the_old_one`
-  and `versions_order_numerically` (no messages).
+  (and the unit test `versions_order_numerically`) with no messages;
+- (d) `is_framework_crate` returning `false` failed `a_local_framework_checkout_is_not_judged`
+  (three notes: `crux_core 0.21.0 -> 0.20.0` and two facet notes against the checkout);
+- (e) `compatible` returning `false` failed `crates_outside_the_app_at_target_are_quiet`;
+- (f) dropping the app-crates-only filter failed `two_versions_name_the_crates_that_need_the_old_one`
+  (`mobiler-core 0.46.0` named beside `mobile-admin` for crux);
+- (g) reading a missing lock as empty failed `one_version_each_is_quiet` (`Some([])`, not `None`);
+- (h) naming a framework crate without its version failed
+  `an_old_framework_crate_is_named_with_its_version`.
 
 ## 5. Consequences (Positive and Negative Predictions)
 
