@@ -537,3 +537,103 @@ fn adr_0053_every_shell_reports_what_a_copy_got() {
     let core = read("mobiler-core/src/clipboard.rs");
     assert!(core.contains("pub fn from_response(resp: &crate::PluginResponse) -> Option<Self>"), "ADR-0053: core can't read the report");
 }
+
+/// Every `shared/src/bin/codegen.rs` (and its `shared/Cargo.toml`) under `demos/`.
+fn demo_shared_crates() -> Vec<PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = e.file_name();
+            if !e.file_type().is_ok_and(|t| t.is_dir()) || [".git", "target", "node_modules", "build"].contains(&name.to_str().unwrap_or("")) {
+                continue;
+            }
+            if name == "shared" && p.join("src/bin/codegen.rs").is_file() {
+                out.push(p.clone());
+            }
+            walk(&p, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&root().join("demos"), &mut out);
+    out.sort();
+    out
+}
+
+/// The exact `uniffi = { version = "=X", … }` pin in a manifest.
+fn uniffi_pin(manifest: &str) -> Option<String> {
+    manifest.lines().find_map(|l| {
+        let rest = l.trim_start().strip_prefix("uniffi = { version = \"")?;
+        rest.split('"').next().map(str::to_string)
+    })
+}
+
+/// ADR-0054: the app's codegen makes the bindings through UniFFI, never through crux's bindgen, and
+/// pins UniFFI to exactly the `uniffi_bindgen` version crux_core pins.
+#[test]
+fn adr_0054_codegen_uses_uniffi_not_crux_bindgen() {
+    let template = root().join("mobiler/templates/shared");
+    let mut crates = vec![template.clone()];
+    crates.extend(demo_shared_crates());
+    assert!(crates.len() >= 6, "ADR-0054: expected the template and five demos, found {crates:?}");
+
+    let out = Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--manifest-path"])
+        .arg(root().join("Cargo.toml"))
+        .output()
+        .expect("run cargo metadata");
+    assert!(out.status.success(), "cargo metadata failed: {}", String::from_utf8_lossy(&out.stderr));
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout).expect("parse cargo metadata");
+    let crux_pin = meta["packages"]
+        .as_array()
+        .expect("packages")
+        .iter()
+        .filter(|p| p["name"] == "crux_core")
+        .flat_map(|p| p["dependencies"].as_array().cloned().unwrap_or_default())
+        .find(|d| d["name"] == "uniffi_bindgen")
+        .and_then(|d| d["req"].as_str().map(str::to_string))
+        .expect("ADR-0054: crux_core no longer declares uniffi_bindgen");
+
+    for dir in crates {
+        let codegen = std::fs::read_to_string(dir.join("src/bin/codegen.rs")).expect("read codegen.rs");
+        let live = live_code(&codegen);
+        for banned in ["crux_core::cli", "crux_core::bindgen", "cli::{", "bindgen::{"] {
+            assert!(!live.contains(banned), "ADR-0054: {} uses crux's bindgen ({banned})", dir.display());
+        }
+        assert!(live.contains("generate_bindings_library_mode"), "ADR-0054: {} doesn't call UniFFI's library mode", dir.display());
+        let manifest_name = if dir == template { "Cargo.toml.tmpl" } else { "Cargo.toml" };
+        let manifest = std::fs::read_to_string(dir.join(manifest_name)).expect("read shared manifest");
+        assert!(!manifest.contains("\"crux_core/cli\""), "ADR-0054: {} enables crux_core/cli", dir.display());
+        let pin = uniffi_pin(&manifest).unwrap_or_else(|| panic!("ADR-0054: {} has no exact uniffi pin", dir.display()));
+        assert_eq!(pin, crux_pin, "ADR-0054: {} pins uniffi {pin}, crux_core pins uniffi_bindgen {crux_pin}", dir.display());
+    }
+}
+
+/// A manifest's version for `dep`: `dep = "X"` or `dep = { version = "X", … }`.
+fn string_pin(manifest: &str, dep: &str) -> Option<String> {
+    let prefix = format!("{dep} = ");
+    manifest.lines().find_map(|l| {
+        let rest = l.trim_start().strip_prefix(&prefix)?;
+        let rest = rest.strip_prefix('"').or_else(|| rest.strip_prefix("{ version = \""))?;
+        rest.split('"').next().map(str::to_string)
+    })
+}
+
+/// ADR-0055: the pins `mobiler upgrade` moves an app to are the ones the framework itself builds
+/// with — the template's crux_core is the workspace's, and the facet version upgrade tells apps to
+/// use is mobiler-core's.
+#[test]
+fn adr_0055_template_crux_pin_matches_the_workspace() {
+    let read = |p: &str| std::fs::read_to_string(root().join(p)).unwrap_or_else(|e| panic!("read {p}: {e}"));
+    let template = string_pin(&read("mobiler/templates/Cargo.toml.tmpl"), "crux_core").expect("template pins crux_core");
+    let workspace = string_pin(&read("Cargo.toml"), "crux_core").expect("workspace pins crux_core");
+    assert_eq!(template, workspace, "ADR-0055: the template pins crux_core {template}, the workspace builds with {workspace}");
+
+    let core_facet = string_pin(&read("mobiler-core/Cargo.toml"), "facet").expect("mobiler-core pins facet");
+    let upgrade = read("mobiler/src/upgrade.rs");
+    let told = upgrade
+        .lines()
+        .find_map(|l| l.strip_prefix("const FACET_PIN: &str = \"")?.split('"').next().map(str::to_string))
+        .expect("ADR-0055: upgrade.rs has no FACET_PIN");
+    assert_eq!(told, core_facet, "ADR-0055: upgrade tells apps facet {told}, mobiler-core builds with {core_facet}");
+}
