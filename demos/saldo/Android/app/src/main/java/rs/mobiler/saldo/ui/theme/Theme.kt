@@ -10,6 +10,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -53,7 +54,11 @@ fun SaldoTheme(
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
+    // Each core update brings a new (equal) theme. The scheme, type and shapes are built once per
+    // distinct theme: MaterialTheme hands them down through static locals, and a new instance there
+    // would recompose the whole app on every update, however little changed.
+    val context = LocalContext.current
+    val colorScheme = remember(theme, darkTheme, dynamicColor, context) { when {
         // A brand theme wins: build a scheme seeded from its color, no dynamic override.
         theme != null -> {
             val seed = Color(theme.seed.r.toInt(), theme.seed.g.toInt(), theme.seed.b.toInt())
@@ -63,16 +68,17 @@ fun SaldoTheme(
             base.copy(primary = seed, secondary = accent, tertiary = accent)
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
-    }
+    } }
+    val typography = remember(theme?.font) { typographyFor(theme?.font) }
+    val shapes = remember(theme?.corner) { theme?.let { shapesFor(it.corner) } ?: Shapes() }
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = typographyFor(theme?.font),
-        shapes = theme?.let { shapesFor(it.corner) } ?: Shapes(),
+        typography = typography,
+        shapes = shapes,
         content = content,
     )
 }

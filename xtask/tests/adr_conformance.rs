@@ -290,6 +290,55 @@ fn adr_0057_android_keeps_tab_screens_measuring_only_the_active_one() {
     }
 }
 
+/// ADR-0058: the iOS shell keeps visited tab screens by ADR-0057's rules. A hidden slot can't be tapped or
+/// read, sends nothing, a switch ends editing, and only a screen `keptWhenHidden` allows is kept.
+#[test]
+fn adr_0058_ios_keeps_tab_screens_like_android() {
+    let swift = ["demos/barbershop/iOS/Sources/Render.swift", "mobiler/templates/iOS/Sources/Render.swift"];
+    for path in swift {
+        let code = live_code(&std::fs::read_to_string(root().join(path)).expect(path));
+        let host = fn_body(&code, "private struct TabSlots").unwrap_or_else(|| panic!("ADR-0058: {path} has no TabSlots"));
+        // The slot cache decides what is kept; the host only renders it.
+        let cache = fn_body(&code, "private final class SlotCache").unwrap_or_else(|| panic!("ADR-0058: {path} has no SlotCache"));
+        assert!(cache.contains("keptWhenHidden("), "ADR-0058: {path} SlotCache must ask keptWhenHidden before keeping a hidden screen");
+        assert!(host.contains("cache.update("), "ADR-0058: {path} TabSlots must render what SlotCache keeps");
+        assert!(
+            host.contains(".allowsHitTesting(") && host.contains(".accessibilityHidden("),
+            "ADR-0058: {path} a hidden slot must not be tapped or read"
+        );
+        assert!(host.contains("resignFirstResponder"), "ADR-0058: {path} a switch must end editing");
+        // A hardware keyboard or Full Keyboard Access moves focus without hit testing: a hidden slot is disabled.
+        assert!(host.contains(".disabled(!shown)"), "ADR-0058: {path} a hidden slot's fields must not take keyboard focus");
+        assert!(host.contains("if gate.active { send("), "ADR-0058: {path} a hidden slot's send must be dropped");
+        let live = fn_body(&code, "func holdsLiveView(").unwrap_or_else(|| panic!("ADR-0058: {path} has no holdsLiveView"));
+        for kind in [".webView", ".video", ".map", ".pdfView"] {
+            assert!(live.contains(kind), "ADR-0058: {path} holdsLiveView misses {kind}");
+        }
+        let kept = fn_body(&code, "func keptWhenHidden(").unwrap_or_else(|| panic!("ADR-0058: {path} has no keptWhenHidden"));
+        for rule in ["holdsLiveView(", "refreshing", ".progress", ".lazyList", ".scaffold", ".secure"] {
+            assert!(kept.contains(rule), "ADR-0058: {path} keptWhenHidden misses {rule}");
+        }
+    }
+}
+
+/// Not an ADR: the bug fixed beside ADR-0057 (#302). A theme that builds a new `ColorScheme` on every core
+/// update recomposes the whole app on every update, so every shell's theme builds it once per distinct theme.
+#[test]
+fn every_android_theme_builds_its_color_scheme_once() {
+    let themes: Vec<PathBuf> = files_with_extension(&[root().join("mobiler/templates/Android"), root().join("demos")], "kt")
+        .into_iter()
+        .filter(|p| p.ends_with("ui/theme/Theme.kt"))
+        .collect();
+    for path in &themes {
+        let code: String = std::fs::read_to_string(path).unwrap().lines().map(kotlin_code).collect::<Vec<_>>().join("\n");
+        let rel = path.strip_prefix(root()).unwrap().display();
+        assert!(code.contains("val colorScheme = remember("), "{rel} builds a new ColorScheme on every update");
+        assert!(code.contains("val typography = remember("), "{rel} builds new typography on every update");
+        assert!(code.contains("val shapes = remember("), "{rel} builds new shapes on every update");
+    }
+    assert!(themes.len() >= 6, "expected the template's and every demo's Theme.kt, found {}", themes.len());
+}
+
 #[test]
 fn walk_skips_symlinks_and_terminates() {
     let dir = std::env::temp_dir().join(format!("adr-walk-{}", std::process::id()));
