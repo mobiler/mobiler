@@ -23,6 +23,11 @@ import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.layout.Layout
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
@@ -1658,111 +1663,18 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             }
                         },
                     ) { padding ->
-                        // Animate the body when the route changes: slide for push/pop
-                        // (direction from depth), crossfade for a lateral move at the same
-                        // depth. Same route = a data update → no transition (contentKey).
+                        // Animate the body when the route changes: slide for push/pop (direction from depth), a
+                        // crossfade for a lateral move at the same depth. Every screen with tabs shares one content
+                        // key, so a tab switch happens inside TabSlots, which keeps each visited tab composed
+                        // (ADR-0057). Same route = a data update → no transition (contentKey).
                         AnimatedContent(
                             targetState = widget,
-                            contentKey = { it.route },
-                            transitionSpec = {
-                                val dur = 280
-                                // A fade draws the screen into an off-screen layer, and a WebView drawn into one
-                                // crashes Android's renderer on some devices (Samsung, Android 13). A move to or
-                                // from a screen holding a WebView slides without fading; a lateral move (a tab)
-                                // switches at once.
-                                val fades = !holdsWebView(initialState) && !holdsWebView(targetState)
-                                val enterFade = if (fades) fadeIn(tween(dur)) else EnterTransition.None
-                                val exitFade = if (fades) fadeOut(tween(dur)) else ExitTransition.None
-                                // Unfaded, the outgoing screen slides all the way out, so the two never overlap.
-                                val behind = if (fades) 3 else 1
-                                when {
-                                    targetState.depth > initialState.depth ->
-                                        (slideInHorizontally(tween(dur)) { it } + enterFade) togetherWith
-                                            (slideOutHorizontally(tween(dur)) { -it / behind } + exitFade)
-                                    targetState.depth < initialState.depth ->
-                                        (slideInHorizontally(tween(dur)) { -it / behind } + enterFade) togetherWith
-                                            (slideOutHorizontally(tween(dur)) { it } + exitFade)
-                                    else ->
-                                        enterFade togetherWith exitFade
-                                }
-                            },
+                            contentKey = { if (tabSlotOf(it) != null) TABS_KEY else it.route },
+                            transitionSpec = { navTransition() },
                             label = "nav",
                         ) { screen ->
-                            // Fill mode (screen.body is a `LazyList { fill: true }`, or its first
-                            // direct Column child is): the body stops page-scrolling and that list
-                            // takes the rest of the height, scrolling itself. `bodyFillIndex` — null
-                            // means no fill list, and the column renders exactly as before.
-                            val fillIndex = bodyFillIndex(screen.body)
-                            // Cap + center the content column so it doesn't stretch on a tablet.
-                            val column: @Composable BoxScope.() -> Unit = {
-                                Column(
-                                    modifier = Modifier
-                                        .let { if (fillIndex != null) it.fillMaxSize() else it.fillMaxWidth() }
-                                        .widthIn(max = 760.dp)
-                                        .align(Alignment.TopCenter)
-                                        .padding(horizontal = 16.dp),
-                                    // A Column body's own spacing (as its Column arm would give it).
-                                    verticalArrangement = Arrangement.spacedBy(if (isLarge && screen.body is Widget.Column && fillIndex != -1) 12.dp else 6.dp),
-                                ) {
-                                    if (screen.refreshing) {
-                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
-                                    }
-                                    // A Column body is walked here whether or not it holds a fill list, so a
-                                    // fill list appearing (search results) doesn't rebuild the fields above it.
-                                    val body = screen.body
-                                    if (fillIndex == null && body !is Widget.Column) {
-                                        Render(body, send)
-                                    } else if (fillIndex == -1) {
-                                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                            CompositionLocalProvider(LocalFillList provides true) { Render(screen.body, send) }
-                                        }
-                                    } else {
-                                        KeyedChildren((body as Widget.Column).children) { i, child ->
-                                            if (i == fillIndex) {
-                                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                                    CompositionLocalProvider(LocalFillList provides true) { Render(child, send) }
-                                                }
-                                            } else {
-                                                Render(child, send)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            val onRefresh = screen.onRefresh
-                            if (onRefresh != null) {
-                                // Pull-to-refresh — the body is pull-refreshable; the spinner is
-                                // driven by the app-owned `refreshing` flag.
-                                val ptr = rememberPullToRefreshState()
-                                PullToRefreshBox(
-                                    isRefreshing = screen.refreshing,
-                                    onRefresh = { send(Action.Fired(onRefresh)) },
-                                    // Keyboard: the body ends above it (minus what the bars below already cover),
-                                    // so the scroll area shrinks and the focused field is brought into view.
-                                    modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
-                                    state = ptr,
-                                    indicator = {
-                                        PullToRefreshDefaults.Indicator(
-                                            state = ptr,
-                                            isRefreshing = screen.refreshing,
-                                            modifier = Modifier.align(Alignment.TopCenter),
-                                            color = selectionColor() ?: PullToRefreshDefaults.indicatorColor,
-                                        )
-                                    },
-                                ) {
-                                    Box(
-                                        modifier = if (fillIndex != null) Modifier.fillMaxSize() else Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                                        content = column,
-                                    )
-                                }
-                            } else {
-                                Box(
-                                    // Keyboard: as above, the body ends above it and the focused field stays in view.
-                                    modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
-                                        .let { if (fillIndex != null) it else it.verticalScroll(rememberScrollState()) },
-                                    content = column,
-                                )
-                            }
+                            val slot = tabSlotOf(screen)
+                            if (slot != null) TabSlots(screen, slot, padding, send) else ScreenBody(screen, padding, send)
                         }
                     }
                 }
@@ -2441,23 +2353,211 @@ private class MapApplied {
     var latestMarkers: List<MapMarker> = emptyList()
 }
 
+/** The body's route transition: a slide for push/pop (direction from depth), a crossfade for a lateral
+ *  move at the same depth. */
+private fun AnimatedContentTransitionScope<Widget.Scaffold>.navTransition(): ContentTransform {
+    val dur = 280
+    // A fade draws the screen into an off-screen layer, and a WebView drawn into one
+    // crashes Android's renderer on some devices (Samsung, Android 13). A move to or
+    // from a screen holding a WebView slides without fading. A tab switch never comes here:
+    // it happens inside TabSlots, at once.
+    val fades = !holdsWebView(initialState) && !holdsWebView(targetState)
+    val enterFade = if (fades) fadeIn(tween(dur)) else EnterTransition.None
+    val exitFade = if (fades) fadeOut(tween(dur)) else ExitTransition.None
+    // Unfaded, the outgoing screen slides all the way out, so the two never overlap.
+    val behind = if (fades) 3 else 1
+    return when {
+        targetState.depth > initialState.depth ->
+            (slideInHorizontally(tween(dur)) { it } + enterFade) togetherWith
+                (slideOutHorizontally(tween(dur)) { -it / behind } + exitFade)
+        targetState.depth < initialState.depth ->
+            (slideInHorizontally(tween(dur)) { -it / behind } + enterFade) togetherWith
+                (slideOutHorizontally(tween(dur)) { it } + exitFade)
+        else ->
+            enterFade togetherWith exitFade
+    }
+}
+
+/** One screen's scrollable body under the Scaffold's bars (`padding`). */
+@Composable
+private fun ScreenBody(screen: Widget.Scaffold, padding: PaddingValues, send: (Action) -> Unit) {
+    // Fill mode (screen.body is a `LazyList { fill: true }`, or its first
+    // direct Column child is): the body stops page-scrolling and that list
+    // takes the rest of the height, scrolling itself. `bodyFillIndex` — null
+    // means no fill list, and the column renders exactly as before.
+    val fillIndex = bodyFillIndex(screen.body)
+    // Cap + center the content column so it doesn't stretch on a tablet.
+    val column: @Composable BoxScope.() -> Unit = {
+        Column(
+            modifier = Modifier
+                .let { if (fillIndex != null) it.fillMaxSize() else it.fillMaxWidth() }
+                .widthIn(max = 760.dp)
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 16.dp),
+            // A Column body's own spacing (as its Column arm would give it).
+            verticalArrangement = Arrangement.spacedBy(if (isLarge && screen.body is Widget.Column && fillIndex != -1) 12.dp else 6.dp),
+        ) {
+            if (screen.refreshing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
+            }
+            // A Column body is walked here whether or not it holds a fill list, so a
+            // fill list appearing (search results) doesn't rebuild the fields above it.
+            val body = screen.body
+            if (fillIndex == null && body !is Widget.Column) {
+                Render(body, send)
+            } else if (fillIndex == -1) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    CompositionLocalProvider(LocalFillList provides true) { Render(screen.body, send) }
+                }
+            } else {
+                KeyedChildren((body as Widget.Column).children) { i, child ->
+                    if (i == fillIndex) {
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            CompositionLocalProvider(LocalFillList provides true) { Render(child, send) }
+                        }
+                    } else {
+                        Render(child, send)
+                    }
+                }
+            }
+        }
+    }
+    val onRefresh = screen.onRefresh
+    if (onRefresh != null) {
+        // Pull-to-refresh — the body is pull-refreshable; the spinner is
+        // driven by the app-owned `refreshing` flag.
+        val ptr = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = screen.refreshing,
+            onRefresh = { send(Action.Fired(onRefresh)) },
+            // Keyboard: the body ends above it (minus what the bars below already cover),
+            // so the scroll area shrinks and the focused field is brought into view.
+            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
+            state = ptr,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = ptr,
+                    isRefreshing = screen.refreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    color = selectionColor() ?: PullToRefreshDefaults.indicatorColor,
+                )
+            },
+        ) {
+            Box(
+                modifier = if (fillIndex != null) Modifier.fillMaxSize() else Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                content = column,
+            )
+        }
+    } else {
+        Box(
+            // Keyboard: as above, the body ends above it and the focused field stays in view.
+            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
+                .let { if (fillIndex != null) it else it.verticalScroll(rememberScrollState()) },
+            content = column,
+        )
+    }
+}
+
+/** Marks every screen with tabs as one `AnimatedContent` content, so a tab switch happens inside [TabSlots]. */
+private const val TABS_KEY = "\u0000tabs"
+
+/** The selected tab's index, or null when the screen has no tabs or not exactly one is selected. */
+private fun tabSlotOf(s: Widget.Scaffold): Int? = s.tabs.indices.singleOrNull { s.tabs[it].selected }
+
+/** A tab's kept screen. A new epoch is a new composition: the old one is disposed. */
+private class Slot(var screen: Widget.Scaffold, val epoch: Int)
+
+/** Each visited tab keeps its last screen composed, so returning to it is a diff, not a rebuild (ADR-0057).
+ *  Only the selected tab is measured, placed and drawn: a hidden one stays composed but costs no frame
+ *  time, sends nothing and holds no focus, and it is shown again only with the screen the core just sent.
+ *  A screen holding a live native view (video, map, web view, PDF) is let go once hidden, as before. */
+@Composable
+private fun TabSlots(screen: Widget.Scaffold, slot: Int, padding: PaddingValues, send: (Action) -> Unit) {
+    // A cache rebuilt from `screen` on every composition: keep each step below idempotent for a given
+    // (screen, slot), since a composition can be abandoned and run again.
+    val slots = remember { mutableMapOf<Int, Slot>() }
+    // [the slot shown last composition, the next epoch]
+    val last = remember { intArrayOf(-1, 0) }
+    slots.keys.retainAll { it < screen.tabs.size }
+    if (last[0] != slot) {
+        // The tab that was showing is hidden now: let it go unless it is safe to keep (keptWhenHidden).
+        slots.keys.retainAll { it == slot || keptWhenHidden(slots.getValue(it).screen) }
+        // The core moved this tab to another screen while it was away: rebuild it, without a transition.
+        if (slots[slot]?.screen?.route.let { it != null && it != screen.route }) slots.remove(slot)
+        last[0] = slot
+    }
+    slots.getOrPut(slot) { Slot(screen, last[1]++) }.screen = screen
+    // A switch drops focus, so the keyboard closes and no hidden field keeps it.
+    val focus = LocalFocusManager.current
+    LaunchedEffect(slot) { focus.clearFocus(force = true) }
+    val order = slots.keys.sorted()
+    val shown = order.indexOf(slot)
+    Layout(
+        modifier = Modifier.fillMaxSize(),
+        content = {
+            order.forEach { i ->
+                val kept = slots.getValue(i)
+                key(i, kept.epoch) {
+                    val isActive by rememberUpdatedState(i == slot)
+                    val gated = remember(send) { { a: Action -> if (isActive) send(a) } }
+                    Box(Modifier.fillMaxSize()) {
+                        AnimatedContent(
+                            targetState = kept.screen,
+                            contentKey = { it.route },
+                            transitionSpec = { navTransition() },
+                            label = "tab",
+                        ) { ScreenBody(it, padding, gated) }
+                    }
+                }
+            }
+        },
+    ) { measurables, constraints ->
+        // Only the shown tab is measured and placed; the others are never measured.
+        val p = measurables[shown].measure(constraints)
+        layout(p.width, p.height) { p.place(0, 0) }
+    }
+}
+
+/** Whether a hidden tab's screen may stay composed (ADR-0057). Not when it holds a live native view
+ *  (its player, map or web view would keep running), still animates (refreshing, an indeterminate
+ *  progress, a loading list: their animations ask for a frame on every vsync, placed or not), nests a
+ *  Scaffold (its BackHandler and sheet outlive placement) or has a SECURE field (its text would stay
+ *  in memory after the user left). */
+private fun keptWhenHidden(s: Widget.Scaffold): Boolean {
+    if (s.refreshing || holdsLiveView(s)) return false
+    return !holdsAny(s.body) {
+        it is Widget.Scaffold || (it is Widget.Progress && it.value == null) ||
+            (it is Widget.LazyList && (it.loading || it.refreshing)) ||
+            (it is Widget.TextField && it.kind == FieldKind.SECURE)
+    }
+}
+
 /** Whether a WebView is anywhere in this subtree. A WebView must never be drawn into an off-screen
  *  layer (it crashes Android's renderer on some devices), so a screen holding one is never faded (the
  *  Scaffold's transitionSpec) and a scroller holding one has no edge fade. A Scaffold's sheet and
  *  bottom bar are not drawn in the faded content; they are checked only as a guard. */
-private fun holdsWebView(w: Widget): Boolean = when (w) {
-    is Widget.WebView -> true
-    is Widget.Row -> w.children.any(::holdsWebView)
-    is Widget.Column -> w.children.any(::holdsWebView)
-    is Widget.Box -> w.children.any(::holdsWebView)
-    is Widget.Grid -> w.children.any(::holdsWebView)
-    is Widget.Scroller -> w.children.any(::holdsWebView)
-    is Widget.LazyList -> w.children.any(::holdsWebView)
-    is Widget.Card -> holdsWebView(w.child)
-    is Widget.A11y -> holdsWebView(w.child)
-    is Widget.SwipeAction -> holdsWebView(w.child)
-    is Widget.Split -> holdsWebView(w.primary) || holdsWebView(w.detail)
-    is Widget.Scaffold -> holdsWebView(w.body) || w.sheet?.let { holdsWebView(it.child) } == true ||
-        w.bottomBar.orEmpty().any(::holdsWebView)
+private fun holdsWebView(w: Widget): Boolean = holdsAny(w) { it is Widget.WebView }
+
+/** Whether a live native view (web view, video, map, PDF) is anywhere in this subtree. A tab screen
+ *  holding one is not kept once hidden (ADR-0057), so its player, map or web view is released as
+ *  before. */
+private fun holdsLiveView(w: Widget): Boolean = holdsAny(w) {
+    it is Widget.WebView || it is Widget.Video || it is Widget.Map || it is Widget.PdfView
+}
+
+/** Whether any widget in this subtree satisfies `hit`. */
+private fun holdsAny(w: Widget, hit: (Widget) -> Boolean): Boolean = hit(w) || when (w) {
+    is Widget.Row -> w.children.any { holdsAny(it, hit) }
+    is Widget.Column -> w.children.any { holdsAny(it, hit) }
+    is Widget.Box -> w.children.any { holdsAny(it, hit) }
+    is Widget.Grid -> w.children.any { holdsAny(it, hit) }
+    is Widget.Scroller -> w.children.any { holdsAny(it, hit) }
+    is Widget.LazyList -> w.children.any { holdsAny(it, hit) }
+    is Widget.Card -> holdsAny(w.child, hit)
+    is Widget.A11y -> holdsAny(w.child, hit)
+    is Widget.SwipeAction -> holdsAny(w.child, hit)
+    is Widget.Split -> holdsAny(w.primary, hit) || holdsAny(w.detail, hit)
+    is Widget.Scaffold -> holdsAny(w.body, hit) || w.sheet?.let { holdsAny(it.child, hit) } == true ||
+        w.bottomBar.orEmpty().any { holdsAny(it, hit) }
     else -> false
 }
