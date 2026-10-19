@@ -1,0 +1,960 @@
+import Foundation
+import Observation
+import SharedTypes
+import UIKit
+import PhotosUI
+import UniformTypeIdentifiers
+
+// Keeps every non-HTTP plugin compiling unchanged now that PluginResponse.output is
+// bytes: they all construct responses from Strings.
+extension PluginResponse {
+    init(ok: Bool, output: String) {
+        self.init(ok: ok, output: [UInt8](output.utf8))
+    }
+}
+
+// NOTE (verify on macOS): `SharedTypes` is the facet-generated ABI types package
+// (Widget/Action/Effect/Request/Requests/PluginCall/PluginResponse/...). `CoreFfi`
+// comes from the uniffi-generated bindings for the `shared` crate; depending on the
+// Xcode setup it's either in this same target (generated sources compiled in) or a
+// module to `import`. project.yml wires that.
+
+/// Drives the Rust core from Swift — the iOS twin of the Android `Core.kt`.
+///
+/// Speaks only the fixed Mobiler ABI: send an `Action`, receive a `Widget` tree +
+/// capability effects. Request/response capabilities resolve **asynchronously**
+/// (Swift `async/await` / `Task`), so a network call never blocks the UI — exactly
+/// like the Android shell's coroutine resolution.
+@MainActor
+final class Core: ObservableObject {
+    @Published private(set) var view: Widget
+
+    private let core = CoreFfi()
+    // Live streaming subscriptions (cx.subscribe), keyed by subscription key, so
+    // cx.unsubscribe(key) can cancel the matching native source.
+    private var streamTasks: [String: Task<Void, Never>] = [:]
+
+    init() {
+        // First frame straight from the core's view model.
+        self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
+        if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+        // Light/dark is a window-level override set from the root (see applyWindowStyle); the window
+        // exists by the next tick.
+        DispatchQueue.main.async { [weak self] in if let v = self?.view { applyWindowStyle(v) } }
+        // The app's own version first, so the core's restore/init already see it (cx.app_info()).
+        let info = Bundle.main.infoDictionary
+        update(.appInfo(
+            version: info?["CFBundleShortVersionString"] as? String ?? "",
+            build: info?["CFBundleVersion"] as? String ?? "",
+            platform: "ios",
+            bundleId: Bundle.main.bundleIdentifier ?? ""))
+        // Restore persisted state, then fire Start so the app can load initial data.
+        let saved = StoragePlugin.load()
+        if !saved.isEmpty { update(.restore(data: saved)) }
+        update(.start)
+    }
+
+    func update(_ action: Action) {
+        process(core.update(data: Data(try! action.bincodeSerialize())))
+    }
+
+    private func process(_ effectBytes: Data) {
+        let requests = try! Requests.bincodeDeserialize(input: [UInt8](effectBytes)).value
+        for request in requests {
+            switch request.effect {
+            case .render:
+                self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
+                if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+                applyWindowStyle(view)
+
+            // Fire-and-forget: dispatch, ignore the result, don't resolve. The
+            // `stream`/`unsubscribe` control notify cancels a live subscription.
+            case .pluginNotify(let notify):
+                if notify.plugin == "stream", notify.op == "unsubscribe" {
+                    streamTasks[notify.input]?.cancel()
+                    streamTasks[notify.input] = nil
+                } else {
+                    Task { _ = await Plugins.handle(plugin: notify.plugin, op: notify.op, input: notify.input) }
+                }
+
+            // Request/response: dispatch (awaiting async work), resolve the core
+            // with the response, then process the effects that produces.
+            case .plugin(let call):
+                let id = request.id
+                Task {
+                    let resp = await Plugins.handle(plugin: call.plugin, op: call.op, input: call.input)
+                    let next = core.resolve(id: id, data: Data(try! resp.bincodeSerialize()))
+                    process(next)
+                }
+
+            // Streaming subscription: start a native source that resolves the SAME
+            // request id repeatedly (one PluginResponse per event). `emit` hops to the
+            // main actor to touch the core/view. Parked by key for unsubscribe.
+            case .pluginStream(let call):
+                let id = request.id
+                let emit: @Sendable (PluginResponse) -> Void = { [weak self] resp in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.process(self.core.resolve(id: id, data: Data(try! resp.bincodeSerialize())))
+                    }
+                }
+                streamTasks[call.key] = Task {
+                    await Plugins.subscribe(plugin: call.plugin, op: call.op, input: call.input, emit: emit)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Capability plugins (the iOS twin of the Android plugin registry)
+
+/// Built-in `ticker` stream: emits an incrementing counter every `input` ms until the
+/// subscription's Task is cancelled (cx.unsubscribe). The deterministic demonstrator
+/// for the streaming primitive (cx.subscribe).
+enum TickerStream {
+    static func run(input: String, emit: @Sendable (PluginResponse) -> Void) async {
+        let ms = UInt64(input) ?? 1000
+        var count = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: ms * 1_000_000)
+            if Task.isCancelled { break }
+            count += 1
+            emit(PluginResponse(ok: true, output: String(count)))
+        }
+    }
+}
+
+/// Streaming dispatch for the built-in `system` source: bridges deep-link + lifecycle events from
+/// SystemBridge (App.swift) into the cx.subscribe stream. Attaches on subscribe — flushing any
+/// buffered launch deep-link — parks until the Task is cancelled (cx.unsubscribe), then detaches.
+enum SystemStream {
+    static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
+        // A subscription cancelled before its hop to the main actor never attaches, so it can't
+        // replace a newer subscription's sink.
+        let attached: Int? = await MainActor.run { Task.isCancelled ? nil : SystemBridge.shared.attach(sink) }
+        guard let id = attached else { return }
+        await withTaskCancellationHandler {
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        } onCancel: {
+            Task { @MainActor in SystemBridge.shared.detach(id) }
+        }
+    }
+}
+
+/// The scaffold's dark flag outside a view (Core's per-render palette resolution): `.system` reads
+/// the OS via the window scene; ScaffoldView refines it with the live environment scheme.
+@MainActor
+func resolvedDark(_ appearance: Appearance?, _ darkMode: Bool) -> Bool {
+    switch appearance {
+    case .some(.light): return false
+    case .some(.dark): return true
+    case .some(.system): return AppearanceBridge.osDark()
+    case .none: return darkMode
+    }
+}
+
+/// Light/dark for the whole window, from the ROOT view: a scaffold's appearance (System → the OS,
+/// `.unspecified`) or its `dark_mode`; any other root follows the OS. A window-level override (not
+/// SwiftUI's `preferredColorScheme`, which doesn't reliably let go when set back to nil) — and it sits
+/// below the window scene, so the scene's trait always stays the OS value the appearance query reads.
+@MainActor
+func applyWindowStyle(_ view: Widget) {
+    let style: UIUserInterfaceStyle
+    if case let .scaffold(_, _, _, _, darkMode, _, _, _, _, _, _, _, _, appearance, _) = view {
+        switch appearance {
+        case .some(.system): style = .unspecified
+        case .some(.light): style = .light
+        case .some(.dark): style = .dark
+        case .none: style = darkMode ? .dark : .light
+        }
+    } else {
+        style = .unspecified
+    }
+    for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+        for window in scene.windows where window.overrideUserInterfaceStyle != style {
+            window.overrideUserInterfaceStyle = style
+        }
+    }
+}
+
+/// The OS light/dark setting: the active window scene's trait (system-level — the app's own
+/// light/dark override is set on its windows, below the scene). iOS 17 trait-change registration feeds
+/// the `appearance` stream; every subscription (key) gets its own sink, and the scene registration
+/// lives while at least one is attached.
+@MainActor
+final class AppearanceBridge {
+    static let shared = AppearanceBridge()
+    private var sinks: [UUID: @Sendable (String) -> Void] = [:]
+    private var registration: (any UITraitChangeRegistration)?
+    private weak var registeredScene: UIWindowScene?
+    private var last: String?
+    private var activation: NSObjectProtocol?
+
+    static func scene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
+    static func osDark() -> Bool {
+        (scene()?.traitCollection.userInterfaceStyle ?? UITraitCollection.current.userInterfaceStyle) == .dark
+    }
+    private static func name(_ dark: Bool) -> String { dark ? "dark" : "light" }
+
+    /// Add a subscriber: it gets the current value at once; returns its token for `detach`.
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> UUID {
+        let id = UUID()
+        sinks[id] = sink
+        let now = Self.name(Self.osDark())
+        sink(now)
+        if last == nil { last = now }
+        registerIfNeeded()
+        if activation == nil {
+            // A scene that (re)activates — first launch, reconnect after a long background, iPad
+            // multi-window — gets the registration, and a change made meanwhile is delivered.
+            activation = NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.registerIfNeeded()
+                    self?.changed(Self.name(Self.osDark()))
+                }
+            }
+        }
+        return id
+    }
+    /// Register on the current scene if it isn't the one already registered (none yet, or replaced).
+    private func registerIfNeeded() {
+        guard !sinks.isEmpty, let scene = Self.scene(), scene !== registeredScene else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
+        registeredScene = scene
+        registration = scene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
+            self?.changed(Self.name(scene.traitCollection.userInterfaceStyle == .dark))
+        }
+    }
+    private func changed(_ value: String) {
+        // iOS flips traits while it snapshots a backgrounded app for the switcher — ignore those; the
+        // activation observer re-reads the real value when the app comes back.
+        guard UIApplication.shared.applicationState != .background else { return }
+        guard value != last else { return }
+        last = value
+        for sink in sinks.values { sink(value) }
+    }
+    /// Remove one subscriber; the scene registration goes with the last one.
+    func detach(_ id: UUID) {
+        sinks[id] = nil
+        guard sinks.isEmpty else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
+        registration = nil
+        registeredScene = nil
+        last = nil
+        if let a = activation { NotificationCenter.default.removeObserver(a) }
+        activation = nil
+    }
+}
+
+/// Built-in `appearance` stream: the OS light/dark setting — the current value first, then each change.
+enum AppearanceStream {
+    static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
+        let id = await MainActor.run { AppearanceBridge.shared.attach(sink) }
+        await withTaskCancellationHandler {
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        } onCancel: {
+            Task { @MainActor in AppearanceBridge.shared.detach(id) }
+        }
+    }
+}
+
+/// Dispatches the opaque `{plugin, op, input}` envelope by name. Adding a plugin
+/// never touches the wire ABI — only this registry.
+enum Plugins {
+    /// Streaming dispatch (cx.subscribe): start a long-lived source that calls `emit`
+    /// per event until cancelled. Streaming-capable capabilities are matched here.
+    static func subscribe(plugin: String, op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        switch plugin {
+        case "ticker": await TickerStream.run(input: input, emit: emit)
+        case "system": await SystemStream.run(emit: emit)
+        case "appearance": await AppearanceStream.run(emit: emit)
+        // mobiler:plugins-stream — streaming plugins inserted above this line
+        default: break
+        }
+    }
+
+    static func handle(plugin: String, op: String, input: String) async -> PluginResponse {
+        switch plugin {
+        case "http": return await HttpPlugin.handle(op: op, input: input)
+        case "storage": return StoragePlugin.handle(op: op, input: input)
+        case "clipboard": return await ClipboardPlugin.handle(op: op, input: input)
+        case "clipboard_with": return await ClipboardWithPlugin.handle(op: op, input: input)
+        case "share": return await SharePlugin.handle(op: op, input: input)
+        case "browser": return await BrowserPlugin.handle(op: op, input: input)
+        case "toast": return await ToastPlugin.handle(op: op, input: input)
+        case "snackbar": return await SnackbarPlugin.handle(op: op, input: input)
+        case "device": return await DevicePlugin.handle(op: op, input: input)
+        case "haptics": return await HapticsPlugin.handle(op: op, input: input)
+        case "dialog": return await DialogPlugin.handle(op: op, input: input)
+        case "datetime": return await DateTimePlugin.handle(op: op, input: input)
+        case "photo": return await PhotoPlugin.handle(op: op, input: input)
+        case "camera": return await CameraPlugin.handle(op: op, input: input)
+        // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
+        default:
+            return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
+        }
+    }
+}
+
+/// HTTP capability (paired with `cx.request`/`get`/`post`/`put`/... in Rust). `op` is
+/// the method; `input` is `{"url":..., "headers":[{"name":...,"value":...}], "body":...}`.
+/// Returns a bincode `HttpOutcome` in `output`; `ok` = 2xx.
+enum HttpPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard
+            let data = input.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let urlString = obj["url"] as? String,
+            let url = URL(string: urlString)
+        else {
+            return transportError("invalid http request envelope")
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = op
+
+        var callerSetContentType = false
+        if let headers = obj["headers"] as? [[String: Any]] {
+            for h in headers {
+                guard let name = h["name"] as? String, let value = h["value"] as? String else { continue }
+                req.addValue(value, forHTTPHeaderField: name)
+                if name.lowercased() == "content-type" { callerSetContentType = true }
+            }
+        }
+
+        if let body = obj["body"] as? String {
+            req.httpBody = body.data(using: .utf8)
+            if !callerSetContentType {
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+        }
+
+        do {
+            let (respData, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else {
+                return transportError("non-HTTP response")
+            }
+            let headers = http.allHeaderFields.compactMap { key, value -> HttpHeader? in
+                guard let name = key as? String else { return nil }
+                return HttpHeader(name: name, value: String(describing: value))
+            }
+            // Clamp rather than trap: `UInt16(_:)` crashes on an out-of-range status
+            // code, and a hard crash in the shell is worse than a clamped value.
+            let status = UInt16(clamping: http.statusCode)
+            let outcome = HttpOutcome.response(status: status, headers: headers, body: [UInt8](respData))
+            return PluginResponse(ok: (200..<300).contains(http.statusCode), output: encode(outcome))
+        } catch {
+            // URLSession throws only when no response was obtained.
+            return transportError(error.localizedDescription)
+        }
+    }
+
+    private static func encode(_ outcome: HttpOutcome) -> [UInt8] {
+        (try? outcome.bincodeSerialize()) ?? []
+    }
+
+    private static func transportError(_ message: String) -> PluginResponse {
+        PluginResponse(ok: false, output: encode(.transportError(message: message)))
+    }
+}
+
+/// Persistence capability (paired with `cx.save` + `restore`). Backed by UserDefaults.
+enum StoragePlugin {
+    private static let key = "mobiler.state"
+    static func load() -> String { UserDefaults.standard.string(forKey: key) ?? "" }
+    static func handle(op: String, input: String) -> PluginResponse {
+        switch op {
+        case "save": UserDefaults.standard.set(input, forKey: key); return PluginResponse(ok: true, output: "")
+        case "load": return PluginResponse(ok: true, output: load())
+        default: return PluginResponse(ok: false, output: "unknown op '\(op)'")
+        }
+    }
+}
+
+/// Clipboard capability — copy text (UIPasteboard is main-actor only).
+@MainActor
+enum ClipboardPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        UIPasteboard.general.string = input
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052). iOS has no system sensitive flag;
+/// a sensitive copy carries the `org.nspasteboard.ConcealedType` convention, `local_only` keeps it out of Universal
+/// Clipboard and `expires_ms` lets the system remove it. `ok: true` carries the report (ADR-0053).
+@MainActor
+enum ClipboardWithPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard op == "copy" else { return PluginResponse(ok: false, output: "unknown clipboard_with op '\(op)'") }
+        guard let data = input.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return PluginResponse(ok: false, output: "invalid input JSON") }
+        guard let text = obj["text"] as? String else { return PluginResponse(ok: false, output: "missing text") }
+        let sensitive = (obj["sensitive"] as? Bool) == true
+        let localOnly = (obj["local_only"] as? Bool) == true
+        var item: [String: Any] = [UTType.utf8PlainText.identifier: text]
+        // The nspasteboard.org convention (1Password, Bitwarden): a Mac's clipboard managers skip a concealed item.
+        if sensitive { item["org.nspasteboard.ConcealedType"] = Data() }
+        var options: [UIPasteboard.OptionsKey: Any] = [:]
+        if localOnly { options[.localOnly] = true }
+        var expires = "none"
+        if let ms = (obj["expires_ms"] as? NSNumber)?.doubleValue {
+            // A huge value (the core sends up to u64::MAX) is capped at distantFuture, i.e. never.
+            options[.expirationDate] = min(Date().addingTimeInterval(ms / 1000), Date.distantFuture)
+            expires = "system"
+        }
+        UIPasteboard.general.setItems([item], options: options)
+        // What this copy got (ADR-0053).
+        let report: [String: Any] = ["sensitive": sensitive, "expires": expires, "local_only": localOnly]
+        let out = (try? JSONSerialization.data(withJSONObject: report)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        return PluginResponse(ok: true, output: out)
+    }
+}
+
+/// Share capability — the system share sheet (UIActivityViewController).
+@MainActor
+enum SharePlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        let sheet = UIActivityViewController(activityItems: [input], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = presenter.view // iPad anchor
+        presenter.present(sheet, animated: true)
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Open a URL externally (Safari / the default handler).
+@MainActor
+enum BrowserPlugin {
+    /// Honest result (cx.open_url_then): iOS reports whether an app took the link — e.g. `tel:` on
+    /// an iPad without calling answers `ok: false`.
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard let url = URL(string: input) else {
+            return PluginResponse(ok: false, output: "invalid url")
+        }
+        let opened = await UIApplication.shared.open(url)
+        if opened { return PluginResponse(ok: true, output: "opened") }
+        // A declined confirmation (the tel: "Call …?" prompt) also reports false; only say nothing
+        // can open it when that is actually true.
+        return PluginResponse(ok: false, output: UIApplication.shared.canOpenURL(url) ? "cancelled" : "no app can open this link")
+    }
+}
+
+/// The hardware identifier (`utsname.machine`, e.g. "iPhone15,2"); on the simulator, the simulated one.
+private func hardwareModel() -> String {
+    if let sim = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return sim }
+    var sys = utsname()
+    uname(&sys)
+    return withUnsafeBytes(of: &sys.machine) { raw in
+        String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
+    }
+}
+
+/// Device info — request/response. `model` returns e.g. "Apple iPhone (iOS 18.0)".
+@MainActor
+enum DevicePlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        switch op {
+        case "model":
+            let d = UIDevice.current
+            return PluginResponse(ok: true, output: "Apple \(d.model) (\(d.systemName) \(d.systemVersion))")
+        case "info":
+            // Structured (cx.device_info): OS version and the hardware identifier ("iPhone15,2"),
+            // not the user-set device name. The simulator reports its simulated model.
+            let info = DeviceInfo(osVersion: UIDevice.current.systemVersion, osApiLevel: 0, manufacturer: "Apple", model: hardwareModel())
+            return PluginResponse(ok: true, output: (try? info.bincodeSerialize()) ?? [])
+        case "locale":
+            return PluginResponse(ok: true, output: Locale.preferredLanguages.first ?? Locale.current.identifier)
+        case "appearance":
+            // The OS setting, whatever the app forces.
+            return PluginResponse(ok: true, output: AppearanceBridge.osDark() ? "dark" : "light")
+        default:
+            return PluginResponse(ok: false, output: "unknown op '\(op)'")
+        }
+    }
+}
+
+/// Haptic tap — iOS has no permission requirement. `op` is the style.
+@MainActor
+enum HapticsPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        let style: UIImpactFeedbackGenerator.FeedbackStyle = switch op {
+        case "light": .light
+        case "heavy": .heavy
+        default: .medium
+        }
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// Toast — iOS has no native toast, so show a transient padded label in the key
+/// window (the SwiftUI/UIKit twin of Android's Toast / the web's `.toast` div).
+@MainActor
+enum ToastPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard let window = keyWindow() else { return PluginResponse(ok: false, output: "no window") }
+        let label = PaddedLabel()
+        label.text = input
+        label.numberOfLines = 0
+        label.textColor = .white
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 14)
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.85)
+        label.layer.cornerRadius = 18
+        label.clipsToBounds = true
+        label.alpha = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        window.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: window.centerXAnchor),
+            label.bottomAnchor.constraint(equalTo: window.safeAreaLayoutGuide.bottomAnchor, constant: -32),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: window.leadingAnchor, constant: 24),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: window.trailingAnchor, constant: -24),
+        ])
+        UIView.animate(withDuration: 0.2) { label.alpha = 1 }
+        UIView.animate(withDuration: 0.3, delay: 2.3) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
+        return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// The snackbar on screen, drawn by `ScaffoldView` (`SnackbarView`). `nonisolated(unsafe)` like
+/// `ActiveTheme`: only ever touched on the main thread, from the plugin and the view.
+@Observable final class SnackbarHost {
+    nonisolated(unsafe) static let shared = SnackbarHost()
+    struct Request: Identifiable {
+        let id: Int
+        let text: String
+        let action: String?
+        let seconds: Double
+    }
+    var current: Request?
+    /// ScaffoldViews on screen: the timeout runs in `SnackbarView`, so with none there'd be no end.
+    @ObservationIgnored var hosts = 0
+    @ObservationIgnored private var answer: ((String) -> Void)?
+    @ObservationIgnored private var nextId = 0
+
+    /// Show a snackbar; a visible one answers "replaced" first (one at a time).
+    func show(text: String, action: String?, seconds: Double, answer: @escaping (String) -> Void) {
+        finish("replaced")
+        nextId += 1
+        current = Request(id: nextId, text: text, action: action, seconds: seconds)
+        self.answer = answer
+    }
+
+    /// Resolve and hide the visible snackbar — only if it's still request `id`, when one is given
+    /// (a late timer or swipe must not close a newer snackbar).
+    func finish(_ outcome: String, id: Int? = nil) {
+        guard let cur = current, id == nil || id == cur.id else { return }
+        let a = answer
+        answer = nil
+        current = nil
+        a?(outcome)
+    }
+}
+
+/// Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+/// "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout", "dismissed"
+/// (swiped down) or "replaced" (a newer snackbar).
+@MainActor
+enum SnackbarPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "show" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        let text = obj?["text"] as? String ?? ""
+        let action = (obj?["action_label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        var seconds: Double = (obj?["duration"] as? String) == "long" ? 10 : 4
+        // VoiceOver needs time to reach the action (Android's M3 host lengthens it the same way).
+        if action != nil && UIAccessibility.isVoiceOverRunning { seconds = max(seconds, 10) }
+        // No scaffold on screen → nothing to show it on, and nothing would ever time it out.
+        if SnackbarHost.shared.hosts == 0 { return PluginResponse(ok: false, output: "timeout") }
+        let outcome: String = await withCheckedContinuation { cont in
+            SnackbarHost.shared.show(text: text, action: action, seconds: seconds) { cont.resume(returning: $0) }
+        }
+        return PluginResponse(ok: outcome == "action", output: outcome)
+    }
+}
+
+/// Confirm dialog — request/response. Presents a UIAlertController and awaits the
+/// user's choice (`ok` = confirmed) via a continuation, so the core resolves only
+/// once they tap. Input is JSON {title, message, confirm_label?, cancel_label?, destructive?}; system alerts keep their own size.
+@MainActor
+enum DialogPlugin {
+    /// The confirm alert currently on screen and how to answer it. A new confirm answers it
+    /// `ok: false` and dismisses it first — one confirm at a time on every shell.
+    /// `nonisolated(unsafe)` (like `ActiveTheme`/`ActiveLabels`): it's touched from the nested
+    /// `func done` below (called from the alert-action handlers), which the compiler treats as
+    /// nonisolated — though it always runs on the main thread.
+    nonisolated(unsafe) private static var openConfirm: (alert: UIAlertController, answer: (PluginResponse) -> Void)?
+
+    /// `topViewController()`, but walking past any `UIAlertController` that's already
+    /// mid-dismissal (each one is still `presentedViewController` for a moment, yet presenting on
+    /// top of it fails) to its own presenter instead — not just the current `openConfirm`'s alert,
+    /// since a third confirm can arrive while an earlier one is still only queued behind that
+    /// dismissal (its own alert never presented, so it can't be the one we see here).
+    private static func topViewControllerForConfirm() -> UIViewController? {
+        var top = topViewController()
+        while let alert = top as? UIAlertController, alert.isBeingDismissed {
+            top = alert.presentingViewController
+        }
+        return top
+    }
+
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "confirm" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        let title = obj?["title"] as? String ?? ""
+        let message = obj?["message"] as? String ?? ""
+        // Optional app labels; a plain `cx.confirm` sends none and falls back to the scaffold's
+        // ShellLabels, then OK / Cancel.
+        let confirmLabel = (obj?["confirm_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ((ActiveLabels.current?.ok).flatMap { $0.isEmpty ? nil : $0 } ?? "OK")
+        let cancelLabel = (obj?["cancel_label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ((ActiveLabels.current?.cancel).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel")
+        let destructive = obj?["destructive"] as? Bool ?? false
+
+        // One confirm at a time: a new confirm answers the open one ok:false before we even look
+        // for a view controller to present the new one from — unless it's already being dismissed
+        // (the user just tapped it), in which case its own handler is about to answer it, so we
+        // leave it alone. Either way, the actual UIKit dismissal (ours, or the one already running)
+        // happens in `presentWhenReady` below, and the new alert is presented only once it's done —
+        // never while a dismissal is in flight.
+        //
+        // A previous confirm that was itself still queued behind an EARLIER dismissal never
+        // actually reached `presenter.present` — its `presentingViewController` is still nil, so
+        // there's nothing on screen for it to dismiss. Answer it, but don't queue it as
+        // `prevToDismiss`; a stray `dismiss(animated:false)` with no real presentation behind it
+        // would otherwise land on whatever view controller `topViewControllerForConfirm()` finds
+        // next (possibly an unrelated app sheet) and dismiss that instead.
+        var prevToDismiss: UIAlertController?
+        if let prev = openConfirm, !prev.alert.isBeingDismissed {
+            if prev.alert.presentingViewController != nil {
+                prevToDismiss = prev.alert
+            }
+            openConfirm = nil
+            prev.answer(PluginResponse(ok: false, output: "cancel"))
+        }
+
+        guard let presenter = prevToDismiss?.presentingViewController ?? topViewControllerForConfirm() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            let alert = UIAlertController(
+                title: title.isEmpty ? nil : title, message: message, preferredStyle: .alert)
+            // Identity only, never a strong capture of `alert` — the closure below is retained by
+            // the UIAlertAction, which is retained by `alert` itself, so capturing `alert` there
+            // would be a retain cycle.
+            let alertID = ObjectIdentifier(alert)
+            var resumed = false
+            func done(_ r: PluginResponse) {
+                if !resumed {
+                    resumed = true
+                    if openConfirm.map({ ObjectIdentifier($0.alert) }) == alertID { openConfirm = nil }
+                    cont.resume(returning: r)
+                }
+            }
+            alert.addAction(UIAlertAction(title: cancelLabel, style: .cancel) { _ in
+                done(PluginResponse(ok: false, output: "cancel"))
+            })
+            alert.addAction(UIAlertAction(title: confirmLabel, style: destructive ? .destructive : .default) { _ in
+                done(PluginResponse(ok: true, output: "ok"))
+            })
+            openConfirm = (alert, done)
+            presentWhenReady(alert, from: presenter, afterDismissing: prevToDismiss)
+        }
+    }
+
+    /// Presents `alert` from `presenter`, but never while a dismissal is in flight — presenting on
+    /// top of an alert that's still animating away silently fails. Three cases:
+    /// - `prevToDismiss` (the previous confirm) is still on screen: dismiss it ourselves and
+    ///   present in that dismissal's completion.
+    /// - Nothing of ours needs dismissing, but the front-most controller already is an alert
+    ///   mid-dismissal (the user tapped it directly, and iOS is still animating it away): ride that
+    ///   transition's completion instead of racing it — or, if the transition can't be ridden (no
+    ///   coordinator, or `animate(alongsideTransition:)` itself fails to schedule), fall back to
+    ///   presenting on the next run loop turn.
+    /// - Otherwise: nothing is dismissing, so present immediately.
+    ///
+    /// Every one of those goes through `presentIfStillCurrent` rather than presenting directly:
+    /// by the time a deferred one actually runs, a THIRD confirm may already have superseded and
+    /// answered `alert` (`openConfirm` no longer names it), or `presenter` may no longer be able to
+    /// accept a presentation at all — either way, presenting would silently do nothing and leave
+    /// the caller's continuation hanging forever.
+    ///
+    /// `@MainActor`, the default for a member of this enum: the `withCheckedContinuation` body in
+    /// `handle` that calls this, and the UIKit completion closures inside it (`dismiss`'s
+    /// completion, a transition coordinator's `animate(alongsideTransition:)` completion,
+    /// `DispatchQueue.main.async`), all run main-actor-isolated — unlike the nested `func done`
+    /// above, which the compiler treats as nonisolated and which is why `openConfirm` itself needs
+    /// `nonisolated(unsafe)`.
+    @MainActor
+    private static func presentWhenReady(_ alert: UIAlertController, from presenter: UIViewController, afterDismissing prevToDismiss: UIAlertController?) {
+        if let prevToDismiss {
+            let prevPresenter = prevToDismiss.presentingViewController ?? presenter
+            prevPresenter.dismiss(animated: false) {
+                presentIfStillCurrent(alert, on: presenter)
+            }
+            return
+        }
+        let top = topViewController()
+        if let dismissing = top as? UIAlertController, dismissing.isBeingDismissed {
+            let scheduled = dismissing.transitionCoordinator?.animate(alongsideTransition: nil) { _ in
+                presentIfStillCurrent(alert, on: presenter)
+            }
+            if scheduled != true {
+                DispatchQueue.main.async { presentIfStillCurrent(alert, on: presenter) }
+            }
+            return
+        }
+        presentIfStillCurrent(alert, on: presenter)
+    }
+
+    /// Presents `alert` on `presenter` — but only if `alert` is still `openConfirm` (a third
+    /// confirm arriving while this one was deferred may already have superseded and answered it —
+    /// see `presentWhenReady`) and `presenter` can actually accept a presentation right now (still
+    /// in a window, and not already presenting something else). When either isn't true, `alert` is
+    /// resolved right here through its own stored answer instead of being silently dropped, so a
+    /// deferred present that can never happen still resolves the waiting continuation exactly once,
+    /// the same way `done` itself would.
+    ///
+    /// `@MainActor`, like `presentWhenReady` above: the deferred UIKit completion closures that
+    /// call this — `dismiss`'s completion, a transition coordinator's
+    /// `animate(alongsideTransition:)` completion, `DispatchQueue.main.async` — all run
+    /// main-actor-isolated, so this needs no isolation override of its own; only `openConfirm`
+    /// (touched from the genuinely nonisolated nested `func done`) does.
+    @MainActor
+    private static func presentIfStillCurrent(_ alert: UIAlertController, on presenter: UIViewController) {
+        let alertID = ObjectIdentifier(alert)
+        guard openConfirm.map({ ObjectIdentifier($0.alert) }) == alertID else { return }
+        guard presenter.view.window != nil, presenter.presentedViewController == nil else {
+            let current = openConfirm
+            openConfirm = nil
+            current?.answer(PluginResponse(ok: false, output: "no view controller to present from"))
+            return
+        }
+        presenter.present(alert, animated: true)
+    }
+}
+
+/// Native date / time capability — request/response. `op`:
+///   "now"  → the current local date-time as "yyyy-MM-dd HH:mm:ss" (no UI, resolves immediately),
+///   "date" → a picker returning ISO "YYYY-MM-DD", "time" → a picker returning 24-hour "HH:MM".
+/// Pickers resolve `ok=false` on cancel. The pickers present a UIDatePicker in an action sheet.
+@MainActor
+enum DateTimePlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        // "now" needs no UI — stamp the current local date-time and return at once.
+        if op == "now" {
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return PluginResponse(ok: true, output: fmt.string(from: Date()))
+        }
+        let mode: UIDatePicker.Mode
+        switch op {
+        case "date": mode = .date
+        case "time": mode = .time
+        default: return PluginResponse(ok: false, output: "unknown op '\(op)'")
+        }
+        // Optional app labels ({title?, confirm_label?, cancel_label?}); "" (plain pick_date) → defaults.
+        let labels = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        func label(_ key: String, _ fallback: String) -> String {
+            (labels?[key] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? fallback
+        }
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            let picker = UIDatePicker()
+            picker.datePickerMode = mode
+            picker.preferredDatePickerStyle = .wheels
+            picker.translatesAutoresizingMaskIntoConstraints = false
+
+            // An action sheet with blank message lines reserves room for the wheel picker.
+            let alert = UIAlertController(
+                title: label("title", op == "date" ? "Pick a date" : "Pick a time"),
+                message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .actionSheet)
+            alert.view.addSubview(picker)
+            NSLayoutConstraint.activate([
+                picker.centerXAnchor.constraint(equalTo: alert.view.centerXAnchor),
+                picker.topAnchor.constraint(equalTo: alert.view.topAnchor, constant: 48),
+                picker.widthAnchor.constraint(equalTo: alert.view.widthAnchor, constant: -16),
+            ])
+
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.dateFormat = op == "date" ? "yyyy-MM-dd" : "HH:mm"
+
+            var resumed = false
+            func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
+            alert.addAction(UIAlertAction(title: label("cancel_label", (ActiveLabels.current?.cancel).flatMap { $0.isEmpty ? nil : $0 } ?? "Cancel"), style: .cancel) { _ in
+                done(PluginResponse(ok: false, output: "cancel"))
+            })
+            alert.addAction(UIAlertAction(title: label("confirm_label", (ActiveLabels.current?.done).flatMap { $0.isEmpty ? nil : $0 } ?? "Done"), style: .default) { _ in
+                done(PluginResponse(ok: true, output: fmt.string(from: picker.date)))
+            })
+            // iPad presents action sheets in a popover, which needs a source.
+            alert.popoverPresentationController?.sourceView = presenter.view
+            alert.popoverPresentationController?.sourceRect = CGRect(
+                x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+            presenter.present(alert, animated: true)
+        }
+    }
+}
+
+/// Photo picker — request/response, permission-less (the system PHPicker). Loads the
+/// pick into a temp file and returns its `file://` URL (which the image widget renders).
+@MainActor
+enum PhotoPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "pick" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            var config = PHPickerConfiguration()
+            config.filter = .images
+            config.selectionLimit = 1
+            let picker = PHPickerViewController(configuration: config)
+            let delegate = PhotoPickerDelegate(input: input) { cont.resume(returning: $0) }
+            PhotoPickerDelegate.retained = delegate // PHPicker holds its delegate weakly
+            picker.delegate = delegate
+            presenter.present(picker, animated: true)
+        }
+    }
+}
+
+private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegate {
+    static var retained: PhotoPickerDelegate?
+    private let input: String
+    private let onResult: (PluginResponse) -> Void
+    /// An empty `input` returns the picked file (cx.pick_photo); options re-encode it (ADR-0045).
+    init(input: String, onResult: @escaping (PluginResponse) -> Void) { self.input = input; self.onResult = onResult }
+
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        guard let provider = results.first?.itemProvider else {
+            finish(PluginResponse(ok: false, output: "cancelled")); return
+        }
+        // Copy the pick to our own temp file (the system one is short-lived) and return it.
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, error in
+            guard let url else {
+                self.finish(PluginResponse(ok: false, output: error?.localizedDescription ?? "load failed")); return
+            }
+            let ext = url.pathExtension.isEmpty ? "jpg" : url.pathExtension
+            let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
+            do {
+                try FileManager.default.copyItem(at: url, to: dest)
+                if self.input.isEmpty {
+                    self.finish(PluginResponse(ok: true, output: dest.absoluteString))
+                } else {
+                    self.finish(PhotoPipeline.processReplacing(dest, input: self.input))
+                }
+            } catch {
+                self.finish(PluginResponse(ok: false, output: error.localizedDescription))
+            }
+        }
+    }
+
+    private func finish(_ r: PluginResponse) {
+        onResult(r)
+        // Runs on the loadFileRepresentation queue: clear the static on main, and only if it is still us.
+        DispatchQueue.main.async { if PhotoPickerDelegate.retained === self { PhotoPickerDelegate.retained = nil } }
+    }
+}
+
+/// Camera capture — request/response. Launches UIImagePickerController(.camera), writes
+/// the shot to a temp file and returns its `file://` URL. Requires NSCameraUsageDescription
+/// (project.yml). The simulator has no camera, so it returns ok:false there; on a device it
+/// presents the system camera. No separate permission API call — iOS prompts on first use.
+@MainActor
+enum CameraPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "capture" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            return PluginResponse(ok: false, output: input.isEmpty ? "camera not available" : "unavailable")
+        }
+        guard let presenter = topViewController() else {
+            return PluginResponse(ok: false, output: "no view controller to present from")
+        }
+        return await withCheckedContinuation { cont in
+            let picker = UIImagePickerController()
+            picker.sourceType = .camera
+            let delegate = CameraCaptureDelegate(input: input) { cont.resume(returning: $0) }
+            CameraCaptureDelegate.retained = delegate // the picker holds its delegate weakly
+            picker.delegate = delegate
+            presenter.present(picker, animated: true)
+        }
+    }
+}
+
+private final class CameraCaptureDelegate: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    static var retained: CameraCaptureDelegate?
+    private let input: String
+    private let onResult: (PluginResponse) -> Void
+    /// An empty `input` returns the captured JPEG (cx.capture_photo); options re-encode it (ADR-0045).
+    init(input: String, onResult: @escaping (PluginResponse) -> Void) { self.input = input; self.onResult = onResult }
+
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        picker.dismiss(animated: true)
+        // With options, keep full quality here: the pipeline does the one lossy encode.
+        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: input.isEmpty ? 0.9 : 1.0) else {
+            finish(PluginResponse(ok: false, output: "no image")); return
+        }
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        do {
+            try data.write(to: dest)
+        } catch {
+            finish(PluginResponse(ok: false, output: error.localizedDescription)); return
+        }
+        if input.isEmpty {
+            finish(PluginResponse(ok: true, output: dest.absoluteString))
+        } else {
+            // Up to five full-size encodes: off the main thread.
+            let input = self.input
+            DispatchQueue.global(qos: .userInitiated).async { self.finish(PhotoPipeline.processReplacing(dest, input: input)) }
+        }
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+        finish(PluginResponse(ok: false, output: "cancelled"))
+    }
+
+    private func finish(_ r: PluginResponse) {
+        onResult(r)
+        // May run off the main thread (the encode): clear the static there, and only if it is still us.
+        DispatchQueue.main.async { if CameraCaptureDelegate.retained === self { CameraCaptureDelegate.retained = nil } }
+    }
+}
+
+/// A UILabel with inner padding (UILabel alone has none) — for the toast pill.
+private final class PaddedLabel: UILabel {
+    private let insets = UIEdgeInsets(top: 10, left: 18, bottom: 10, right: 18)
+    override func drawText(in rect: CGRect) { super.drawText(in: rect.inset(by: insets)) }
+    override var intrinsicContentSize: CGSize {
+        let s = super.intrinsicContentSize
+        return CGSize(width: s.width + insets.left + insets.right, height: s.height + insets.top + insets.bottom)
+    }
+}
+
+/// The active key window — where the shell hangs modals/toasts (it owns no VC).
+@MainActor
+private func keyWindow() -> UIWindow? {
+    (UIApplication.shared.connectedScenes
+        .first { $0.activationState == .foregroundActive } as? UIWindowScene)?.keyWindow
+}
+
+/// The frontmost view controller — modals (the share sheet) present from here.
+@MainActor
+private func topViewController() -> UIViewController? {
+    var top = keyWindow()?.rootViewController
+    while let presented = top?.presentedViewController { top = presented }
+    return top
+}

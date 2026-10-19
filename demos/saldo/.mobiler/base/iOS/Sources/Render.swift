@@ -1,0 +1,2868 @@
+import SwiftUI
+import SharedTypes
+import UIKit
+import ImageIO
+import PDFKit
+import AVKit
+import AVFoundation
+import WebKit
+import MapKit
+
+// The ENTIRE iOS shell renderer. Knows only the fixed Mobiler ABI — `Widget`
+// (what to draw) + `Action` (what to send back). No app-specific types; this exact
+// code renders any Mobiler app. Style *intent* (TextStyle, Tone, …) is decided in
+// Rust; the concrete look (fonts, colors, dp) is decided here — the iOS twin of the
+// Compose `Render`. Recursion is type-erased through `AnyView`.
+
+func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) -> AnyView {
+    switch widget {
+
+    // MARK: content
+    case .text(let content, let style):
+        return AnyView(Text(content).modifier(TextStyleMod(style)))
+
+    case .image(let source, let shape, let ratio):
+        // Size the box from a ratio'd `Color.clear` (an intrinsic-less sizing view)
+        // and let the image fill it as an overlay. Applying `.aspectRatio` to
+        // `AsyncImage` directly is unreliable. Local file URLs (a picked photo) load
+        // via UIImage — AsyncImage doesn't reliably fetch `file://`; remote URLs use
+        // AsyncImage.
+        let fill: AnyView
+        if source.hasPrefix("file:"), let url = URL(string: source) {
+            // Decode local images (a full-res camera/picked photo) OFF the main thread —
+            // decoding a many-megapixel file inline in `render` (which runs on every update)
+            // can stall the UI. FileImageView loads + downsamples asynchronously and caches.
+            fill = AnyView(FileImageView(url: url))
+        } else {
+            fill = AnyView(AsyncImage(url: URL(string: source)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: { Color.gray.opacity(0.15) })
+        }
+        return AnyView(
+            Color.clear
+                .aspectRatio(aspect(ratio), contentMode: .fit)
+                .overlay(fill)
+                .clipShape(imageShape(shape))
+                // An image is decoration, never a touch target. The sizing `Color.clear`
+                // is hit-testable and has no accessibility element, so without this it
+                // silently swallows taps meant for an adjacent control — e.g. an in-body
+                // "← Back" button rendered just above an image, whose taps never reach
+                // their action (verified on-sim). Let touches pass through.
+                .allowsHitTesting(false)
+        )
+
+    case .badge(let label, let tone, let icon):
+        let (bg, fg) = toneColors(tone)
+        return AnyView(
+            // with_icon: the status reads without its colour; the icon is decorative.
+            HStack(spacing: 4) {
+                if let icon { Image(systemName: sfSymbol(icon)).font(.system(size: 14)).accessibilityHidden(true) }
+                Text(label).font(.footnote.weight(.semibold))
+            }
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background(bg).foregroundColor(fg).clipShape(ShapeTokens.shape(ShapeTokens.shapes?.badge) ?? AnyShape(Capsule()))
+        )
+
+    case .colorDot(let color):
+        return AnyView(Circle().fill(projectColor(color)).frame(width: 12, height: 12))
+
+    case .avatar(let source, let status, let initials, let size):
+        return AnyView(AvatarView(source: source, status: status, initials: initials, size: size))
+
+    case .pdfView(let url):
+        return AnyView(PDFKitView(urlString: url).frame(minHeight: 480))
+
+    case .video(let url, let id, let playing, let seekToMs, let controls, let looping, let muted, let onEnded,
+                let poster, let startAtMs, let captions, let rate, let volume, let urls, let startIndex, let seekIndex, let allowPip):
+        return AnyView(VideoView(
+            urlString: url, id: id, playing: playing, seekToMs: seekToMs,
+            controls: controls, looping: looping, muted: muted, onEnded: onEnded,
+            poster: poster, startAtMs: startAtMs, captions: captions, rate: rate, volume: volume,
+            urls: urls, startIndex: startIndex, seekIndex: seekIndex, allowPip: allowPip, send: send
+        ).id(id).frame(minHeight: 240))
+
+    case .webView(let url):
+        return AnyView(WebKitWebView(urlString: url).frame(minHeight: 240))
+
+    case .map(let id, let centerLat, let centerLng, let zoom, let markers, _, let interactive):
+        return AnyView(MapWidgetView(
+            id: id, centerLat: centerLat, centerLng: centerLng, zoom: zoom,
+            markers: markers, interactive: interactive, send: send
+        ).frame(minHeight: 240))
+
+    case .steps(let total, let current, let caption):
+        // One element spoken as the step text (the optional caption is part of it), never as a
+        // percentage. Unfilled segments use the outline colour: they carry the step count.
+        let t = Int(total), c = min(Int(current), Int(total))
+        if t == 0 { return AnyView(EmptyView()) }
+        let tpl = (ActiveLabels.current?.stepOf).flatMap { $0.isEmpty ? nil : $0 } ?? "Step {current} of {total}"
+        let spoken = tpl.replacingOccurrences(of: "{current}", with: "\(c)").replacingOccurrences(of: "{total}", with: "\(t)")
+        return AnyView(VStack(alignment: .leading, spacing: 6) {
+            if caption { Text(spoken).font(.caption).foregroundColor(.secondary) }
+            HStack(spacing: 4) {
+                ForEach(0..<t, id: \.self) { i in
+                    Capsule().fill(i < c ? role(pal?.primary, else: ActiveTheme.current?.brandColor ?? .accentColor) : role(pal?.outline, else: Color(.systemGray3))).frame(height: 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken))
+
+    case .rating(let value, let max, let onRate):
+        return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
+
+    case .divider:
+        return AnyView(PaletteDivider())
+
+    case .progress(let value):
+        if let v = value {
+            return AnyView(ProgressView(value: Double(v)).progressViewStyle(.linear).selectionTint().padding(.vertical, 4))
+        }
+        return AnyView(ProgressView().padding(.vertical, 4))
+
+    case .skeleton:
+        return AnyView(RoundedRectangle(cornerRadius: 8).fill(role(pal?.surfaceMuted, else: Color.gray.opacity(0.2))).frame(height: 48).padding(.vertical, 4))
+
+    case .chart(let series, let labels, let style, let axis, let legend):
+        return AnyView(ChartView(series: series, labels: labels, style: style, axis: axis, legend: legend))
+
+    case .regionChart(let regions, let ticks, let xMax, let yMax, let refLines, let bracket, let legend):
+        return AnyView(RegionChartView(regions: regions, ticks: ticks, xMax: xMax, yMax: yMax, refLines: refLines, bracket: bracket, legend: legend))
+
+    case .calendar(_, _, let title, let weekdayLabels, let leadingBlanks, let selected, let onDay, let markers):
+        return AnyView(CalendarView(title: title, weekdayLabels: weekdayLabels, leadingBlanks: leadingBlanks, selected: selected, onDay: onDay, markers: markers, send: send))
+
+    case .swipeAction(let child, let actions):
+        return AnyView(SwipeActionView(content: child, actions: actions, send: send))
+
+    case .spacer(let size):
+        return AnyView(Color.clear.frame(height: spacing(size)))
+
+    // MARK: layout
+    case .row(let children):
+        return AnyView(HStack(spacing: isLargeDensity() ? 12 : 8) { childViews(children, send) })
+
+    case .column(let children):
+        return AnyView(VStack(alignment: .leading, spacing: isLargeDensity() ? 12 : 6) { childViews(children, send) })
+
+    case .card(let child, let style, let onPress, let onLongPress):
+        // contentShape: the whole card takes the tap, not just its drawn content — an outlined or dashed
+        // card has no fill, so its padding and blank space would otherwise be dead.
+        let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)).contentShape(Rectangle()))
+        var view = body
+        if let token = onPress {
+            view = AnyView(Button(action: { send(.fired(token: token)) }) { body }.buttonStyle(.plain))
+        }
+        if let longToken = onLongPress {
+            view = AnyView(view.onLongPressGesture { send(.fired(token: longToken)) })
+        }
+        return view
+
+    case .box(let children, let align, let scrim):
+        // A scrim box (hero banner) must be sized by its background — the first
+        // child, an image — not by the dimming layer. A bare `Color` is an
+        // infinitely greedy view, so leaving it as a ZStack sibling inflates the
+        // box to fill the scroll view. Instead the scrim + foreground ride along
+        // as an `.overlay` on the image (the SwiftUI twin of Compose's
+        // `matchParentSize()`): sized to the image, never driving layout. The
+        // clipShape matches the rounded hero image so the dim doesn't bleed corners.
+        if scrim, children.count > 1, let first = children.first {
+            return AnyView(
+                render(first, send).overlay(
+                    ZStack(alignment: boxAlign(align)) {
+                        Color.black.opacity(0.4)
+                        VStack(alignment: .leading) { childViews(Array(children.dropFirst()), send) }
+                            .padding().foregroundColor(.white)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                )
+            )
+        }
+        return AnyView(
+            ZStack(alignment: boxAlign(align)) { childViews(children, send) }
+        )
+
+    case .grid(let children, let columns):
+        // Column count adapts to width: 2 on a phone (compact), more on iPad.
+        return AnyView(GridView(children: children, columns: columns, send: send))
+
+    case .scroller(let children, let edgeFade):
+        if !edgeFade {
+            return AnyView(
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) { childViews(children, send) }
+                }
+            )
+        }
+        // Trailing 32pt fade + 32pt of trailing room so the last item clears it at scroll-end.
+        return AnyView(
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    childViews(children, send)
+                    Color.clear.frame(width: 32)
+                }
+            }
+            .mask {
+                HStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 32)
+                }
+            }
+        )
+
+    case .split(let primary, let detail, let showDetail, let onBack):
+        return AnyView(SplitView(primary: primary, detail: detail, showDetail: showDetail, onBack: onBack, send: send))
+
+    // Accessibility wrapper: present the subtree as ONE VoiceOver element named `label`. `.combine`
+    // merges descendants (keeping any tap action) under one element so the override label sticks.
+    case .a11y(let child, let label, let hint, let role):
+        var v = AnyView(render(child, send).accessibilityElement(children: .combine).accessibilityLabel(label))
+        if let hint { v = AnyView(v.accessibilityHint(hint)) }
+        if let role { v = AnyView(v.accessibilityAddTraits(a11yTraits(role))) }
+        return v
+
+    case .lazyList(let children, let onLoadMore, let loading, let hasMore, let onRefresh, let refreshing, let endLabel, let fill):
+        return AnyView(LazyListView(
+            children: children, onLoadMore: onLoadMore, loading: loading,
+            hasMore: hasMore, onRefresh: onRefresh, refreshing: refreshing, endLabel: endLabel, fill: fill, send: send
+        ))
+
+    // MARK: input / actions
+    case .button(let label, let style, let onPress, let tone, let icon, let wide):
+        return AnyView(MobilerButton(label: label, style: style, tone: tone, icon: icon, wide: wide) { send(.fired(token: onPress)) })
+
+    case .iconButton(let icon, let onPress):
+        let large = isLargeDensity()
+        return AnyView(
+            Button(action: { send(.fired(token: onPress)) }) {
+                if large {
+                    Image(systemName: sfSymbol(icon)).foregroundColor(iconTint(icon))
+                        .font(.system(size: 24)).frame(minWidth: 56, minHeight: 56).contentShape(Rectangle())
+                } else {
+                    Image(systemName: sfSymbol(icon)).foregroundColor(iconTint(icon))
+                }
+            }.buttonStyle(.plain)
+        )
+
+    case .chip(let label, let selected, let onPress):
+        let large = isLargeDensity()
+        return AnyView(
+            Button(action: { send(.fired(token: onPress)) }) {
+                Group {
+                    if large {
+                        Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body)).padding(.horizontal, 16).frame(minHeight: 48)
+                    } else {
+                        Text(label).font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline)).padding(.horizontal, 12).padding(.vertical, 6)
+                    }
+                }
+                .background(selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.18)) : role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
+                .foregroundColor(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : role(pal?.onSurface, else: .primary))
+                .overlay((ShapeTokens.shape(ShapeTokens.shapes?.chip) ?? AnyShape(Capsule())).stroke(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : .clear))
+                .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.chip) ?? AnyShape(Capsule()))
+            }.buttonStyle(.plain)
+        )
+
+    case .textField(let id, let placeholder, let value, let kind, let error):
+        let binding = Binding(
+            get: { value },
+            set: { send(.input(id: id, value: .text($0))) }
+        )
+        let lowercase = (kind == .email || kind == .url)
+        let kb: UIKeyboardType
+        switch kind {
+        case .email: kb = .emailAddress
+        case .number: kb = .numberPad
+        case .decimal: kb = .decimalPad
+        case .phone: kb = .phonePad
+        case .url: kb = .URL
+        default: kb = .default
+        }
+        let control: AnyView
+        switch kind {
+        case .secure:
+            control = AnyView(SecureField(placeholder, text: binding).modifier(PaletteFieldStyle()))
+        case .multiline:
+            control = AnyView(TextField(placeholder, text: binding, axis: .vertical)
+                .lineLimit(3...6).modifier(PaletteFieldStyle()))
+        default:
+            control = AnyView(TextField(placeholder, text: binding)
+                .modifier(PaletteFieldStyle())
+                .keyboardType(kb)
+                .textInputAutocapitalization(lowercase ? .never : .sentences)
+                .autocorrectionDisabled(lowercase))
+        }
+        return AnyView(
+            VStack(alignment: .leading, spacing: 4) {
+                control
+                if let error = error {
+                    Text(error).font(CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption)).foregroundColor(role(pal?.error, else: .red))
+                }
+            }
+        )
+
+    case .searchField(let id, let placeholder, let value):
+        return AnyView(
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                TextField(placeholder, text: Binding(
+                    get: { value },
+                    set: { send(.input(id: id, value: .text($0))) }
+                ))
+                .selectionTint()
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
+            .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.input) ?? AnyShape(Capsule()))
+        )
+
+    case .segmented(let segments):
+        let large = isLargeDensity()
+        return AnyView(
+            HStack(spacing: 4) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+                    Button(action: { send(.fired(token: seg.onSelect)) }) {
+                        Text(seg.label).font(large ? CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold) : CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: large ? 48 : nil)
+                            .padding(.vertical, large ? 0 : 8)
+                            .background(seg.selected ? role(pal?.secondaryContainer, else: Color.accentColor) : Color.clear)
+                            .foregroundColor(seg.selected ? role(pal?.onSecondaryContainer, else: .white) : role(pal?.onSurfaceVariant, else: .secondary))
+                            .clipShape(Capsule())
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
+            .clipShape(Capsule())
+        )
+
+    case .toggle(let id, let label, let value):
+        return AnyView(
+            Toggle(label, isOn: Binding(
+                get: { value },
+                set: { send(.input(id: id, value: .bool($0))) }
+            ))
+            .selectionTint()
+        )
+
+    case .checkbox(let id, let label, let value):
+        // iOS has no native checkbox; a leading toggle-style control + label.
+        return AnyView(
+            Button(action: { send(.input(id: id, value: .bool(!value))) }) {
+                HStack(spacing: 10) {
+                    Image(systemName: value ? "checkmark.square.fill" : "square")
+                        .foregroundColor(value ? role(pal?.selection, else: .accentColor) : .secondary)
+                    Text(label).foregroundColor(.primary)
+                    Spacer()
+                }
+            }.buttonStyle(.plain)
+        )
+
+    case .slider(let id, let value, let max):
+        return AnyView(
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { send(.input(id: id, value: .int(Int64($0.rounded())))) }
+                ),
+                in: 0...Double(max)
+            )
+            .selectionTint()
+        )
+
+    case .stepper(let value, let onDecrement, let onIncrement):
+        return AnyView(
+            HStack(spacing: 12) {
+                Button("−") { send(.fired(token: onDecrement)) }.buttonStyle(.bordered)
+                Text("\(value)").font(CustomFonts.bodyOr(.title3, size: 20, relativeTo: .title3))
+                Button("+") { send(.fired(token: onIncrement)) }.buttonStyle(.bordered)
+            }
+        )
+
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, let appearance, let bottomBar):
+        // Theme-as-data: the non-View mapper helpers — spacing(), imageShape(), CardMod,
+        // TextStyleMod — read `ActiveTheme.current` (set from the root view in Core.swift, not
+        // here) for corner/density/font. `theme` itself still flows into ScaffoldView, which uses
+        // it directly only for its own `.tint` and the FAB background.
+        return AnyView(ScaffoldView(
+            title: title, content: body, tabs: tabs, back: back,
+            darkMode: darkMode, appearance: appearance, theme: theme, fab: fab, sheet: sheet,
+            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, bottomBar: bottomBar, send: send
+        ))
+    }
+}
+
+/// The active app [`Theme`] (set from the root view in Core.swift, alongside `ActiveLabels`), read
+/// by the non-View mapper helpers for corner/density/font. `nil` ⇒ framework defaults (no visual
+/// change). Render is single-threaded on the main actor, so `nonisolated(unsafe)` is sound here —
+/// it lets the nonisolated mapper helpers (spacing/imageShape/TextStyleMod) read it; the theme is
+/// app-global, like dark mode.
+enum ActiveTheme {
+    nonisolated(unsafe) static var current: Theme?
+}
+
+/// The current scaffold's app-wide shell text (ShellLabels), set from the root view in Core.swift;
+/// read by the dialog/picker plugins for their defaults. `nil` ⇒ English defaults.
+enum ActiveLabels {
+    nonisolated(unsafe) static var current: ShellLabels?
+}
+
+/// The active palette set — the root scaffold's `theme.palette`, light or dark by its dark mode — set
+/// in Core.swift with `ActiveTheme`. `nil` = no palette: every widget keeps its system colours.
+enum ActivePalette {
+    nonisolated(unsafe) static var current: ColorRoles?
+}
+private var pal: ColorRoles? { ActivePalette.current }
+/// The resolved palette in the environment too: views that read `pal` in their body declare
+/// `@Environment(\.paletteRoles)`, so a light/dark flip (same view inputs) still re-renders them.
+private struct PaletteRolesKey: EnvironmentKey { static let defaultValue: ColorRoles? = nil }
+extension EnvironmentValues {
+    var paletteRoles: ColorRoles? {
+        get { self[PaletteRolesKey.self] }
+        set { self[PaletteRolesKey.self] = newValue }
+    }
+}
+extension Rgb { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255) } }
+extension Rgba { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255) } }
+/// The palette colour for a role, else the shell's current colour.
+func role(_ c: Rgb?, else fallback: Color) -> Color { c?.color ?? fallback }
+extension View {
+    /// The palette's `selection` as this control's tint; unset keeps the inherited tint (today's colour).
+    @ViewBuilder func selectionTint() -> some View {
+        if let s = pal?.selection { self.tint(s.color) } else { self }
+    }
+}
+/// The palette's container/on-container pair for a tone (nil: no palette, neutral, or unset).
+private func palettePair(_ tone: Tone) -> TonePair? {
+    guard let p = pal else { return nil }
+    switch tone {
+    case .success: return p.success
+    case .warning: return p.warning
+    case .danger: return p.danger
+    case .info: return p.info
+    case .neutral: return nil
+    }
+}
+/// `FontFamily.custom`: the families `mobiler fonts sync` registered (UIAppFonts + the
+/// MobilerFontDisplay/MobilerFontBody Info.plist keys) — used only if the family actually registered;
+/// otherwise nil and the system font is used, per role.
+enum CustomFonts {
+    static let display: String? = registered("MobilerFontDisplay")
+    static let body: String? = registered("MobilerFontBody")
+    private static func registered(_ key: String) -> String? {
+        guard let family = Bundle.main.infoDictionary?[key] as? String, !family.isEmpty else { return nil }
+        guard !UIFont.fontNames(forFamilyName: family).isEmpty else {
+            print("mobiler: font family \"\(family)\" (\(key)) isn't registered — using the system font. Check mobiler.toml [fonts] and run `mobiler fonts sync`.")
+            return nil
+        }
+        return family
+    }
+    static var active: Bool { if case .some(.custom) = ActiveTheme.current?.font { return true }; return false }
+    /// The custom family at the size of the system style it replaces (`relativeTo` keeps Dynamic Type);
+    /// nil when not `.custom` or the role has no registered family.
+    static func font(_ family: String?, size: CGFloat, relativeTo: Font.TextStyle) -> Font? {
+        guard active, let family else { return nil }
+        return Font.custom(family, size: size, relativeTo: relativeTo)
+    }
+    /// For controls that set their own font: the body family at the system style's size, else exactly
+    /// `system` (so a non-custom theme is unchanged).
+    static func bodyOr(_ system: Font, size: CGFloat, relativeTo: Font.TextStyle) -> Font {
+        font(body, size: size, relativeTo: relativeTo) ?? system
+    }
+}
+
+/// A type-scale spec (`Theme.type_scale`) as a Font: the synced custom family via `Font.custom(…,
+/// relativeTo:)` (follows Dynamic Type), else the system font at a `UIFontMetrics`-scaled size —
+/// `Font.system(size:)` alone wouldn't follow the user's text size.
+enum TypeScaleFonts {
+    static var scale: TypeScale? { ActiveTheme.current?.typeScale }
+    static func weight(_ w: UInt16) -> Font.Weight {
+        switch (min(max(Int(w), 100), 900) + 50) / 100 * 100 {
+        case 100: return .ultraLight
+        case 200: return .thin
+        case 300: return .light
+        case 400: return .regular
+        case 500: return .medium
+        case 600: return .semibold
+        case 700: return .bold
+        case 800: return .heavy
+        default: return .black
+        }
+    }
+    static func font(_ spec: TypeSpec, relativeTo: Font.TextStyle, uiStyle: UIFont.TextStyle, design: Font.Design) -> Font {
+        let family = spec.family == .display ? CustomFonts.display : CustomFonts.body
+        if let f = CustomFonts.font(family, size: CGFloat(spec.size), relativeTo: relativeTo) { return f.weight(weight(spec.weight)) }
+        return .system(size: UIFontMetrics(forTextStyle: uiStyle).scaledValue(for: CGFloat(spec.size)), weight: weight(spec.weight), design: design)
+    }
+}
+
+/// With `FontFamily.custom`, the body family is the default for everything below (buttons, fields,
+/// plain text); otherwise no modifier.
+private struct CustomBodyFont: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if let f = CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) { content.font(f) } else { content }
+    }
+}
+
+/// Body text in the palette's `on_surface`; without that role, no modifier (system label colour).
+/// The colour is an input (not read from `pal` inside): a modifier with no changing inputs isn't
+/// re-evaluated, so a Light/Dark switch kept the previous set's text colour.
+private struct PaletteText: ViewModifier {
+    let ink: Rgb?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let c = ink { content.foregroundColor(c.color) } else { content }
+    }
+}
+/// Theme.shapes per component: the set radius as a shape (`Pill` = capsule, `Dp(n)` = n pt), else nil
+/// so the site keeps its own shape.
+enum ShapeTokens {
+    static var shapes: Shapes? { ActiveTheme.current?.shapes }
+    static func shape(_ r: Radius?) -> AnyShape? {
+        switch r {
+        case .none: return nil
+        case .some(.pill): return AnyShape(Capsule())
+        case .some(.dp(let n)): return AnyShape(RoundedRectangle(cornerRadius: CGFloat(n)))
+        }
+    }
+    static var button: AnyShape { shape(shapes?.button) ?? AnyShape(Capsule()) }
+}
+
+
+/// Text fields: with a palette's `surface_muted`, a plain field on that fill with an `outline` border
+/// (`.roundedBorder` can't be recoloured); otherwise the system rounded border, as before.
+private struct PaletteFieldStyle: ViewModifier {
+    @Environment(\.paletteRoles) private var paletteRoles
+    /// A palette's `selection` marks the focused field's border; unset: no focus border, as before.
+    @FocusState private var focused: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let focusMark = focused ? pal?.selection : nil
+        // `.roundedBorder` can't take another radius either: an `input` radius also switches to a plain
+        // field with its own shape.
+        let inputShape = ShapeTokens.shape(ShapeTokens.shapes?.input)
+        if pal?.surfaceMuted != nil || inputShape != nil {
+            let shape = inputShape ?? AnyShape(RoundedRectangle(cornerRadius: 8))
+            content.textFieldStyle(.plain)
+                .focused($focused)
+                .selectionTint()
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemFill))))
+                // A palette without `outline` keeps its borderless field; the gray hairline is only for
+                // an input radius without a palette.
+                .overlay(shape.stroke(focusMark?.color ?? role(pal?.outline, else: pal?.surfaceMuted != nil ? .clear : Color.gray.opacity(0.3))))
+        } else {
+            content.textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .selectionTint()
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(focusMark?.color ?? .clear, lineWidth: 1))
+        }
+    }
+}
+/// A horizontal hairline in the palette's `outline_variant`, else the system divider.
+private struct PaletteDivider: View {
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        if let c = pal?.outlineVariant { Rectangle().fill(c.color).frame(height: 1) } else { Divider() }
+    }
+}
+
+/// Concrete look derived from the active theme (with framework defaults when un-themed).
+extension Theme {
+    var brandColor: Color { Color(red: Double(seed.r) / 255, green: Double(seed.g) / 255, blue: Double(seed.b) / 255) }
+    var accentColor: Color { accent.map { Color(red: Double($0.r) / 255, green: Double($0.g) / 255, blue: Double($0.b) / 255) } ?? brandColor }
+    var cardRadius: CGFloat { switch corner { case .none: 0; case .small: 8; case .medium: 14; case .large: 22 } }
+    var imageRadius: CGFloat { switch corner { case .none: 0; case .small: 10; case .medium: 16; case .large: 24 } }
+    var densityScale: CGFloat { switch density { case .compact: 0.75; case .comfortable: 1.0; case .large: 1.25 } }
+    var fontDesign: Font.Design { switch font { case .system: .default; case .rounded: .rounded; case .serif: .serif; case .monospace: .monospaced; case .custom: .default } }
+}
+
+/// `Density.large` enlarges controls (56pt buttons, 48pt chips/day cells, larger labels). Every use is
+/// `large ? <large> : <the original value>` so the other densities stay pixel-identical.
+private func isLargeDensity() -> Bool {
+    if case .large? = ActiveTheme.current?.density { return true }
+    return false
+}
+
+/// A widget's own id, for the kinds that have one.
+fileprivate func ownId(_ w: SharedTypes.Widget) -> String? {
+    switch w {
+    case .textField(let id, _, _, _, _), .searchField(let id, _, _), .toggle(let id, _, _),
+         .checkbox(let id, _, _), .slider(let id, _, _), .map(let id, _, _, _, _, _, _):
+        return id
+    case .video(_, let id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _):
+        return id
+    default:
+        return nil
+    }
+}
+
+/// The first id in a widget's subtree (depth first): how an id-less container is known by what it holds.
+fileprivate func firstId(_ w: SharedTypes.Widget) -> String? {
+    if let id = ownId(w) { return id }
+    switch w {
+    case .row(let children), .column(let children):
+        return children.lazy.compactMap(firstId).first
+    case .box(let children, _, _), .grid(let children, _), .scroller(let children, _):
+        return children.lazy.compactMap(firstId).first
+    case .lazyList(let children, _, _, _, _, _, _, _):
+        return children.lazy.compactMap(firstId).first
+    case .card(let child, _, _, _), .a11y(let child, _, _, _), .swipeAction(let child, _):
+        return firstId(child)
+    case .split(let primary, let detail, _, _):
+        return firstId(primary) ?? firstId(detail)
+    default:
+        return nil
+    }
+}
+
+/// A child's identity across renders (ADR-0047): its id; else its kind, plus the first id inside it
+/// for a container (`row[email]`); then `#n` for its place among siblings with the same base, so keys
+/// are unique. A row appearing above a field, or above the row or card holding it, never changes the
+/// field's identity, so SwiftUI keeps its text and focus.
+fileprivate func childKeys(_ children: [SharedTypes.Widget]) -> [String] {
+    var seen: [String: Int] = [:]
+    return children.map { w in
+        let base: String
+        if let id = ownId(w) {
+            base = "id:\(id)"
+        } else {
+            // The case name: a case with values reflects as one labelled child.
+            let kind = Mirror(reflecting: w).children.first?.label ?? String(describing: w)
+            base = kind + (firstId(w).map { "[\($0)]" } ?? "")
+        }
+        let n = seen[base, default: 0]
+        seen[base] = n + 1
+        return "\(base)#\(n)"
+    }
+}
+
+/// A sibling with its `childKeys` identity and its position, for `ForEach`.
+fileprivate struct KeyedChild: Identifiable {
+    let id: String
+    let offset: Int
+    let element: SharedTypes.Widget
+}
+
+fileprivate func keyedChildren(_ children: [SharedTypes.Widget]) -> [KeyedChild] {
+    zip(childKeys(children), children.enumerated()).map { KeyedChild(id: $0, offset: $1.offset, element: $1.element) }
+}
+
+/// Renders a `[Widget]` as sibling views (children of a stack/grid), each under its identity.
+@ViewBuilder
+private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Action) -> Void) -> some View {
+    ForEach(keyedChildren(children)) { item in
+        render(item.element, send)
+    }
+}
+
+/// `Widget::Map` on iOS — MapKit (`MKMapView`) via UIViewRepresentable. The app drives the camera
+/// (center/zoom → region span) + markers; a tap reports coordinates and selecting a marker reports its
+/// id, both via `Action::Input` ("{id}.tap" / "{id}.marker"). `style_url` is MapLibre-only → ignored
+/// here (MapKit uses Apple Maps). The camera and markers are applied only when the app's values change
+/// (ADR-0026), so a user's pan or zoom survives unrelated re-renders.
+private struct MapWidgetView: UIViewRepresentable {
+    let id: String
+    let centerLat: Double
+    let centerLng: Double
+    let zoom: Double
+    let markers: [SharedTypes.MapMarker]
+    let interactive: Bool
+    let send: (Action) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> MKMapView {
+        let mv = MKMapView()
+        mv.delegate = context.coordinator
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tap.delegate = context.coordinator
+        mv.addGestureRecognizer(tap)
+        return mv
+    }
+
+    func updateUIView(_ mv: MKMapView, context: Context) {
+        context.coordinator.parent = self
+        mv.isScrollEnabled = interactive
+        mv.isZoomEnabled = interactive
+        let c = context.coordinator
+        let camera = [centerLat, centerLng, zoom]
+        if c.appliedCamera != camera {
+            c.appliedCamera = camera
+            // zoom level → span in degrees (≈ 360 / 2^zoom), clamped to a sane range.
+            let span = min(180.0, max(0.001, 360.0 / pow(2.0, zoom)))
+            let region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
+                span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
+            )
+            mv.setRegion(region, animated: false)
+            // The first update can run before SwiftUI sizes the view, and MapKit fits a region to
+            // the view's bounds: apply it once more after layout.
+            if mv.bounds.isEmpty {
+                DispatchQueue.main.async { mv.setRegion(region, animated: false) }
+            }
+        }
+        let markersKey = markers.map { "\($0.id)|\($0.lat)|\($0.lng)|\($0.title ?? "")" }.joined(separator: "\n")
+        if c.appliedMarkers != markersKey {
+            c.appliedMarkers = markersKey
+            mv.removeAnnotations(mv.annotations)
+            for mk in markers {
+                let a = MarkerAnnotation(markerId: mk.id)
+                a.coordinate = CLLocationCoordinate2D(latitude: mk.lat, longitude: mk.lng)
+                a.title = mk.title
+                mv.addAnnotation(a)
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
+        var parent: MapWidgetView
+        /// What was last applied from the app, so a re-render with the same values leaves the user's
+        /// pan/zoom and the marker selection alone. `nil` until the first update.
+        var appliedCamera: [Double]?
+        var appliedMarkers: String?
+        init(_ p: MapWidgetView) { parent = p }
+
+        @objc func handleTap(_ g: UITapGestureRecognizer) {
+            guard let mv = g.view as? MKMapView else { return }
+            let coord = mv.convert(g.location(in: mv), toCoordinateFrom: mv)
+            parent.send(.input(id: "\(parent.id).tap", value: .text("\(coord.latitude),\(coord.longitude)")))
+        }
+
+        // Don't treat a tap on a marker pin as a map tap (the marker fires `didSelect` separately).
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            !(touch.view is MKAnnotationView || touch.view?.superview is MKAnnotationView)
+        }
+
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            if let a = view.annotation as? MarkerAnnotation {
+                parent.send(.input(id: "\(parent.id).marker", value: .text(a.markerId)))
+            }
+        }
+    }
+}
+
+private final class MarkerAnnotation: MKPointAnnotation {
+    let markerId: String
+    init(markerId: String) { self.markerId = markerId; super.init() }
+}
+
+/// A responsive grid: 2 columns on a phone (compact width), 4 on an iPad (regular) —
+/// the iOS twin of the web shell's `auto-fill` grid and Android's width-derived count.
+private struct GridView: View {
+    let children: [SharedTypes.Widget]
+    /// with_columns: exactly that many (1-4) at every width; nil = 2 on a phone, 4 on iPad.
+    let columns: UInt8?
+    let send: (Action) -> Void
+    @Environment(\.horizontalSizeClass) private var hSize
+    var body: some View {
+        let cols = columns.map { Int(min(max($0, 1), 4)) } ?? (hSize == .regular ? 4 : 2)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: cols), spacing: 12) {
+            childViews(children, send)
+        }
+    }
+}
+
+// Circular avatar image with an optional colored status dot.
+private struct AvatarView: View {
+    let source: String
+    let status: Tone?
+    let initials: String?
+    let size: UInt8?
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let d = CGFloat(size ?? 48)
+        let img: AnyView
+        if let initials, source.isEmpty {
+            img = AnyView(initialsView(initials, d))
+        } else if source.hasPrefix("file:"), let url = URL(string: source) {
+            img = AnyView(FileImageView(url: url, fallback: initials.map { AnyView(initialsView($0, d)) }))
+        } else if let initials, URL(string: source) == nil {
+            // Not a loadable URL at all: AsyncImage would stay empty, so it's a failure.
+            img = AnyView(initialsView(initials, d))
+        } else if let initials {
+            // with_initials: drawn when the image fails to load; a loaded image wins.
+            img = AnyView(AsyncImage(url: URL(string: source)) { phase in
+                switch phase {
+                case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
+                case .failure: initialsView(initials, d)
+                default: Color.gray.opacity(0.15)
+                }
+            })
+        } else {
+            img = AnyView(AsyncImage(url: URL(string: source)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: { Color.gray.opacity(0.15) })
+        }
+        return img
+            .frame(width: d, height: d)
+            .clipShape(Circle())
+            .overlay(alignment: .bottomTrailing) {
+                if let status = status {
+                    Circle().fill(palettePair(status) != nil ? toneColors(status).1 : toneColors(status).0)
+                        .frame(width: 12, height: 12)
+                        .overlay(Circle().stroke(role(pal?.surface, else: Color(.systemBackground)), lineWidth: 2))
+                }
+            }
+    }
+
+    /// The first two characters on the palette's secondary container (else a 16% brand tint), 40% of
+    /// the diameter, in the body family.
+    private func initialsView(_ initials: String, _ d: CGFloat) -> some View {
+        let brand = ActiveTheme.current?.brandColor ?? .accentColor
+        return Circle()
+            .fill(role(pal?.secondaryContainer, else: brand.opacity(0.16)))
+            .overlay(
+                Text(String(initials.prefix(2)))
+                    .font(CustomFonts.bodyOr(.system(size: d * 0.4), size: d * 0.4, relativeTo: .body).weight(.semibold))
+                    .foregroundColor(role(pal?.onSecondaryContainer, else: brand))
+            )
+    }
+}
+
+// Distinct fallback colors for series 1.. (series 0 with no override rides the accent color).
+private let chartPalette: [Color] = [
+    Color(red: 224.0 / 255, green: 119.0 / 255, blue: 44.0 / 255),
+    Color(red: 46.0 / 255, green: 160.0 / 255, blue: 106.0 / 255),
+    Color(red: 192.0 / 255, green: 70.0 / 255, blue: 107.0 / 255),
+    Color(red: 138.0 / 255, green: 92.0 / 255, blue: 192.0 / 255),
+    Color(red: 201.0 / 255, green: 162.0 / 255, blue: 39.0 / 255),
+    Color(red: 63.0 / 255, green: 167.0 / 255, blue: 214.0 / 255),
+]
+
+// Palette as RGB (parallel to chartPalette) so RegionChart can compute per-band label contrast.
+private let regionPaletteRGB: [(Double, Double, Double)] = [
+    (224.0 / 255, 119.0 / 255, 44.0 / 255), (46.0 / 255, 160.0 / 255, 106.0 / 255), (192.0 / 255, 70.0 / 255, 107.0 / 255),
+    (138.0 / 255, 92.0 / 255, 192.0 / 255), (201.0 / 255, 162.0 / 255, 39.0 / 255), (63.0 / 255, 167.0 / 255, 214.0 / 255),
+]
+
+// Multi-series chart: cartesian (bar/line/stacked) with optional y-axis + legend, or circular
+// (pie/donut/rings/gauge). Drawn with SwiftUI Canvas; the iOS twin of the Compose Chart arm and
+// mobiler-web's chart_view. Non-interactive.
+private struct ChartView: View {
+    let series: [ChartSeries]
+    let labels: [String]
+    let style: SharedTypes.ChartStyle
+    let axis: Bool
+    let legend: Bool
+
+    private func color(_ i: Int) -> Color {
+        if i < series.count, let c = series[i].color {
+            return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+        }
+        return i == 0 ? role(pal?.primaryText, else: Color.accentColor) : chartPalette[(i - 1) % chartPalette.count]
+    }
+    private func mag(_ i: Int) -> Float { i < series.count ? series[i].values.reduce(0, +) : 0 }
+    private func fmtTick(_ v: Float) -> String {
+        abs(v - v.rounded()) < 0.05 ? "\(Int(v))" : String(format: "%.1f", v)
+    }
+    private var isCartesian: Bool {
+        switch style { case .bar, .line, .stackedBar, .stackedBar100: return true; default: return false }
+    }
+    private var nslots: Int { max(series.map { $0.values.count }.max() ?? 0, 1) }
+    private func slotVal(_ s: ChartSeries, _ j: Int) -> Float { s.values.indices.contains(j) ? s.values[j] : 0 }
+    private var maxV: Float {
+        switch style {
+        case .stackedBar:
+            let totals = (0 ..< nslots).map { j in series.reduce(Float(0)) { $0 + slotVal($1, j) } }
+            return max(totals.max() ?? 1, 1e-6)
+        case .stackedBar100: return 1
+        default: return max(series.flatMap { $0.values }.max() ?? 1, 1e-6)
+        }
+    }
+    private var gaugePct: Int {
+        guard !series.isEmpty else { return 0 }
+        let g = series[0].goal ?? mag(0)
+        return Int((min(mag(0) / (g <= 0 ? 1e-6 : g), 1) * 100).rounded())
+    }
+
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        VStack(spacing: 4) {
+            if isCartesian {
+                HStack(spacing: 4) {
+                    if axis {
+                        VStack(alignment: .trailing) {
+                            Text(fmtTick(maxV)).font(.caption2).foregroundColor(.secondary)
+                            Spacer()
+                            Text(fmtTick(maxV / 2)).font(.caption2).foregroundColor(.secondary)
+                            Spacer()
+                            Text(fmtTick(0)).font(.caption2).foregroundColor(.secondary)
+                        }.frame(height: 120)
+                    }
+                    cartesianCanvas.frame(height: 120)
+                }
+                if !labels.isEmpty {
+                    HStack(spacing: 0) {
+                        ForEach(Array(labels.enumerated()), id: \.offset) { _, l in
+                            Text(l).font(.caption2).foregroundColor(.secondary).frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            } else {
+                ZStack {
+                    circularCanvas
+                    if case .gauge = style { Text("\(gaugePct)%").font(CustomFonts.bodyOr(.title2, size: 22, relativeTo: .title2)).bold() }
+                }.frame(height: 140)
+            }
+            if legend, !series.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(Array(series.enumerated()), id: \.offset) { i, s in
+                        HStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 2).fill(color(i)).frame(width: 10, height: 10)
+                            Text(s.name).font(.caption2).foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+
+    private var cartesianCanvas: some View {
+        Canvas { ctx, size in
+            let w = size.width
+            let top: CGFloat = 2
+            let plot = max(size.height - 4, 1)
+            let bottom = top + plot
+            if axis {
+                for k in 0 ... 4 {
+                    let y = top + CGFloat(k) * plot / 4
+                    var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+                    ctx.stroke(p, with: .color(.gray.opacity(0.25)), lineWidth: 0.5)
+                }
+            }
+            switch style {
+            case .line:
+                for (i, s) in series.enumerated() {
+                    let n = max(s.values.count, 1)
+                    var p = Path()
+                    for (j, v) in s.values.enumerated() {
+                        let x = n == 1 ? w / 2 : w * CGFloat(j) / CGFloat(n - 1)
+                        let y = top + (1 - CGFloat(min(max(v / maxV, 0), 1))) * plot
+                        if j == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                    ctx.stroke(p, with: .color(color(i)), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                }
+            case .bar:
+                let sw = w / CGFloat(nslots)
+                let ns = CGFloat(max(series.count, 1))
+                for (i, s) in series.enumerated() {
+                    for (j, v) in s.values.enumerated() {
+                        let bh = CGFloat(min(max(v / maxV, 0), 1)) * plot
+                        let bw = sw * 0.8 / ns
+                        let x = CGFloat(j) * sw + sw * 0.1 + CGFloat(i) * bw
+                        ctx.fill(Path(CGRect(x: x, y: bottom - bh, width: bw, height: bh)), with: .color(color(i)))
+                    }
+                }
+            default: // stackedBar / stackedBar100
+                let sw = w / CGFloat(nslots)
+                for j in 0 ..< nslots {
+                    let slotTotal = max(series.reduce(Float(0)) { $0 + slotVal($1, j) }, 1e-6)
+                    let denom: Float = { if case .stackedBar100 = style { return slotTotal } else { return maxV } }()
+                    var acc: CGFloat = 0
+                    for (i, s) in series.enumerated() {
+                        let bh = CGFloat(min(max(slotVal(s, j) / denom, 0), 1)) * plot
+                        let x = CGFloat(j) * sw + sw * 0.15
+                        ctx.fill(Path(CGRect(x: x, y: bottom - acc - bh, width: sw * 0.7, height: bh)), with: .color(color(i)))
+                        acc += bh
+                    }
+                }
+            }
+        }
+    }
+
+    private var circularCanvas: some View {
+        Canvas { ctx, size in
+            let cx = size.width / 2, cy = size.height / 2
+            let center = CGPoint(x: cx, y: cy)
+            let rad = min(size.width, size.height) / 2 - 6
+            func ring(_ r: CGFloat, _ from: Double, _ to: Double) -> Path {
+                var p = Path()
+                p.addArc(center: center, radius: r, startAngle: .degrees(from), endAngle: .degrees(to), clockwise: false)
+                return p
+            }
+            switch style {
+            case .pie, .donut:
+                let total = max((0 ..< series.count).reduce(Float(0)) { $0 + mag($1) }, 1e-6)
+                var start = -90.0
+                for i in 0 ..< series.count {
+                    let sweep = Double(mag(i) / total) * 360
+                    if case .donut = style {
+                        ctx.stroke(ring(rad - 10, start, start + sweep), with: .color(color(i)), lineWidth: 20)
+                    } else {
+                        var p = Path()
+                        p.move(to: center)
+                        p.addArc(center: center, radius: rad, startAngle: .degrees(start), endAngle: .degrees(start + sweep), clockwise: false)
+                        p.closeSubpath()
+                        ctx.fill(p, with: .color(color(i)))
+                    }
+                    start += sweep
+                }
+            case .rings:
+                let n = max(series.count, 1)
+                for i in 0 ..< series.count {
+                    let r = rad - CGFloat(i) * (rad * 0.62 / CGFloat(n)) - 2
+                    ctx.stroke(Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)), with: .color(.gray.opacity(0.2)), lineWidth: 10)
+                    let g = series[i].goal ?? mag(i)
+                    let prog = Double(min(max(mag(i) / (g <= 0 ? 1e-6 : g), 0), 1))
+                    if prog > 0 {
+                        ctx.stroke(ring(r, -90, -90 + 360 * prog), with: .color(color(i)), style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    }
+                }
+            default: // gauge
+                let r = rad - 4
+                ctx.stroke(ring(r, 135, 135 + 270), with: .color(.gray.opacity(0.2)), style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                if !series.isEmpty {
+                    let g = series[0].goal ?? mag(0)
+                    let prog = Double(min(max(mag(0) / (g <= 0 ? 1e-6 : g), 0), 1))
+                    ctx.stroke(ring(r, 135, 135 + 270 * prog), with: .color(color(0)), style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                }
+            }
+        }
+    }
+}
+
+// Variable-width stacked-region / coverage-gap chart: absolute-positioned region rectangles in the
+// [0,xMax]×[0,yMax] plane + ref lines/chips + irregular x-ticks + optional right bracket + legend.
+// The iOS twin of mobiler-web's region_chart_view. Non-interactive.
+private struct RegionChartView: View {
+    let regions: [ChartRegion]
+    let ticks: [ChartTick]
+    let xMax: Float
+    let yMax: Float
+    let refLines: [ChartRefLine]
+    let bracket: ChartBracket?
+    let legend: [ChartLegendItem]
+
+    private func rgbOf(_ i: Int) -> (Double, Double, Double) {
+        if i < regions.count, let c = regions[i].color {
+            return (Double(c.r) / 255, Double(c.g) / 255, Double(c.b) / 255)
+        }
+        return regionPaletteRGB[i % regionPaletteRGB.count]
+    }
+    private func color(_ i: Int) -> Color {
+        let (r, g, b) = rgbOf(i)
+        return Color(red: r, green: g, blue: b)
+    }
+    private func textOn(_ i: Int) -> Color {
+        let (r, g, b) = rgbOf(i)
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 0.55 ? Color(white: 0.1) : Color(white: 0.96)
+    }
+    private func fmtTick(_ v: Float) -> String {
+        abs(v - v.rounded()) < 0.05 ? "\(Int(v))" : String(format: "%.1f", v)
+    }
+
+    // Everything is drawn in ONE Canvas coordinate space: a reserved left gutter (y labels) +
+    // plot + right margin (chips/bracket). Regions, axes, ticks, and x-labels all map through the
+    // same px()/py(), so they line up by construction. The iOS twin of mobiler-web's region chart.
+    var body: some View {
+        let xm = max(xMax, 1e-6)
+        let ym = max(yMax, 1e-6)
+        VStack(spacing: 6) {
+            Canvas { ctx, size in
+                let gutter: CGFloat = 42
+                let chipW: CGFloat = 58
+                let plotX = gutter
+                let plotTop: CGFloat = 6
+                let plotBottom = size.height - 22
+                let plotH = max(plotBottom - plotTop, 1)
+                let plotW = max(size.width - gutter - chipW, 1)
+                let px: (Float) -> CGFloat = { plotX + CGFloat(min(max($0 / xm, 0), 1)) * plotW }
+                let py: (Float) -> CGFloat = { plotTop + CGFloat(1 - min(max($0 / ym, 0), 1)) * plotH }
+                let axisColor = Color.primary.opacity(0.8)
+                let red = Color(red: 0.75, green: 0.22, blue: 0.17)
+
+                for (i, r) in regions.enumerated() {
+                    let rect = CGRect(x: px(r.x0), y: py(r.y1), width: px(r.x1) - px(r.x0), height: py(r.y0) - py(r.y1))
+                    ctx.fill(Path(rect), with: .color(color(i)))
+                    ctx.stroke(Path(rect), with: .color(.white.opacity(0.4)), lineWidth: 0.5)
+                    if !r.label.isEmpty {
+                        let avail = r.vertical ? (rect.height - 6) : (rect.width - 6)
+                        var fs: CGFloat = 11
+                        var t = ctx.resolve(Text(r.label).font(.system(size: fs)).foregroundColor(textOn(i)))
+                        let mw = t.measure(in: CGSize(width: 4000, height: 4000)).width
+                        if avail > 1, mw > avail {
+                            fs = max(7, fs * avail / mw)
+                            t = ctx.resolve(Text(r.label).font(.system(size: fs)).foregroundColor(textOn(i)))
+                        }
+                        if r.vertical {
+                            var c = ctx
+                            c.translateBy(x: rect.midX, y: rect.midY)
+                            c.rotate(by: .degrees(-90))
+                            c.draw(t, at: .zero, anchor: .center)
+                        } else {
+                            ctx.draw(t, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+                        }
+                    }
+                }
+                for rl in refLines {
+                    let y = py(rl.value)
+                    var p = Path(); p.move(to: CGPoint(x: plotX, y: y)); p.addLine(to: CGPoint(x: plotX + plotW, y: y))
+                    ctx.stroke(p, with: .color(red), style: rl.dashed ? StrokeStyle(lineWidth: 2, dash: [6, 5]) : StrokeStyle(lineWidth: 2))
+                }
+                if let b = bracket {
+                    let bx = plotX + plotW + 4
+                    let yt = py(b.y1); let yb = py(b.y0)
+                    var p = Path()
+                    p.move(to: CGPoint(x: bx, y: yt)); p.addLine(to: CGPoint(x: bx, y: yb))
+                    p.move(to: CGPoint(x: bx, y: yt)); p.addLine(to: CGPoint(x: bx - 5, y: yt))
+                    p.move(to: CGPoint(x: bx, y: yb)); p.addLine(to: CGPoint(x: bx - 5, y: yb))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(b.info ? "ⓘ\n" + b.label : b.label).font(.system(size: 8)).foregroundColor(.secondary)), at: CGPoint(x: bx + 4, y: (yt + yb) / 2), anchor: .leading)
+                }
+                var ax = Path()
+                ax.move(to: CGPoint(x: plotX, y: plotTop)); ax.addLine(to: CGPoint(x: plotX, y: plotBottom))
+                ax.move(to: CGPoint(x: plotX, y: plotBottom)); ax.addLine(to: CGPoint(x: plotX + plotW, y: plotBottom))
+                ctx.stroke(ax, with: .color(axisColor), lineWidth: 2)
+                for k in 0 ... 4 {
+                    let v = ym * Float(k) / 4
+                    let y = py(v)
+                    var p = Path(); p.move(to: CGPoint(x: plotX - 6, y: y)); p.addLine(to: CGPoint(x: plotX, y: y))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(fmtTick(v)).font(.system(size: 9)).foregroundColor(.secondary)), at: CGPoint(x: plotX - 6, y: y), anchor: .trailing)
+                }
+                for t in ticks {
+                    let x = px(t.at)
+                    var p = Path(); p.move(to: CGPoint(x: x, y: plotBottom)); p.addLine(to: CGPoint(x: x, y: plotBottom + 5))
+                    ctx.stroke(p, with: .color(axisColor), lineWidth: 1.5)
+                    ctx.draw(ctx.resolve(Text(t.label).font(.caption2).foregroundColor(.secondary)), at: CGPoint(x: x, y: plotBottom + 13), anchor: .center)
+                }
+                for rl in refLines {
+                    let y = py(rl.value)
+                    let ct = ctx.resolve(Text(rl.label).font(.system(size: 9).weight(.semibold)).foregroundColor(Color(white: 0.1)))
+                    let sz = ct.measure(in: CGSize(width: chipW, height: 40))
+                    let cx = plotX + plotW + chipW / 2
+                    let box = CGRect(x: cx - sz.width / 2 - 4, y: y - sz.height / 2 - 2, width: sz.width + 8, height: sz.height + 4)
+                    ctx.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(.white))
+                    ctx.stroke(Path(roundedRect: box, cornerRadius: 4), with: .color(.black.opacity(0.2)), lineWidth: 0.5)
+                    ctx.draw(ct, at: CGPoint(x: cx, y: y), anchor: .center)
+                }
+            }
+            .frame(height: 312)
+            if !legend.isEmpty {
+                let rows = (legend.count + 2) / 3
+                VStack(spacing: 2) {
+                    ForEach(0 ..< rows, id: \.self) { row in
+                        HStack(spacing: 12) {
+                            ForEach(Array((row * 3) ..< min(row * 3 + 3, legend.count)), id: \.self) { idx in
+                                let li = legend[idx]
+                                HStack(spacing: 4) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color(red: Double(li.color.r) / 255, green: Double(li.color.g) / 255, blue: Double(li.color.b) / 255))
+                                        .frame(width: 10, height: 10)
+                                    Text(li.label).font(.caption2).foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+}
+
+/// Set true only around the Scaffold body's designated fill `LazyList` (see `bodyFillIndex`) — the
+/// `.lazyList` case reads it (together with `fill`) to switch from the 420pt cap to filling its
+/// parent, and resets it to false around its own children so a nested or second `fill: true` list
+/// keeps the cap.
+private struct FillListKey: EnvironmentKey {
+    static let defaultValue = false
+}
+private extension EnvironmentValues {
+    var fillList: Bool {
+        get { self[FillListKey.self] }
+        set { self[FillListKey.self] = newValue }
+    }
+}
+
+/// The scaffold body's fill list, per the shared rule: the body itself, or the first direct child of
+/// the body's column, that is a `LazyList { fill: true }`. `-1` ⇒ the body itself; `i >= 0` ⇒ child
+/// `i` of the body's column; `nil` ⇒ no fill mode (the body scrolls as a page, as today).
+private func bodyFillIndex(_ body: SharedTypes.Widget) -> Int? {
+    if case .lazyList(_, _, _, _, _, _, _, let fill) = body, fill { return -1 }
+    if case .column(let children) = body {
+        return children.firstIndex { child in
+            if case .lazyList(_, _, _, _, _, _, _, let fill) = child { return fill }
+            return false
+        }
+    }
+    return nil
+}
+
+// A list row that reveals trailing action buttons on horizontal swipe; tap an action to fire it.
+// A paged feed list: pull-to-refresh at the top (`.refreshable`) + load-more when the last row
+// appears (`.onAppear`, guarded by hasMore && !loading so it fires once per page). App-owned
+// `loading`/`refreshing`/`hasMore` drive the spinners and gate the events.
+private struct LazyListView: View {
+    let children: [SharedTypes.Widget]
+    let onLoadMore: String?
+    let loading: Bool
+    let hasMore: Bool
+    let onRefresh: String?
+    let refreshing: Bool
+    let endLabel: String?
+    let fill: Bool
+    let send: (Action) -> Void
+    // Set by the Scaffold body arm around its designated fill list (see `bodyFillIndex`); reset to
+    // false below around this list's own children so a nested/second fill list keeps the 420pt cap.
+    @Environment(\.fillList) private var fillList
+
+    var body: some View {
+        let list = ScrollView {
+            LazyVStack(alignment: .leading, spacing: 6) {
+                if refreshing {
+                    ProgressView().frame(maxWidth: .infinity).padding(.bottom, 4)
+                }
+                ForEach(keyedChildren(children)) { item in
+                    let (idx, child) = (item.offset, item.element)
+                    render(child, send)
+                        .environment(\.fillList, false)
+                        .onAppear {
+                            if idx == children.count - 1, hasMore, !loading, let token = onLoadMore {
+                                send(.fired(token: token))
+                            }
+                        }
+                }
+                if loading {
+                    ProgressView().frame(maxWidth: .infinity).padding(8)
+                } else if !hasMore && onLoadMore != nil, let endLabel {
+                    Text(endLabel).font(.footnote).foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity).padding(8)
+                }
+            }
+        }
+        // A bounded height makes the inner ScrollView a real scroll region: the LazyVStack
+        // virtualizes (so load-more fires incrementally on scroll, not all at once) and
+        // `.refreshable` has a scroll view to attach to. Nested inside the page scroll —
+        // unless this is the Scaffold body's designated fill list, which instead takes the
+        // remaining height of its (non-scrolling) parent. Must be pixel-identical to the old
+        // unconditional `.frame(height: 420)` when not filling.
+        Group {
+            if fillList && fill {
+                list.frame(maxHeight: .infinity)
+            } else {
+                list.frame(height: 420)
+            }
+        }
+        .refreshableIf(onRefresh, send)
+    }
+}
+
+private struct SwipeActionView: View {
+    let content: SharedTypes.Widget
+    let actions: [SwipeButton]
+    let send: (Action) -> Void
+    @State private var offset: CGFloat = 0
+    private var revealWidth: CGFloat { CGFloat(actions.count) * 84 }
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 8) {
+                ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
+                    Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
+                        Text(a.label)
+                            .font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
+                            .foregroundColor(palettePair(a.tone) != nil ? toneColors(a.tone).1 : .white)
+                            .frame(width: 76)
+                            .frame(maxHeight: .infinity)
+                            .background(palettePair(a.tone) != nil ? toneColors(a.tone).0 : toneColors(a.tone).1)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+            render(content, send)
+                .background(role(pal?.surface, else: Color(.systemBackground)))
+                .offset(x: offset)
+                .gesture(
+                    DragGesture()
+                        .onChanged { v in offset = min(0, max(-revealWidth, v.translation.width)) }
+                        .onEnded { _ in withAnimation { offset = offset < -revealWidth / 2 ? -revealWidth : 0 } }
+                )
+        }
+        .clipped()
+    }
+}
+
+// Inline month calendar — title, weekday header and leading blanks come pre-localized from the
+// core; tappable days with 0–3 busy-dots under the number.
+private struct CalendarView: View {
+    let title: String
+    let weekdayLabels: [String]
+    let leadingBlanks: UInt8
+    let selected: UInt8?
+    let onDay: [String]
+    let markers: [UInt8]
+    let send: (Action) -> Void
+    private let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let cell: CGFloat = isLargeDensity() ? 48 : 32
+        VStack(spacing: 6) {
+            Text(title).font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
+            LazyVGrid(columns: cols, spacing: 4) {
+                ForEach(Array(weekdayLabels.enumerated()), id: \.offset) { _, w in
+                    Text(w).font(.caption2).foregroundColor(.secondary)
+                }
+                ForEach(0..<Int(leadingBlanks), id: \.self) { _ in Color.clear.frame(height: cell) }
+                ForEach(Array(onDay.enumerated()), id: \.offset) { idx, token in
+                    let day = idx + 1
+                    let isSel = selected.map { Int($0) == day } ?? false
+                    let level = idx < markers.count ? min(Int(markers[idx]), 3) : 0
+                    Button(action: { send(.fired(token: token)) }) {
+                        Text("\(day)").frame(maxWidth: .infinity, minHeight: cell)
+                            .background(isSel ? role(pal?.primary, else: Color.accentColor) : Color.clear)
+                            .foregroundColor(isSel ? role(pal?.onPrimary, else: .white) : role(pal?.onSurface, else: .primary))
+                            .clipShape(Circle())
+                            .overlay(alignment: .bottom) {
+                                if level > 0 {
+                                    HStack(spacing: 2) {
+                                        ForEach(0..<level, id: \.self) { _ in
+                                            Circle().fill(isSel ? role(pal?.onPrimary, else: Color.white) : role(pal?.primaryText, else: Color.accentColor)).frame(width: 4, height: 4)
+                                        }
+                                    }
+                                    .padding(.bottom, 3)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+}
+
+// Star rating; tappable when `onRate` carries one token per star.
+private struct RatingView: View {
+    let value: UInt32
+    let max: UInt8
+    let onRate: [String]?
+    let send: (Action) -> Void
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        HStack(spacing: 2) {
+            ForEach(1...Int(max), id: \.self) { i in
+                let threshold = UInt32(i) * 10
+                let name = value >= threshold ? "star.fill" : (value + 5 >= threshold ? "star.leadinghalf.filled" : "star")
+                if let tokens = onRate, i - 1 < tokens.count {
+                    let token = tokens[i - 1]
+                    Button(action: { send(.fired(token: token)) }) {
+                        Image(systemName: name).foregroundColor(role(pal?.primaryText, else: .accentColor))
+                    }.buttonStyle(.plain)
+                } else {
+                    Image(systemName: name).foregroundColor(role(pal?.primaryText, else: .accentColor))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Scaffold (top bar + scrollable body + bottom tabs + theme-as-data)
+
+// Two-pane master-detail (Widget.Split). Regular width (tablet / landscape) → primary + detail
+// side-by-side; compact (phone) → one pane: `primary`, or `detail` with a back chevron when
+// `showDetail`. Reads the same `horizontalSizeClass` as ScaffoldView's nav-rail switch.
+private struct SplitView: View {
+    let primary: SharedTypes.Widget
+    let detail: SharedTypes.Widget
+    let showDetail: Bool
+    let onBack: String?
+    let send: (Action) -> Void
+    @Environment(\.horizontalSizeClass) private var hSize
+
+    var body: some View {
+        if hSize == .regular {
+            HStack(alignment: .top, spacing: 20) {
+                render(primary, send).frame(width: 320, alignment: .top)
+                Divider()
+                render(detail, send).frame(maxWidth: .infinity, alignment: .top)
+            }
+        } else if showDetail {
+            VStack(alignment: .leading, spacing: 8) {
+                if let onBack {
+                    Button(action: { send(.fired(token: onBack)) }) {
+                        Label((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back", systemImage: "chevron.left").font(.body.weight(.semibold))
+                    }.buttonStyle(.plain)
+                }
+                render(detail, send)
+            }
+        } else {
+            render(primary, send)
+        }
+    }
+}
+
+private struct ScaffoldView: View {
+    let title: String
+    let content: SharedTypes.Widget
+    let tabs: [SharedTypes.Tab]
+    let back: String?
+    let darkMode: Bool
+    let appearance: Appearance?
+    let theme: Theme?
+    let fab: SharedTypes.Fab?
+    let sheet: SharedTypes.Sheet?
+    let onRefresh: String?
+    let refreshing: Bool
+    let route: String
+    let depth: UInt32
+    /// with_bottom_bar: the screen's main actions, pinned between the body and the tabs.
+    let bottomBar: [SharedTypes.Widget]?
+    let send: (Action) -> Void
+
+    // Remember the depth of the previous route so a route change knows its
+    // direction (push vs pop). Updated after each route settles.
+    @State private var prevDepth: UInt32 = 0
+    // Regular width (iPad / large landscape) swaps the bottom tab-bar for a side rail.
+    @Environment(\.horizontalSizeClass) private var hSize
+    // The live scheme around the scaffold: the OS's under `.system` (no preferredColorScheme then).
+    @Environment(\.colorScheme) private var systemScheme
+    // The type scale's system-font sizes for the top-bar and sheet titles are scaled by hand
+    // (UIFontMetrics), so a text-size change must re-render the scaffold too.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    // Light/Dark force the mode; System follows the OS; none → dark_mode, as before.
+    private var resolvedDark: Bool {
+        switch appearance {
+        case .some(.light): return false
+        case .some(.dark): return true
+        case .some(.system): return systemScheme == .dark
+        case .none: return darkMode
+        }
+    }
+    private var isSystem: Bool { if case .some(.system) = appearance { return true }; return false }
+
+    var body: some View {
+        // Under `.system` the live OS scheme picks the palette set, so an OS flip re-renders this view
+        // and re-resolves it here, before the children render (they read `pal`). Other modes are
+        // resolved from the root in Core.swift (a nested scaffold never overrides it).
+        let _ = { if isSystem { ActivePalette.current = ActiveTheme.current?.palette.map { resolvedDark ? $0.dark : $0.light } } }()
+        let _ = dynamicTypeSize
+        let useRail = hSize == .regular && !tabs.isEmpty
+        Group {
+            if useRail {
+                HStack(spacing: 0) {
+                    navRail
+                    Divider()
+                    mainColumn(showBottomTabs: false)
+                }
+            } else {
+                mainColumn(showBottomTabs: true)
+            }
+        }
+        .background(role(pal?.background, else: .clear).ignoresSafeArea())
+        .modifier(PaletteText(ink: pal?.onSurface))
+        .modifier(CustomBodyFont())
+        // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
+        // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
+        .tint(pal?.primary?.color ?? theme?.brandColor)
+        .animation(.easeInOut(duration: 0.28), value: route)
+        // Edge-swipe to go back — the iOS idiom for Android's system BackHandler. The
+        // gesture only engages past a 90pt drag from the leading edge, so it doesn't
+        // interfere with taps (a tap has ~0 translation < the 24pt minimum). It's a
+        // `.simultaneousGesture`, so it never blocks the buttons beneath it.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .local).onEnded { value in
+                guard let back = back else { return }
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                if value.startLocation.x < 32, value.translation.width > 90, horizontal {
+                    send(.fired(token: back))
+                }
+            }
+        )
+        // After each route settles, record its depth for the next transition.
+        .task(id: route) { prevDepth = depth }
+        // cx.snackbar draws inside a scaffold; count the ones on screen (see SnackbarHost.hosts).
+        .onAppear { SnackbarHost.shared.hosts += 1 }
+        .onDisappear {
+            SnackbarHost.shared.hosts -= 1
+            // The last scaffold went: nothing draws the snackbar or runs its timer any more.
+            if SnackbarHost.shared.hosts == 0 { SnackbarHost.shared.finish("timeout") }
+        }
+        // Modal bottom sheet — a scrim (tap to dismiss) + a panel from the bottom.
+        .overlay {
+            if let sheet = sheet {
+                ZStack(alignment: .bottom) {
+                    (pal?.scrim?.color ?? Color.black.opacity(0.45)).ignoresSafeArea()
+                        .onTapGesture { send(.fired(token: sheet.onDismiss)) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Capsule().fill(role(pal?.outlineVariant, else: Color.secondary.opacity(0.4)))
+                            .frame(width: 40, height: 4).frame(maxWidth: .infinity)
+                        Text(sheet.title).font(TypeScaleFonts.scale?.headline.map { TypeScaleFonts.font($0, relativeTo: .title2, uiStyle: .title2, design: theme?.fontDesign ?? .default) } ?? CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.bold() ?? .title3.bold())
+                        render(sheet.child, send)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(role(pal?.surface, else: Color(.systemBackground)))
+                    // Theme.shapes `sheet_top` rounds the top corners only (the bottom keeps 20).
+                    .clipShape(ShapeTokens.shapes?.sheetTop.map { (r: Radius) -> AnyShape in
+                        // Pill is capped at 32: a dome would clip the sheet's content.
+                        let top: CGFloat
+                        switch r {
+                        case .dp(let n): top = CGFloat(n)
+                        case .pill: top = 32
+                        }
+                        return AnyShape(UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: 20, bottomTrailingRadius: 20, topTrailingRadius: top))
+                    } ?? AnyShape(RoundedRectangle(cornerRadius: 20)))
+                }
+                .transition(.opacity)
+            }
+        }
+        // The palette in the environment for everything above — the sheet overlay included, so a
+        // System OS flip re-renders sheet content too.
+        .environment(\.paletteRoles, pal)
+    }
+
+    // Top bar + scrollable body, optionally with the phone's bottom tab-bar.
+    private func mainColumn(showBottomTabs: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                if let back = back {
+                    Button(action: { send(.fired(token: back)) }) {
+                        Image(systemName: "chevron.left")
+                    }
+                    // The back chevron in primary_text (a palette's primary is a fill colour); else the tint.
+                    .tint(pal?.primaryText?.color ?? pal?.primary?.color ?? theme?.brandColor)
+                    .accessibilityLabel((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back")
+                }
+                Spacer()
+                Text(title).font(TypeScaleFonts.scale?.title.map { TypeScaleFonts.font($0, relativeTo: .title2, uiStyle: .title2, design: theme?.fontDesign ?? .default) } ?? CustomFonts.font(CustomFonts.display, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
+                Spacer()
+                // keep the title centered when a back button is present
+                if back != nil { Image(systemName: "chevron.left").hidden() }
+            }
+            .padding()
+            .background(role(pal?.surfaceBar, else: .clear).ignoresSafeArea(edges: .top))
+
+            PaletteDivider()
+
+            // The body is keyed by `route`, so a push/pop swaps the whole screen
+            // (with a slide+fade; lateral move crossfades); a same-route update
+            // just re-renders in place. The iOS twin of Android's AnimatedContent.
+            // A screen with tabs renders in TabSlots instead, keyed once for every tab, so a tab
+            // switch happens inside it (ADR-0058).
+            Group {
+                if let slot = tabSlotOf(tabs) {
+                    TabSlots(
+                        screen: TabScreen(content: content, refreshing: refreshing, onRefresh: onRefresh, route: route, sheet: sheet, bottomBar: bottomBar),
+                        slot: slot, tabCount: tabs.count, transition: navTransition, send: send
+                    )
+                    .id(TabSlots.key)
+                } else {
+                    ScreenBody(content: content, refreshing: refreshing, onRefresh: onRefresh, send: send)
+                        .id(route)
+                }
+            }
+            .transition(navTransition)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Floating action button — the raised primary action, over the body bottom-trailing.
+            .overlay(alignment: .bottomTrailing) {
+                if let fab = fab {
+                    Button(action: { send(.fired(token: fab.onPress)) }) {
+                        fabContent(fab)
+                            .background(role(pal?.fab, else: theme?.brandColor ?? .accentColor))
+                            .foregroundColor(role(pal?.onFab, else: .white))
+                            .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.fab) ?? AnyShape(RoundedRectangle(cornerRadius: 18)))
+                            .shadow(radius: 6, y: 3)
+                    }
+                    .padding(18)
+                }
+            }
+            // cx.snackbar — bottom-centre over the body (which ends above the tab bar), lifted above the FAB.
+            .overlay(alignment: .bottom) {
+                SnackbarView(seed: theme?.seed)
+                    .padding(.bottom, fab != nil ? 56 + 18 + 12 : 12)
+            }
+
+            // with_bottom_bar: pinned above the tabs; the body (with the FAB and snackbar overlays)
+            // ends above it, and the keyboard safe area lifts it with the keyboard.
+            if let bar = bottomBar, !bar.isEmpty {
+                PaletteDivider()
+                HStack(spacing: 12) {
+                    ForEach(keyedChildren(bar)) { item in
+                        render(item.element, send).frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                // Without tabs below it, the bar's fill runs under the home indicator (as the tabs' does).
+                .background(role(pal?.surfaceBar, else: Color(.systemBackground)).ignoresSafeArea(edges: .bottom))
+            }
+
+            if showBottomTabs && !tabs.isEmpty {
+                PaletteDivider()
+                HStack {
+                    ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                        Button(action: { send(.fired(token: tab.onSelect)) }) {
+                            VStack(spacing: 2) {
+                                if let icon = tab.icon {
+                                    Image(systemName: sfSymbol(icon)).font(.system(size: 20))
+                                        .overlay(alignment: .topTrailing) {
+                                            if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
+                                        }
+                                }
+                                HStack(spacing: 4) {
+                                    Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
+                                    if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
+                                }
+                            }
+                            .fontWeight(tab.selected ? .semibold : .regular)
+                            .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
+                            .frame(maxWidth: .infinity)
+                        }
+                        .accessibilityValue(tabSpoken(tab))
+                    }
+                }
+                .padding(.vertical, 10)
+                .background(role(pal?.surfaceBar, else: .clear).ignoresSafeArea(edges: .bottom))
+            }
+        }
+    }
+
+    // Vertical navigation rail (regular width) — the iPad twin of the bottom tabs.
+    private var navRail: some View {
+        VStack(spacing: 4) {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                Button(action: { send(.fired(token: tab.onSelect)) }) {
+                    HStack(spacing: 10) {
+                        if let icon = tab.icon {
+                            Image(systemName: sfSymbol(icon)).font(.system(size: 18))
+                                .overlay(alignment: .topTrailing) {
+                                    if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
+                                }
+                        }
+                        Text(tab.label)
+                        if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
+                    }
+                    .fontWeight(tab.selected ? .semibold : .regular)
+                    .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 14)
+                    .background(tab.selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.12)) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(tabSpoken(tab))
+            }
+            Spacer()
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
+        .frame(width: 220)
+        .background(role(pal?.surfaceBar, else: .clear))
+    }
+
+    private var navTransition: AnyTransition {
+        if depth == prevDepth { return .opacity }          // lateral move → crossfade
+        let forward = depth > prevDepth                     // push vs pop
+        return .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
+        )
+    }
+
+    // ADR-0050: a tab's badge — palette error_fill / on_error_fill, else red on white. The mark is hidden from
+    // VoiceOver; tabSpoken (label, else text) is the tab button's accessibility value, read after its name.
+    @ViewBuilder
+    private func tabBadgeMark(_ b: SharedTypes.TabBadge) -> some View {
+        let fill = role(pal?.errorFill, else: .red)
+        if b.text.isEmpty {
+            Circle().fill(fill).frame(width: 8, height: 8).accessibilityHidden(true)
+        } else {
+            Text(b.text)
+                .font(.system(size: isLargeDensity() ? 13 : 11, weight: .semibold))
+                .fontWeight(.semibold)
+                .foregroundColor(role(pal?.onErrorFill, else: .white))
+                .padding(.horizontal, 4)
+                .frame(minWidth: 16, minHeight: 16)
+                .background(Capsule().fill(fill))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func tabSpoken(_ tab: SharedTypes.Tab) -> String {
+        guard let b = tab.badge else { return "" }
+        return b.label.isEmpty ? b.text : b.label
+    }
+}
+
+/// A screen's body: page-scrolling, or fill mode (`bodyFillIndex`). Untabbed screens show one; each tab
+/// slot keeps one (ADR-0058).
+private struct ScreenBody: View {
+    let content: SharedTypes.Widget
+    let refreshing: Bool
+    let onRefresh: String?
+    let send: (Action) -> Void
+    @Environment(\.horizontalSizeClass) private var hSize
+
+    var body: some View {
+        // On a regular width the column is capped + centered so it doesn't stretch.
+        //
+        // Fill mode (`bodyFillIndex(content)` non-nil): the body stops page-scrolling — no
+        // ScrollView — and its designated LazyList takes the remaining height, scrolling
+        // itself. Every other scaffold renders exactly as before.
+        Group {
+            if let fillIndex = bodyFillIndex(content) {
+                VStack(alignment: .leading, spacing: (fillIndex >= 0 && isLargeDensity()) ? 12 : 6) {
+                    if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                    if fillIndex == -1 {
+                        render(content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                    } else if case .column(let children) = content {
+                        ForEach(keyedChildren(children)) { item in
+                            let (i, child) = (item.offset, item.element)
+                            if i == fillIndex {
+                                render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                            } else {
+                                render(child, send)
+                            }
+                        }
+                    }
+                }
+                    .padding(16)
+                    .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                        render(content, send)
+                    }
+                        .padding(16)
+                        .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        // In fill mode this attaches `.refreshable` to the Group around the (non-scrolling)
+        // fill VStack; SwiftUI carries that refresh action down through the environment to the
+        // fill list's own inner ScrollView, so pulling on the list itself drives it even though
+        // the list has no `onRefresh` of its own.
+        .refreshableIf(onRefresh, send)
+    }
+}
+
+/// A tab's screen as the core last sent it: what a slot keeps and `keptWhenHidden` reads (ADR-0058).
+private struct TabScreen {
+    let content: SharedTypes.Widget
+    let refreshing: Bool
+    let onRefresh: String?
+    let route: String
+    let sheet: SharedTypes.Sheet?
+    let bottomBar: [SharedTypes.Widget]?
+}
+
+/// Whether a kept slot may send: read when an action is sent, so a closure a hidden slot captured
+/// earlier still drops it.
+private final class SlotGate { var active = false }
+
+/// The tab slots, rebuilt from the screen on every render: a plain class, so updating it never
+/// invalidates the view. Each step is idempotent for a given (screen, slot), since SwiftUI may
+/// evaluate a body more than once.
+private final class SlotCache {
+    /// A tab's kept screen. A new epoch is a new view identity: the old one is dropped.
+    final class Kept {
+        let index: Int
+        let epoch: Int
+        var screen: TabScreen
+        let gate = SlotGate()
+        init(_ index: Int, _ epoch: Int, _ screen: TabScreen) { self.index = index; self.epoch = epoch; self.screen = screen }
+    }
+    private var slots: [Int: Kept] = [:]
+    private var last = -1
+    private var nextEpoch = 0
+
+    func update(_ screen: TabScreen, slot: Int, tabCount: Int) -> [Kept] {
+        slots = slots.filter { $0.key < tabCount }
+        if last != slot {
+            // The tab that was showing is hidden now: let it go unless it is safe to keep (keptWhenHidden).
+            slots = slots.filter { $0.key == slot || keptWhenHidden($0.value.screen) }
+            // The core moved this tab to another screen while it was away: rebuild it, without a transition.
+            if let kept = slots[slot], kept.screen.route != screen.route { slots[slot] = nil }
+            last = slot
+        }
+        if let kept = slots[slot] {
+            kept.screen = screen
+        } else {
+            slots[slot] = Kept(slot, nextEpoch, screen)
+            nextEpoch += 1
+        }
+        for (i, kept) in slots { kept.gate.active = i == slot }
+        return slots.keys.sorted().compactMap { slots[$0] }
+    }
+}
+
+/// Each visited tab keeps its last screen, so returning to it finds it as it was left: its scroll
+/// position and shell state (ADR-0058, the iOS twin of ADR-0057). A hidden slot is invisible, can't be
+/// tapped, is hidden from VoiceOver and sends nothing; a switch ends editing and doesn't animate. The
+/// selected slot always shows the screen the core just sent. A screen holding a live native view, still
+/// animating, nesting a Scaffold or holding a secure field is let go once hidden.
+private struct TabSlots: View {
+    /// Every screen with tabs shares this identity, so a tab switch happens inside TabSlots.
+    static let key = "\u{0}tabs"
+    let screen: TabScreen
+    let slot: Int
+    let tabCount: Int
+    let transition: AnyTransition
+    let send: (Action) -> Void
+    @State private var cache = SlotCache()
+
+    var body: some View {
+        let kept = cache.update(screen, slot: slot, tabCount: tabCount)
+        ZStack {
+            ForEach(kept, id: \.epoch) { k in
+                let shown = k.index == slot
+                let gate = k.gate
+                // A push/pop inside the tab slides as before: the route keys this slot's content.
+                ZStack {
+                    ScreenBody(
+                        content: k.screen.content, refreshing: k.screen.refreshing, onRefresh: k.screen.onRefresh,
+                        send: { a in if gate.active { send(a) } }
+                    )
+                    .id(k.screen.route)
+                    .transition(transition)
+                }
+                .opacity(shown ? 1 : 0)
+                .allowsHitTesting(shown)
+                // A hardware keyboard or Full Keyboard Access moves focus without a touch.
+                .disabled(!shown)
+                .accessibilityHidden(!shown)
+            }
+        }
+        // A tab switch shows the other slot at once: no fade, no slide.
+        .transaction(value: slot) { $0.animation = nil }
+        // A switch drops focus, so the keyboard closes and no hidden field keeps it.
+        .onChange(of: slot) {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+    }
+}
+
+/// The selected tab's index, or nil when the screen has no tabs or not exactly one is selected.
+fileprivate func tabSlotOf(_ tabs: [SharedTypes.Tab]) -> Int? {
+    let selected = tabs.indices.filter { tabs[$0].selected }
+    return selected.count == 1 ? selected[0] : nil
+}
+
+/// Whether a hidden tab's screen may be kept (ADR-0058, as ADR-0057). Not when it holds a live native
+/// view (its player, map or web view would keep running), still animates (refreshing, an indeterminate
+/// progress, a loading list), nests a Scaffold (its sheet and back gesture outlive the switch) or has a
+/// secure field (its text would stay in memory after the user left).
+fileprivate func keptWhenHidden(_ s: TabScreen) -> Bool {
+    if s.refreshing || holdsLiveView(s.content) { return false }
+    if let sheet = s.sheet, holdsLiveView(sheet.child) { return false }
+    if (s.bottomBar ?? []).contains(where: holdsLiveView) { return false }
+    return !holdsAny(s.content) { w in
+        switch w {
+        case .scaffold: return true
+        case .progress(.none): return true
+        case .lazyList(_, _, let loading, _, _, let refreshing, _, _): return loading || refreshing
+        case .textField(_, _, _, .secure, _): return true
+        default: return false
+        }
+    }
+}
+
+/// Whether a live native view (web view, video, map, PDF) is anywhere in this subtree.
+fileprivate func holdsLiveView(_ w: SharedTypes.Widget) -> Bool {
+    holdsAny(w) { w in
+        switch w {
+        case .webView, .video, .map, .pdfView: return true
+        default: return false
+        }
+    }
+}
+
+/// Whether any widget in this subtree satisfies `hit`.
+fileprivate func holdsAny(_ w: SharedTypes.Widget, _ hit: (SharedTypes.Widget) -> Bool) -> Bool {
+    if hit(w) { return true }
+    switch w {
+    case .row(let children), .column(let children):
+        return children.contains { holdsAny($0, hit) }
+    case .box(let children, _, _), .grid(let children, _), .scroller(let children, _):
+        return children.contains { holdsAny($0, hit) }
+    case .lazyList(let children, _, _, _, _, _, _, _):
+        return children.contains { holdsAny($0, hit) }
+    case .card(let child, _, _, _), .a11y(let child, _, _, _), .swipeAction(let child, _):
+        return holdsAny(child, hit)
+    case .split(let primary, let detail, _, _):
+        return holdsAny(primary, hit) || holdsAny(detail, hit)
+    case .scaffold(_, let body, _, _, _, _, _, let sheet, _, _, _, _, _, _, let bottomBar):
+        return holdsAny(body, hit) || sheet.map { holdsAny($0.child, hit) } == true
+            || (bottomBar ?? []).contains { holdsAny($0, hit) }
+    default:
+        return false
+    }
+}
+
+// MARK: - Style-token → concrete look (the only place that decides looks)
+
+private struct TextStyleMod: ViewModifier {
+    let style: TextStyle
+    init(_ s: TextStyle) { style = s }
+    // The theme's font design (rounded/serif/mono); `.default` when un-themed.
+    private var design: Font.Design { ActiveTheme.current?.fontDesign ?? .default }
+    @Environment(\.paletteRoles) private var paletteRoles
+    // Re-render on a text-size change (system sizes are scaled by hand for the type scale / new styles).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let _ = dynamicTypeSize
+        // A type-scale spec for this style wins; otherwise the look below, as before.
+        if let spec = specFor(style) {
+            let f = TypeScaleFonts.font(spec.0, relativeTo: spec.1, uiStyle: spec.2, design: design)
+            if case .caption = style { return AnyView(content.font(f).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary))) }
+            return AnyView(content.font(f))
+        }
+        switch style {
+        // `FontFamily.custom` → the synced display (title/subtitle) or body family at the same size;
+        // any other font (or an unsynced role) → the system font, exactly as before.
+        case .display: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 36, relativeTo: .largeTitle)?.bold() ?? .system(size: UIFontMetrics(forTextStyle: .largeTitle).scaledValue(for: 36), weight: .bold, design: design)))
+        case .headline: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 24, relativeTo: .title2)?.weight(.semibold) ?? .system(size: UIFontMetrics(forTextStyle: .title2).scaledValue(for: 24), weight: .semibold, design: design)))
+        case .title: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 34, relativeTo: .largeTitle)?.bold() ?? .system(.largeTitle, design: design).bold()))
+        case .subtitle: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.weight(.semibold) ?? .system(.title3, design: design).weight(.semibold)))
+        case .caption: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 13, relativeTo: .footnote) ?? .system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
+        case .emphasis: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body)?.weight(.semibold) ?? .system(.body, design: design).weight(.semibold)))
+        case .body: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) ?? .system(.body, design: design)))
+        }
+    }
+
+    /// The scale's spec for a style, with the text style it scales like.
+    private func specFor(_ s: TextStyle) -> (TypeSpec, Font.TextStyle, UIFont.TextStyle)? {
+        guard let ts = TypeScaleFonts.scale else { return nil }
+        switch s {
+        case .display: return ts.display.map { ($0, .largeTitle, .largeTitle) }
+        case .headline: return ts.headline.map { ($0, .title2, .title2) }
+        case .title: return ts.title.map { ($0, .title2, .title2) }
+        case .subtitle: return ts.subtitle.map { ($0, .subheadline, .subheadline) }
+        case .body: return ts.body.map { ($0, .body, .body) }
+        case .emphasis: return ts.emphasis.map { ($0, .body, .body) }
+        case .caption: return ts.caption.map { ($0, .caption, .caption1) }
+        }
+    }
+}
+
+// Widget::Button. A neutral tone with no icon and not wide renders exactly the original
+// `Button(label).modifier(ButtonStyleMod(style))`; a tone tints it, `icon` adds a leading SF Symbol,
+// `wide` stretches the label to the available width.
+private struct MobilerButton: View {
+    let label: String
+    let style: SharedTypes.ButtonStyle
+    let tone: Tone
+    let icon: Icon?
+    let wide: Bool
+    let action: () -> Void
+
+    private var neutral: Bool { if case .neutral = tone { return true }; return false }
+    private var tint: Color { neutral ? .accentColor : toneColors(tone).1 }
+
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let button = Button(action: action) { labelView }
+        if let c = paletteColors() {
+            button.buttonStyle(PaletteButtonStyle(fill: c.fill, fg: c.fg, stroke: c.stroke, large: isLargeDensity()))
+        } else if isLargeDensity() {
+            button.buttonStyle(LargeButtonStyle(style: style, color: tint))
+        } else if neutral {
+            button.modifier(ButtonStyleMod(style))
+        } else {
+            button.modifier(ButtonStyleMod(style, tint: tint)).tint(tint)
+        }
+    }
+
+    /// With a palette: neutral buttons use primary / secondary_container / primary_text; a toned button
+    /// uses its pair (filled flips it: on-container fill, container text). nil = no palette, or a toned
+    /// button whose pair the palette leaves unset — today's styling then.
+    /// `pairColors()`, with a palette's error roles over a Danger button (each falls back to today's).
+    private func paletteColors() -> (fill: Color, fg: Color, stroke: Color)? {
+        let base = pairColors()
+        guard case .danger = tone, let p = pal else { return base }
+        switch style {
+        case .filled:
+            guard p.errorFill != nil || p.onErrorFill != nil else { return base }
+            return (role(p.errorFill, else: base?.fill ?? .red), role(p.onErrorFill, else: base?.fg ?? .white), .clear)
+        case .outlined:
+            guard let e = p.error else { return base }
+            return (.clear, e.color, e.color)
+        case .text:
+            guard let e = p.error else { return base }
+            return (.clear, e.color, .clear)
+        case .tonal:
+            return base
+        }
+    }
+
+    private func pairColors() -> (fill: Color, fg: Color, stroke: Color)? {
+        guard let p = pal else { return nil }
+        let pair = palettePair(tone)
+        if !neutral && pair == nil { return nil }
+        if let pair {
+            let c = pair.container.color, on = pair.onContainer.color
+            switch style {
+            case .filled: return (on, c, .clear)
+            case .tonal: return (c, on, .clear)
+            case .outlined: return (.clear, on, on)
+            case .text: return (.clear, on, .clear)
+            }
+        }
+        // A neutral button switches to palette colours only when the palette sets the role its style
+        // reads; otherwise the system style it has today (a partial palette changes nothing else).
+        switch style {
+        case .filled:
+            guard let fill = p.primary else { return nil }
+            return (fill.color, role(p.onPrimary, else: .white), .clear)
+        case .tonal:
+            guard let bg = p.secondaryContainer else { return nil }
+            return (bg.color, role(p.onSecondaryContainer, else: role(p.primary, else: .accentColor)), .clear)
+        case .outlined:
+            guard let text = p.primaryText else { return nil }
+            return (.clear, text.color, role(p.outline, else: text.color))
+        case .text:
+            guard let text = p.primaryText else { return nil }
+            return (.clear, text.color, .clear)
+        }
+    }
+
+    @ViewBuilder private var labelView: some View {
+        if let icon {
+            if wide { Label(label, systemImage: sfSymbol(icon)).frame(maxWidth: .infinity) } else { Label(label, systemImage: sfSymbol(icon)) }
+        } else if wide {
+            Text(label).frame(maxWidth: .infinity)
+        } else {
+            Text(label)
+        }
+    }
+}
+
+private struct ButtonStyleMod: ViewModifier {
+    let style: SharedTypes.ButtonStyle
+    let tint: Color
+    init(_ s: SharedTypes.ButtonStyle, tint: Color = .accentColor) { style = s; self.tint = tint }
+    func body(content: Content) -> some View {
+        switch style {
+        case .filled: return AnyView(content.buttonStyle(.borderedProminent).modifier(ButtonShapeMod()))
+        case .outlined: return AnyView(content.buttonStyle(.bordered).modifier(ButtonShapeMod()))
+        case .text: return AnyView(content.buttonStyle(.borderless))
+        case .tonal: return AnyView(content.buttonStyle(TonalButtonStyle(color: tint)))
+        }
+    }
+}
+
+/// A Theme.shapes `button` radius on the system bordered styles; no radius → unchanged.
+private struct ButtonShapeMod: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        switch ShapeTokens.shapes?.button {
+        case .none: content
+        case .some(.pill): content.buttonBorderShape(.capsule)
+        case .some(.dp(let n)): content.buttonBorderShape(.roundedRectangle(radius: CGFloat(n)))
+        }
+    }
+}
+
+// M3-style filled-tonal: tinted label on a soft tint capsule (the quieter secondary action).
+private struct TonalButtonStyle: SwiftUI.ButtonStyle {
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .foregroundColor(color)
+            .background(color.opacity(0.18))
+            .clipShape(ShapeTokens.button)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// A palette-coloured button (any ButtonStyle): explicit fill / label / outline on a capsule, at the
+// regular or the Density.large size.
+private struct PaletteButtonStyle: SwiftUI.ButtonStyle {
+    let fill: Color
+    let fg: Color
+    let stroke: Color
+    let large: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
+            .padding(.horizontal, large ? 24 : 14)
+            .padding(.vertical, large ? 0 : 7)
+            .frame(minHeight: large ? 56 : nil)
+            .foregroundColor(fg)
+            .background(fill)
+            .overlay(ShapeTokens.button.stroke(stroke, lineWidth: 1))
+            .clipShape(ShapeTokens.button)
+            .contentShape(ShapeTokens.button)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// Density.large button: 56pt min height, 24pt side padding, body-semibold label (scales with Dynamic
+// Type), capsule — one style for all four ButtonStyles so every large button is the same height.
+private struct LargeButtonStyle: SwiftUI.ButtonStyle {
+    let style: SharedTypes.ButtonStyle
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        let (fill, fg, stroke): (Color, Color, Color) = {
+            switch style {
+            case .filled: return (color, .white, .clear)
+            case .tonal: return (color.opacity(0.18), color, .clear)
+            case .outlined: return (.clear, color, color)
+            case .text: return (.clear, color, .clear)
+            }
+        }()
+        return configuration.label
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
+            .padding(.horizontal, 24)
+            .frame(minHeight: 56)
+            .foregroundColor(fg)
+            .background(fill)
+            .overlay(ShapeTokens.button.stroke(stroke, lineWidth: 1))
+            .clipShape(ShapeTokens.button)
+            .contentShape(ShapeTokens.button)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+private struct CardMod: ViewModifier {
+    let style: CardStyle
+    init(_ s: CardStyle) { style = s }
+    @Environment(\.paletteRoles) private var paletteRoles
+    func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let shape = ShapeTokens.shape(ShapeTokens.shapes?.card) ?? AnyShape(RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14))
+        switch style {
+        case .elevated:
+            return AnyView(content.background(shape.fill(role(pal?.surface, else: Color(.secondarySystemBackground))))
+                .shadow(color: .black.opacity(0.08), radius: 4, y: 2))
+        case .filled:
+            return AnyView(content.background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemBackground)))))
+        case .outlined:
+            return AnyView(content.overlay(shape.stroke(role(pal?.outlineVariant, else: Color.gray.opacity(0.3)))))
+        case .dashed:
+            // No fill; a 1.5pt dashed outline (dash 6 / gap 4) in the palette's outline.
+            return AnyView(content.overlay(shape.stroke(role(pal?.outline, else: Color.gray.opacity(0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))))
+        case .brand:
+            let t = ActiveTheme.current
+            let grad = LinearGradient(
+                // Without an app accent a palette's primary ends the gradient (else the seed, as before).
+                colors: [role(pal?.primary, else: t?.brandColor ?? .accentColor), (t?.accent == nil ? pal?.primary?.color : nil) ?? t?.accentColor ?? .accentColor],
+                startPoint: .topLeading, endPoint: .bottomTrailing,
+            )
+            return AnyView(content.background(shape.fill(grad)).foregroundColor(role(pal?.onPrimary, else: .white)))
+        }
+    }
+}
+
+private func spacing(_ s: Spacing) -> CGFloat {
+    let base: CGFloat = { switch s { case .xs: return 4; case .sm: return 8; case .md: return 12; case .lg: return 16; case .xl: return 24 } }()
+    return base * (ActiveTheme.current?.densityScale ?? 1.0)
+}
+
+// Map an A11yRole to VoiceOver traits (best-effort; Adjustable has no static SwiftUI trait → none).
+private func a11yTraits(_ role: SharedTypes.A11yRole) -> AccessibilityTraits {
+    switch role {
+    case .button: return .isButton
+    case .link: return .isLink
+    case .image: return .isImage
+    case .header: return .isHeader
+    case .adjustable: return []
+    }
+}
+
+private func toneColors(_ tone: Tone) -> (Color, Color) {
+    if let pair = palettePair(tone) { return (pair.container.color, pair.onContainer.color) }
+    if case .neutral = tone, let p = pal { return (role(p.surfaceMuted, else: Color.gray.opacity(0.15)), role(p.onSurfaceVariant, else: .secondary)) }
+    switch tone {
+    case .neutral: return (Color.gray.opacity(0.15), .secondary)
+    case .success: return (Color.green.opacity(0.15), .green)
+    case .warning: return (Color.orange.opacity(0.15), .orange)
+    case .danger: return (Color.red.opacity(0.15), .red)
+    case .info: return (Color.accentColor.opacity(0.15), .accentColor)
+    }
+}
+
+private func projectColor(_ c: ProjectColor) -> Color {
+    switch c {
+    case .indigo: return Color(red: 0.36, green: 0.42, blue: 0.75)
+    case .teal: return Color(red: 0.15, green: 0.65, blue: 0.60)
+    case .coral: return Color(red: 1.0, green: 0.44, blue: 0.26)
+    case .amber: return Color(red: 1.0, green: 0.70, blue: 0.0)
+    case .lime: return Color(red: 0.61, green: 0.80, blue: 0.40)
+    case .pink: return Color(red: 0.93, green: 0.25, blue: 0.48)
+    }
+}
+
+private func sfSymbol(_ icon: Icon) -> String {
+    switch icon {
+    case .delete: return "trash"
+    case .add: return "plus"
+    case .edit: return "pencil"
+    case .close: return "xmark"
+    case .settings: return "gearshape"
+    case .check: return "checkmark"
+    case .star: return "star.fill"
+    case .info: return "info.circle"
+    case .home: return "house.fill"
+    case .search: return "magnifyingglass"
+    case .menu: return "line.3.horizontal"
+    case .filter: return "line.3.horizontal.decrease.circle"
+    case .back: return "chevron.left"
+    case .forward: return "chevron.right"
+    case .down: return "chevron.down"
+    case .bell: return "bell.fill"
+    case .cart: return "cart.fill"
+    case .share: return "square.and.arrow.up"
+    case .heart: return "heart"
+    case .heartFilled: return "heart.fill"
+    case .person: return "person.fill"
+    case .people: return "person.2.fill"
+    case .phone: return "phone.fill"
+    case .mail: return "envelope.fill"
+    case .calendar: return "calendar"
+    case .clock: return "clock.fill"
+    case .mapPin: return "mappin.and.ellipse"
+    case .camera: return "camera.fill"
+    case .photo: return "photo"
+    case .play: return "play.fill"
+    case .scissors: return "scissors"
+    case .doneAll: return "checkmark.circle"
+    }
+}
+
+private func iconTint(_ icon: Icon) -> Color {
+    switch icon { case .star: return role(pal?.primaryText, else: .accentColor); default: return .primary }
+}
+
+private func imageShape(_ s: ImageShape) -> AnyShape {
+    switch s {
+    case .square: return AnyShape(Rectangle())
+    case .rounded: return AnyShape(RoundedRectangle(cornerRadius: ActiveTheme.current?.imageRadius ?? 16))
+    case .circle: return AnyShape(Circle())
+    }
+}
+
+private func aspect(_ r: ImageRatio) -> CGFloat {
+    switch r { case .wide: return 16.0 / 10.0; case .square: return 1.0; case .tall: return 3.0 / 4.0 }
+}
+
+private func boxAlign(_ a: BoxAlign) -> Alignment {
+    switch a {
+    case .topStart: return .topLeading
+    case .topEnd: return .topTrailing
+    case .center: return .center
+    case .bottomStart: return .bottomLeading
+    case .bottomCenter: return .bottom
+    case .bottomEnd: return .bottomTrailing
+    }
+}
+
+/// Renders a local file image, decoding it OFF the main thread (downsample + cache) with a
+/// neutral placeholder until ready — so a large photo never blocks `render` (which runs on
+/// every state update). A perf safeguard for many-megapixel camera/picked photos.
+private struct FileImageView: View {
+    let url: URL
+    /// Shown instead of the grey placeholder once the file fails to load (an avatar's initials).
+    var fallback: AnyView? = nil
+    @State private var image: UIImage?
+    @State private var failed = false
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else if failed, let fallback {
+                fallback
+            } else {
+                Color.gray.opacity(0.15)
+            }
+        }
+        .task(id: url.path) {
+            failed = false
+            if let cached = fileImageCache.object(forKey: url.path as NSString) { image = cached; return }
+            image = await Task.detached(priority: .userInitiated) { downsampledFileImage(at: url) }.value
+            failed = image == nil
+        }
+    }
+}
+
+// A picked/captured photo can be many megapixels; decoding it full-size stalls the UI.
+// Downsample with ImageIO to a display size and cache by path, so each file image is
+// decoded once and kept small. Called from FileImageView's background task (off-main).
+private let fileImageCache = NSCache<NSString, UIImage>()
+private func downsampledFileImage(at url: URL, maxPixel: CGFloat = 1400) -> UIImage? {
+    let key = url.path as NSString
+    if let cached = fileImageCache.object(forKey: key) { return cached }
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+    let img = UIImage(cgImage: cg)
+    fileImageCache.setObject(img, forKey: key)
+    return img
+}
+
+// Pull-to-refresh, gated: attaches `.refreshable` only when the scaffold carries an on_refresh
+// token (so screens without it aren't bouncy). The event is fire-and-forget; the brief sleep keeps
+// the native pull spinner visible while the app's async reload kicks off (the model's `refreshing`
+// flag drives the in-body indicator that reflects the real reload duration).
+extension View {
+    @ViewBuilder
+    func refreshableIf(_ token: String?, _ send: @escaping (Action) -> Void) -> some View {
+        if let token = token {
+            self.refreshable {
+                send(.fired(token: token))
+                try? await Task.sleep(nanoseconds: 600_000_000)
+            }
+        } else {
+            self
+        }
+    }
+}
+
+
+// Native video player (Widget.Video). The iOS shell rebuilds the ENTIRE view tree on every model
+// change (e.g. the ~1s position update), so SwiftUI recreates this representable — therefore the
+// AVPlayer + its observers must live OUTSIDE the SwiftUI view lifecycle, in a per-`id` session store,
+// or playback would reset to a fresh player every tick (black "no video", stops after ~1s). A
+// recreated AVPlayerViewController just rebinds to the same already-playing player. A stable `.id`
+// on the view (in the render switch) also helps SwiftUI preserve identity. The app drives play/pause
+// (`playing`, on change) + seek (`seekToMs`, on change); a periodic observer reports position ~1/sec
+// via `.input(id, .int(ms))`; `onEnded` fires (or it loops).
+struct VideoView: UIViewControllerRepresentable {
+    let urlString: String
+    let id: String
+    let playing: Bool
+    let seekToMs: Int64
+    let controls: Bool
+    let looping: Bool
+    let muted: Bool
+    let onEnded: String?
+    let poster: String?
+    let startAtMs: Int64
+    let captions: [Caption]
+    let rate: Float
+    let volume: Float
+    let urls: [String]
+    let startIndex: Int64
+    let seekIndex: Int64
+    let allowPip: Bool
+    let send: (Action) -> Void
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let session = VideoSessionStore.shared.session(id: id, url: urlString, urls: urls, startIndex: startIndex, send: send)
+        session.configure(looping: looping, onEnded: onEnded, muted: muted, volume: volume, rate: rate, captions: captions)
+        let vc = AVPlayerViewController()
+        vc.player = session.player
+        vc.showsPlaybackControls = controls
+        vc.allowsPictureInPicturePlayback = allowPip
+        if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
+        vc.delegate = session.pipDelegate
+        session.attachPoster(to: vc, poster: poster)
+        session.attachCaption(to: vc)
+        session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
+        return vc
+    }
+
+    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
+        let session = VideoSessionStore.shared.session(id: id, url: urlString, urls: urls, startIndex: startIndex, send: send)
+        session.configure(looping: looping, onEnded: onEnded, muted: muted, volume: volume, rate: rate, captions: captions)
+        if vc.player !== session.player { vc.player = session.player }
+        vc.showsPlaybackControls = controls
+        vc.allowsPictureInPicturePlayback = allowPip
+        if #available(iOS 14.2, *) { vc.canStartPictureInPictureAutomaticallyFromInline = allowPip }
+        vc.delegate = session.pipDelegate
+        session.attachPoster(to: vc, poster: poster)
+        session.attachCaption(to: vc)
+        session.apply(playing: playing, seekToMs: seekToMs, startAtMs: startAtMs, seekIndex: seekIndex, allowPip: allowPip)
+    }
+}
+
+// A persistent per-video session — the AVPlayer (or AVQueuePlayer for a playlist) + its observers,
+// kept alive across the shell's whole-tree re-renders (which recreate the representable). Keyed by
+// the widget's stable `id`. Reports position + duration/state/buffered (+ playlist index) via the
+// `.input("{id}[.suffix]", …)` path so the app can build a custom transport UI.
+@MainActor
+final class VideoSession {
+    let player: AVPlayer
+    let url: String
+    let urls: [String]
+    private let id: String
+    private var send: (Action) -> Void
+    private var looping = false
+    private var onEnded: String?
+    private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
+    private var lastSeekMs: Int64 = -1
+    private var lastPlaying: Bool?
+    private var desiredRate: Float = 1.0
+    private var lastSeekIndex: Int64 = -1
+    private var appliedStartAt = false
+    private var captionsOn = false
+    private var captionUrl: String?
+    private var captionsRequested = false
+    private var cues: [(start: Double, end: Double, text: String)] = []
+    private var captionLabel: UILabel?
+    private var endedFlag = false
+    private var posterView: UIImageView?
+    private var posterImage: UIImage?
+    private var lastDuration: Int64 = -2
+    private var lastState: Int64 = -1
+    private var lastBuffered: Int64 = -1
+    private var lastIndex: Int64 = -2
+    private var itemToIndex: [ObjectIdentifier: Int] = [:]
+    let pipDelegate = VideoPipDelegate()
+
+    init(id: String, url: String, urls: [String], startIndex: Int64, send: @escaping (Action) -> Void) {
+        self.id = id; self.url = url; self.urls = urls; self.send = send
+        if urls.isEmpty {
+            self.player = AVPlayer(url: URL(string: url) ?? URL(fileURLWithPath: "/dev/null"))
+        } else {
+            let start = max(0, min(Int(startIndex), urls.count - 1))
+            var items: [AVPlayerItem] = []
+            for i in start..<urls.count {
+                guard let u = URL(string: urls[i]) else { continue }
+                let item = AVPlayerItem(url: u)
+                itemToIndex[ObjectIdentifier(item)] = i
+                items.append(item)
+            }
+            self.player = AVQueuePlayer(items: items)
+        }
+        let pid = id
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main
+        ) { [weak self] time in
+            guard let self else { return }
+            let secs = time.seconds
+            self.send(.input(id: pid, value: .int(Int64(secs.isFinite ? secs * 1000 : 0))))
+            self.reportTransport()
+        }
+        // Observe ALL item ends (queue advances internally) and react to ours only.
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let item = note.object as? AVPlayerItem else { return }
+            guard self.owns(item) else { return }
+            if self.urls.isEmpty {
+                self.endedFlag = true
+                if self.looping { self.endedFlag = false; self.player.seek(to: .zero); self.player.play() }
+                else if let token = self.onEnded { self.send(.fired(token: token)) }
+            } else if self.isLastItem(item) {
+                self.endedFlag = true
+                if self.looping { self.endedFlag = false; self.restartQueue() }
+                else if let token = self.onEnded { self.send(.fired(token: token)) }
+            }
+            self.reportTransport()
+        }
+    }
+
+    private func owns(_ item: AVPlayerItem) -> Bool {
+        if urls.isEmpty { return item === player.currentItem }
+        return itemToIndex[ObjectIdentifier(item)] != nil
+    }
+    private func isLastItem(_ item: AVPlayerItem) -> Bool {
+        guard let idx = itemToIndex[ObjectIdentifier(item)] else { return false }
+        return idx == urls.count - 1
+    }
+    private func restartQueue() {
+        guard let queue = player as? AVQueuePlayer else { return }
+        queue.removeAllItems()
+        itemToIndex.removeAll()
+        for i in 0..<urls.count {
+            guard let u = URL(string: urls[i]) else { continue }
+            let item = AVPlayerItem(url: u)
+            itemToIndex[ObjectIdentifier(item)] = i
+            if queue.canInsert(item, after: nil) { queue.insert(item, after: nil) }
+        }
+        queue.play()
+    }
+
+    // Refresh per-render inputs (latest send closure + cosmetic flags) without touching playback.
+    func configure(looping: Bool, onEnded: String?, muted: Bool, volume: Float, rate: Float, captions: [Caption]) {
+        self.looping = looping
+        self.onEnded = onEnded
+        player.isMuted = muted
+        player.volume = volume
+        self.desiredRate = rate > 0 ? rate : 1.0
+        // Captions: AVPlayer can't render a sidecar WebVTT alongside an MP4, so the shell parses the
+        // selected track itself and draws cues in an overlay label (HLS streams with EMBEDDED captions
+        // are still selectable via the player's own CC menu). Pick the default track, else the first.
+        captionsOn = !captions.isEmpty
+        let chosen = captions.first(where: { $0.defaultOn }) ?? captions.first
+        if let chosen, chosen.url != captionUrl {
+            captionUrl = chosen.url
+            captionsRequested = false
+            cues = []
+        }
+        loadCaptionsIfNeeded()
+        if !captionsOn { captionLabel?.isHidden = true }
+    }
+    func refresh(send: @escaping (Action) -> Void) { self.send = send }
+
+    // Edge-triggered: seek / play / pause / track-jump only when a value actually CHANGES, so the
+    // periodic re-render neither re-applies every tick nor fights the native transport controls.
+    func apply(playing: Bool, seekToMs: Int64, startAtMs: Int64, seekIndex: Int64, allowPip: Bool) {
+        if allowPip {
+            // PiP needs an active playback audio session; this enables foreground PiP without any
+            // Info.plist key (background continuation is the documented opt-in `UIBackgroundModes`).
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
+        if !appliedStartAt, startAtMs >= 0 {
+            appliedStartAt = true
+            player.seek(to: CMTime(seconds: Double(startAtMs) / 1000.0, preferredTimescale: 600))
+        }
+        // A seek/jump fires only when the value CHANGES; the app clears it back to -1 once consumed,
+        // and we mirror that here so a repeat seek to the SAME value (e.g. Restart → 0 again) re-fires.
+        if seekIndex >= 0 {
+            if seekIndex != lastSeekIndex { lastSeekIndex = seekIndex; jump(to: Int(seekIndex)) }
+        } else { lastSeekIndex = -1 }
+        if seekToMs >= 0 {
+            if seekToMs != lastSeekMs {
+                lastSeekMs = seekToMs
+                endedFlag = false
+                player.seek(to: CMTime(seconds: Double(seekToMs) / 1000.0, preferredTimescale: 600))
+            }
+        } else { lastSeekMs = -1 }
+        if playing != lastPlaying {
+            lastPlaying = playing
+            if playing { endedFlag = false; player.rate = desiredRate } else { player.pause() }
+        } else if playing {
+            // honor a rate change while already playing
+            if abs(player.rate - desiredRate) > 0.001 { player.rate = desiredRate }
+        }
+        updateCaption()  // reflect a CC toggle immediately, even while paused
+    }
+
+    private func jump(to index: Int) {
+        guard let queue = player as? AVQueuePlayer, !urls.isEmpty else { return }
+        let target = max(0, min(index, urls.count - 1))
+        queue.removeAllItems()
+        itemToIndex.removeAll()
+        for i in target..<urls.count {
+            guard let u = URL(string: urls[i]) else { continue }
+            let item = AVPlayerItem(url: u)
+            itemToIndex[ObjectIdentifier(item)] = i
+            if queue.canInsert(item, after: nil) { queue.insert(item, after: nil) }
+        }
+        endedFlag = false
+        if lastPlaying == true { queue.play() }
+    }
+
+    // Fetch + parse the selected sidecar WebVTT once (works for https and data: URLs).
+    private func loadCaptionsIfNeeded() {
+        guard captionsOn, !captionsRequested, let urlStr = captionUrl else { return }
+        captionsRequested = true
+        // data: URLs aren't reliably loaded by URLSession — decode them inline. Remote tracks fetch.
+        if urlStr.hasPrefix("data:"), let comma = urlStr.firstIndex(of: ",") {
+            let meta = urlStr[..<comma]
+            let payload = String(urlStr[urlStr.index(after: comma)...])
+            let text: String? = meta.contains(";base64")
+                ? Data(base64Encoded: payload).flatMap { String(data: $0, encoding: .utf8) }
+                : (payload.removingPercentEncoding ?? payload)
+            if let text { cues = VideoSession.parseVtt(text) }
+            return
+        }
+        guard let url = URL(string: urlStr) else { return }
+        Task { @MainActor in
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let text = String(data: data, encoding: .utf8) else { return }
+            self.cues = VideoSession.parseVtt(text)
+        }
+    }
+
+    // Minimal WebVTT parser: blocks separated by blank lines, each with a `start --> end` line.
+    static func parseVtt(_ raw: String) -> [(start: Double, end: Double, text: String)] {
+        var out: [(start: Double, end: Double, text: String)] = []
+        let text = raw.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        for block in text.components(separatedBy: "\n\n") {
+            let lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            guard let arrowIdx = lines.firstIndex(where: { $0.contains("-->") }) else { continue }
+            let parts = lines[arrowIdx].components(separatedBy: "-->")
+            guard parts.count == 2, let s = parseVttTime(parts[0]), let e = parseVttTime(parts[1]) else { continue }
+            let cue = lines[(arrowIdx + 1)...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cue.isEmpty { out.append((s, e, cue)) }
+        }
+        return out
+    }
+    static func parseVttTime(_ s: String) -> Double? {
+        let token = s.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? ""
+        let comps = token.split(separator: ":").map(String.init)
+        guard !comps.isEmpty else { return nil }
+        var secs = 0.0
+        for c in comps { secs = secs * 60 + (Double(c.replacingOccurrences(of: ",", with: ".")) ?? 0) }
+        return secs
+    }
+
+    // Attach a caption overlay label, re-attaching to the current VC's overlay if recreated (see #127).
+    func attachCaption(to vc: AVPlayerViewController) {
+        guard let overlay = vc.contentOverlayView else { return }
+        if let existing = captionLabel, existing.superview === overlay { return }
+        let lbl = UILabel()
+        lbl.numberOfLines = 0
+        lbl.textAlignment = .center
+        lbl.textColor = .white
+        lbl.font = .systemFont(ofSize: 15, weight: .semibold)
+        lbl.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        lbl.isHidden = true
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(lbl)
+        NSLayoutConstraint.activate([
+            lbl.leadingAnchor.constraint(greaterThanOrEqualTo: overlay.leadingAnchor, constant: 8),
+            lbl.trailingAnchor.constraint(lessThanOrEqualTo: overlay.trailingAnchor, constant: -8),
+            lbl.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            lbl.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -16),
+        ])
+        captionLabel = lbl
+    }
+    private func updateCaption() {
+        guard captionsOn, !cues.isEmpty else { captionLabel?.isHidden = true; return }
+        let now = CMTimeGetSeconds(player.currentTime())
+        let active = cues.first(where: { now >= $0.start && now <= $0.end })
+        captionLabel?.text = active?.text
+        captionLabel?.isHidden = (active == nil)
+    }
+
+    // Show `poster` as an overlay until playback starts. The VC is recreated on every whole-tree
+    // re-render (see #127), so re-attach to the CURRENT overlay if ours isn't in it; the fetched
+    // image is cached on the session so a recreated VC shows it instantly.
+    func attachPoster(to vc: AVPlayerViewController, poster: String?) {
+        guard let poster, let url = URL(string: poster), let overlay = vc.contentOverlayView else { return }
+        if let existing = posterView, existing.superview === overlay {
+            if player.timeControlStatus == .playing { existing.isHidden = true }
+            return
+        }
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFit
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        iv.image = posterImage
+        iv.isHidden = (player.timeControlStatus == .playing)
+        overlay.addSubview(iv)
+        NSLayoutConstraint.activate([
+            iv.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+            iv.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+            iv.topAnchor.constraint(equalTo: overlay.topAnchor),
+            iv.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+        ])
+        posterView = iv
+        if posterImage == nil {
+            Task { @MainActor in
+                if let (data, _) = try? await URLSession.shared.data(from: url), let img = UIImage(data: data) {
+                    self.posterImage = img
+                    self.posterView?.image = img
+                }
+            }
+        }
+    }
+
+    private func currentIndex() -> Int64 {
+        guard !urls.isEmpty, let item = player.currentItem else { return -1 }
+        return Int64(itemToIndex[ObjectIdentifier(item)] ?? 0)
+    }
+    private func durationMs() -> Int64 {
+        guard let item = player.currentItem else { return -1 }
+        let d = CMTimeGetSeconds(item.duration)
+        return (d.isFinite && d > 0) ? Int64(d * 1000) : -1
+    }
+    private func bufferedMs() -> Int64 {
+        guard let item = player.currentItem, let r = item.loadedTimeRanges.last?.timeRangeValue else { return 0 }
+        let end = CMTimeGetSeconds(r.start) + CMTimeGetSeconds(r.duration)
+        return end.isFinite ? Int64(end * 1000) : 0
+    }
+    private func currentState() -> Int64 {
+        guard let item = player.currentItem else { return 0 }
+        if item.status == .failed { return 0 }
+        switch player.timeControlStatus {
+        case .playing: return 3
+        case .waitingToPlayAtSpecifiedRate: return 1
+        case .paused: return endedFlag ? 4 : 2
+        @unknown default: return 2
+        }
+    }
+    // Report duration/state/buffered (+ playlist index) via suffixed input ids when they change.
+    private func reportTransport() {
+        updateCaption()
+        if posterView != nil, player.timeControlStatus == .playing { posterView?.isHidden = true }
+        let d = durationMs()
+        if d != lastDuration { lastDuration = d; send(.input(id: id + ".duration", value: .int(d))) }
+        let s = currentState()
+        if s != lastState { lastState = s; send(.input(id: id + ".state", value: .int(s))) }
+        let b = bufferedMs()
+        if b != lastBuffered { lastBuffered = b; send(.input(id: id + ".buffered", value: .int(b))) }
+        let i = currentIndex()
+        if i != lastIndex { lastIndex = i; send(.input(id: id + ".index", value: .int(i))) }
+    }
+}
+
+// Auto-restores the embedded player's inline UI when PiP stops (e.g. when the user reopens the
+// app), instead of leaving the floating window until the video is tapped. The VC is still in the
+// view hierarchy, so acknowledging the restore (completionHandler(true)) is all that's needed.
+final class VideoPipDelegate: NSObject, AVPlayerViewControllerDelegate {
+    func playerViewController(_ playerViewController: AVPlayerViewController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(true)
+    }
+}
+
+@MainActor
+final class VideoSessionStore {
+    static let shared = VideoSessionStore()
+    private var sessions: [String: VideoSession] = [:]
+    func session(id: String, url: String, urls: [String], startIndex: Int64, send: @escaping (Action) -> Void) -> VideoSession {
+        if let s = sessions[id], s.url == url, s.urls == urls { s.refresh(send: send); return s }
+        let s = VideoSession(id: id, url: url, urls: urls, startIndex: startIndex, send: send)
+        sessions[id] = s
+        return s
+    }
+}
+
+// In-app PDF viewer (Widget.PdfView) — PDFKit renders the document at `urlString`
+// (a remote https URL is downloaded; a file:// URL loads directly). `autoScales` fits the page.
+struct PDFKitView: UIViewRepresentable {
+    let urlString: String
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        load(into: view)
+        return view
+    }
+    func updateUIView(_ view: PDFView, context: Context) {}
+    private func load(into view: PDFView) {
+        guard let url = URL(string: urlString) else { return }
+        if url.isFileURL {
+            view.document = PDFDocument(url: url)
+            return
+        }
+        Task { @MainActor in
+            if let (data, _) = try? await URLSession.shared.data(from: url),
+               let doc = PDFDocument(data: data) {
+                view.document = doc
+            }
+        }
+    }
+}
+
+// General embedded web content (docs, dashboards, hosted player embeds like Bunny.net). JS +
+// inline-media autoplay are enabled so hosted players work. Reloads only when the URL changes.
+struct WebKitWebView: UIViewRepresentable {
+    let urlString: String
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        let view = WKWebView(frame: .zero, configuration: config)
+        load(into: view)
+        context.coordinator.lastURL = urlString
+        return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {
+        if context.coordinator.lastURL != urlString {
+            context.coordinator.lastURL = urlString
+            load(into: view)
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    final class Coordinator { var lastURL: String? = nil }
+    private func load(into view: WKWebView) {
+        guard let url = URL(string: urlString) else { return }
+        view.load(URLRequest(url: url))
+    }
+}
+
+/// The snackbar from `SnackbarHost` (cx.snackbar): inverse colours (on_surface / surface / primary
+/// from the palette), an optional action button, a timer, and a downward swipe to dismiss.
+struct SnackbarView: View {
+    let seed: Rgb?
+    @Environment(\.paletteRoles) private var paletteRoles
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The palette's inverse pair, only when it sets both (one alone could pair with a default of
+    /// the same lightness).
+    private var paletteColors: (bg: Rgb, fg: Rgb)? {
+        guard let bg = pal?.onSurface, let fg = pal?.surface else { return nil }
+        return (bg, fg)
+    }
+
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        ZStack {
+            if let r = SnackbarHost.shared.current {
+                HStack(spacing: 12) {
+                    Text(r.text)
+                        .font(.subheadline)
+                        .foregroundColor(paletteColors?.fg.color ?? Color(.systemBackground))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let action = r.action {
+                        Button(action) { SnackbarHost.shared.finish("action", id: r.id) }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(actionColor)
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                // Inverse of the page, as on web and Android: the label colour, with background text.
+                .background(paletteColors?.bg.color ?? Color(.label))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .shadow(radius: 6, y: 3)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: 560)
+                .accessibilityElement(children: .contain)
+                .gesture(DragGesture(minimumDistance: 10).onEnded { g in
+                    if g.translation.height > 30 { SnackbarHost.shared.finish("dismissed", id: r.id) }
+                })
+                .onAppear {
+                    UIAccessibility.post(notification: .announcement, argument: r.action.map { "\(r.text). \($0)" } ?? r.text)
+                }
+                .task(id: r.id) {
+                    // A cancelled sleep (the view rebuilt mid-show) must not close it: the new view's
+                    // task starts the timer again.
+                    do { try await Task.sleep(for: .seconds(r.seconds)) } catch { return }
+                    SnackbarHost.shared.finish("timeout", id: r.id)
+                }
+                .id(r.id)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: SnackbarHost.shared.current?.id)
+    }
+
+    /// An inverse primary: the brand halfway toward the bar's text colour (the palette's surface, else
+    /// the system background: white in light mode, black in dark), so it reads on the inverted bar.
+    private var actionColor: Color {
+        guard let p = pal?.primary ?? seed else { return .accentColor }
+        let toward = paletteColors.map { (Double($0.fg.r), Double($0.fg.g), Double($0.fg.b)) }
+            ?? (colorScheme == .dark ? (0, 0, 0) : (255, 255, 255))
+        return Color(red: (Double(p.r) + toward.0) / 510, green: (Double(p.g) + toward.1) / 510, blue: (Double(p.b) + toward.2) / 510)
+    }
+}
+
+/// The FAB's content: the round icon, or (with_extended_fab) the icon plus its label, which is then
+/// the spoken name. Both are 56pt tall; the caller adds the fill, shape and shadow.
+@ViewBuilder
+private func fabContent(_ fab: SharedTypes.Fab) -> some View {
+    if let label = fab.label {
+        HStack(spacing: 12) {
+            Image(systemName: sfSymbol(fab.icon)).font(.title2).accessibilityHidden(true)
+            // The theme's body family (Custom fonts), like every other control label.
+            Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold)).lineLimit(1)
+        }
+        // M3's extended FAB: 16 before the icon, 20 after the label; grows past 56 at large text sizes.
+        .padding(.leading, 16)
+        .padding(.trailing, 20)
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+    } else {
+        Image(systemName: sfSymbol(fab.icon))
+            .font(.title2)
+            .frame(width: 56, height: 56)
+    }
+}

@@ -16,13 +16,20 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.channels.awaitClose
@@ -40,6 +47,7 @@ import rs.mobiler.saldo.shared.CoreFfi
 import rs.mobiler.saldo.shared.types.Action
 import rs.mobiler.saldo.shared.types.Effect
 import rs.mobiler.saldo.shared.types.HttpHeader
+import rs.mobiler.saldo.shared.types.DeviceInfo
 import rs.mobiler.saldo.shared.types.HttpOutcome
 import rs.mobiler.saldo.shared.types.PluginResponse
 import rs.mobiler.saldo.shared.types.Requests
@@ -139,9 +147,44 @@ class SystemPlugin : MobilerPlugin {
 class DevicePlugin : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
+        // Structured (cx.device_info): OS version + API level, manufacturer, model. No serial or ids.
+        "info" -> PluginResponse(
+            true,
+            DeviceInfo(Build.VERSION.RELEASE.orEmpty(), Build.VERSION.SDK_INT.toUInt(), Build.MANUFACTURER.orEmpty(), Build.MODEL.orEmpty())
+                .bincodeSerialize().toUByteList(),
+        )
         "locale" -> PluginResponse(true, java.util.Locale.getDefault().toLanguageTag())
+        // The OS light/dark setting (system resources: unaffected by the app's own appearance).
+        "appearance" -> PluginResponse(true, nightName(android.content.res.Resources.getSystem().configuration))
         else -> PluginResponse(false, "unknown op '$op'")
     }
+}
+
+private fun nightName(c: android.content.res.Configuration): String =
+    if ((c.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES) "dark" else "light"
+
+/** Built-in `appearance` stream: the OS light/dark setting — the current value first, then each
+ *  change. Application-level callbacks, so it survives Activity recreation on a uiMode change. */
+class AppearancePlugin(private val app: Application) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse =
+        PluginResponse(false, "appearance is a streaming capability — use cx.subscribe_appearance")
+    override fun subscribe(op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> =
+        kotlinx.coroutines.flow.callbackFlow {
+            var last = nightName(android.content.res.Resources.getSystem().configuration)
+            trySend(PluginResponse(true, last))
+            val cb = object : android.content.ComponentCallbacks {
+                override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+                    // The system configuration, as for the first value (it is already updated when
+                    // Application callbacks run) — not the app's, which could carry an app-level override.
+                    val now = nightName(android.content.res.Resources.getSystem().configuration)
+                    if (now != last) { last = now; trySend(PluginResponse(true, now)) }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onLowMemory() {}
+            }
+            app.registerComponentCallbacks(cb)
+            awaitClose { app.unregisterComponentCallbacks(cb) }
+        }
 }
 
 /** Official, bundled plugin: copy text to the system clipboard. */
@@ -150,6 +193,96 @@ class ClipboardPlugin(private val context: Context) : MobilerPlugin {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("text", input))
         return PluginResponse(true, "")
+    }
+}
+
+/** Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052): a copy with options. */
+class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "copy") return PluginResponse(false, "unknown clipboard_with op '$op'")
+        val o = runCatching { JSONObject(input) }.getOrNull() ?: return PluginResponse(false, "invalid input JSON")
+        val text = o.opt("text") as? String ?: return PluginResponse(false, "missing text")
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        // A unique label is how ClipboardExpiry later proves the clipboard still holds this copy.
+        val label = "mobiler-copy-" + java.util.UUID.randomUUID()
+        val clip = ClipData.newPlainText(label, text)
+        val sensitive = o.optBoolean("sensitive")
+        if (sensitive) {
+            // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); the same key asks keyboards not to keep it.
+            clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+        }
+        return try {
+            // ClipboardExpiry is main-confined: arm/disarm only ever run here, on Main.
+            withContext(Dispatchers.Main) {
+                cm.setPrimaryClip(clip)
+                if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
+            }
+            // What this copy got (ADR-0053): Android has no switch to keep a copy off other devices.
+            val report = JSONObject()
+                .put("sensitive", sensitive)
+                .put("expires", if (o.isNull("expires_ms")) "none" else "best_effort")
+                .put("local_only", false)
+            PluginResponse(true, report.toString())
+        } catch (e: CancellationException) {
+            // The copy may already be on the clipboard: never answer "not copied" for a cancelled call.
+            throw e
+        } catch (e: Exception) {
+            PluginResponse(false, "copy failed: ${e.message ?: e.javaClass.simpleName}")
+        }
+    }
+}
+
+/** `expires_ms` as a Long: a value past Long.MAX_VALUE (the core sends up to u64::MAX) saturates instead of wrapping
+ *  to a negative delay, which would clear at once. */
+private fun expiresMs(o: JSONObject): Long =
+    o.optDouble("expires_ms", 0.0).coerceIn(0.0, Long.MAX_VALUE.toDouble()).toLong()
+
+/** Clears a `clipboard_with` copy when its time is up, but only while the clipboard provably still holds it: since
+ *  Android 10 a backgrounded app can't read the clipboard, so there it re-checks every 5 s, reading the clipboard only
+ *  while an activity is resumed (it clears within seconds of the user returning), and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
+ *  Main-confined: call arm/disarm on the main thread only. Time is `SystemClock.elapsedRealtime()`, which keeps
+ *  counting while the phone sleeps (`delay` alone counts uptime, which stops). */
+object ClipboardExpiry {
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
+    private var job: Job? = null
+
+    fun disarm() {
+        job?.cancel()
+        job = null
+    }
+
+    fun arm(cm: ClipboardManager, label: String, ms: Long) {
+        disarm()
+        val now = android.os.SystemClock.elapsedRealtime()
+        val deadline = if (ms > Long.MAX_VALUE - now) Long.MAX_VALUE else now + ms
+        job = scope.launch {
+            // Sleep in steps of at most 5 s, so a deadline passed while the phone slept is noticed within 5 s of waking.
+            while (true) {
+                val left = deadline - android.os.SystemClock.elapsedRealtime()
+                if (left <= 0) break
+                kotlinx.coroutines.delay(minOf(left, 5_000L))
+            }
+            val giveUpAt = android.os.SystemClock.elapsedRealtime() + 60 * 60 * 1000L
+            while (isActive && android.os.SystemClock.elapsedRealtime() < giveUpAt) {
+                // Android 10+ denies (and logs) a read from the background, so there read only while an activity is
+                // resumed; Android 8–9 can read from anywhere and clear on time.
+                if (Build.VERSION.SDK_INT < 29 || MobilerActivity.current?.get() != null) {
+                    // Null when the clipboard is empty (or still unreadable, e.g. before the window has focus).
+                    val desc = cm.primaryClipDescription
+                    if (desc != null) {
+                        if (desc.label?.toString() == label) clear(cm)
+                        return@launch
+                    }
+                }
+                kotlinx.coroutines.delay(5_000)
+            }
+        }
+    }
+
+    private fun clear(cm: ClipboardManager) {
+        if (Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() else cm.setPrimaryClip(ClipData.newPlainText("", ""))
     }
 }
 
@@ -290,6 +423,45 @@ class DialogPlugin : MobilerPlugin {
     }
 }
 
+/** The scaffold's snackbar host (MainActivity passes it to the M3 Scaffold). `current` is the show in
+ *  flight (showing, or still waiting on the host's queue), so a newer snackbar can cancel it; `hosts`
+ *  counts the composed Scaffolds — M3 runs the timeout in the host, so with none there'd be no end. */
+object SnackbarBus {
+    val state = SnackbarHostState()
+    var current: Job? = null
+    var hosts = 0
+}
+
+/** Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+ *  "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout" | "replaced"
+ *  (M3 snackbars aren't swipeable, so there's no "dismissed" here). A newer snackbar replaces a
+ *  visible or queued one — M3 would queue it. With no Scaffold on screen it resolves "timeout" at
+ *  once (nothing to show it on). */
+class SnackbarPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "show") return PluginResponse(false, "unknown op '$op'")
+        val obj = runCatching { JSONObject(input) }.getOrElse { JSONObject() }
+        val label = obj.optString("action_label").ifEmpty { null }
+        val duration = if (obj.optString("duration") == "long") SnackbarDuration.Long else SnackbarDuration.Short
+        return withContext(Dispatchers.Main) {
+            if (SnackbarBus.hosts == 0) return@withContext PluginResponse(false, "timeout")
+            // One at a time: cancelling the older show (on screen, or queued on the host's mutex)
+            // removes it and makes that call answer "replaced".
+            SnackbarBus.current?.cancel()
+            val show = async { SnackbarBus.state.showSnackbar(obj.optString("text"), actionLabel = label, duration = duration) }
+            SnackbarBus.current = show
+            try {
+                if (show.await() == SnackbarResult.ActionPerformed) PluginResponse(true, "action") else PluginResponse(false, "timeout")
+            } catch (e: CancellationException) {
+                if (!isActive) throw e // this call itself was cancelled, not replaced
+                PluginResponse(false, "replaced")
+            } finally {
+                if (SnackbarBus.current === show) SnackbarBus.current = null
+            }
+        }
+    }
+}
+
 /** Official, bundled plugin: native date / time capability (request/response). op is
  *  "now" (→ current local "yyyy-MM-dd HH:mm:ss", no UI), "date" (→ ISO "YYYY-MM-DD")
  *  or "time" (→ 24-hour "HH:MM"); pickers return ok=false on cancel and suspend until
@@ -317,7 +489,7 @@ class DateTimePlugin : MobilerPlugin {
                 when (op) {
                     "date" -> {
                         val dlg = DatePickerDialog(
-                            activity,
+                            pickerContext(activity),
                             { _, y, m, d -> done(PluginResponse(true, String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m + 1, d))) },
                             now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH),
                         )
@@ -331,7 +503,7 @@ class DateTimePlugin : MobilerPlugin {
                     }
                     "time" -> {
                         val dlg = TimePickerDialog(
-                            activity,
+                            pickerContext(activity),
                             { _, h, min -> done(PluginResponse(true, String.format(java.util.Locale.US, "%02d:%02d", h, min))) },
                             now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), true,
                         )
@@ -351,40 +523,6 @@ class DateTimePlugin : MobilerPlugin {
 }
 
 /**
- * Native single-choice picker — request/response. Input {"title", "options":[…], "selected":Int}.
- * Shows an AlertDialog single-choice list (the iOS action sheet's Android counterpart). Resolves
- * ok=true with the chosen index as a string, or ok=false on cancel.
- */
-class PickerPlugin : MobilerPlugin {
-    override suspend fun handle(op: String, input: String): PluginResponse {
-        if (op != "choose") return PluginResponse(false, "unknown op '$op'")
-        val obj = JSONObject(input)
-        val arr = obj.optJSONArray("options") ?: return PluginResponse(false, "no options")
-        val options = Array(arr.length()) { arr.getString(it) }
-        val title = obj.optString("title")
-        val selected = obj.optInt("selected", -1)
-        val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
-        return withContext(Dispatchers.Main) {
-            suspendCancellableCoroutine { cont ->
-                var resumed = false
-                fun done(r: PluginResponse) {
-                    if (!resumed) { resumed = true; cont.resumeWith(Result.success(r)) }
-                }
-                val dlg = android.app.AlertDialog.Builder(activity)
-                    .setTitle(title)
-                    .setSingleChoiceItems(options, selected) { d, which ->
-                        done(PluginResponse(true, which.toString())); d.dismiss()
-                    }
-                    .setOnCancelListener { done(PluginResponse(false, "cancel")) }
-                    .create()
-                cont.invokeOnCancellation { dlg.dismiss() }
-                dlg.show()
-            }
-        }
-    }
-}
-
-/**
  * Set by MainActivity: launches the system photo picker and calls back with the
  * picked image URI (null if cancelled). The ActivityResult launcher must be
  * registered on the Activity, so it can't live in the (Application-context) plugin.
@@ -393,15 +531,19 @@ object PhotoPicker {
     var launch: ((onResult: (String?) -> Unit) -> Unit)? = null
 }
 
-/** Official, bundled plugin: pick an image via the system photo picker (no permission). */
-class PhotoPlugin : MobilerPlugin {
+/** Official, bundled plugin: pick an image via the system photo picker (no permission). An empty
+ *  input returns the picked URI (cx.pick_photo); options re-encode it (cx.pick_photo_with, ADR-0045). */
+class PhotoPlugin(private val app: Application) : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         if (op != "pick") return PluginResponse(false, "unknown op '$op'")
-        val launch = PhotoPicker.launch ?: return PluginResponse(false, "photo picker unavailable")
+        val launch = PhotoPicker.launch
+            ?: return PluginResponse(false, if (input.isEmpty()) "photo picker unavailable" else "unavailable")
         val uri = suspendCancellableCoroutine<String?> { cont ->
             launch { result -> cont.resumeWith(Result.success(result)) }
         }
-        return if (uri != null) PluginResponse(true, uri) else PluginResponse(false, "cancelled")
+        if (uri == null) return PluginResponse(false, "cancelled")
+        if (input.isEmpty()) return PluginResponse(true, uri)
+        return withContext(Dispatchers.IO) { PhotoPipeline.process(app, Uri.parse(uri), input) }
     }
 }
 
@@ -416,14 +558,25 @@ object CameraCapture {
 
 /** Official, bundled plugin: capture a photo with the system camera (cx.capture_photo).
  *  Intent-based (the system camera app handles capture), so no CAMERA permission. */
-class CameraPlugin : MobilerPlugin {
+class CameraPlugin(private val app: Application) : MobilerPlugin {
     override suspend fun handle(op: String, input: String): PluginResponse {
         if (op != "capture") return PluginResponse(false, "unknown op '$op'")
-        val launch = CameraCapture.launch ?: return PluginResponse(false, "camera unavailable")
+        val launch = CameraCapture.launch
+            ?: return PluginResponse(false, if (input.isEmpty()) "camera unavailable" else "unavailable")
         val uri = suspendCancellableCoroutine<String?> { cont ->
             launch { result -> cont.resumeWith(Result.success(result)) }
         }
-        return if (uri != null) PluginResponse(true, uri) else PluginResponse(false, "cancelled")
+        if (uri == null) return PluginResponse(false, "cancelled")
+        if (input.isEmpty()) return PluginResponse(true, uri)
+        return withContext(Dispatchers.IO) {
+            try {
+                PhotoPipeline.process(app, Uri.parse(uri), input)
+            } finally {
+                // The result is always a new file (a pass-through is copied), so the full-size capture,
+                // with the camera's EXIF, goes on every outcome, a throw included.
+                Uri.parse(uri).lastPathSegment?.let { java.io.File(app.cacheDir, "captures/$it").delete() }
+            }
+        }
     }
 }
 
@@ -512,24 +665,26 @@ class Core(application: Application) : AndroidViewModel(application) {
     // (e.g. premium plugins); the generic shell ships only the official ones.
     private val plugins: Map<String, MobilerPlugin> = mapOf(
         "toast" to ToastPlugin(application),
+        "snackbar" to SnackbarPlugin(),
         "device" to DevicePlugin(),
         "ticker" to TickerPlugin(),
         "system" to SystemPlugin(),
+        "appearance" to AppearancePlugin(application),
         "storage" to StoragePlugin(application),
         "http" to HttpPlugin(),
         "clipboard" to ClipboardPlugin(application),
+        "clipboard_with" to ClipboardWithPlugin(application),
         "share" to SharePlugin(application),
         "browser" to BrowserPlugin(application),
         "haptics" to HapticsPlugin(application),
         "dialog" to DialogPlugin(),
         "datetime" to DateTimePlugin(),
-        "picker" to PickerPlugin(),
-        "photo" to PhotoPlugin(),
-        "camera" to CameraPlugin(),
-        "sqlite" to SqlitePlugin(application),
-        "files" to FilesPlugin(application),
-        "filepicker" to FilePickerPlugin(application),
+        "photo" to PhotoPlugin(application),
+        "camera" to CameraPlugin(application),
         "biometric" to BiometricPlugin(application),
+        "filepicker" to FilePickerPlugin(application),
+        "files" to FilesPlugin(application),
+        "sqlite" to SqlitePlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 
@@ -658,4 +813,14 @@ class Core(application: Application) : AndroidViewModel(application) {
             emit(pluginFailed(plugin, e))
         }
     }
+}
+
+/** The date/time picker dialogs follow the app's resolved appearance (`ActiveAppearance`, set by App()),
+ *  not the OS night mode alone: the app theme resolved for that mode (its values / values-night
+ *  variant). Only this dialog's context is overridden; the app's configuration stays the OS's (ADR-0041). */
+private fun pickerContext(activity: Activity): android.content.Context {
+    val conf = android.content.res.Configuration(activity.resources.configuration)
+    val night = if (ActiveAppearance.dark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO
+    conf.uiMode = (conf.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or night
+    return android.view.ContextThemeWrapper(activity, activity.applicationInfo.theme).apply { applyOverrideConfiguration(conf) }
 }

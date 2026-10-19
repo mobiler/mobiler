@@ -49,9 +49,23 @@ jobs:
       - name: Build the release APK (release Rust via -PrustRelease)
         run: ./Android/gradlew -p Android --no-daemon :app:assembleRelease -PrustRelease
 
+      # The shell's release build is unsigned (the template's, ADR-0059: Saldo's shell equals it). Sign
+      # it here with a throwaway debug key so the shareable APK sideloads onto any device; a Play upload
+      # uses an upload key in its own lane.
+      - name: Sign the release APK with a debug key
+        run: |
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/debug.keystore" -storepass android -keypass android \
+            -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -validity 10000
+          OUT=Android/app/build/outputs/apk/release
+          "$BT/zipalign" -f -p 4 "$OUT/app-release-unsigned.apk" "$OUT/app-release-aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/debug.keystore" --ks-pass pass:android \
+            --out "$OUT/saldo-release.apk" "$OUT/app-release-aligned.apk"
+          "$BT/apksigner" verify "$OUT/saldo-release.apk"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: saldo-apk-${{ github.sha }}
-          path: demos/saldo/Android/app/build/outputs/apk/release/app-release.apk
+          path: demos/saldo/Android/app/build/outputs/apk/release/saldo-release.apk
           if-no-files-found: error

@@ -38,9 +38,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Debug-sign the release build so the shareable APK sideloads onto any device
-            // (a real Play upload uses an upload key; that's the separate release lane).
-            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -76,6 +73,8 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     // HTTP capability (Core.kt HttpPlugin)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Photo options (cx.pick_photo_with): the EXIF orientation.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Media3/ExoPlayer for Widget.Video (MP4 + HLS playback)
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")

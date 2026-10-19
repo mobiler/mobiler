@@ -51,19 +51,23 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 .allowsHitTesting(false)
         )
 
-    case .badge(let label, let tone, _):
+    case .badge(let label, let tone, let icon):
         let (bg, fg) = toneColors(tone)
         return AnyView(
-            Text(label).font(.footnote.weight(.semibold))
+            // with_icon: the status reads without its colour; the icon is decorative.
+            HStack(spacing: 4) {
+                if let icon { Image(systemName: sfSymbol(icon)).font(.system(size: 14)).accessibilityHidden(true) }
+                Text(label).font(.footnote.weight(.semibold))
+            }
                 .padding(.horizontal, 12).padding(.vertical, 5)
-                .background(bg).foregroundColor(fg).clipShape(Capsule())
+                .background(bg).foregroundColor(fg).clipShape(ShapeTokens.shape(ShapeTokens.shapes?.badge) ?? AnyShape(Capsule()))
         )
 
     case .colorDot(let color):
         return AnyView(Circle().fill(projectColor(color)).frame(width: 12, height: 12))
 
-    case .avatar(let source, let status, _, _):
-        return AnyView(AvatarView(source: source, status: status))
+    case .avatar(let source, let status, let initials, let size):
+        return AnyView(AvatarView(source: source, status: status, initials: initials, size: size))
 
     case .pdfView(let url):
         return AnyView(PDFKitView(urlString: url).frame(minHeight: 480))
@@ -97,7 +101,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             if caption { Text(spoken).font(.caption).foregroundColor(.secondary) }
             HStack(spacing: 4) {
                 ForEach(0..<t, id: \.self) { i in
-                    Capsule().fill(i < c ? (ActiveTheme.current?.brandColor ?? .accentColor) : Color(.systemGray3)).frame(height: 4)
+                    Capsule().fill(i < c ? role(pal?.primary, else: ActiveTheme.current?.brandColor ?? .accentColor) : role(pal?.outline, else: Color(.systemGray3))).frame(height: 4)
                 }
             }
         }
@@ -109,16 +113,16 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(RatingView(value: value, max: max, onRate: onRate, send: send))
 
     case .divider:
-        return AnyView(Divider())
+        return AnyView(PaletteDivider())
 
     case .progress(let value):
         if let v = value {
-            return AnyView(ProgressView(value: Double(v)).progressViewStyle(.linear).padding(.vertical, 4))
+            return AnyView(ProgressView(value: Double(v)).progressViewStyle(.linear).selectionTint().padding(.vertical, 4))
         }
         return AnyView(ProgressView().padding(.vertical, 4))
 
     case .skeleton:
-        return AnyView(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2)).frame(height: 48).padding(.vertical, 4))
+        return AnyView(RoundedRectangle(cornerRadius: 8).fill(role(pal?.surfaceMuted, else: Color.gray.opacity(0.2))).frame(height: 48).padding(.vertical, 4))
 
     case .chart(let series, let labels, let style, let axis, let legend):
         return AnyView(ChartView(series: series, labels: labels, style: style, axis: axis, legend: legend))
@@ -143,8 +147,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(VStack(alignment: .leading, spacing: isLargeDensity() ? 12 : 6) { childViews(children, send) })
 
     case .card(let child, let style, let onPress, let onLongPress):
-        // contentShape makes the WHOLE card hit-testable — without it a tappable Outlined card (a
-        // transparent fill) only registers taps on its text/chevron, not the empty middle.
+        // contentShape: the whole card takes the tap, not just its drawn content — an outlined or dashed
+        // card has no fill, so its padding and blank space would otherwise be dead.
         let body = AnyView(render(child, send).padding(14).frame(maxWidth: .infinity, alignment: .leading).modifier(CardMod(style)).contentShape(Rectangle()))
         var view = body
         if let token = onPress {
@@ -179,9 +183,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             ZStack(alignment: boxAlign(align)) { childViews(children, send) }
         )
 
-    case .grid(let children, _):
+    case .grid(let children, let columns):
         // Column count adapts to width: 2 on a phone (compact), more on iPad.
-        return AnyView(GridView(children: children, send: send))
+        return AnyView(GridView(children: children, columns: columns, send: send))
 
     case .scroller(let children, let edgeFade):
         if !edgeFade {
@@ -247,15 +251,15 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             Button(action: { send(.fired(token: onPress)) }) {
                 Group {
                     if large {
-                        Text(label).font(.body).padding(.horizontal, 16).frame(minHeight: 48)
+                        Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body)).padding(.horizontal, 16).frame(minHeight: 48)
                     } else {
-                        Text(label).font(.subheadline).padding(.horizontal, 12).padding(.vertical, 6)
+                        Text(label).font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline)).padding(.horizontal, 12).padding(.vertical, 6)
                     }
                 }
-                .background(selected ? ActiveTheme.accent.opacity(0.18) : Color.gray.opacity(0.12))
-                .foregroundColor(selected ? ActiveTheme.accent : .primary)
-                .overlay(Capsule().stroke(selected ? ActiveTheme.accent : .clear))
-                .clipShape(Capsule())
+                .background(selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.18)) : role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
+                .foregroundColor(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : role(pal?.onSurface, else: .primary))
+                .overlay((ShapeTokens.shape(ShapeTokens.shapes?.chip) ?? AnyShape(Capsule())).stroke(selected ? role(pal?.onSecondaryContainer, else: Color.accentColor) : .clear))
+                .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.chip) ?? AnyShape(Capsule()))
             }.buttonStyle(.plain)
         )
 
@@ -277,13 +281,13 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         let control: AnyView
         switch kind {
         case .secure:
-            control = AnyView(SecureField(placeholder, text: binding).textFieldStyle(.roundedBorder))
+            control = AnyView(SecureField(placeholder, text: binding).modifier(PaletteFieldStyle()))
         case .multiline:
             control = AnyView(TextField(placeholder, text: binding, axis: .vertical)
-                .lineLimit(3...6).textFieldStyle(.roundedBorder))
+                .lineLimit(3...6).modifier(PaletteFieldStyle()))
         default:
             control = AnyView(TextField(placeholder, text: binding)
-                .textFieldStyle(.roundedBorder)
+                .modifier(PaletteFieldStyle())
                 .keyboardType(kb)
                 .textInputAutocapitalization(lowercase ? .never : .sentences)
                 .autocorrectionDisabled(lowercase))
@@ -292,7 +296,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             VStack(alignment: .leading, spacing: 4) {
                 control
                 if let error = error {
-                    Text(error).font(.caption).foregroundColor(.red)
+                    Text(error).font(CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption)).foregroundColor(role(pal?.error, else: .red))
                 }
             }
         )
@@ -305,10 +309,11 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                     get: { value },
                     set: { send(.input(id: id, value: .text($0))) }
                 ))
+                .selectionTint()
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(Color.gray.opacity(0.12))
-            .clipShape(Capsule())
+            .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
+            .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.input) ?? AnyShape(Capsule()))
         )
 
     case .segmented(let segments):
@@ -317,18 +322,18 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             HStack(spacing: 4) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
                     Button(action: { send(.fired(token: seg.onSelect)) }) {
-                        Text(seg.label).font(large ? Font.body.weight(.semibold) : Font.subheadline.weight(.semibold))
+                        Text(seg.label).font(large ? CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold) : CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: large ? 48 : nil)
                             .padding(.vertical, large ? 0 : 8)
-                            .background(seg.selected ? ActiveTheme.accent : Color.clear)
-                            .foregroundColor(seg.selected ? .white : .secondary)
+                            .background(seg.selected ? role(pal?.secondaryContainer, else: Color.accentColor) : Color.clear)
+                            .foregroundColor(seg.selected ? role(pal?.onSecondaryContainer, else: .white) : role(pal?.onSurfaceVariant, else: .secondary))
                             .clipShape(Capsule())
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
             }
             .padding(4)
-            .background(Color.gray.opacity(0.12))
+            .background(role(pal?.surfaceMuted, else: Color.gray.opacity(0.12)))
             .clipShape(Capsule())
         )
 
@@ -338,6 +343,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 get: { value },
                 set: { send(.input(id: id, value: .bool($0))) }
             ))
+            .selectionTint()
         )
 
     case .checkbox(let id, let label, let value):
@@ -346,7 +352,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             Button(action: { send(.input(id: id, value: .bool(!value))) }) {
                 HStack(spacing: 10) {
                     Image(systemName: value ? "checkmark.square.fill" : "square")
-                        .foregroundColor(value ? ActiveTheme.accent : .secondary)
+                        .foregroundColor(value ? role(pal?.selection, else: .accentColor) : .secondary)
                     Text(label).foregroundColor(.primary)
                     Spacer()
                 }
@@ -362,26 +368,27 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                 ),
                 in: 0...Double(max)
             )
+            .selectionTint()
         )
 
     case .stepper(let value, let onDecrement, let onIncrement):
         return AnyView(
             HStack(spacing: 12) {
                 Button("−") { send(.fired(token: onDecrement)) }.buttonStyle(.bordered)
-                Text("\(value)").font(.title3)
+                Text("\(value)").font(CustomFonts.bodyOr(.title3, size: 20, relativeTo: .title3))
                 Button("+") { send(.fired(token: onIncrement)) }.buttonStyle(.bordered)
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, _, _, _):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, let appearance, let bottomBar):
         // Theme-as-data: the non-View mapper helpers — spacing(), imageShape(), CardMod,
         // TextStyleMod — read `ActiveTheme.current` (set from the root view in Core.swift, not
         // here) for corner/density/font. `theme` itself still flows into ScaffoldView, which uses
         // it directly only for its own `.tint` and the FAB background.
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
-            darkMode: darkMode, theme: theme, fab: fab, sheet: sheet,
-            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, send: send
+            darkMode: darkMode, appearance: appearance, theme: theme, fab: fab, sheet: sheet,
+            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, bottomBar: bottomBar, send: send
         ))
     }
 }
@@ -393,21 +400,172 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
 /// app-global, like dark mode.
 enum ActiveTheme {
     nonisolated(unsafe) static var current: Theme?
-    /// The themed brand accent for custom controls. SwiftUI's `.tint` does NOT change
-    /// `ActiveTheme.accent`, so custom views that used it rendered in the system blue — read this
-    /// instead so selected chips/segments/tabs/toggles all match the brand.
-    static var accent: Color { current?.accentColor ?? .accentColor }
-    /// The app background — a faint brand tint in light mode (so white cards float and the glass
-    /// tab bar has something to refract), the system background in dark mode.
-    static var appBackground: Color {
-        Color(red: 0xE9 / 255.0, green: 0xF6 / 255.0, blue: 0xF1 / 255.0) // Aqua Mint
-    }
 }
 
 /// The current scaffold's app-wide shell text (ShellLabels), set from the root view in Core.swift;
 /// read by the dialog/picker plugins for their defaults. `nil` ⇒ English defaults.
 enum ActiveLabels {
     nonisolated(unsafe) static var current: ShellLabels?
+}
+
+/// The active palette set — the root scaffold's `theme.palette`, light or dark by its dark mode — set
+/// in Core.swift with `ActiveTheme`. `nil` = no palette: every widget keeps its system colours.
+enum ActivePalette {
+    nonisolated(unsafe) static var current: ColorRoles?
+}
+private var pal: ColorRoles? { ActivePalette.current }
+/// The resolved palette in the environment too: views that read `pal` in their body declare
+/// `@Environment(\.paletteRoles)`, so a light/dark flip (same view inputs) still re-renders them.
+private struct PaletteRolesKey: EnvironmentKey { static let defaultValue: ColorRoles? = nil }
+extension EnvironmentValues {
+    var paletteRoles: ColorRoles? {
+        get { self[PaletteRolesKey.self] }
+        set { self[PaletteRolesKey.self] = newValue }
+    }
+}
+extension Rgb { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255) } }
+extension Rgba { var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255) } }
+/// The palette colour for a role, else the shell's current colour.
+func role(_ c: Rgb?, else fallback: Color) -> Color { c?.color ?? fallback }
+extension View {
+    /// The palette's `selection` as this control's tint; unset keeps the inherited tint (today's colour).
+    @ViewBuilder func selectionTint() -> some View {
+        if let s = pal?.selection { self.tint(s.color) } else { self }
+    }
+}
+/// The palette's container/on-container pair for a tone (nil: no palette, neutral, or unset).
+private func palettePair(_ tone: Tone) -> TonePair? {
+    guard let p = pal else { return nil }
+    switch tone {
+    case .success: return p.success
+    case .warning: return p.warning
+    case .danger: return p.danger
+    case .info: return p.info
+    case .neutral: return nil
+    }
+}
+/// `FontFamily.custom`: the families `mobiler fonts sync` registered (UIAppFonts + the
+/// MobilerFontDisplay/MobilerFontBody Info.plist keys) — used only if the family actually registered;
+/// otherwise nil and the system font is used, per role.
+enum CustomFonts {
+    static let display: String? = registered("MobilerFontDisplay")
+    static let body: String? = registered("MobilerFontBody")
+    private static func registered(_ key: String) -> String? {
+        guard let family = Bundle.main.infoDictionary?[key] as? String, !family.isEmpty else { return nil }
+        guard !UIFont.fontNames(forFamilyName: family).isEmpty else {
+            print("mobiler: font family \"\(family)\" (\(key)) isn't registered — using the system font. Check mobiler.toml [fonts] and run `mobiler fonts sync`.")
+            return nil
+        }
+        return family
+    }
+    static var active: Bool { if case .some(.custom) = ActiveTheme.current?.font { return true }; return false }
+    /// The custom family at the size of the system style it replaces (`relativeTo` keeps Dynamic Type);
+    /// nil when not `.custom` or the role has no registered family.
+    static func font(_ family: String?, size: CGFloat, relativeTo: Font.TextStyle) -> Font? {
+        guard active, let family else { return nil }
+        return Font.custom(family, size: size, relativeTo: relativeTo)
+    }
+    /// For controls that set their own font: the body family at the system style's size, else exactly
+    /// `system` (so a non-custom theme is unchanged).
+    static func bodyOr(_ system: Font, size: CGFloat, relativeTo: Font.TextStyle) -> Font {
+        font(body, size: size, relativeTo: relativeTo) ?? system
+    }
+}
+
+/// A type-scale spec (`Theme.type_scale`) as a Font: the synced custom family via `Font.custom(…,
+/// relativeTo:)` (follows Dynamic Type), else the system font at a `UIFontMetrics`-scaled size —
+/// `Font.system(size:)` alone wouldn't follow the user's text size.
+enum TypeScaleFonts {
+    static var scale: TypeScale? { ActiveTheme.current?.typeScale }
+    static func weight(_ w: UInt16) -> Font.Weight {
+        switch (min(max(Int(w), 100), 900) + 50) / 100 * 100 {
+        case 100: return .ultraLight
+        case 200: return .thin
+        case 300: return .light
+        case 400: return .regular
+        case 500: return .medium
+        case 600: return .semibold
+        case 700: return .bold
+        case 800: return .heavy
+        default: return .black
+        }
+    }
+    static func font(_ spec: TypeSpec, relativeTo: Font.TextStyle, uiStyle: UIFont.TextStyle, design: Font.Design) -> Font {
+        let family = spec.family == .display ? CustomFonts.display : CustomFonts.body
+        if let f = CustomFonts.font(family, size: CGFloat(spec.size), relativeTo: relativeTo) { return f.weight(weight(spec.weight)) }
+        return .system(size: UIFontMetrics(forTextStyle: uiStyle).scaledValue(for: CGFloat(spec.size)), weight: weight(spec.weight), design: design)
+    }
+}
+
+/// With `FontFamily.custom`, the body family is the default for everything below (buttons, fields,
+/// plain text); otherwise no modifier.
+private struct CustomBodyFont: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if let f = CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) { content.font(f) } else { content }
+    }
+}
+
+/// Body text in the palette's `on_surface`; without that role, no modifier (system label colour).
+/// The colour is an input (not read from `pal` inside): a modifier with no changing inputs isn't
+/// re-evaluated, so a Light/Dark switch kept the previous set's text colour.
+private struct PaletteText: ViewModifier {
+    let ink: Rgb?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let c = ink { content.foregroundColor(c.color) } else { content }
+    }
+}
+/// Theme.shapes per component: the set radius as a shape (`Pill` = capsule, `Dp(n)` = n pt), else nil
+/// so the site keeps its own shape.
+enum ShapeTokens {
+    static var shapes: Shapes? { ActiveTheme.current?.shapes }
+    static func shape(_ r: Radius?) -> AnyShape? {
+        switch r {
+        case .none: return nil
+        case .some(.pill): return AnyShape(Capsule())
+        case .some(.dp(let n)): return AnyShape(RoundedRectangle(cornerRadius: CGFloat(n)))
+        }
+    }
+    static var button: AnyShape { shape(shapes?.button) ?? AnyShape(Capsule()) }
+}
+
+
+/// Text fields: with a palette's `surface_muted`, a plain field on that fill with an `outline` border
+/// (`.roundedBorder` can't be recoloured); otherwise the system rounded border, as before.
+private struct PaletteFieldStyle: ViewModifier {
+    @Environment(\.paletteRoles) private var paletteRoles
+    /// A palette's `selection` marks the focused field's border; unset: no focus border, as before.
+    @FocusState private var focused: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let focusMark = focused ? pal?.selection : nil
+        // `.roundedBorder` can't take another radius either: an `input` radius also switches to a plain
+        // field with its own shape.
+        let inputShape = ShapeTokens.shape(ShapeTokens.shapes?.input)
+        if pal?.surfaceMuted != nil || inputShape != nil {
+            let shape = inputShape ?? AnyShape(RoundedRectangle(cornerRadius: 8))
+            content.textFieldStyle(.plain)
+                .focused($focused)
+                .selectionTint()
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemFill))))
+                // A palette without `outline` keeps its borderless field; the gray hairline is only for
+                // an input radius without a palette.
+                .overlay(shape.stroke(focusMark?.color ?? role(pal?.outline, else: pal?.surfaceMuted != nil ? .clear : Color.gray.opacity(0.3))))
+        } else {
+            content.textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .selectionTint()
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(focusMark?.color ?? .clear, lineWidth: 1))
+        }
+    }
+}
+/// A horizontal hairline in the palette's `outline_variant`, else the system divider.
+private struct PaletteDivider: View {
+    @Environment(\.paletteRoles) private var paletteRoles
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        if let c = pal?.outlineVariant { Rectangle().fill(c.color).frame(height: 1) } else { Divider() }
+    }
 }
 
 /// Concrete look derived from the active theme (with framework defaults when un-themed).
@@ -427,18 +585,83 @@ private func isLargeDensity() -> Bool {
     return false
 }
 
-/// Renders a `[Widget]` as sibling views (children of a stack/grid).
+/// A widget's own id, for the kinds that have one.
+fileprivate func ownId(_ w: SharedTypes.Widget) -> String? {
+    switch w {
+    case .textField(let id, _, _, _, _), .searchField(let id, _, _), .toggle(let id, _, _),
+         .checkbox(let id, _, _), .slider(let id, _, _), .map(let id, _, _, _, _, _, _):
+        return id
+    case .video(_, let id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _):
+        return id
+    default:
+        return nil
+    }
+}
+
+/// The first id in a widget's subtree (depth first): how an id-less container is known by what it holds.
+fileprivate func firstId(_ w: SharedTypes.Widget) -> String? {
+    if let id = ownId(w) { return id }
+    switch w {
+    case .row(let children), .column(let children):
+        return children.lazy.compactMap(firstId).first
+    case .box(let children, _, _), .grid(let children, _), .scroller(let children, _):
+        return children.lazy.compactMap(firstId).first
+    case .lazyList(let children, _, _, _, _, _, _, _):
+        return children.lazy.compactMap(firstId).first
+    case .card(let child, _, _, _), .a11y(let child, _, _, _), .swipeAction(let child, _):
+        return firstId(child)
+    case .split(let primary, let detail, _, _):
+        return firstId(primary) ?? firstId(detail)
+    default:
+        return nil
+    }
+}
+
+/// A child's identity across renders (ADR-0047): its id; else its kind, plus the first id inside it
+/// for a container (`row[email]`); then `#n` for its place among siblings with the same base, so keys
+/// are unique. A row appearing above a field, or above the row or card holding it, never changes the
+/// field's identity, so SwiftUI keeps its text and focus.
+fileprivate func childKeys(_ children: [SharedTypes.Widget]) -> [String] {
+    var seen: [String: Int] = [:]
+    return children.map { w in
+        let base: String
+        if let id = ownId(w) {
+            base = "id:\(id)"
+        } else {
+            // The case name: a case with values reflects as one labelled child.
+            let kind = Mirror(reflecting: w).children.first?.label ?? String(describing: w)
+            base = kind + (firstId(w).map { "[\($0)]" } ?? "")
+        }
+        let n = seen[base, default: 0]
+        seen[base] = n + 1
+        return "\(base)#\(n)"
+    }
+}
+
+/// A sibling with its `childKeys` identity and its position, for `ForEach`.
+fileprivate struct KeyedChild: Identifiable {
+    let id: String
+    let offset: Int
+    let element: SharedTypes.Widget
+}
+
+fileprivate func keyedChildren(_ children: [SharedTypes.Widget]) -> [KeyedChild] {
+    zip(childKeys(children), children.enumerated()).map { KeyedChild(id: $0, offset: $1.offset, element: $1.element) }
+}
+
+/// Renders a `[Widget]` as sibling views (children of a stack/grid), each under its identity.
 @ViewBuilder
 private func childViews(_ children: [SharedTypes.Widget], _ send: @escaping (Action) -> Void) -> some View {
-    ForEach(Array(children.enumerated()), id: \.offset) { _, child in
-        render(child, send)
+    ForEach(keyedChildren(children)) { item in
+        render(item.element, send)
     }
 }
 
 /// `Widget::Map` on iOS — MapKit (`MKMapView`) via UIViewRepresentable. The app drives the camera
 /// (center/zoom → region span) + markers; a tap reports coordinates and selecting a marker reports its
 /// id, both via `Action::Input` ("{id}.tap" / "{id}.marker"). `style_url` is MapLibre-only → ignored
-/// here (MapKit uses Apple Maps).
+/// here (MapKit uses Apple Maps). The camera and markers are applied only when the app's values change
+/// (ADR-0026), so a user's pan or zoom survives unrelated re-renders.
 private struct MapWidgetView: UIViewRepresentable {
     let id: String
     let centerLat: Double
@@ -463,24 +686,42 @@ private struct MapWidgetView: UIViewRepresentable {
         context.coordinator.parent = self
         mv.isScrollEnabled = interactive
         mv.isZoomEnabled = interactive
-        // zoom level → span in degrees (≈ 360 / 2^zoom), clamped to a sane range.
-        let span = min(180.0, max(0.001, 360.0 / pow(2.0, zoom)))
-        let region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
-            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
-        )
-        mv.setRegion(region, animated: false)
-        mv.removeAnnotations(mv.annotations)
-        for mk in markers {
-            let a = MarkerAnnotation(markerId: mk.id)
-            a.coordinate = CLLocationCoordinate2D(latitude: mk.lat, longitude: mk.lng)
-            a.title = mk.title
-            mv.addAnnotation(a)
+        let c = context.coordinator
+        let camera = [centerLat, centerLng, zoom]
+        if c.appliedCamera != camera {
+            c.appliedCamera = camera
+            // zoom level → span in degrees (≈ 360 / 2^zoom), clamped to a sane range.
+            let span = min(180.0, max(0.001, 360.0 / pow(2.0, zoom)))
+            let region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
+                span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
+            )
+            mv.setRegion(region, animated: false)
+            // The first update can run before SwiftUI sizes the view, and MapKit fits a region to
+            // the view's bounds: apply it once more after layout.
+            if mv.bounds.isEmpty {
+                DispatchQueue.main.async { mv.setRegion(region, animated: false) }
+            }
+        }
+        let markersKey = markers.map { "\($0.id)|\($0.lat)|\($0.lng)|\($0.title ?? "")" }.joined(separator: "\n")
+        if c.appliedMarkers != markersKey {
+            c.appliedMarkers = markersKey
+            mv.removeAnnotations(mv.annotations)
+            for mk in markers {
+                let a = MarkerAnnotation(markerId: mk.id)
+                a.coordinate = CLLocationCoordinate2D(latitude: mk.lat, longitude: mk.lng)
+                a.title = mk.title
+                mv.addAnnotation(a)
+            }
         }
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
         var parent: MapWidgetView
+        /// What was last applied from the app, so a re-render with the same values leaves the user's
+        /// pan/zoom and the marker selection alone. `nil` until the first update.
+        var appliedCamera: [Double]?
+        var appliedMarkers: String?
         init(_ p: MapWidgetView) { parent = p }
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
@@ -511,10 +752,12 @@ private final class MarkerAnnotation: MKPointAnnotation {
 /// the iOS twin of the web shell's `auto-fill` grid and Android's width-derived count.
 private struct GridView: View {
     let children: [SharedTypes.Widget]
+    /// with_columns: exactly that many (1-4) at every width; nil = 2 on a phone, 4 on iPad.
+    let columns: UInt8?
     let send: (Action) -> Void
     @Environment(\.horizontalSizeClass) private var hSize
     var body: some View {
-        let cols = hSize == .regular ? 4 : 2
+        let cols = columns.map { Int(min(max($0, 1), 4)) } ?? (hSize == .regular ? 4 : 2)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: cols), spacing: 12) {
             childViews(children, send)
         }
@@ -525,25 +768,57 @@ private struct GridView: View {
 private struct AvatarView: View {
     let source: String
     let status: Tone?
+    let initials: String?
+    let size: UInt8?
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let d = CGFloat(size ?? 48)
         let img: AnyView
-        if source.hasPrefix("file:"), let url = URL(string: source) {
-            img = AnyView(FileImageView(url: url))
+        if let initials, source.isEmpty {
+            img = AnyView(initialsView(initials, d))
+        } else if source.hasPrefix("file:"), let url = URL(string: source) {
+            img = AnyView(FileImageView(url: url, fallback: initials.map { AnyView(initialsView($0, d)) }))
+        } else if let initials, URL(string: source) == nil {
+            // Not a loadable URL at all: AsyncImage would stay empty, so it's a failure.
+            img = AnyView(initialsView(initials, d))
+        } else if let initials {
+            // with_initials: drawn when the image fails to load; a loaded image wins.
+            img = AnyView(AsyncImage(url: URL(string: source)) { phase in
+                switch phase {
+                case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
+                case .failure: initialsView(initials, d)
+                default: Color.gray.opacity(0.15)
+                }
+            })
         } else {
             img = AnyView(AsyncImage(url: URL(string: source)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: { Color.gray.opacity(0.15) })
         }
         return img
-            .frame(width: 48, height: 48)
+            .frame(width: d, height: d)
             .clipShape(Circle())
             .overlay(alignment: .bottomTrailing) {
                 if let status = status {
-                    Circle().fill(toneColors(status).0)
+                    Circle().fill(palettePair(status) != nil ? toneColors(status).1 : toneColors(status).0)
                         .frame(width: 12, height: 12)
-                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                        .overlay(Circle().stroke(role(pal?.surface, else: Color(.systemBackground)), lineWidth: 2))
                 }
             }
+    }
+
+    /// The first two characters on the palette's secondary container (else a 16% brand tint), 40% of
+    /// the diameter, in the body family.
+    private func initialsView(_ initials: String, _ d: CGFloat) -> some View {
+        let brand = ActiveTheme.current?.brandColor ?? .accentColor
+        return Circle()
+            .fill(role(pal?.secondaryContainer, else: brand.opacity(0.16)))
+            .overlay(
+                Text(String(initials.prefix(2)))
+                    .font(CustomFonts.bodyOr(.system(size: d * 0.4), size: d * 0.4, relativeTo: .body).weight(.semibold))
+                    .foregroundColor(role(pal?.onSecondaryContainer, else: brand))
+            )
     }
 }
 
@@ -577,7 +852,7 @@ private struct ChartView: View {
         if i < series.count, let c = series[i].color {
             return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
         }
-        return i == 0 ? ActiveTheme.accent : chartPalette[(i - 1) % chartPalette.count]
+        return i == 0 ? role(pal?.primaryText, else: Color.accentColor) : chartPalette[(i - 1) % chartPalette.count]
     }
     private func mag(_ i: Int) -> Float { i < series.count ? series[i].values.reduce(0, +) : 0 }
     private func fmtTick(_ v: Float) -> String {
@@ -603,7 +878,9 @@ private struct ChartView: View {
         return Int((min(mag(0) / (g <= 0 ? 1e-6 : g), 1) * 100).rounded())
     }
 
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         VStack(spacing: 4) {
             if isCartesian {
                 HStack(spacing: 4) {
@@ -628,7 +905,7 @@ private struct ChartView: View {
             } else {
                 ZStack {
                     circularCanvas
-                    if case .gauge = style { Text("\(gaugePct)%").font(.title2).bold() }
+                    if case .gauge = style { Text("\(gaugePct)%").font(CustomFonts.bodyOr(.title2, size: 22, relativeTo: .title2)).bold() }
                 }.frame(height: 140)
             }
             if legend, !series.isEmpty {
@@ -939,7 +1216,8 @@ private struct LazyListView: View {
                 if refreshing {
                     ProgressView().frame(maxWidth: .infinity).padding(.bottom, 4)
                 }
-                ForEach(Array(children.enumerated()), id: \.offset) { idx, child in
+                ForEach(keyedChildren(children)) { item in
+                    let (idx, child) = (item.offset, item.element)
                     render(child, send)
                         .environment(\.fillList, false)
                         .onAppear {
@@ -979,24 +1257,26 @@ private struct SwipeActionView: View {
     let send: (Action) -> Void
     @State private var offset: CGFloat = 0
     private var revealWidth: CGFloat { CGFloat(actions.count) * 84 }
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         ZStack(alignment: .trailing) {
             HStack(spacing: 8) {
                 ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
                     Button(action: { send(.fired(token: a.onTap)); withAnimation { offset = 0 } }) {
                         Text(a.label)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.white)
+                            .font(CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
+                            .foregroundColor(palettePair(a.tone) != nil ? toneColors(a.tone).1 : .white)
                             .frame(width: 76)
                             .frame(maxHeight: .infinity)
-                            .background(toneColors(a.tone).1)
+                            .background(palettePair(a.tone) != nil ? toneColors(a.tone).0 : toneColors(a.tone).1)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain)
                 }
             }
             .padding(.vertical, 4)
             render(content, send)
-                .background(Color(.systemBackground))
+                .background(role(pal?.surface, else: Color(.systemBackground)))
                 .offset(x: offset)
                 .gesture(
                     DragGesture()
@@ -1019,10 +1299,12 @@ private struct CalendarView: View {
     let markers: [UInt8]
     let send: (Action) -> Void
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         let cell: CGFloat = isLargeDensity() ? 48 : 32
         VStack(spacing: 6) {
-            Text(title).font(.headline)
+            Text(title).font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
             LazyVGrid(columns: cols, spacing: 4) {
                 ForEach(Array(weekdayLabels.enumerated()), id: \.offset) { _, w in
                     Text(w).font(.caption2).foregroundColor(.secondary)
@@ -1034,14 +1316,14 @@ private struct CalendarView: View {
                     let level = idx < markers.count ? min(Int(markers[idx]), 3) : 0
                     Button(action: { send(.fired(token: token)) }) {
                         Text("\(day)").frame(maxWidth: .infinity, minHeight: cell)
-                            .background(isSel ? ActiveTheme.accent : Color.clear)
-                            .foregroundColor(isSel ? .white : .primary)
+                            .background(isSel ? role(pal?.primary, else: Color.accentColor) : Color.clear)
+                            .foregroundColor(isSel ? role(pal?.onPrimary, else: .white) : role(pal?.onSurface, else: .primary))
                             .clipShape(Circle())
                             .overlay(alignment: .bottom) {
                                 if level > 0 {
                                     HStack(spacing: 2) {
                                         ForEach(0..<level, id: \.self) { _ in
-                                            Circle().fill(isSel ? Color.white : ActiveTheme.accent).frame(width: 4, height: 4)
+                                            Circle().fill(isSel ? role(pal?.onPrimary, else: Color.white) : role(pal?.primaryText, else: Color.accentColor)).frame(width: 4, height: 4)
                                         }
                                     }
                                     .padding(.bottom, 3)
@@ -1061,7 +1343,9 @@ private struct RatingView: View {
     let max: UInt8
     let onRate: [String]?
     let send: (Action) -> Void
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         HStack(spacing: 2) {
             ForEach(1...Int(max), id: \.self) { i in
                 let threshold = UInt32(i) * 10
@@ -1069,10 +1353,10 @@ private struct RatingView: View {
                 if let tokens = onRate, i - 1 < tokens.count {
                     let token = tokens[i - 1]
                     Button(action: { send(.fired(token: token)) }) {
-                        Image(systemName: name).foregroundColor(ActiveTheme.accent)
+                        Image(systemName: name).foregroundColor(role(pal?.primaryText, else: .accentColor))
                     }.buttonStyle(.plain)
                 } else {
-                    Image(systemName: name).foregroundColor(ActiveTheme.accent)
+                    Image(systemName: name).foregroundColor(role(pal?.primaryText, else: .accentColor))
                 }
             }
         }
@@ -1114,41 +1398,13 @@ private struct SplitView: View {
     }
 }
 
-// Bottom tab bar style: a floating frosted-glass capsule (content scrolls/blurs behind it) vs the
-// classic opaque bar stacked below the body. Flip to `false` to opt out of the glass look.
-private let glassTabBar = true
-
-private extension View {
-    // The real iOS 26 Liquid Glass material in `shape` (translucent, refractive). Compiled only when
-    // built with the iOS 26 SDK (`compiler(>=6.2)` = Xcode 26); older SDKs / OS versions fall back to a
-    // frosted `.ultraThinMaterial`, so this builds on any Xcode and degrades gracefully below iOS 26.
-    @ViewBuilder
-    func glassPill<S: InsettableShape>(_ shape: S) -> some View {
-        #if compiler(>=6.2)
-        if #available(iOS 26.0, *) {
-            self.glassEffect(in: shape)
-        } else {
-            self.frostedPill(shape)
-        }
-        #else
-        self.frostedPill(shape)
-        #endif
-    }
-
-    @ViewBuilder
-    func frostedPill<S: InsettableShape>(_ shape: S) -> some View {
-        self.background(.ultraThinMaterial, in: shape)
-            .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
-            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
-    }
-}
-
 private struct ScaffoldView: View {
     let title: String
     let content: SharedTypes.Widget
     let tabs: [SharedTypes.Tab]
     let back: String?
     let darkMode: Bool
+    let appearance: Appearance?
     let theme: Theme?
     let fab: SharedTypes.Fab?
     let sheet: SharedTypes.Sheet?
@@ -1156,6 +1412,8 @@ private struct ScaffoldView: View {
     let refreshing: Bool
     let route: String
     let depth: UInt32
+    /// with_bottom_bar: the screen's main actions, pinned between the body and the tabs.
+    let bottomBar: [SharedTypes.Widget]?
     let send: (Action) -> Void
 
     // Remember the depth of the previous route so a route change knows its
@@ -1163,8 +1421,29 @@ private struct ScaffoldView: View {
     @State private var prevDepth: UInt32 = 0
     // Regular width (iPad / large landscape) swaps the bottom tab-bar for a side rail.
     @Environment(\.horizontalSizeClass) private var hSize
+    // The live scheme around the scaffold: the OS's under `.system` (no preferredColorScheme then).
+    @Environment(\.colorScheme) private var systemScheme
+    // The type scale's system-font sizes for the top-bar and sheet titles are scaled by hand
+    // (UIFontMetrics), so a text-size change must re-render the scaffold too.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    // Light/Dark force the mode; System follows the OS; none → dark_mode, as before.
+    private var resolvedDark: Bool {
+        switch appearance {
+        case .some(.light): return false
+        case .some(.dark): return true
+        case .some(.system): return systemScheme == .dark
+        case .none: return darkMode
+        }
+    }
+    private var isSystem: Bool { if case .some(.system) = appearance { return true }; return false }
 
     var body: some View {
+        // Under `.system` the live OS scheme picks the palette set, so an OS flip re-renders this view
+        // and re-resolves it here, before the children render (they read `pal`). Other modes are
+        // resolved from the root in Core.swift (a nested scaffold never overrides it).
+        let _ = { if isSystem { ActivePalette.current = ActiveTheme.current?.palette.map { resolvedDark ? $0.dark : $0.light } } }()
+        let _ = dynamicTypeSize
         let useRail = hSize == .regular && !tabs.isEmpty
         Group {
             if useRail {
@@ -1177,11 +1456,12 @@ private struct ScaffoldView: View {
                 mainColumn(showBottomTabs: true)
             }
         }
-        .background((darkMode ? Color(.systemBackground) : ActiveTheme.appBackground).ignoresSafeArea())
-        .preferredColorScheme(darkMode ? .dark : .light)
+        .background(role(pal?.background, else: .clear).ignoresSafeArea())
+        .modifier(PaletteText(ink: pal?.onSurface))
+        .modifier(CustomBodyFont())
         // Brand color cascades to buttons (.borderedProminent), chips, the .info tone, star,
-        // toggles, sliders, text fields — one modifier themes most controls.
-        .tint(theme?.brandColor)
+        // toggles, sliders, text fields — one modifier themes most controls. A palette's primary wins.
+        .tint(pal?.primary?.color ?? theme?.brandColor)
         .animation(.easeInOut(duration: 0.28), value: route)
         // Edge-swipe to go back — the iOS idiom for Android's system BackHandler. The
         // gesture only engages past a 90pt drag from the leading edge, so it doesn't
@@ -1198,168 +1478,151 @@ private struct ScaffoldView: View {
         )
         // After each route settles, record its depth for the next transition.
         .task(id: route) { prevDepth = depth }
+        // cx.snackbar draws inside a scaffold; count the ones on screen (see SnackbarHost.hosts).
+        .onAppear { SnackbarHost.shared.hosts += 1 }
+        .onDisappear {
+            SnackbarHost.shared.hosts -= 1
+            // The last scaffold went: nothing draws the snackbar or runs its timer any more.
+            if SnackbarHost.shared.hosts == 0 { SnackbarHost.shared.finish("timeout") }
+        }
         // Modal bottom sheet — a scrim (tap to dismiss) + a panel from the bottom.
         .overlay {
             if let sheet = sheet {
                 ZStack(alignment: .bottom) {
-                    Color.black.opacity(0.45).ignoresSafeArea()
+                    (pal?.scrim?.color ?? Color.black.opacity(0.45)).ignoresSafeArea()
                         .onTapGesture { send(.fired(token: sheet.onDismiss)) }
                     VStack(alignment: .leading, spacing: 8) {
-                        Capsule().fill(Color.secondary.opacity(0.4))
+                        Capsule().fill(role(pal?.outlineVariant, else: Color.secondary.opacity(0.4)))
                             .frame(width: 40, height: 4).frame(maxWidth: .infinity)
-                        Text(sheet.title).font(.title3.bold())
+                        Text(sheet.title).font(TypeScaleFonts.scale?.headline.map { TypeScaleFonts.font($0, relativeTo: .title2, uiStyle: .title2, design: theme?.fontDesign ?? .default) } ?? CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.bold() ?? .title3.bold())
                         render(sheet.child, send)
                     }
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .background(role(pal?.surface, else: Color(.systemBackground)))
+                    // Theme.shapes `sheet_top` rounds the top corners only (the bottom keeps 20).
+                    .clipShape(ShapeTokens.shapes?.sheetTop.map { (r: Radius) -> AnyShape in
+                        // Pill is capped at 32: a dome would clip the sheet's content.
+                        let top: CGFloat
+                        switch r {
+                        case .dp(let n): top = CGFloat(n)
+                        case .pill: top = 32
+                        }
+                        return AnyShape(UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: 20, bottomTrailingRadius: 20, topTrailingRadius: top))
+                    } ?? AnyShape(RoundedRectangle(cornerRadius: 20)))
                 }
                 .transition(.opacity)
             }
         }
+        // The palette in the environment for everything above — the sheet overlay included, so a
+        // System OS flip re-renders sheet content too.
+        .environment(\.paletteRoles, pal)
     }
 
     // Top bar + scrollable body, optionally with the phone's bottom tab-bar.
     private func mainColumn(showBottomTabs: Bool) -> some View {
-        let showTabs = showBottomTabs && !tabs.isEmpty
-        let floating = glassTabBar && showTabs
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             HStack {
                 if let back = back {
                     Button(action: { send(.fired(token: back)) }) {
                         Image(systemName: "chevron.left")
                     }
+                    // The back chevron in primary_text (a palette's primary is a fill colour); else the tint.
+                    .tint(pal?.primaryText?.color ?? pal?.primary?.color ?? theme?.brandColor)
                     .accessibilityLabel((ActiveLabels.current?.back).flatMap { $0.isEmpty ? nil : $0 } ?? "Back")
                 }
                 Spacer()
-                Text(title).font(.headline)
+                Text(title).font(TypeScaleFonts.scale?.title.map { TypeScaleFonts.font($0, relativeTo: .title2, uiStyle: .title2, design: theme?.fontDesign ?? .default) } ?? CustomFonts.font(CustomFonts.display, size: 17, relativeTo: .headline)?.weight(.semibold) ?? .headline)
                 Spacer()
                 // keep the title centered when a back button is present
                 if back != nil { Image(systemName: "chevron.left").hidden() }
             }
             .padding()
+            .background(role(pal?.surfaceBar, else: .clear).ignoresSafeArea(edges: .top))
 
-            Divider()
+            PaletteDivider()
 
             // The body is keyed by `route`, so a push/pop swaps the whole screen
             // (with a slide+fade; lateral move crossfades); a same-route update
             // just re-renders in place. The iOS twin of Android's AnimatedContent.
-            // On a regular width the column is capped + centered so it doesn't stretch.
-            //
-            // Fill mode (`bodyFillIndex(content)` non-nil): the body stops page-scrolling — no
-            // ScrollView — and its designated LazyList takes the remaining height, scrolling
-            // itself. Every other scaffold renders exactly as before.
+            // A screen with tabs renders in TabSlots instead, keyed once for every tab, so a tab
+            // switch happens inside it (ADR-0058).
             Group {
-                if let fillIndex = bodyFillIndex(content) {
-                    VStack(alignment: .leading, spacing: (fillIndex >= 0 && isLargeDensity()) ? 12 : 6) {
-                        if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
-                        if fillIndex == -1 {
-                            render(self.content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
-                        } else if case .column(let children) = self.content {
-                            ForEach(Array(children.enumerated()), id: \.offset) { i, child in
-                                if i == fillIndex {
-                                    render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
-                                } else {
-                                    render(child, send)
-                                }
-                            }
-                        }
-                    }
-                        .padding(16)
-                        // clearance so the fill list can scroll clear of the floating glass bar
-                        .padding(.bottom, floating ? 88 : 0)
-                        .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                if let slot = tabSlotOf(tabs) {
+                    TabSlots(
+                        screen: TabScreen(content: content, refreshing: refreshing, onRefresh: onRefresh, route: route, sheet: sheet, bottomBar: bottomBar),
+                        slot: slot, tabCount: tabs.count, transition: navTransition, send: send
+                    )
+                    .id(TabSlots.key)
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
-                            render(self.content, send)
-                        }
-                            .padding(16)
-                            // clearance so the last row can scroll clear of the floating glass bar
-                            .padding(.bottom, floating ? 88 : 0)
-                            .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
-                            .frame(maxWidth: .infinity)
-                    }
+                    ScreenBody(content: content, refreshing: refreshing, onRefresh: onRefresh, send: send)
+                        .id(route)
                 }
             }
-            // In fill mode this attaches `.refreshable` to the Group around the (non-scrolling)
-            // fill VStack; SwiftUI carries that refresh action down through the environment to the
-            // fill list's own inner ScrollView, so pulling on the list itself drives it even though
-            // the list has no `onRefresh` of its own.
-            .refreshableIf(onRefresh, send)
-            .id(route)
             .transition(navTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Floating action button — the raised primary action, over the body bottom-trailing.
-            // With the glass look it's a frosted circle (à la the Substack search button) with a
-            // brand-tinted glyph; otherwise the classic solid rounded-square.
             .overlay(alignment: .bottomTrailing) {
                 if let fab = fab {
                     Button(action: { send(.fired(token: fab.onPress)) }) {
-                        if glassTabBar {
-                            Image(systemName: sfSymbol(fab.icon))
-                                .font(.title2.weight(.semibold))
-                                .foregroundColor(theme?.brandColor ?? .accentColor)
-                                .frame(width: 56, height: 56)
-                                .glassPill(Circle())
-                        } else {
-                            Image(systemName: sfSymbol(fab.icon))
-                                .font(.title2)
-                                .frame(width: 56, height: 56)
-                                .background(theme?.brandColor ?? .accentColor)
-                                .foregroundColor(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 18))
-                                .shadow(radius: 6, y: 3)
-                        }
+                        fabContent(fab)
+                            .background(role(pal?.fab, else: theme?.brandColor ?? .accentColor))
+                            .foregroundColor(role(pal?.onFab, else: .white))
+                            .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.fab) ?? AnyShape(RoundedRectangle(cornerRadius: 18)))
+                            .shadow(radius: 6, y: 3)
                     }
-                    .padding(.trailing, 18)
-                    .padding(.bottom, floating ? 92 : 18) // sit above the floating bar
+                    .padding(18)
                 }
             }
-            // Glass tab bar floats over the body so content blurs through behind it.
+            // cx.snackbar — bottom-centre over the body (which ends above the tab bar), lifted above the FAB.
             .overlay(alignment: .bottom) {
-                if floating { floatingTabBar }
+                SnackbarView(seed: theme?.seed)
+                    .padding(.bottom, fab != nil ? 56 + 18 + 12 : 12)
             }
 
-            // Classic opaque bar (when the glass look is opted out).
-            if showTabs && !glassTabBar {
-                Divider()
-                tabButtons.padding(.vertical, 10)
-            }
-        }
-    }
-
-    // The row of tab buttons, shared by the classic and glass bars.
-    private var tabButtons: some View {
-        HStack {
-            ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
-                Button(action: { send(.fired(token: tab.onSelect)) }) {
-                    VStack(spacing: 2) {
-                        if let icon = tab.icon {
-                            Image(systemName: sfSymbol(icon)).font(.system(size: 20))
-                        }
-                        Text(tab.label).font(isLargeDensity() ? .subheadline : .caption)
+            // with_bottom_bar: pinned above the tabs; the body (with the FAB and snackbar overlays)
+            // ends above it, and the keyboard safe area lifts it with the keyboard.
+            if let bar = bottomBar, !bar.isEmpty {
+                PaletteDivider()
+                HStack(spacing: 12) {
+                    ForEach(keyedChildren(bar)) { item in
+                        render(item.element, send).frame(maxWidth: .infinity)
                     }
-                    .fontWeight(tab.selected ? .semibold : .regular)
-                    .foregroundColor(tab.selected ? ActiveTheme.accent : .secondary)
-                    .frame(maxWidth: .infinity)
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                // Without tabs below it, the bar's fill runs under the home indicator (as the tabs' does).
+                .background(role(pal?.surfaceBar, else: Color(.systemBackground)).ignoresSafeArea(edges: .bottom))
+            }
+
+            if showBottomTabs && !tabs.isEmpty {
+                PaletteDivider()
+                HStack {
+                    ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                        Button(action: { send(.fired(token: tab.onSelect)) }) {
+                            VStack(spacing: 2) {
+                                if let icon = tab.icon {
+                                    Image(systemName: sfSymbol(icon)).font(.system(size: 20))
+                                        .overlay(alignment: .topTrailing) {
+                                            if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
+                                        }
+                                }
+                                HStack(spacing: 4) {
+                                    Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
+                                    if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
+                                }
+                            }
+                            .fontWeight(tab.selected ? .semibold : .regular)
+                            .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
+                            .frame(maxWidth: .infinity)
+                        }
+                        .accessibilityValue(tabSpoken(tab))
+                    }
+                }
+                .padding(.vertical, 10)
+                .background(role(pal?.surfaceBar, else: .clear).ignoresSafeArea(edges: .bottom))
             }
         }
-    }
-
-    // A floating Liquid Glass capsule — translucent and refractive (iOS 26), with the scrolling content
-    // visible behind it; a frosted `.ultraThinMaterial` capsule below iOS 26.
-    private var floatingTabBar: some View {
-        tabButtons
-            .padding(.vertical, 10)
-            .padding(.horizontal, 18)
-            .glassPill(Capsule())
-            .padding(.horizontal, 16)
-            .padding(.bottom, 6)
     }
 
     // Vertical navigation rail (regular width) — the iPad twin of the bottom tabs.
@@ -1370,24 +1633,30 @@ private struct ScaffoldView: View {
                     HStack(spacing: 10) {
                         if let icon = tab.icon {
                             Image(systemName: sfSymbol(icon)).font(.system(size: 18))
+                                .overlay(alignment: .topTrailing) {
+                                    if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
+                                }
                         }
                         Text(tab.label)
+                        if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
                     }
                     .fontWeight(tab.selected ? .semibold : .regular)
-                    .foregroundColor(tab.selected ? ActiveTheme.accent : .secondary)
+                    .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 12)
                     .padding(.horizontal, 14)
-                    .background(tab.selected ? ActiveTheme.accent.opacity(0.12) : Color.clear)
+                    .background(tab.selected ? role(pal?.secondaryContainer, else: Color.accentColor.opacity(0.12)) : Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
+                .accessibilityValue(tabSpoken(tab))
             }
             Spacer()
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 8)
         .frame(width: 220)
+        .background(role(pal?.surfaceBar, else: .clear))
     }
 
     private var navTransition: AnyTransition {
@@ -1398,6 +1667,238 @@ private struct ScaffoldView: View {
             removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
         )
     }
+
+    // ADR-0050: a tab's badge — palette error_fill / on_error_fill, else red on white. The mark is hidden from
+    // VoiceOver; tabSpoken (label, else text) is the tab button's accessibility value, read after its name.
+    @ViewBuilder
+    private func tabBadgeMark(_ b: SharedTypes.TabBadge) -> some View {
+        let fill = role(pal?.errorFill, else: .red)
+        if b.text.isEmpty {
+            Circle().fill(fill).frame(width: 8, height: 8).accessibilityHidden(true)
+        } else {
+            Text(b.text)
+                .font(.system(size: isLargeDensity() ? 13 : 11, weight: .semibold))
+                .fontWeight(.semibold)
+                .foregroundColor(role(pal?.onErrorFill, else: .white))
+                .padding(.horizontal, 4)
+                .frame(minWidth: 16, minHeight: 16)
+                .background(Capsule().fill(fill))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func tabSpoken(_ tab: SharedTypes.Tab) -> String {
+        guard let b = tab.badge else { return "" }
+        return b.label.isEmpty ? b.text : b.label
+    }
+}
+
+/// A screen's body: page-scrolling, or fill mode (`bodyFillIndex`). Untabbed screens show one; each tab
+/// slot keeps one (ADR-0058).
+private struct ScreenBody: View {
+    let content: SharedTypes.Widget
+    let refreshing: Bool
+    let onRefresh: String?
+    let send: (Action) -> Void
+    @Environment(\.horizontalSizeClass) private var hSize
+
+    var body: some View {
+        // On a regular width the column is capped + centered so it doesn't stretch.
+        //
+        // Fill mode (`bodyFillIndex(content)` non-nil): the body stops page-scrolling — no
+        // ScrollView — and its designated LazyList takes the remaining height, scrolling
+        // itself. Every other scaffold renders exactly as before.
+        Group {
+            if let fillIndex = bodyFillIndex(content) {
+                VStack(alignment: .leading, spacing: (fillIndex >= 0 && isLargeDensity()) ? 12 : 6) {
+                    if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                    if fillIndex == -1 {
+                        render(content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                    } else if case .column(let children) = content {
+                        ForEach(keyedChildren(children)) { item in
+                            let (i, child) = (item.offset, item.element)
+                            if i == fillIndex {
+                                render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                            } else {
+                                render(child, send)
+                            }
+                        }
+                    }
+                }
+                    .padding(16)
+                    .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                        render(content, send)
+                    }
+                        .padding(16)
+                        .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        // In fill mode this attaches `.refreshable` to the Group around the (non-scrolling)
+        // fill VStack; SwiftUI carries that refresh action down through the environment to the
+        // fill list's own inner ScrollView, so pulling on the list itself drives it even though
+        // the list has no `onRefresh` of its own.
+        .refreshableIf(onRefresh, send)
+    }
+}
+
+/// A tab's screen as the core last sent it: what a slot keeps and `keptWhenHidden` reads (ADR-0058).
+private struct TabScreen {
+    let content: SharedTypes.Widget
+    let refreshing: Bool
+    let onRefresh: String?
+    let route: String
+    let sheet: SharedTypes.Sheet?
+    let bottomBar: [SharedTypes.Widget]?
+}
+
+/// Whether a kept slot may send: read when an action is sent, so a closure a hidden slot captured
+/// earlier still drops it.
+private final class SlotGate { var active = false }
+
+/// The tab slots, rebuilt from the screen on every render: a plain class, so updating it never
+/// invalidates the view. Each step is idempotent for a given (screen, slot), since SwiftUI may
+/// evaluate a body more than once.
+private final class SlotCache {
+    /// A tab's kept screen. A new epoch is a new view identity: the old one is dropped.
+    final class Kept {
+        let index: Int
+        let epoch: Int
+        var screen: TabScreen
+        let gate = SlotGate()
+        init(_ index: Int, _ epoch: Int, _ screen: TabScreen) { self.index = index; self.epoch = epoch; self.screen = screen }
+    }
+    private var slots: [Int: Kept] = [:]
+    private var last = -1
+    private var nextEpoch = 0
+
+    func update(_ screen: TabScreen, slot: Int, tabCount: Int) -> [Kept] {
+        slots = slots.filter { $0.key < tabCount }
+        if last != slot {
+            // The tab that was showing is hidden now: let it go unless it is safe to keep (keptWhenHidden).
+            slots = slots.filter { $0.key == slot || keptWhenHidden($0.value.screen) }
+            // The core moved this tab to another screen while it was away: rebuild it, without a transition.
+            if let kept = slots[slot], kept.screen.route != screen.route { slots[slot] = nil }
+            last = slot
+        }
+        if let kept = slots[slot] {
+            kept.screen = screen
+        } else {
+            slots[slot] = Kept(slot, nextEpoch, screen)
+            nextEpoch += 1
+        }
+        for (i, kept) in slots { kept.gate.active = i == slot }
+        return slots.keys.sorted().compactMap { slots[$0] }
+    }
+}
+
+/// Each visited tab keeps its last screen, so returning to it finds it as it was left: its scroll
+/// position and shell state (ADR-0058, the iOS twin of ADR-0057). A hidden slot is invisible, can't be
+/// tapped, is hidden from VoiceOver and sends nothing; a switch ends editing and doesn't animate. The
+/// selected slot always shows the screen the core just sent. A screen holding a live native view, still
+/// animating, nesting a Scaffold or holding a secure field is let go once hidden.
+private struct TabSlots: View {
+    /// Every screen with tabs shares this identity, so a tab switch happens inside TabSlots.
+    static let key = "\u{0}tabs"
+    let screen: TabScreen
+    let slot: Int
+    let tabCount: Int
+    let transition: AnyTransition
+    let send: (Action) -> Void
+    @State private var cache = SlotCache()
+
+    var body: some View {
+        let kept = cache.update(screen, slot: slot, tabCount: tabCount)
+        ZStack {
+            ForEach(kept, id: \.epoch) { k in
+                let shown = k.index == slot
+                let gate = k.gate
+                // A push/pop inside the tab slides as before: the route keys this slot's content.
+                ZStack {
+                    ScreenBody(
+                        content: k.screen.content, refreshing: k.screen.refreshing, onRefresh: k.screen.onRefresh,
+                        send: { a in if gate.active { send(a) } }
+                    )
+                    .id(k.screen.route)
+                    .transition(transition)
+                }
+                .opacity(shown ? 1 : 0)
+                .allowsHitTesting(shown)
+                // A hardware keyboard or Full Keyboard Access moves focus without a touch.
+                .disabled(!shown)
+                .accessibilityHidden(!shown)
+            }
+        }
+        // A tab switch shows the other slot at once: no fade, no slide.
+        .transaction(value: slot) { $0.animation = nil }
+        // A switch drops focus, so the keyboard closes and no hidden field keeps it.
+        .onChange(of: slot) {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+    }
+}
+
+/// The selected tab's index, or nil when the screen has no tabs or not exactly one is selected.
+fileprivate func tabSlotOf(_ tabs: [SharedTypes.Tab]) -> Int? {
+    let selected = tabs.indices.filter { tabs[$0].selected }
+    return selected.count == 1 ? selected[0] : nil
+}
+
+/// Whether a hidden tab's screen may be kept (ADR-0058, as ADR-0057). Not when it holds a live native
+/// view (its player, map or web view would keep running), still animates (refreshing, an indeterminate
+/// progress, a loading list), nests a Scaffold (its sheet and back gesture outlive the switch) or has a
+/// secure field (its text would stay in memory after the user left).
+fileprivate func keptWhenHidden(_ s: TabScreen) -> Bool {
+    if s.refreshing || holdsLiveView(s.content) { return false }
+    if let sheet = s.sheet, holdsLiveView(sheet.child) { return false }
+    if (s.bottomBar ?? []).contains(where: holdsLiveView) { return false }
+    return !holdsAny(s.content) { w in
+        switch w {
+        case .scaffold: return true
+        case .progress(.none): return true
+        case .lazyList(_, _, let loading, _, _, let refreshing, _, _): return loading || refreshing
+        case .textField(_, _, _, .secure, _): return true
+        default: return false
+        }
+    }
+}
+
+/// Whether a live native view (web view, video, map, PDF) is anywhere in this subtree.
+fileprivate func holdsLiveView(_ w: SharedTypes.Widget) -> Bool {
+    holdsAny(w) { w in
+        switch w {
+        case .webView, .video, .map, .pdfView: return true
+        default: return false
+        }
+    }
+}
+
+/// Whether any widget in this subtree satisfies `hit`.
+fileprivate func holdsAny(_ w: SharedTypes.Widget, _ hit: (SharedTypes.Widget) -> Bool) -> Bool {
+    if hit(w) { return true }
+    switch w {
+    case .row(let children), .column(let children):
+        return children.contains { holdsAny($0, hit) }
+    case .box(let children, _, _), .grid(let children, _), .scroller(let children, _):
+        return children.contains { holdsAny($0, hit) }
+    case .lazyList(let children, _, _, _, _, _, _, _):
+        return children.contains { holdsAny($0, hit) }
+    case .card(let child, _, _, _), .a11y(let child, _, _, _), .swipeAction(let child, _):
+        return holdsAny(child, hit)
+    case .split(let primary, let detail, _, _):
+        return holdsAny(primary, hit) || holdsAny(detail, hit)
+    case .scaffold(_, let body, _, _, _, _, _, let sheet, _, _, _, _, _, _, let bottomBar):
+        return holdsAny(body, hit) || sheet.map { holdsAny($0.child, hit) } == true
+            || (bottomBar ?? []).contains { holdsAny($0, hit) }
+    default:
+        return false
+    }
 }
 
 // MARK: - Style-token → concrete look (the only place that decides looks)
@@ -1407,20 +1908,42 @@ private struct TextStyleMod: ViewModifier {
     init(_ s: TextStyle) { style = s }
     // The theme's font design (rounded/serif/mono); `.default` when un-themed.
     private var design: Font.Design { ActiveTheme.current?.fontDesign ?? .default }
-    // Re-render on a text-size change (the Display/Headline sizes are scaled by hand).
+    @Environment(\.paletteRoles) private var paletteRoles
+    // Re-render on a text-size change (system sizes are scaled by hand for the type scale / new styles).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     func body(content: Content) -> some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         let _ = dynamicTypeSize
+        // A type-scale spec for this style wins; otherwise the look below, as before.
+        if let spec = specFor(style) {
+            let f = TypeScaleFonts.font(spec.0, relativeTo: spec.1, uiStyle: spec.2, design: design)
+            if case .caption = style { return AnyView(content.font(f).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary))) }
+            return AnyView(content.font(f))
+        }
         switch style {
-        case .title: return AnyView(content.font(.system(.largeTitle, design: design).bold()))
-        case .subtitle: return AnyView(content.font(.system(.title3, design: design).weight(.semibold)))
-        case .caption: return AnyView(content.font(.system(.footnote, design: design)).foregroundColor(.secondary))
-        case .emphasis: return AnyView(content.font(.system(.body, design: design).weight(.semibold)))
-        // Display/Headline: 36 bold / 24 semibold, scaled like their text styles (Font.system(size:) alone
-        // wouldn't follow Dynamic Type).
-        case .display: return AnyView(content.font(.system(size: UIFontMetrics(forTextStyle: .largeTitle).scaledValue(for: 36), weight: .bold, design: design)))
-        case .headline: return AnyView(content.font(.system(size: UIFontMetrics(forTextStyle: .title2).scaledValue(for: 24), weight: .semibold, design: design)))
-        case .body: return AnyView(content.font(.system(.body, design: design)))
+        // `FontFamily.custom` → the synced display (title/subtitle) or body family at the same size;
+        // any other font (or an unsynced role) → the system font, exactly as before.
+        case .display: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 36, relativeTo: .largeTitle)?.bold() ?? .system(size: UIFontMetrics(forTextStyle: .largeTitle).scaledValue(for: 36), weight: .bold, design: design)))
+        case .headline: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 24, relativeTo: .title2)?.weight(.semibold) ?? .system(size: UIFontMetrics(forTextStyle: .title2).scaledValue(for: 24), weight: .semibold, design: design)))
+        case .title: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 34, relativeTo: .largeTitle)?.bold() ?? .system(.largeTitle, design: design).bold()))
+        case .subtitle: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.weight(.semibold) ?? .system(.title3, design: design).weight(.semibold)))
+        case .caption: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 13, relativeTo: .footnote) ?? .system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
+        case .emphasis: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body)?.weight(.semibold) ?? .system(.body, design: design).weight(.semibold)))
+        case .body: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) ?? .system(.body, design: design)))
+        }
+    }
+
+    /// The scale's spec for a style, with the text style it scales like.
+    private func specFor(_ s: TextStyle) -> (TypeSpec, Font.TextStyle, UIFont.TextStyle)? {
+        guard let ts = TypeScaleFonts.scale else { return nil }
+        switch s {
+        case .display: return ts.display.map { ($0, .largeTitle, .largeTitle) }
+        case .headline: return ts.headline.map { ($0, .title2, .title2) }
+        case .title: return ts.title.map { ($0, .title2, .title2) }
+        case .subtitle: return ts.subtitle.map { ($0, .subheadline, .subheadline) }
+        case .body: return ts.body.map { ($0, .body, .body) }
+        case .emphasis: return ts.emphasis.map { ($0, .body, .body) }
+        case .caption: return ts.caption.map { ($0, .caption, .caption1) }
         }
     }
 }
@@ -1437,16 +1960,73 @@ private struct MobilerButton: View {
     let action: () -> Void
 
     private var neutral: Bool { if case .neutral = tone { return true }; return false }
-    private var tint: Color { neutral ? ActiveTheme.accent : toneColors(tone).1 }
+    private var tint: Color { neutral ? .accentColor : toneColors(tone).1 }
 
+    @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
         let button = Button(action: action) { labelView }
-        if isLargeDensity() {
-            button.modifier(ButtonStyleMod(style, tint: tint, large: true))
+        if let c = paletteColors() {
+            button.buttonStyle(PaletteButtonStyle(fill: c.fill, fg: c.fg, stroke: c.stroke, large: isLargeDensity()))
+        } else if isLargeDensity() {
+            button.buttonStyle(LargeButtonStyle(style: style, color: tint))
         } else if neutral {
             button.modifier(ButtonStyleMod(style))
         } else {
             button.modifier(ButtonStyleMod(style, tint: tint)).tint(tint)
+        }
+    }
+
+    /// With a palette: neutral buttons use primary / secondary_container / primary_text; a toned button
+    /// uses its pair (filled flips it: on-container fill, container text). nil = no palette, or a toned
+    /// button whose pair the palette leaves unset — today's styling then.
+    /// `pairColors()`, with a palette's error roles over a Danger button (each falls back to today's).
+    private func paletteColors() -> (fill: Color, fg: Color, stroke: Color)? {
+        let base = pairColors()
+        guard case .danger = tone, let p = pal else { return base }
+        switch style {
+        case .filled:
+            guard p.errorFill != nil || p.onErrorFill != nil else { return base }
+            return (role(p.errorFill, else: base?.fill ?? .red), role(p.onErrorFill, else: base?.fg ?? .white), .clear)
+        case .outlined:
+            guard let e = p.error else { return base }
+            return (.clear, e.color, e.color)
+        case .text:
+            guard let e = p.error else { return base }
+            return (.clear, e.color, .clear)
+        case .tonal:
+            return base
+        }
+    }
+
+    private func pairColors() -> (fill: Color, fg: Color, stroke: Color)? {
+        guard let p = pal else { return nil }
+        let pair = palettePair(tone)
+        if !neutral && pair == nil { return nil }
+        if let pair {
+            let c = pair.container.color, on = pair.onContainer.color
+            switch style {
+            case .filled: return (on, c, .clear)
+            case .tonal: return (c, on, .clear)
+            case .outlined: return (.clear, on, on)
+            case .text: return (.clear, on, .clear)
+            }
+        }
+        // A neutral button switches to palette colours only when the palette sets the role its style
+        // reads; otherwise the system style it has today (a partial palette changes nothing else).
+        switch style {
+        case .filled:
+            guard let fill = p.primary else { return nil }
+            return (fill.color, role(p.onPrimary, else: .white), .clear)
+        case .tonal:
+            guard let bg = p.secondaryContainer else { return nil }
+            return (bg.color, role(p.onSecondaryContainer, else: role(p.primary, else: .accentColor)), .clear)
+        case .outlined:
+            guard let text = p.primaryText else { return nil }
+            return (.clear, text.color, role(p.outline, else: text.color))
+        case .text:
+            guard let text = p.primaryText else { return nil }
+            return (.clear, text.color, .clear)
         }
     }
 
@@ -1464,107 +2044,117 @@ private struct MobilerButton: View {
 private struct ButtonStyleMod: ViewModifier {
     let style: SharedTypes.ButtonStyle
     let tint: Color
-    let large: Bool
-    init(_ s: SharedTypes.ButtonStyle, tint: Color = ActiveTheme.accent, large: Bool = false) { style = s; self.tint = tint; self.large = large }
+    init(_ s: SharedTypes.ButtonStyle, tint: Color = .accentColor) { style = s; self.tint = tint }
     func body(content: Content) -> some View {
         switch style {
-        case .filled: return AnyView(content.buttonStyle(BrandButtonStyle(kind: .filled, color: tint, large: large)))
-        case .outlined: return AnyView(content.buttonStyle(BrandButtonStyle(kind: .outlined, color: tint, large: large)))
-        case .text: return AnyView(content.buttonStyle(BrandButtonStyle(kind: .text, color: tint, large: large)))
-        case .tonal: return AnyView(content.buttonStyle(BrandButtonStyle(kind: .tonal, color: tint, large: large)))
+        case .filled: return AnyView(content.buttonStyle(.borderedProminent).modifier(ButtonShapeMod()))
+        case .outlined: return AnyView(content.buttonStyle(.bordered).modifier(ButtonShapeMod()))
+        case .text: return AnyView(content.buttonStyle(.borderless))
+        case .tonal: return AnyView(content.buttonStyle(TonalButtonStyle(color: tint)))
         }
     }
 }
 
-/// Saldo's buttons. The native `.bordered`/`.borderedProminent` styles read as flat grey and follow
-/// SwiftUI's `.tint` (which doesn't reach a presented sheet → they came out blue). This draws them in
-/// the brand colour explicitly: a solid pill (filled), a soft-tinted bordered pill (outlined), a softer
-/// tonal pill, or plain coloured text — rounded, semibold, with a gentle press state. `color` is the
-/// tone's tint (the brand accent for a neutral button, unchanged from before tones existed).
-private struct BrandButtonStyle: SwiftUI.ButtonStyle {
-    enum Kind { case filled, outlined, text, tonal }
-    let kind: Kind
-    let color: Color
-    /// Density.large: 56pt min height, 24pt side padding, capsule — same kinds, colours and press state.
-    let large: Bool
-
-    @ViewBuilder
-    func makeBody(configuration: Configuration) -> some View {
-        if large { largeBody(configuration) } else { standardBody(configuration) }
+/// A Theme.shapes `button` radius on the system bordered styles; no radius → unchanged.
+private struct ButtonShapeMod: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        switch ShapeTokens.shapes?.button {
+        case .none: content
+        case .some(.pill): content.buttonBorderShape(.capsule)
+        case .some(.dp(let n)): content.buttonBorderShape(.roundedRectangle(radius: CGFloat(n)))
+        }
     }
+}
 
-    private func largeBody(_ configuration: Configuration) -> some View {
-        let accent = color
+// M3-style filled-tonal: tinted label on a soft tint capsule (the quieter secondary action).
+private struct TonalButtonStyle: SwiftUI.ButtonStyle {
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .foregroundColor(color)
+            .background(color.opacity(0.18))
+            .clipShape(ShapeTokens.button)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// A palette-coloured button (any ButtonStyle): explicit fill / label / outline on a capsule, at the
+// regular or the Density.large size.
+private struct PaletteButtonStyle: SwiftUI.ButtonStyle {
+    let fill: Color
+    let fg: Color
+    let stroke: Color
+    let large: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
+            .padding(.horizontal, large ? 24 : 14)
+            .padding(.vertical, large ? 0 : 7)
+            .frame(minHeight: large ? 56 : nil)
+            .foregroundColor(fg)
+            .background(fill)
+            .overlay(ShapeTokens.button.stroke(stroke, lineWidth: 1))
+            .clipShape(ShapeTokens.button)
+            .contentShape(ShapeTokens.button)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// Density.large button: 56pt min height, 24pt side padding, body-semibold label (scales with Dynamic
+// Type), capsule — one style for all four ButtonStyles so every large button is the same height.
+private struct LargeButtonStyle: SwiftUI.ButtonStyle {
+    let style: SharedTypes.ButtonStyle
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        let (fill, fg, stroke): (Color, Color, Color) = {
+            switch style {
+            case .filled: return (color, .white, .clear)
+            case .tonal: return (color.opacity(0.18), color, .clear)
+            case .outlined: return (.clear, color, color)
+            case .text: return (.clear, color, .clear)
+            }
+        }()
         return configuration.label
-            .font(.body.weight(.semibold))
-            .foregroundColor(kind == .filled ? .white : accent)
+            .font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold))
             .padding(.horizontal, 24)
             .frame(minHeight: 56)
-            .background {
-                switch kind {
-                case .filled: Capsule().fill(accent)
-                case .outlined: Capsule().fill(accent.opacity(0.10))
-                case .tonal: Capsule().fill(accent.opacity(0.18))
-                case .text: Color.clear
-                }
-            }
-            .overlay {
-                if kind == .outlined {
-                    Capsule().stroke(accent.opacity(0.45), lineWidth: 1)
-                }
-            }
-            .contentShape(Capsule())
-            .opacity(configuration.isPressed ? 0.65 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-
-    private func standardBody(_ configuration: Configuration) -> some View {
-        let accent = color
-        let radius = ActiveTheme.current?.cardRadius ?? 14
-        return configuration.label
-            .font(.body.weight(.semibold))
-            .foregroundColor(kind == .filled ? .white : accent)
-            .padding(.horizontal, kind == .text ? 4 : 18)
-            .padding(.vertical, kind == .text ? 4 : 11)
-            .background {
-                switch kind {
-                case .filled: RoundedRectangle(cornerRadius: radius).fill(accent)
-                case .outlined: RoundedRectangle(cornerRadius: radius).fill(accent.opacity(0.10))
-                case .tonal: RoundedRectangle(cornerRadius: radius).fill(accent.opacity(0.18))
-                case .text: Color.clear
-                }
-            }
-            .overlay {
-                if kind == .outlined {
-                    RoundedRectangle(cornerRadius: radius).stroke(accent.opacity(0.45), lineWidth: 1)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: radius))
-            .opacity(configuration.isPressed ? 0.65 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .foregroundColor(fg)
+            .background(fill)
+            .overlay(ShapeTokens.button.stroke(stroke, lineWidth: 1))
+            .clipShape(ShapeTokens.button)
+            .contentShape(ShapeTokens.button)
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
 private struct CardMod: ViewModifier {
     let style: CardStyle
     init(_ s: CardStyle) { style = s }
+    @Environment(\.paletteRoles) private var paletteRoles
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14)
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        let shape = ShapeTokens.shape(ShapeTokens.shapes?.card) ?? AnyShape(RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14))
         switch style {
         case .elevated:
-            return AnyView(content.background(shape.fill(Color(.secondarySystemBackground)))
+            return AnyView(content.background(shape.fill(role(pal?.surface, else: Color(.secondarySystemBackground))))
                 .shadow(color: .black.opacity(0.08), radius: 4, y: 2))
         case .filled:
-            return AnyView(content.background(shape.fill(Color(.tertiarySystemBackground))))
-        case .outlined, .dashed:
-            return AnyView(content.overlay(shape.stroke(Color.gray.opacity(0.3))))
+            return AnyView(content.background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemBackground)))))
+        case .outlined:
+            return AnyView(content.overlay(shape.stroke(role(pal?.outlineVariant, else: Color.gray.opacity(0.3)))))
+        case .dashed:
+            // No fill; a 1.5pt dashed outline (dash 6 / gap 4) in the palette's outline.
+            return AnyView(content.overlay(shape.stroke(role(pal?.outline, else: Color.gray.opacity(0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))))
         case .brand:
             let t = ActiveTheme.current
             let grad = LinearGradient(
-                colors: [t?.brandColor ?? .accentColor, t?.accentColor ?? .accentColor],
+                // Without an app accent a palette's primary ends the gradient (else the seed, as before).
+                colors: [role(pal?.primary, else: t?.brandColor ?? .accentColor), (t?.accent == nil ? pal?.primary?.color : nil) ?? t?.accentColor ?? .accentColor],
                 startPoint: .topLeading, endPoint: .bottomTrailing,
             )
-            return AnyView(content.background(shape.fill(grad)).foregroundColor(.white))
+            return AnyView(content.background(shape.fill(grad)).foregroundColor(role(pal?.onPrimary, else: .white)))
         }
     }
 }
@@ -1586,12 +2176,14 @@ private func a11yTraits(_ role: SharedTypes.A11yRole) -> AccessibilityTraits {
 }
 
 private func toneColors(_ tone: Tone) -> (Color, Color) {
+    if let pair = palettePair(tone) { return (pair.container.color, pair.onContainer.color) }
+    if case .neutral = tone, let p = pal { return (role(p.surfaceMuted, else: Color.gray.opacity(0.15)), role(p.onSurfaceVariant, else: .secondary)) }
     switch tone {
     case .neutral: return (Color.gray.opacity(0.15), .secondary)
     case .success: return (Color.green.opacity(0.15), .green)
     case .warning: return (Color.orange.opacity(0.15), .orange)
     case .danger: return (Color.red.opacity(0.15), .red)
-    case .info: return (ActiveTheme.accent.opacity(0.15), ActiveTheme.accent)
+    case .info: return (Color.accentColor.opacity(0.15), .accentColor)
     }
 }
 
@@ -1614,11 +2206,9 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .close: return "xmark"
     case .settings: return "gearshape"
     case .check: return "checkmark"
-    // Saldo finance tab glyphs (per-app remap — the framework Icon set has no
-    // chart/ledger/wallet symbol, but the glyph mapping is the app's own).
-    case .star: return "chart.line.uptrend.xyaxis"   // Stats
+    case .star: return "star.fill"
     case .info: return "info.circle"
-    case .home: return "list.bullet.rectangle.fill"  // Bills (the ledger)
+    case .home: return "house.fill"
     case .search: return "magnifyingglass"
     case .menu: return "line.3.horizontal"
     case .filter: return "line.3.horizontal.decrease.circle"
@@ -1626,7 +2216,7 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .forward: return "chevron.right"
     case .down: return "chevron.down"
     case .bell: return "bell.fill"
-    case .cart: return "wallet.bifold.fill"           // Assets (accounts / net worth)
+    case .cart: return "cart.fill"
     case .share: return "square.and.arrow.up"
     case .heart: return "heart"
     case .heartFilled: return "heart.fill"
@@ -1642,19 +2232,11 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .play: return "play.fill"
     case .scissors: return "scissors"
     case .doneAll: return "checkmark.circle"
-    case .ledger: return "list.bullet.rectangle.fill"
-    case .chart: return "chart.line.uptrend.xyaxis"
-    case .wallet: return "wallet.bifold.fill"
-    case .creditCard: return "creditcard.fill"
-    case .lock: return "lock.fill"
-    case .download: return "arrow.down.circle"
-    case .upload: return "arrow.up.circle"
-    case .globe: return "globe"
     }
 }
 
 private func iconTint(_ icon: Icon) -> Color {
-    switch icon { case .star: return ActiveTheme.accent; default: return .primary }
+    switch icon { case .star: return role(pal?.primaryText, else: .accentColor); default: return .primary }
 }
 
 private func imageShape(_ s: ImageShape) -> AnyShape {
@@ -1685,18 +2267,25 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
 /// every state update). A perf safeguard for many-megapixel camera/picked photos.
 private struct FileImageView: View {
     let url: URL
+    /// Shown instead of the grey placeholder once the file fails to load (an avatar's initials).
+    var fallback: AnyView? = nil
     @State private var image: UIImage?
+    @State private var failed = false
     var body: some View {
         ZStack {
             if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else if failed, let fallback {
+                fallback
             } else {
                 Color.gray.opacity(0.15)
             }
         }
         .task(id: url.path) {
+            failed = false
             if let cached = fileImageCache.object(forKey: url.path as NSString) { image = cached; return }
             image = await Task.detached(priority: .userInitiated) { downsampledFileImage(at: url) }.value
+            failed = image == nil
         }
     }
 }
@@ -2185,5 +2774,95 @@ struct WebKitWebView: UIViewRepresentable {
     private func load(into view: WKWebView) {
         guard let url = URL(string: urlString) else { return }
         view.load(URLRequest(url: url))
+    }
+}
+
+/// The snackbar from `SnackbarHost` (cx.snackbar): inverse colours (on_surface / surface / primary
+/// from the palette), an optional action button, a timer, and a downward swipe to dismiss.
+struct SnackbarView: View {
+    let seed: Rgb?
+    @Environment(\.paletteRoles) private var paletteRoles
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The palette's inverse pair, only when it sets both (one alone could pair with a default of
+    /// the same lightness).
+    private var paletteColors: (bg: Rgb, fg: Rgb)? {
+        guard let bg = pal?.onSurface, let fg = pal?.surface else { return nil }
+        return (bg, fg)
+    }
+
+    var body: some View {
+        let _ = paletteRoles // re-render on a light/dark palette flip
+        ZStack {
+            if let r = SnackbarHost.shared.current {
+                HStack(spacing: 12) {
+                    Text(r.text)
+                        .font(.subheadline)
+                        .foregroundColor(paletteColors?.fg.color ?? Color(.systemBackground))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let action = r.action {
+                        Button(action) { SnackbarHost.shared.finish("action", id: r.id) }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(actionColor)
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                // Inverse of the page, as on web and Android: the label colour, with background text.
+                .background(paletteColors?.bg.color ?? Color(.label))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .shadow(radius: 6, y: 3)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: 560)
+                .accessibilityElement(children: .contain)
+                .gesture(DragGesture(minimumDistance: 10).onEnded { g in
+                    if g.translation.height > 30 { SnackbarHost.shared.finish("dismissed", id: r.id) }
+                })
+                .onAppear {
+                    UIAccessibility.post(notification: .announcement, argument: r.action.map { "\(r.text). \($0)" } ?? r.text)
+                }
+                .task(id: r.id) {
+                    // A cancelled sleep (the view rebuilt mid-show) must not close it: the new view's
+                    // task starts the timer again.
+                    do { try await Task.sleep(for: .seconds(r.seconds)) } catch { return }
+                    SnackbarHost.shared.finish("timeout", id: r.id)
+                }
+                .id(r.id)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: SnackbarHost.shared.current?.id)
+    }
+
+    /// An inverse primary: the brand halfway toward the bar's text colour (the palette's surface, else
+    /// the system background: white in light mode, black in dark), so it reads on the inverted bar.
+    private var actionColor: Color {
+        guard let p = pal?.primary ?? seed else { return .accentColor }
+        let toward = paletteColors.map { (Double($0.fg.r), Double($0.fg.g), Double($0.fg.b)) }
+            ?? (colorScheme == .dark ? (0, 0, 0) : (255, 255, 255))
+        return Color(red: (Double(p.r) + toward.0) / 510, green: (Double(p.g) + toward.1) / 510, blue: (Double(p.b) + toward.2) / 510)
+    }
+}
+
+/// The FAB's content: the round icon, or (with_extended_fab) the icon plus its label, which is then
+/// the spoken name. Both are 56pt tall; the caller adds the fill, shape and shadow.
+@ViewBuilder
+private func fabContent(_ fab: SharedTypes.Fab) -> some View {
+    if let label = fab.label {
+        HStack(spacing: 12) {
+            Image(systemName: sfSymbol(fab.icon)).font(.title2).accessibilityHidden(true)
+            // The theme's body family (Custom fonts), like every other control label.
+            Text(label).font(CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold)).lineLimit(1)
+        }
+        // M3's extended FAB: 16 before the icon, 20 after the label; grows past 56 at large text sizes.
+        .padding(.leading, 16)
+        .padding(.trailing, 20)
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+    } else {
+        Image(systemName: sfSymbol(fab.icon))
+            .font(.title2)
+            .frame(width: 56, height: 56)
     }
 }
