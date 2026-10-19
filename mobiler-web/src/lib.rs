@@ -25,7 +25,7 @@ use mobiler_core::{
     A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, HttpHeader, HttpOutcome, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
-    ColorRoles, Rgb, ShellLabels, Spacing, TabBadge, TextStyle, Theme, Tone, TransferEvent, Widget,
+    ColorRoles, Rgb, Rgba, ShellLabels, Spacing, TabBadge, TextStyle, Theme, Tone, TransferEvent, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -2596,7 +2596,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
 
         // ---- shell ----
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance, bottom_bar } => {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance, bottom_bar, ios_glass_tabs: _ } => {
             // ACTIVE_LABELS is stashed once at the root render closure (from the root widget's
             // own `labels`), not here — a Scaffold nested in a sheet, body or Split must not
             // overwrite the root's labels. This arm's own aria-label reads below still see the
@@ -3040,6 +3040,11 @@ fn palette_css(p: &ColorRoles) -> String {
     put_rgb(&mut s, &["--primary-text"], p.primary_text);
     put_rgb(&mut s, &["--accent-soft", "--seg-sel-bg"], p.secondary_container);
     put_rgb(&mut s, &["--on-secondary-container", "--seg-sel-fg"], p.on_secondary_container);
+    // Later declarations win: the segment's own roles override secondary_container for it alone.
+    put_rgb(&mut s, &["--seg-sel-bg"], p.segment_selected);
+    put_rgb(&mut s, &["--seg-sel-fg"], p.on_segment_selected);
+    put_rgba(&mut s, "--outlined-fill", p.outlined_fill);
+    put_rgba(&mut s, "--outlined-border", p.outlined_border);
     put_rgb(&mut s, &["--fab"], p.fab);
     put_rgb(&mut s, &["--on-fab"], p.on_fab);
     for (name, pair) in [("success", p.success), ("warning", p.warning), ("danger", p.danger), ("info", p.info)] {
@@ -3055,10 +3060,15 @@ fn palette_css(p: &ColorRoles) -> String {
     put_rgb(&mut s, &["--error"], p.error);
     put_rgb(&mut s, &["--error-fill"], p.error_fill);
     put_rgb(&mut s, &["--on-error-fill"], p.on_error_fill);
-    if let Some(a) = p.scrim {
-        s.push_str(&format!("--scrim:rgba({},{},{},{:.3});", a.r, a.g, a.b, f32::from(a.a) / 255.0));
-    }
+    put_rgba(&mut s, "--scrim", p.scrim);
     s
+}
+
+/// Append `name:rgba(…);` when the role is set (alpha as 0–1, three decimals).
+fn put_rgba(s: &mut String, name: &str, c: Option<Rgba>) {
+    if let Some(a) = c {
+        s.push_str(&format!("{name}:rgba({},{},{},{:.3});", a.r, a.g, a.b, f32::from(a.a) / 255.0));
+    }
 }
 
 /// Pick the Scaffold body's transition class for this render. Returns `""` for a
@@ -3207,6 +3217,14 @@ fn icon_glyph(i: Icon) -> &'static str {
         Icon::Play => "▶",
         Icon::Scissors => "✂",
         Icon::DoneAll => "✓✓",
+        Icon::Ledger => "🧾",
+        Icon::Chart => "📈",
+        Icon::Wallet => "👛",
+        Icon::CreditCard => "💳",
+        Icon::Lock => "🔒",
+        Icon::Download => "⬇",
+        Icon::Upload => "⬆",
+        Icon::Globe => "🌐",
     }
 }
 
@@ -3591,7 +3609,7 @@ fn region_chart_view(
 #[cfg(test)]
 mod palette_tests {
     use super::*;
-    use mobiler_core::{ColorRoles, Palette, Rgba, TonePair};
+    use mobiler_core::{ColorRoles, Palette, TonePair};
 
     #[test]
     fn palette_css_emits_only_set_roles() {
@@ -3634,6 +3652,33 @@ mod palette_tests {
         assert!(css.contains("--error:rgb(255,143,133);"));
         assert!(css.contains("--error-fill:rgb(192,57,43);"));
         assert!(!css.contains("--on-error-fill"), "unset on_error_fill emits nothing (falls back to today's ink)");
+    }
+
+    #[test]
+    fn outlined_and_segment_roles_emit_their_variables_and_unset_emits_nothing() {
+        let css = palette_css(&ColorRoles {
+            outlined_fill: Some(Rgba { r: 14, g: 159, b: 142, a: 26 }),
+            outlined_border: Some(Rgba { r: 14, g: 159, b: 142, a: 115 }),
+            secondary_container: Some(Rgb::hex(0xd8efe9)),
+            segment_selected: Some(Rgb::hex(0x0e9f8e)),
+            on_segment_selected: Some(Rgb::hex(0xffffff)),
+            ..Default::default()
+        });
+        assert!(css.contains("--outlined-fill:rgba(14,159,142,0.102);"), "{css}");
+        assert!(css.contains("--outlined-border:rgba(14,159,142,0.451);"), "{css}");
+        // The segment roles win over secondary_container for the segment only.
+        assert!(css.contains("--accent-soft:rgb(216,239,233);"));
+        assert!(css.rfind("--seg-sel-bg:rgb(14,159,142);") > css.rfind("--seg-sel-bg:rgb(216,239,233);"), "{css}");
+        assert!(css.contains("--seg-sel-fg:rgb(255,255,255);"));
+        let plain = palette_css(&ColorRoles { secondary_container: Some(Rgb::hex(0xd8efe9)), ..Default::default() });
+        assert!(!plain.contains("--outlined-"), "unset roles emit nothing");
+    }
+
+    #[test]
+    fn every_new_icon_has_a_glyph() {
+        for i in [Icon::Ledger, Icon::Chart, Icon::Wallet, Icon::CreditCard, Icon::Lock, Icon::Download, Icon::Upload, Icon::Globe] {
+            assert!(!icon_glyph(i).is_empty());
+        }
     }
 
     #[test]
