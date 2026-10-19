@@ -307,6 +307,8 @@ fn adr_0058_ios_keeps_tab_screens_like_android() {
             "ADR-0058: {path} a hidden slot must not be tapped or read"
         );
         assert!(host.contains("resignFirstResponder"), "ADR-0058: {path} a switch must end editing");
+        // A hardware keyboard or Full Keyboard Access moves focus without hit testing: a hidden slot is disabled.
+        assert!(host.contains(".disabled(!shown)"), "ADR-0058: {path} a hidden slot's fields must not take keyboard focus");
         assert!(host.contains("if gate.active { send("), "ADR-0058: {path} a hidden slot's send must be dropped");
         let live = fn_body(&code, "func holdsLiveView(").unwrap_or_else(|| panic!("ADR-0058: {path} has no holdsLiveView"));
         for kind in [".webView", ".video", ".map", ".pdfView"] {

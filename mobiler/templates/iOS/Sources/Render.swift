@@ -1830,6 +1830,8 @@ private struct TabSlots: View {
                 }
                 .opacity(shown ? 1 : 0)
                 .allowsHitTesting(shown)
+                // A hardware keyboard or Full Keyboard Access moves focus without a touch.
+                .disabled(!shown)
                 .accessibilityHidden(!shown)
             }
         }

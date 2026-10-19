@@ -22,7 +22,8 @@ and shell state. The two shells then behave the same.
 
 In iOS terms:
 - `TabSlots` renders every kept slot in a `ZStack`. The selected slot shows the screen the core just sent. A hidden slot
-  is `opacity(0)`, `allowsHitTesting(false)` and `accessibilityHidden(true)`.
+  is `opacity(0)`, `allowsHitTesting(false)`, `disabled(true)` (a hardware keyboard or Full Keyboard Access moves focus
+  without a touch) and `accessibilityHidden(true)`.
 - A hidden slot's `send` drops every `Action`. Each slot's closure reads a `SlotGate` when the action is sent, so a
   closure captured while the slot was shown can't send after it is hidden.
 - A switch resigns the first responder, so the keyboard closes, and `.transaction(value: slot)` clears its animation,
@@ -82,6 +83,9 @@ time; the file was then restored with `git checkout -- <file>`, and the test pas
 - `SlotCache` asked `holdsLiveView` instead of `keptWhenHidden`
   (`… SlotCache must ask keptWhenHidden before keeping a hidden screen`).
 
+After the review pass a seventh check was added, and seen to fail before the fix: without `.disabled(!shown)` the test
+failed with `… a hidden slot's fields must not take keyboard focus`.
+
 ## 5. Consequences (Positive and Negative Predictions)
 
 - **Positive:** Android and iOS behave the same on a tab switch: the screen, its scroll position and its shell state
@@ -90,6 +94,12 @@ time; the file was then restored with `git checkout -- <file>`, and the test pas
 - **Negative:** a hidden slot is still laid out and re-rendered on each core update, unlike Android's. With a few tabs
   this is small on iOS hardware; a slow update with many heavy tabs would show it first.
 - **Negative:** tab switches no longer cross-fade on iOS.
-- **Negative:** moving to an untabbed screen and back drops every kept slot, as on Android.
+- **Negative:** moving to an untabbed screen and back drops every kept slot, as on Android. So does a size-class change
+  (rotating a large iPhone, iPad Split View), which swaps the tab bar for the rail.
+- **Negative:** slots are keyed by tab index only, as on Android. A switch to a different set of tabs (another role,
+  signed out but still tabbed) keeps the old hidden screens in memory until each index is revisited or the tab count
+  drops. They are never shown: the route check rebuilds a slot whose route changed.
+- **Negative:** text still being composed (CJK marked text, a pending autocorrection) when the user switches tabs is
+  committed after the slot is hidden, so the gate drops it, as on Android.
 - **Negative:** the web shell still rebuilds a tab on every switch. Until it follows ADR-0057, it differs from the
   native shells.
