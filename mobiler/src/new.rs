@@ -67,7 +67,7 @@ pub fn run(
 
     let mut written = 0usize;
     write_dir(&TEMPLATES, &out_dir, &subs, &mut written)?;
-    make_gradlew_executable(&out_dir)?;
+    make_scripts_executable(&out_dir)?;
     // Stamp the generating CLI version so `mobiler upgrade` (and future drift checks) have a baseline.
     crate::upgrade::write_version_stamp(&out_dir).context("writing version stamp")?;
     written += 1;
@@ -154,20 +154,25 @@ fn write_local_properties(out_dir: &Path, sdk_dir: &str) -> Result<()> {
     Ok(())
 }
 
+/// The scripts a new app runs directly: the embedded templates carry no file modes.
+const SCRIPTS: &[&str] = &["Android/gradlew", "Android/build-android.sh", "iOS/build-ios.sh"];
+
 #[cfg(unix)]
-fn make_gradlew_executable(out_dir: &Path) -> Result<()> {
+fn make_scripts_executable(out_dir: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let gradlew = out_dir.join("Android/gradlew");
-    if gradlew.exists() {
-        let mut perms = fs::metadata(&gradlew)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&gradlew, perms)?;
+    for script in SCRIPTS {
+        let path = out_dir.join(script);
+        if path.exists() {
+            let mut perms = fs::metadata(&path)?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms)?;
+        }
     }
     Ok(())
 }
 
 #[cfg(not(unix))]
-fn make_gradlew_executable(_out_dir: &Path) -> Result<()> {
+fn make_scripts_executable(_out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
@@ -246,6 +251,27 @@ mod test {
     };
     use crate::templating::{Subs, is_binary, substitute, templated_path};
     use std::path::{Path, PathBuf};
+
+    #[cfg(unix)]
+    #[test]
+    fn new_app_scripts_are_executable() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mobiler-new-exec-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let scripts = ["Android/gradlew", "Android/build-android.sh", "iOS/build-ios.sh"];
+        for s in scripts {
+            fs::create_dir_all(dir.join(s).parent().unwrap()).unwrap();
+            fs::write(dir.join(s), "#!/bin/sh\n").unwrap();
+            fs::set_permissions(dir.join(s), fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        super::make_scripts_executable(&dir).unwrap();
+        for s in scripts {
+            let mode = fs::metadata(dir.join(s)).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o755, "{s} is not executable");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn pascal_case_conversion() {
