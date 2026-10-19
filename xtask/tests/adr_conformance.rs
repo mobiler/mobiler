@@ -321,6 +321,39 @@ fn adr_0058_ios_keeps_tab_screens_like_android() {
     }
 }
 
+/// ADR-0019: every palette colour role is drawn by both native shells (barbershop, the reference,
+/// and the template): each `ColorRoles` field, in its generated camelCase name, is read by the Android
+/// shell (MainActivity.kt or ui/theme/Theme.kt) and the iOS shell (Render.swift or Core.swift).
+#[test]
+fn every_palette_role_is_read_by_both_native_shells() {
+    let ui = read("mobiler-ui/src/lib.rs");
+    let body = fn_body(&ui, "pub struct ColorRoles").expect("ColorRoles");
+    let roles: Vec<String> = body
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("pub ")?.split(':').next().map(str::to_string))
+        .map(|snake| {
+            let mut out = String::new();
+            let mut up = false;
+            for c in snake.chars() {
+                if c == '_' { up = true } else if up { out.extend(c.to_uppercase()); up = false } else { out.push(c) }
+            }
+            out
+        })
+        .collect();
+    assert!(roles.len() >= 28, "expected the ColorRoles fields, found {roles:?}");
+    let shells = [
+        ("demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/", vec!["MainActivity.kt", "ui/theme/Theme.kt"]),
+        ("demos/barbershop/iOS/Sources/", vec!["Render.swift", "Core.swift"]),
+        // The template joins in the CLI PR that follows the libraries' publish (ADR-0009).
+    ];
+    for (dir, files) in shells {
+        let code: String = files.iter().map(|f| live_code(&read(&format!("{dir}{f}")))).collect();
+        for role in &roles {
+            assert!(code.contains(&format!(".{role}")), "ADR-0019: {dir} never reads the palette role {role}");
+        }
+    }
+}
+
 /// Not an ADR: the bug fixed beside ADR-0057 (#302). A theme that builds a new `ColorScheme` on every core
 /// update recomposes the whole app on every update, so every shell's theme builds it once per distinct theme.
 #[test]
