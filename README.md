@@ -197,6 +197,7 @@ free plugins:
 | ✉️ **composer** | email / SMS / phone call via the system apps | `mobiler plugin add composer` |
 | 🗣️ **tts** | text-to-speech (speak a string aloud) | `mobiler plugin add tts` |
 | ⭐ **review** | in-app App Store / Play review prompt | `mobiler plugin add review` |
+| ☑️ **picker** | native single-choice picker (a list of options, one chosen) | `mobiler plugin add picker` |
 | 📤 **sharefile** | share a file / image via the share sheet | `mobiler plugin add sharefile` |
 | 📁 **files** | app-sandbox read/write/list, download a URL to disk, export to Files/Downloads | `mobiler plugin add files` |
 | 🎬 **video** | record a video → local URI | `mobiler plugin add video` |

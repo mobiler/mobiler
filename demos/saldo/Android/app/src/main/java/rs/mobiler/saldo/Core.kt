@@ -685,6 +685,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "filepicker" to FilePickerPlugin(application),
         "files" to FilesPlugin(application),
         "sqlite" to SqlitePlugin(application),
+        "picker" to PickerPlugin(),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

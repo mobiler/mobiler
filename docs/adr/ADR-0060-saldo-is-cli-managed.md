@@ -71,8 +71,11 @@ restored, and the test passed again.
 
 - **Positive:** the showcase app always runs the current shells, and the upgrade path is exercised on a real app in
   every shell-changing CLI PR.
-- **Positive:** the refresh found two CLI gaps, fixed in the deciding PR: `mobiler new` left `build-android.sh` and
-  `build-ios.sh` non-executable, and the template's `.gitignore` didn't ignore the iOS build output.
+- **Positive:** the refresh found three gaps, fixed in the deciding PR: `mobiler new` left `build-android.sh` and
+  `build-ios.sh` non-executable; the template's `.gitignore` didn't ignore the iOS build output; and Saldo's
+  Language and Currency pickers ran on a single-choice picker written into its old `Core.kt` / `Core.swift` by hand
+  (#183). That picker is now the bundled `picker` plugin, added to Saldo with `mobiler plugin add picker`, as the
+  maintainer chose (2026-10-19).
 - **Negative:** every CLI PR that changes a template shell must also commit Saldo's upgrade, or CI fails.
 - **Negative:** Saldo can no longer carry a shell experiment of its own. A behaviour it needs goes into the template (or
   a plugin) first.

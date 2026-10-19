@@ -282,6 +282,7 @@ ABI change. Bundled free plugins:
 | ✉️ `composer` | email / SMS / phone call via the system apps |
 | 🗣️ `tts` | text-to-speech (speak a string aloud) |
 | ⭐ `review` | in-app App Store / Play review prompt |
+| ☑️ `picker` | native single-choice picker (a list of options, one chosen) |
 | 📤 `sharefile` | share a file / image via the share sheet |
 | 📁 `files` | read/write/list app files, download a URL, export to Files/Downloads |
 | 🎬 `video` | record a video → local URI |

@@ -298,6 +298,7 @@ enum Plugins {
         case "filepicker": return await FilePickerPlugin.handle(op: op, input: input)
         case "files": return await FilesPlugin.handle(op: op, input: input)
         case "sqlite": return await SqlitePlugin.handle(op: op, input: input)
+        case "picker": return await PickerPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
