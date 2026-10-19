@@ -70,6 +70,11 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
@@ -1503,6 +1508,14 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.PLAY -> Icons.Default.PlayArrow
     WidgetIcon.SCISSORS -> Icons.Default.ContentCut
     WidgetIcon.DONEALL -> Icons.Default.DoneAll
+    WidgetIcon.LEDGER -> Icons.AutoMirrored.Filled.ReceiptLong
+    WidgetIcon.CHART -> Icons.AutoMirrored.Filled.ShowChart
+    WidgetIcon.WALLET -> Icons.Default.AccountBalanceWallet
+    WidgetIcon.CREDITCARD -> Icons.Default.CreditCard
+    WidgetIcon.LOCK -> Icons.Default.Lock
+    WidgetIcon.DOWNLOAD -> Icons.Default.Download
+    WidgetIcon.UPLOAD -> Icons.Default.Upload
+    WidgetIcon.GLOBE -> Icons.Default.Language
 }
 
 @Composable
