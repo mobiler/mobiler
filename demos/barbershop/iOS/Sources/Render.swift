@@ -1545,49 +1545,20 @@ private struct ScaffoldView: View {
             // The body is keyed by `route`, so a push/pop swaps the whole screen
             // (with a slide+fade; lateral move crossfades); a same-route update
             // just re-renders in place. The iOS twin of Android's AnimatedContent.
-            // On a regular width the column is capped + centered so it doesn't stretch.
-            //
-            // Fill mode (`bodyFillIndex(content)` non-nil): the body stops page-scrolling — no
-            // ScrollView — and its designated LazyList takes the remaining height, scrolling
-            // itself. Every other scaffold renders exactly as before.
+            // A screen with tabs renders in TabSlots instead, keyed once for every tab, so a tab
+            // switch happens inside it (ADR-0058).
             Group {
-                if let fillIndex = bodyFillIndex(content) {
-                    VStack(alignment: .leading, spacing: (fillIndex >= 0 && isLargeDensity()) ? 12 : 6) {
-                        if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
-                        if fillIndex == -1 {
-                            render(self.content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
-                        } else if case .column(let children) = self.content {
-                            ForEach(keyedChildren(children)) { item in
-                                let (i, child) = (item.offset, item.element)
-                                if i == fillIndex {
-                                    render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
-                                } else {
-                                    render(child, send)
-                                }
-                            }
-                        }
-                    }
-                        .padding(16)
-                        .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                if let slot = tabSlotOf(tabs) {
+                    TabSlots(
+                        screen: TabScreen(content: content, refreshing: refreshing, onRefresh: onRefresh, route: route, sheet: sheet, bottomBar: bottomBar),
+                        slot: slot, tabCount: tabs.count, transition: navTransition, send: send
+                    )
+                    .id(TabSlots.key)
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
-                            render(self.content, send)
-                        }
-                            .padding(16)
-                            .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
-                            .frame(maxWidth: .infinity)
-                    }
+                    ScreenBody(content: content, refreshing: refreshing, onRefresh: onRefresh, send: send)
+                        .id(route)
                 }
             }
-            // In fill mode this attaches `.refreshable` to the Group around the (non-scrolling)
-            // fill VStack; SwiftUI carries that refresh action down through the environment to the
-            // fill list's own inner ScrollView, so pulling on the list itself drives it even though
-            // the list has no `onRefresh` of its own.
-            .refreshableIf(onRefresh, send)
-            .id(route)
             .transition(navTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Floating action button — the raised primary action, over the body bottom-trailing.
@@ -1719,6 +1690,212 @@ private struct ScaffoldView: View {
     private func tabSpoken(_ tab: SharedTypes.Tab) -> String {
         guard let b = tab.badge else { return "" }
         return b.label.isEmpty ? b.text : b.label
+    }
+}
+
+/// A screen's body: page-scrolling, or fill mode (`bodyFillIndex`). Untabbed screens show one; each tab
+/// slot keeps one (ADR-0058).
+private struct ScreenBody: View {
+    let content: SharedTypes.Widget
+    let refreshing: Bool
+    let onRefresh: String?
+    let send: (Action) -> Void
+    @Environment(\.horizontalSizeClass) private var hSize
+
+    var body: some View {
+        // On a regular width the column is capped + centered so it doesn't stretch.
+        //
+        // Fill mode (`bodyFillIndex(content)` non-nil): the body stops page-scrolling — no
+        // ScrollView — and its designated LazyList takes the remaining height, scrolling
+        // itself. Every other scaffold renders exactly as before.
+        Group {
+            if let fillIndex = bodyFillIndex(content) {
+                VStack(alignment: .leading, spacing: (fillIndex >= 0 && isLargeDensity()) ? 12 : 6) {
+                    if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                    if fillIndex == -1 {
+                        render(content, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                    } else if case .column(let children) = content {
+                        ForEach(keyedChildren(children)) { item in
+                            let (i, child) = (item.offset, item.element)
+                            if i == fillIndex {
+                                render(child, send).environment(\.fillList, true).frame(maxHeight: .infinity)
+                            } else {
+                                render(child, send)
+                            }
+                        }
+                    }
+                }
+                    .padding(16)
+                    .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if refreshing { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 4) }
+                        render(content, send)
+                    }
+                        .padding(16)
+                        .frame(maxWidth: hSize == .regular ? 760 : .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        // In fill mode this attaches `.refreshable` to the Group around the (non-scrolling)
+        // fill VStack; SwiftUI carries that refresh action down through the environment to the
+        // fill list's own inner ScrollView, so pulling on the list itself drives it even though
+        // the list has no `onRefresh` of its own.
+        .refreshableIf(onRefresh, send)
+    }
+}
+
+/// A tab's screen as the core last sent it: what a slot keeps and `keptWhenHidden` reads (ADR-0058).
+private struct TabScreen {
+    let content: SharedTypes.Widget
+    let refreshing: Bool
+    let onRefresh: String?
+    let route: String
+    let sheet: SharedTypes.Sheet?
+    let bottomBar: [SharedTypes.Widget]?
+}
+
+/// Whether a kept slot may send: read when an action is sent, so a closure a hidden slot captured
+/// earlier still drops it.
+private final class SlotGate { var active = false }
+
+/// The tab slots, rebuilt from the screen on every render: a plain class, so updating it never
+/// invalidates the view. Each step is idempotent for a given (screen, slot), since SwiftUI may
+/// evaluate a body more than once.
+private final class SlotCache {
+    /// A tab's kept screen. A new epoch is a new view identity: the old one is dropped.
+    final class Kept {
+        let index: Int
+        let epoch: Int
+        var screen: TabScreen
+        let gate = SlotGate()
+        init(_ index: Int, _ epoch: Int, _ screen: TabScreen) { self.index = index; self.epoch = epoch; self.screen = screen }
+    }
+    private var slots: [Int: Kept] = [:]
+    private var last = -1
+    private var nextEpoch = 0
+
+    func update(_ screen: TabScreen, slot: Int, tabCount: Int) -> [Kept] {
+        slots = slots.filter { $0.key < tabCount }
+        if last != slot {
+            // The tab that was showing is hidden now: let it go unless it is safe to keep (keptWhenHidden).
+            slots = slots.filter { $0.key == slot || keptWhenHidden($0.value.screen) }
+            // The core moved this tab to another screen while it was away: rebuild it, without a transition.
+            if let kept = slots[slot], kept.screen.route != screen.route { slots[slot] = nil }
+            last = slot
+        }
+        if let kept = slots[slot] {
+            kept.screen = screen
+        } else {
+            slots[slot] = Kept(slot, nextEpoch, screen)
+            nextEpoch += 1
+        }
+        for (i, kept) in slots { kept.gate.active = i == slot }
+        return slots.keys.sorted().compactMap { slots[$0] }
+    }
+}
+
+/// Each visited tab keeps its last screen, so returning to it finds it as it was left: its scroll
+/// position and shell state (ADR-0058, the iOS twin of ADR-0057). A hidden slot is invisible, can't be
+/// tapped, is hidden from VoiceOver and sends nothing; a switch ends editing and doesn't animate. The
+/// selected slot always shows the screen the core just sent. A screen holding a live native view, still
+/// animating, nesting a Scaffold or holding a secure field is let go once hidden.
+private struct TabSlots: View {
+    /// Every screen with tabs shares this identity, so a tab switch happens inside TabSlots.
+    static let key = "\u{0}tabs"
+    let screen: TabScreen
+    let slot: Int
+    let tabCount: Int
+    let transition: AnyTransition
+    let send: (Action) -> Void
+    @State private var cache = SlotCache()
+
+    var body: some View {
+        let kept = cache.update(screen, slot: slot, tabCount: tabCount)
+        ZStack {
+            ForEach(kept, id: \.epoch) { k in
+                let shown = k.index == slot
+                let gate = k.gate
+                // A push/pop inside the tab slides as before: the route keys this slot's content.
+                ZStack {
+                    ScreenBody(
+                        content: k.screen.content, refreshing: k.screen.refreshing, onRefresh: k.screen.onRefresh,
+                        send: { a in if gate.active { send(a) } }
+                    )
+                    .id(k.screen.route)
+                    .transition(transition)
+                }
+                .opacity(shown ? 1 : 0)
+                .allowsHitTesting(shown)
+                .accessibilityHidden(!shown)
+            }
+        }
+        // A tab switch shows the other slot at once: no fade, no slide.
+        .transaction(value: slot) { $0.animation = nil }
+        // A switch drops focus, so the keyboard closes and no hidden field keeps it.
+        .onChange(of: slot) {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+    }
+}
+
+/// The selected tab's index, or nil when the screen has no tabs or not exactly one is selected.
+fileprivate func tabSlotOf(_ tabs: [SharedTypes.Tab]) -> Int? {
+    let selected = tabs.indices.filter { tabs[$0].selected }
+    return selected.count == 1 ? selected[0] : nil
+}
+
+/// Whether a hidden tab's screen may be kept (ADR-0058, as ADR-0057). Not when it holds a live native
+/// view (its player, map or web view would keep running), still animates (refreshing, an indeterminate
+/// progress, a loading list), nests a Scaffold (its sheet and back gesture outlive the switch) or has a
+/// secure field (its text would stay in memory after the user left).
+fileprivate func keptWhenHidden(_ s: TabScreen) -> Bool {
+    if s.refreshing || holdsLiveView(s.content) { return false }
+    if let sheet = s.sheet, holdsLiveView(sheet.child) { return false }
+    if (s.bottomBar ?? []).contains(where: holdsLiveView) { return false }
+    return !holdsAny(s.content) { w in
+        switch w {
+        case .scaffold: return true
+        case .progress(.none): return true
+        case .lazyList(_, _, let loading, _, _, let refreshing, _, _): return loading || refreshing
+        case .textField(_, _, _, .secure, _): return true
+        default: return false
+        }
+    }
+}
+
+/// Whether a live native view (web view, video, map, PDF) is anywhere in this subtree.
+fileprivate func holdsLiveView(_ w: SharedTypes.Widget) -> Bool {
+    holdsAny(w) { w in
+        switch w {
+        case .webView, .video, .map, .pdfView: return true
+        default: return false
+        }
+    }
+}
+
+/// Whether any widget in this subtree satisfies `hit`.
+fileprivate func holdsAny(_ w: SharedTypes.Widget, _ hit: (SharedTypes.Widget) -> Bool) -> Bool {
+    if hit(w) { return true }
+    switch w {
+    case .row(let children), .column(let children):
+        return children.contains { holdsAny($0, hit) }
+    case .box(let children, _, _), .grid(let children, _), .scroller(let children, _):
+        return children.contains { holdsAny($0, hit) }
+    case .lazyList(let children, _, _, _, _, _, _, _):
+        return children.contains { holdsAny($0, hit) }
+    case .card(let child, _, _, _), .a11y(let child, _, _, _), .swipeAction(let child, _):
+        return holdsAny(child, hit)
+    case .split(let primary, let detail, _, _):
+        return holdsAny(primary, hit) || holdsAny(detail, hit)
+    case .scaffold(_, let body, _, _, _, _, _, let sheet, _, _, _, _, _, _, let bottomBar):
+        return holdsAny(body, hit) || sheet.map { holdsAny($0.child, hit) } == true
+            || (bottomBar ?? []).contains { holdsAny($0, hit) }
+    default:
+        return false
     }
 }
 
