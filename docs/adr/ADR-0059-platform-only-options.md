@@ -10,9 +10,9 @@ Conformance:   xtask/tests/adr_conformance.rs::adr_0059_platform_only_option_is_
 ## 1. Context (The Problem)
 
 Saldo, the showcase app, drew a floating Liquid Glass tab bar and a glass add button on iOS (#171, #173, #175) by
-editing its own iOS shell. ADR-0060 (on the held Saldo branch) makes Saldo's shells equal the template, so the look has to become a framework
-option. Liquid Glass is an iOS idiom: Material 3 has no navigation-bar equivalent (its floating toolbar is for
-actions), and the web has none either.
+editing its own iOS shell. Saldo is becoming a CLI-managed app whose shells equal the template (its own record, on
+the held Saldo branch), so the look has to become a framework option. Liquid Glass is an iOS idiom: Material 3 has no
+navigation-bar equivalent (its floating toolbar is for actions), and the web has none either.
 
 An app's core is shared by every platform, so an option can't be offered to one platform only. The maintainer asked
 for it to be iOS-only and, if it does nothing elsewhere, for that to be plain to an Android developer (2026-10-19:
@@ -52,7 +52,8 @@ style, and no developer expects it to change Android or the web.
 Option: platform-named options, ignored elsewhere. The first is `Widget::Scaffold.ios_glass_tabs: bool`, set with
 `mobiler_core::with_ios_glass_tabs(root)` and kept by every scaffold builder. On iOS, the phone tab bar floats as a
 capsule over the body: Liquid Glass on iOS 26, and a frosted material below that (and on SDKs before Xcode 26). The
-body, a bottom bar, the FAB and the snackbar stay clear of it. The FAB is glass too: a circle, or a capsule keeping an
+body, a bottom bar, the FAB and the snackbar stay clear of it by its measured height (its labels grow with Dynamic
+Type). The FAB is glass too: a circle, or a capsule keeping an
 extended FAB's label. A palette's `fab` tints the glass, and `on_fab` colours the glyph. On the iPad rail and on every
 other platform nothing changes.
 
@@ -62,6 +63,15 @@ and the test passed again.
 - The field's "iOS only" doc line was removed (`ADR-0059: ios_glass_tabs' doc must say it is iOS only`).
 - Barbershop's `Render.swift` stopped reading it (`ADR-0059: … must render ios_glass_tabs`).
 - The web shell bound it as a used variable (`ADR-0059: the web shell reads the iOS-only option`).
+
+After the review pass, two more checks were each seen to fail before their fix:
+- The glass capsule's clearance was a fixed 74 pt, though its labels grow with Dynamic Type
+  (`ADR-0059: … must clear the glass capsule by its measured height`); it is now measured (`onGeometryChange`).
+- The palette guard beside this record, `every_palette_role_is_read_by_both_native_shells` (ADR-0019's roles, the
+  four new ones among them), counted `.outline` inside `.outlinedFill` and Material's own `colorScheme.outline`.
+  Tightened, it fails when barbershop's Android palette reads of `outline` are renamed
+  (`ADR-0019: …/barbershop/ never reads the palette role outline`) and when iOS stops reading `outlined_fill`
+  (`… never reads the palette role outlinedFill`); before the fix the first mutation passed.
 
 ## 5. Consequences (Positive and Negative Predictions)
 

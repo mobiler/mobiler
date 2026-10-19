@@ -1400,9 +1400,6 @@ private struct SplitView: View {
     }
 }
 
-/// with_ios_glass_tabs: how much the floating capsule (and its 6pt gap) covers above the bottom edge.
-private let glassTabClearance: CGFloat = 74
-
 private extension View {
     /// iOS 26 Liquid Glass in `shape`, optionally tinted; a frosted `.ultraThinMaterial` below iOS 26 (and
     /// on SDKs older than Xcode 26, where `glassEffect` doesn't exist), so it builds and degrades anywhere.
@@ -1448,6 +1445,9 @@ private struct ScaffoldView: View {
     let iosGlassTabs: Bool
     let send: (Action) -> Void
 
+    /// with_ios_glass_tabs: how much the floating capsule (with its 6pt gap) covers above the bottom edge,
+    /// measured, since its labels grow with Dynamic Type. 74 until the first layout.
+    @State private var glassBarHeight: CGFloat = 74
     // Remember the depth of the previous route so a route change knows its
     // direction (push vs pop). Updated after each route settles.
     @State private var prevDepth: UInt32 = 0
@@ -1557,7 +1557,7 @@ private struct ScaffoldView: View {
         // it); the body's end, a bottom bar, the FAB and the snackbar stay clear of it.
         let floating = iosGlassTabs && showBottomTabs && !tabs.isEmpty
         let hasBar = !(bottomBar ?? []).isEmpty
-        let clearance: CGFloat = floating && !hasBar ? glassTabClearance : 0
+        let clearance: CGFloat = floating && !hasBar ? glassBarHeight : 0
         return VStack(spacing: 0) {
             HStack {
                 if let back = back {
@@ -1642,7 +1642,7 @@ private struct ScaffoldView: View {
                 // Without tabs below it, the bar's fill runs under the home indicator (as the tabs' does).
                 .background(role(pal?.surfaceBar, else: Color(.systemBackground)).ignoresSafeArea(edges: .bottom))
                 // The glass capsule floats below the bar, over this space.
-                if floating { Color.clear.frame(height: glassTabClearance) }
+                if floating { Color.clear.frame(height: glassBarHeight) }
             }
 
             if showBottomTabs && !tabs.isEmpty && !floating {
@@ -1660,6 +1660,7 @@ private struct ScaffoldView: View {
                     .glassPill(AnyShape(Capsule()), tint: nil)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 6)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { glassBarHeight = $0 }
             }
         }
     }

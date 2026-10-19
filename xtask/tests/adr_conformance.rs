@@ -332,7 +332,13 @@ fn adr_0059_platform_only_option_is_named_and_ignored_elsewhere() {
     assert!(doc.contains("iOS only"), "ADR-0059: ios_glass_tabs' doc must say it is iOS only");
     // The template's iOS shell joins in the CLI PR that follows the libraries' publish (ADR-0009).
     for path in ["demos/barbershop/iOS/Sources/Render.swift"] {
-        assert!(live_code(&read(path)).contains("iosGlassTabs"), "ADR-0059: {path} must render ios_glass_tabs");
+        let code = live_code(&read(path));
+        assert!(code.contains("iosGlassTabs"), "ADR-0059: {path} must render ios_glass_tabs");
+        // The capsule grows with Dynamic Type: what it covers is measured, never a fixed height.
+        assert!(
+            code.contains("onGeometryChange(") && !code.contains("glassTabClearance"),
+            "ADR-0059: {path} must clear the glass capsule by its measured height"
+        );
     }
     // Shell code only: generated bindings and build output name every field.
     let kotlin: Vec<PathBuf> = files_with_extension(&[root().join("mobiler/templates/Android"), root().join("demos")], "kt")
@@ -376,7 +382,16 @@ fn every_palette_role_is_read_by_both_native_shells() {
     for (dir, files) in shells {
         let code: String = files.iter().map(|f| live_code(&read(&format!("{dir}{f}")))).collect();
         for role in &roles {
-            assert!(code.contains(&format!(".{role}")), "ADR-0019: {dir} never reads the palette role {role}");
+            // A palette read: the role is optional, so it is reached with `?.role`, read as `.role?`, or
+            // read off the palette value itself (`p.role`); Material's `colorScheme.outline` and SwiftUI's
+            // `Color.primary` are none of these. The name ends there (`.outline` ≠ `.outlinedFill`).
+            let read = code.match_indices(&format!(".{role}")).any(|(at, m)| {
+                let next = code[at + m.len()..].chars().next();
+                let ends = !next.is_some_and(|c| c.is_alphanumeric() || c == '_');
+                let owner = code[..at].rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
+                ends && (code[..at].ends_with('?') || next == Some('?') || ["p", "pal", "roles", "palette"].contains(&owner))
+            });
+            assert!(read, "ADR-0019: {dir} never reads the palette role {role}");
         }
     }
 }
