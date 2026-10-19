@@ -290,6 +290,24 @@ fn adr_0057_android_keeps_tab_screens_measuring_only_the_active_one() {
     }
 }
 
+/// Not an ADR: the bug fixed beside ADR-0057 (#302). A theme that builds a new `ColorScheme` on every core
+/// update recomposes the whole app on every update, so every shell's theme builds it once per distinct theme.
+#[test]
+fn every_android_theme_builds_its_color_scheme_once() {
+    let themes: Vec<PathBuf> = files_with_extension(&[root().join("mobiler/templates/Android"), root().join("demos")], "kt")
+        .into_iter()
+        .filter(|p| p.ends_with("ui/theme/Theme.kt"))
+        .collect();
+    for path in &themes {
+        let code: String = std::fs::read_to_string(path).unwrap().lines().map(kotlin_code).collect::<Vec<_>>().join("\n");
+        let rel = path.strip_prefix(root()).unwrap().display();
+        assert!(code.contains("val colorScheme = remember("), "{rel} builds a new ColorScheme on every update");
+        assert!(code.contains("val typography = remember("), "{rel} builds new typography on every update");
+        assert!(code.contains("val shapes = remember("), "{rel} builds new shapes on every update");
+    }
+    assert!(themes.len() >= 6, "expected the template's and every demo's Theme.kt, found {}", themes.len());
+}
+
 #[test]
 fn walk_skips_symlinks_and_terminates() {
     let dir = std::env::temp_dir().join(format!("adr-walk-{}", std::process::id()));
