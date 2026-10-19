@@ -11,6 +11,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
@@ -110,7 +111,11 @@ fun FadehouseTheme(
     content: @Composable () -> Unit,
 ) {
     val roles = theme?.palette?.let { if (darkTheme) it.dark else it.light }
-    val colorScheme = when {
+    // Each core update brings a new (equal) theme. The scheme, type and shapes are built once per
+    // distinct theme: MaterialTheme hands them down through static locals, and a new instance there
+    // would recompose the whole app on every update, however little changed.
+    val context = LocalContext.current
+    val colorScheme = remember(theme, darkTheme, roles, dynamicColor, context) { when {
         // A brand theme wins: build a scheme seeded from its color, no dynamic override.
         theme != null -> {
             val seed = Color(theme.seed.r.toInt(), theme.seed.g.toInt(), theme.seed.b.toInt())
@@ -122,17 +127,18 @@ fun FadehouseTheme(
             roles?.let { paletteScheme(themed, it) } ?: themed
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
-    }
+    } }
+    val typography = remember(theme?.font, context) { typographyFor(theme?.font, context) }
+    val shapes = remember(theme?.corner) { theme?.let { shapesFor(it.corner) } ?: Shapes() }
     CompositionLocalProvider(LocalPalette provides roles) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = typographyFor(theme?.font, LocalContext.current),
-            shapes = theme?.let { shapesFor(it.corner) } ?: Shapes(),
+            typography = typography,
+            shapes = shapes,
             content = content,
         )
     }

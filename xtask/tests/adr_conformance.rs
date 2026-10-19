@@ -227,6 +227,58 @@ fn kotlin_code(line: &str) -> &str {
     if t.starts_with("//") || t.starts_with("/*") || t.starts_with('*') { "" } else { line }
 }
 
+/// The body of the function whose signature starts at `sig`: from the first `{` after it to its
+/// matching `}` (braces counted, so nested blocks stay inside).
+fn fn_body<'a>(code: &'a str, sig: &str) -> Option<&'a str> {
+    let open = code[code.find(sig)?..].find('{')? + code.find(sig)?;
+    let mut depth = 0usize;
+    for (i, c) in code[open..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&code[open..=open + i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[test]
+fn fn_body_matches_nested_braces() {
+    let code = "fun a() { if (x) { y() } else { z() } }\nfun b() { w() }";
+    assert_eq!(fn_body(code, "fun a("), Some("{ if (x) { y() } else { z() } }"));
+    assert_eq!(fn_body(code, "fun b("), Some("{ w() }"));
+    assert_eq!(fn_body(code, "fun c("), None);
+}
+
+#[test]
+fn adr_0057_android_keeps_tab_screens_measuring_only_the_active_one() {
+    let kotlin = [
+        "demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt",
+        "mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt",
+    ];
+    for path in kotlin {
+        let text = std::fs::read_to_string(root().join(path)).expect(path);
+        let code: String = text.lines().map(kotlin_code).collect::<Vec<_>>().join("\n");
+        let host = fn_body(&code, "private fun TabSlots(").unwrap_or_else(|| panic!("ADR-0057: {path} has no TabSlots"));
+        assert!(
+            host.contains("measurables[") && !host.contains("measurables.map") && !host.contains("measurables.forEach"),
+            "ADR-0057: {path} TabSlots must measure only the active slot"
+        );
+        assert!(host.contains("if (isActive) send("), "ADR-0057: {path} a hidden slot's send must be dropped");
+        assert!(host.contains("holdsLiveView("), "ADR-0057: {path} a screen with a live view must not be kept");
+        assert!(host.contains("clearFocus("), "ADR-0057: {path} hiding a slot must clear focus");
+        let live = fn_body(&code, "private fun holdsLiveView(").unwrap_or_else(|| panic!("ADR-0057: {path} has no holdsLiveView"));
+        for kind in ["Widget.WebView", "Widget.Video", "Widget.Map", "Widget.PdfView"] {
+            assert!(live.contains(kind), "ADR-0057: {path} holdsLiveView misses {kind}");
+        }
+    }
+}
+
 #[test]
 fn walk_skips_symlinks_and_terminates() {
     let dir = std::env::temp_dir().join(format!("adr-walk-{}", std::process::id()));
