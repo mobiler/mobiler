@@ -265,16 +265,27 @@ fn adr_0057_android_keeps_tab_screens_measuring_only_the_active_one() {
         let text = std::fs::read_to_string(root().join(path)).expect(path);
         let code: String = text.lines().map(kotlin_code).collect::<Vec<_>>().join("\n");
         let host = fn_body(&code, "private fun TabSlots(").unwrap_or_else(|| panic!("ADR-0057: {path} has no TabSlots"));
+        let measure = &host[host.find("measurables, constraints ->").unwrap_or_else(|| panic!("ADR-0057: {path} TabSlots has no measure policy"))..];
         assert!(
-            host.contains("measurables[") && !host.contains("measurables.map") && !host.contains("measurables.forEach"),
+            measure.contains("measurables[shown]")
+                && !["measurables.map", "measurables.forEach", "for ("].iter().any(|m| measure.contains(m)),
             "ADR-0057: {path} TabSlots must measure only the active slot"
         );
-        assert!(host.contains("if (isActive) send("), "ADR-0057: {path} a hidden slot's send must be dropped");
-        assert!(host.contains("holdsLiveView("), "ADR-0057: {path} a screen with a live view must not be kept");
+        assert!(
+            host.contains("rememberUpdatedState(i == slot)") && host.contains("if (isActive) send("),
+            "ADR-0057: {path} a hidden slot's send must be dropped"
+        );
+        assert!(host.contains("keptWhenHidden("), "ADR-0057: {path} TabSlots must ask keptWhenHidden before keeping a hidden screen");
         assert!(host.contains("clearFocus("), "ADR-0057: {path} hiding a slot must clear focus");
         let live = fn_body(&code, "private fun holdsLiveView(").unwrap_or_else(|| panic!("ADR-0057: {path} has no holdsLiveView"));
         for kind in ["Widget.WebView", "Widget.Video", "Widget.Map", "Widget.PdfView"] {
             assert!(live.contains(kind), "ADR-0057: {path} holdsLiveView misses {kind}");
+        }
+        // Not kept either: a screen still animating (refreshing, an indeterminate progress, a loading
+        // list), a nested Scaffold (its BackHandler and sheet outlive placement), a SECURE field's text.
+        let kept = fn_body(&code, "private fun keptWhenHidden(").unwrap_or_else(|| panic!("ADR-0057: {path} has no keptWhenHidden"));
+        for rule in ["holdsLiveView(", ".refreshing", "Widget.Progress", ".loading", "Widget.Scaffold", "FieldKind.SECURE"] {
+            assert!(kept.contains(rule), "ADR-0057: {path} keptWhenHidden misses {rule}");
         }
     }
 }

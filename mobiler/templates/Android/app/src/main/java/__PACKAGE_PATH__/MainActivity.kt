@@ -2473,13 +2473,15 @@ private class Slot(var screen: Widget.Scaffold, val epoch: Int)
  *  A screen holding a live native view (video, map, web view, PDF) is let go once hidden, as before. */
 @Composable
 private fun TabSlots(screen: Widget.Scaffold, slot: Int, padding: PaddingValues, send: (Action) -> Unit) {
+    // A cache rebuilt from `screen` on every composition: keep each step below idempotent for a given
+    // (screen, slot), since a composition can be abandoned and run again.
     val slots = remember { mutableMapOf<Int, Slot>() }
     // [the slot shown last composition, the next epoch]
     val last = remember { intArrayOf(-1, 0) }
     slots.keys.retainAll { it < screen.tabs.size }
     if (last[0] != slot) {
-        // The tab that was showing is hidden now: a live native view in it is let go.
-        slots.keys.retainAll { it == slot || !holdsLiveView(slots.getValue(it).screen) }
+        // The tab that was showing is hidden now: let it go unless it is safe to keep (keptWhenHidden).
+        slots.keys.retainAll { it == slot || keptWhenHidden(slots.getValue(it).screen) }
         // The core moved this tab to another screen while it was away: rebuild it, without a transition.
         if (slots[slot]?.screen?.route.let { it != null && it != screen.route }) slots.remove(slot)
         last[0] = slot
@@ -2513,6 +2515,20 @@ private fun TabSlots(screen: Widget.Scaffold, slot: Int, padding: PaddingValues,
         // Only the shown tab is measured and placed; the others are never measured.
         val p = measurables[shown].measure(constraints)
         layout(p.width, p.height) { p.place(0, 0) }
+    }
+}
+
+/** Whether a hidden tab's screen may stay composed (ADR-0057). Not when it holds a live native view
+ *  (its player, map or web view would keep running), still animates (refreshing, an indeterminate
+ *  progress, a loading list: their animations ask for a frame on every vsync, placed or not), nests a
+ *  Scaffold (its BackHandler and sheet outlive placement) or has a SECURE field (its text would stay
+ *  in memory after the user left). */
+private fun keptWhenHidden(s: Widget.Scaffold): Boolean {
+    if (s.refreshing || holdsLiveView(s)) return false
+    return !holdsAny(s.body) {
+        it is Widget.Scaffold || (it is Widget.Progress && it.value == null) ||
+            (it is Widget.LazyList && (it.loading || it.refreshing)) ||
+            (it is Widget.TextField && it.kind == FieldKind.SECURE)
     }
 }
 

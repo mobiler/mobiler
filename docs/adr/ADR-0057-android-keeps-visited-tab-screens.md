@@ -1,10 +1,10 @@
-# ADR-0057: The Android shell keeps the last screen of each visited tab composed and measures, places and draws only the selected one; a hidden tab sends nothing and holds no focus, a screen holding a live native view is never kept, and a tab keeps its scroll position across a switch
+# ADR-0057: The Android shell keeps the last screen of each visited tab composed and measures, places and draws only the selected one; a hidden tab sends nothing and holds no focus, a screen holding a live native view, a running indeterminate animation, a nested Scaffold or a secure field is never kept, and a tab keeps its scroll position across a switch
 
 Status:        Accepted
 Date decided:  2026-10-19
 Deciding PRs:  #302
 Supersedes:    none
-Code anchor:   demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt (TabSlots, tabSlotOf, holdsLiveView, holdsAny, ScreenBody, navTransition), mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt (the same)
+Code anchor:   demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt (TabSlots, tabSlotOf, keptWhenHidden, holdsLiveView, holdsAny, ScreenBody, navTransition), mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt (the same)
 Conformance:   xtask/tests/adr_conformance.rs::adr_0057_android_keeps_tab_screens_measuring_only_the_active_one
 
 ## 1. Context (The Problem)
@@ -24,7 +24,7 @@ The body was one `AnimatedContent` keyed by the screen's `route`. Every tab swit
 the new one from nothing, including its images, cards and charts.
 
 A second cause was found while building this (2026-10-19). The Android theme built a new `ColorScheme` on every core
-update. `MainActivity` hands it down through a static composition local, and `ColorScheme` compares by identity, so
+update. `MaterialTheme` hands it down through a static composition local, and `ColorScheme` compares by identity, so
 every update recomposed the whole app. With that cause in place, kept screens were worthless: a revealed tab
 recomposed in full anyway (108–181 ms). The theme fix shipped in the same PR as a bug fix. This record decides only
 the kept screens.
@@ -45,8 +45,13 @@ These rules keep it safe:
 - A hidden slot's `send` drops every `Action`.
 - A switch clears focus, so the keyboard closes.
 - A hidden slot is unplaced, so it is not in the accessibility tree.
-- A screen holding a `WebView`, `Video`, `Map` or `PdfView` is let go once hidden, so live native views keep their
-  lifecycle (ADR-0026).
+- A screen is let go once hidden unless `keptWhenHidden` allows it. Not kept:
+  - a screen holding a `WebView`, `Video`, `Map` or `PdfView`, so live native views keep their lifecycle
+    (ADR-0026);
+  - a screen still animating: `refreshing`, an indeterminate `Progress`, or a `LazyList` that is `loading` or
+    `refreshing`. Their infinite transitions ask for a frame on every vsync, placed or not;
+  - a screen nesting a `Scaffold`, whose `BackHandler` and sheet outlive placement;
+  - a screen with a SECURE `TextField`, whose text would otherwise stay in memory after the user left.
 - A slot whose tab moved to another `route` while it was away is rebuilt without a transition, never shown stale.
 
 ### 2.1. Refutation Conditions
@@ -57,8 +62,11 @@ These rules keep it safe:
 - **Condition 2: a hidden slot sends nothing**, and a switch clears focus.
   - **Validation Metric:** the same test (`if (isActive) send(`, `clearFocus(`). On a device: uiautomator shows the
     field `focused="false"` after a return; text typed on another tab never reaches the hidden field.
-- **Condition 3: live native views are never kept.** `holdsLiveView` names all four kinds, and the host calls it.
-  - **Validation Metric:** the same test. On a device: Profile (WebView) and Home round trips with no renderer crash.
+- **Condition 3: what must not run hidden is never kept.** `holdsLiveView` names all four live kinds;
+  `keptWhenHidden` checks it plus `refreshing`, indeterminate `Progress`, `LazyList.loading`, a nested `Scaffold`
+  and `FieldKind.SECURE`; the host asks `keptWhenHidden`.
+  - **Validation Metric:** the same test. On a device: Profile (WebView) and Home round trips with no renderer crash,
+    and 0 frames rendered while idle after a tab round trip.
 - **Condition 4: it is faster.** On the A32 (same build recipe, shipped profile only):
   - p90 frame time 48 → 38 ms; p95 129 → 61 ms; janky frames 51% → 43%;
   - the longest frame of a return switch ~140–190 ms → ~40 ms.
@@ -103,12 +111,22 @@ each time; each file was then restored with `git checkout -- <file>`, and the te
 - `it is Widget.Video ||` was removed from `holdsLiveView`. The test failed with
   `ADR-0057: … holdsLiveView misses Widget.Video`.
 
+After the review pass the test was tightened, and four more breaks each failed it:
+- the SECURE clause was dropped from `keptWhenHidden` (`… keptWhenHidden misses FieldKind.SECURE`);
+- the host called `holdsLiveView` instead of `keptWhenHidden`
+  (`… TabSlots must ask keptWhenHidden before keeping a hidden screen`);
+- the measure policy showed `measurables[0]` (`… must measure only the active slot`);
+- the gate was frozen with `val isActive = remember { i == slot }` (`… a hidden slot's send must be dropped`).
+
 ## 5. Consequences (Positive and Negative Predictions)
 
 - **Positive:** returning to a visited tab costs a small recomposition, and the old screen is no longer disposed on the
   switch.
-- **Positive:** a tab keeps its scroll position, an open `Disclosure`, and a pushed detail screen.
+- **Positive:** a tab keeps its scroll position and an open `Disclosure`, including inside a pushed detail screen
+  that the core still shows (the core keeps the stack; the shell keeps only the composition).
 - **Negative:** memory. Up to one extra composed screen per tab stays alive (live native views excluded).
+- **Negative:** a hidden screen's coroutines are not paused. A new kind of continuous work in a widget (an
+  infinite animation, a polling loop) must be added to `keptWhenHidden`, or it keeps running while hidden.
 - **Negative:** a first visit to a tab still builds the screen from nothing. Only a lazy body (Option C) would cut that.
 - **Negative:** moving to an untabbed screen and back drops every kept slot, since the tab host leaves the composition.
 - **Negative:** a hidden slot holds the tree it last showed until it is revealed. Code that reads a hidden slot would
