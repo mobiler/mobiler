@@ -410,6 +410,12 @@ stock or its own.
   `Tab { … }` literal needs `badge: None`. `tab` and `tab_icon` are unaffected.
 - **Breaking in mobiler-ui 0.32 / mobiler-core 0.47 / mobiler-web 0.47:** crux 0.20. Your workspace's
   `crux_core` pin and the codegen's bindgen must move with it; CLI 0.70's `mobiler upgrade --apply` does both.
+- **Breaking in mobiler-ui 0.33 / mobiler-core 0.48 / mobiler-web 0.48:** `Scaffold` gained
+  `ios_glass_tabs` (set it with `with_ios_glass_tabs`), `Icon` gained `Ledger`, `Chart`, `Wallet`,
+  `CreditCard`, `Lock`, `Download`, `Upload` and `Globe`, and `ColorRoles` gained `outlined_fill`,
+  `outlined_border`, `segment_selected` and `on_segment_selected`. Full `Scaffold` / `ColorRoles` literals
+  and exhaustive matches need them; builders and `..` are unaffected. Run `mobiler upgrade --apply` (CLI
+  0.72) so the shells draw them.
 
 ## License
 

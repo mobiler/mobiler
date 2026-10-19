@@ -321,6 +321,81 @@ fn adr_0058_ios_keeps_tab_screens_like_android() {
     }
 }
 
+/// ADR-0059: an option only one platform renders is named for it, documented as such, read by that
+/// platform's shell and ignored by every other: `ios_glass_tabs` is read by the iOS shells, never by an
+/// Android shell, and bound only as ignored by the web shell.
+#[test]
+fn adr_0059_platform_only_option_is_named_and_ignored_elsewhere() {
+    let ui = read("mobiler-ui/src/lib.rs");
+    let at = ui.find("ios_glass_tabs: bool").expect("ADR-0059: Scaffold has no ios_glass_tabs");
+    let doc = &ui[ui[..at].rfind("bottom_bar: Option<Vec<Widget>>,").expect("bottom_bar")..at];
+    assert!(doc.contains("iOS only"), "ADR-0059: ios_glass_tabs' doc must say it is iOS only");
+    // The template's iOS shell joins in the CLI PR that follows the libraries' publish (ADR-0009).
+    for path in ["demos/barbershop/iOS/Sources/Render.swift"] {
+        let code = live_code(&read(path));
+        assert!(code.contains("iosGlassTabs"), "ADR-0059: {path} must render ios_glass_tabs");
+        // The capsule grows with Dynamic Type: what it covers is measured, never a fixed height.
+        assert!(
+            code.contains("onGeometryChange(") && !code.contains("glassTabClearance"),
+            "ADR-0059: {path} must clear the glass capsule by its measured height"
+        );
+    }
+    // Shell code only: generated bindings and build output name every field.
+    let kotlin: Vec<PathBuf> = files_with_extension(&[root().join("mobiler/templates/Android"), root().join("demos")], "kt")
+        .into_iter()
+        .filter(|p| !p.components().any(|c| matches!(c.as_os_str().to_str(), Some("generated" | "build"))))
+        .collect();
+    assert!(kotlin.len() > 20, "ADR-0059: expected the shells' Kotlin sources, found {}", kotlin.len());
+    for path in &kotlin {
+        let kt = std::fs::read_to_string(path).unwrap();
+        assert!(!live_code(&kt).contains("iosGlassTabs"), "ADR-0059: {} reads the iOS-only option", path.display());
+    }
+    let web = live_code(&read("mobiler-web/src/lib.rs"));
+    assert_eq!(web.matches("ios_glass_tabs").count(), web.matches("ios_glass_tabs: _").count(), "ADR-0059: the web shell reads the iOS-only option");
+}
+
+/// ADR-0019: every palette colour role is drawn by both native shells (barbershop, the reference,
+/// and the template): each `ColorRoles` field, in its generated camelCase name, is read by the Android
+/// shell (MainActivity.kt or ui/theme/Theme.kt) and the iOS shell (Render.swift or Core.swift).
+#[test]
+fn every_palette_role_is_read_by_both_native_shells() {
+    let ui = read("mobiler-ui/src/lib.rs");
+    let body = fn_body(&ui, "pub struct ColorRoles").expect("ColorRoles");
+    let roles: Vec<String> = body
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("pub ")?.split(':').next().map(str::to_string))
+        .map(|snake| {
+            let mut out = String::new();
+            let mut up = false;
+            for c in snake.chars() {
+                if c == '_' { up = true } else if up { out.extend(c.to_uppercase()); up = false } else { out.push(c) }
+            }
+            out
+        })
+        .collect();
+    assert!(roles.len() >= 28, "expected the ColorRoles fields, found {roles:?}");
+    let shells = [
+        ("demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/", vec!["MainActivity.kt", "ui/theme/Theme.kt"]),
+        ("demos/barbershop/iOS/Sources/", vec!["Render.swift", "Core.swift"]),
+        // The template joins in the CLI PR that follows the libraries' publish (ADR-0009).
+    ];
+    for (dir, files) in shells {
+        let code: String = files.iter().map(|f| live_code(&read(&format!("{dir}{f}")))).collect();
+        for role in &roles {
+            // A palette read: the role is optional, so it is reached with `?.role`, read as `.role?`, or
+            // read off the palette value itself (`p.role`); Material's `colorScheme.outline` and SwiftUI's
+            // `Color.primary` are none of these. The name ends there (`.outline` ≠ `.outlinedFill`).
+            let read = code.match_indices(&format!(".{role}")).any(|(at, m)| {
+                let next = code[at + m.len()..].chars().next();
+                let ends = !next.is_some_and(|c| c.is_alphanumeric() || c == '_');
+                let owner = code[..at].rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
+                ends && (code[..at].ends_with('?') || next == Some('?') || ["p", "pal", "roles", "palette"].contains(&owner))
+            });
+            assert!(read, "ADR-0019: {dir} never reads the palette role {role}");
+        }
+    }
+}
+
 /// Not an ADR: the bug fixed beside ADR-0057 (#302). A theme that builds a new `ColorScheme` on every core
 /// update recomposes the whole app on every update, so every shell's theme builds it once per distinct theme.
 #[test]

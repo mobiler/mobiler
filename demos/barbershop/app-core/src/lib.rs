@@ -6,7 +6,7 @@
 use mobiler_core::{
     Photo, PhotoError, PhotoOptions,
     A11yRole, a11y, with_a11y_hint, with_a11y_role, Appearance, with_appearance, display, headline, FamilyRole, TypeScale, TypeSpec, Radius, Shapes,
-    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns, steps, with_step_caption, with_bottom_bar,
+    map, marker_titled, with_markers, with_extended_fab, with_icon, with_initials, with_avatar_size, avatar, with_columns, steps, with_step_caption, with_bottom_bar, with_ios_glass_tabs,
     BoxAlign, ButtonOpts, ButtonStyle, Caption, CardStyle, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartTick, Confirm, Corner, Cx, Density, FontFamily, Icon, ImageRatio,
     ImageShape, InputValue, MobilerApp, MobilerShell, Palette, ColorRoles, Picker, PluginResponse, Snackbar, Rgb, Rgba, ShellLabels, TonePair, Spacing, Theme, Tone, Widget, avatar_status,
@@ -324,6 +324,8 @@ pub struct Model {
     picked_day: Option<u8>,
     /// Profile "Large controls" toggle → `Theme.density = Density::Large`.
     large_controls: bool,
+    /// Profile "Glass tabs (iOS)" toggle → `with_ios_glass_tabs` on the root scaffold (ADR-0059).
+    glass_tabs: bool,
     /// Home Light · Dark · System control → `with_appearance` (Dark is the default; System follows the OS).
     appearance: Appearance,
     /// The OS setting as the `appearance` stream last reported it (shown under the control).
@@ -455,6 +457,7 @@ impl Default for Model {
             ],
             picked_day: None,
             large_controls: false,
+            glass_tabs: false,
             appearance: Appearance::Dark,
             system_appearance: String::new(),
             serbian_calendar: false,
@@ -1242,6 +1245,7 @@ impl MobilerApp for FadeHouse {
             }
             InputValue::Bool(on) => match id {
                 "large_controls" => model.large_controls = on,
+                "glass_tabs" => model.glass_tabs = on,
                 "serbian_calendar" => model.serbian_calendar = on,
                 _ => {}
             },
@@ -1285,6 +1289,10 @@ impl MobilerApp for FadeHouse {
         // The Bookings tab is pull-to-refresh (the app owns `refreshing`).
         if model.tab == Tab::Bookings {
             root = with_refresh(root, model.refreshing, Msg::RefreshBookings);
+        }
+        // iOS only: the tab bar floats as a glass capsule and the FAB is glass; elsewhere a no-op.
+        if model.glass_tabs {
+            root = with_ios_glass_tabs(root);
         }
         // A selected service pins its main actions at the bottom (with_bottom_bar): within thumb
         // reach however long the detail is. Wide buttons fill their equal cells on every shell.
@@ -2201,6 +2209,8 @@ fn profile_screen(model: &Model) -> Widget {
         progress(Some(completeness(model))),
         // Theme-level switch: Density::Large enlarges every control on every screen.
         toggle("large_controls", "Large controls", model.large_controls),
+        // iOS-only switch (ADR-0059): Android and the web keep the standard bar.
+        toggle("glass_tabs", "Glass tabs (iOS)", model.glass_tabs),
         caption(format!("Device: {}", if model.device_info.is_empty() { "unknown" } else { &model.device_info })),
         divider(),
         row(vec![icon_button(Icon::Person, Msg::SelectTab(Tab::Profile)), text("Account")]),
@@ -2592,6 +2602,15 @@ mod test {
             app.view(&model),
             Widget::Scaffold { theme: Some(Theme { density: Density::Large, .. }), .. }
         ));
+    }
+
+    #[test]
+    fn glass_tabs_toggle_sets_the_ios_option_on_the_root_scaffold() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        assert!(matches!(app.view(&model), Widget::Scaffold { ios_glass_tabs: false, .. }));
+        app.input("glass_tabs", InputValue::Bool(true), &mut model, &mut cx);
+        assert!(matches!(app.view(&model), Widget::Scaffold { ios_glass_tabs: true, .. }));
     }
 
     // Drives the full shell so the test sees the streams (transfers) the update starts.

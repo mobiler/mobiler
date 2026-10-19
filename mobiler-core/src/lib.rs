@@ -1343,7 +1343,7 @@ pub fn with_tab_count(mut tab: Tab, count: u32, label: impl Into<String>) -> Tab
 pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget) -> Widget {
     let title = title.into();
     // route defaults to the title; root depth = 1.
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1, labels: None, appearance: None, bottom_bar: None }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: None, dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 1, labels: None, appearance: None, bottom_bar: None, ios_glass_tabs: false }
 }
 
 /// Like [`scaffold`], but the top bar (and the system back button) navigate back
@@ -1352,7 +1352,7 @@ pub fn scaffold(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body:
 #[must_use]
 pub fn scaffold_back<E: Serialize>(title: impl Into<String>, dark_mode: bool, tabs: Vec<Tab>, body: Widget, back: E) -> Widget {
     let title = title.into();
-    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2, labels: None, appearance: None, bottom_bar: None }
+    Widget::Scaffold { route: title.clone(), title, body: Box::new(body), tabs, back: Some(tok(back)), dark_mode, theme: None, fab: None, sheet: None, on_refresh: None, refreshing: false, depth: 2, labels: None, appearance: None, bottom_bar: None, ios_glass_tabs: false }
 }
 
 /// Scaffold driven by a [`Nav`] stack: fills `route` (from the current route's
@@ -1388,6 +1388,7 @@ where
         labels: None,
         appearance: None,
         bottom_bar: None,
+        ios_glass_tabs: false,
     }
 }
 
@@ -1396,7 +1397,7 @@ where
 /// `with_theme(nav_scaffold(...), Theme { seed, ..Default::default() })`.
 pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, ios_glass_tabs, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1412,6 +1413,7 @@ pub fn with_theme(widget: Widget, theme: Theme) -> Widget {
             labels,
             appearance,
             bottom_bar,
+            ios_glass_tabs,
         },
         other => other,
     }
@@ -1440,8 +1442,21 @@ pub fn with_extended_fab<E: Serialize>(widget: Widget, icon: Icon, label: impl I
 #[must_use]
 pub fn with_bottom_bar(widget: Widget, children: Vec<Widget>) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, .. } => {
-            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar: Some(children) }
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, ios_glass_tabs, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar: Some(children), ios_glass_tabs }
+        }
+        other => other,
+    }
+}
+
+/// iOS only: a floating Liquid Glass tab bar (iOS 26; a frosted capsule below) and a glass FAB.
+/// Android and the web keep the standard bar (ADR-0059), so an app can set it for everyone. Set it on
+/// the root scaffold: `with_ios_glass_tabs(root)`. No-op on any other widget.
+#[must_use]
+pub fn with_ios_glass_tabs(widget: Widget) -> Widget {
+    match widget {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, ios_glass_tabs: true }
         }
         other => other,
     }
@@ -1449,7 +1464,7 @@ pub fn with_bottom_bar(widget: Widget, children: Vec<Widget>) -> Widget {
 
 fn set_fab(widget: Widget, fab: Fab) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, sheet, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, ios_glass_tabs, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1465,6 +1480,7 @@ fn set_fab(widget: Widget, fab: Fab) -> Widget {
             labels,
             appearance,
             bottom_bar,
+            ios_glass_tabs,
         },
         other => other,
     }
@@ -1474,7 +1490,7 @@ fn set_fab(widget: Widget, fab: Fab) -> Widget {
 /// the model: `with_sheet(scaffold(...), title, sheet_body, Msg::CloseSheet)`.
 pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child: Widget, on_dismiss: E) -> Widget {
     match widget {
-        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
+        Widget::Scaffold { title: t, body, tabs, back, dark_mode, theme, fab, on_refresh, refreshing, route, depth, labels, appearance, bottom_bar, ios_glass_tabs, .. } => Widget::Scaffold {
             title: t,
             body,
             tabs,
@@ -1490,6 +1506,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
             labels,
             appearance,
             bottom_bar,
+            ios_glass_tabs,
         },
         other => other,
     }
@@ -1500,7 +1517,7 @@ pub fn with_sheet<E: Serialize>(widget: Widget, title: impl Into<String>, child:
 /// when the async reload completes (the shell shows a spinner while true). No-op on other widgets.
 pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: E) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, labels, appearance, bottom_bar, .. } => Widget::Scaffold {
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, route, depth, labels, appearance, bottom_bar, ios_glass_tabs, .. } => Widget::Scaffold {
             title,
             body,
             tabs,
@@ -1516,6 +1533,7 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
             labels,
             appearance,
             bottom_bar,
+            ios_glass_tabs,
         },
         // Pull-to-refresh on a LazyList's top — same API as on a Scaffold. Leaves the load-more
         // fields intact.
@@ -1540,8 +1558,8 @@ pub fn with_refresh<E: Serialize>(widget: Widget, refreshing: bool, on_refresh: 
 #[must_use]
 pub fn with_labels(widget: Widget, labels: ShellLabels) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, appearance, bottom_bar, .. } => {
-            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: Some(labels), appearance, bottom_bar }
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, appearance, bottom_bar, ios_glass_tabs, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: Some(labels), appearance, bottom_bar, ios_glass_tabs }
         }
         other => other,
     }
@@ -1557,8 +1575,8 @@ pub fn with_labels(widget: Widget, labels: ShellLabels) -> Widget {
 #[must_use]
 pub fn with_appearance(widget: Widget, appearance: Appearance) -> Widget {
     match widget {
-        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, bottom_bar, .. } => {
-            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance: Some(appearance), bottom_bar }
+        Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, bottom_bar, ios_glass_tabs, .. } => {
+            Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels, appearance: Some(appearance), bottom_bar, ios_glass_tabs }
         }
         other => other,
     }
@@ -2192,6 +2210,24 @@ mod tests {
         assert!(keep(with_theme(s.clone(), Theme::default())));
         assert!(keep(with_labels(s.clone(), ShellLabels::new())));
         assert!(keep(with_appearance(s.clone(), Appearance::System)));
+    }
+
+    #[test]
+    fn with_ios_glass_tabs_sets_and_every_scaffold_builder_keeps_it() {
+        let s = with_ios_glass_tabs(scaffold("T", false, vec![], text("x")));
+        assert!(matches!(&s, Widget::Scaffold { ios_glass_tabs: true, .. }));
+        assert!(matches!(with_ios_glass_tabs(text("x")), Widget::Text { .. }));
+        assert!(matches!(scaffold("T", false, vec![], text("x")), Widget::Scaffold { ios_glass_tabs: false, .. }));
+        assert!(matches!(scaffold_back("T", false, vec![], text("x"), Ev::Tap), Widget::Scaffold { ios_glass_tabs: false, .. }));
+        let keep = |w: Widget| matches!(w, Widget::Scaffold { ios_glass_tabs: true, .. });
+        assert!(keep(with_fab(s.clone(), Icon::Add, Ev::Tap)));
+        assert!(keep(with_extended_fab(s.clone(), Icon::Add, "x", Ev::Tap)));
+        assert!(keep(with_sheet(s.clone(), "t", text("s"), Ev::Tap)));
+        assert!(keep(with_refresh(s.clone(), false, Ev::Tap)));
+        assert!(keep(with_theme(s.clone(), Theme::default())));
+        assert!(keep(with_labels(s.clone(), ShellLabels::new())));
+        assert!(keep(with_appearance(s.clone(), Appearance::System)));
+        assert!(keep(with_bottom_bar(s.clone(), vec![text("b")])));
     }
 
     #[test]

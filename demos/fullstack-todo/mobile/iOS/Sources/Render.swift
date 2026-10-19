@@ -371,7 +371,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, _, _):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, _, _, _):
         // Theme-as-data: the non-View mapper helpers — spacing(), imageShape(), CardMod,
         // TextStyleMod — read `ActiveTheme.current` (set from the root view in Core.swift, not
         // here) for corner/density/font. `theme` itself still flows into ScaffoldView, which uses
@@ -1533,6 +1533,14 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .play: return "play.fill"
     case .scissors: return "scissors"
     case .doneAll: return "checkmark.circle"
+    case .ledger: return "list.bullet.rectangle.fill"
+    case .chart: return "chart.line.uptrend.xyaxis"
+    case .wallet: return "wallet.bifold.fill"
+    case .creditCard: return "creditcard.fill"
+    case .lock: return "lock.fill"
+    case .download: return "arrow.down.circle"
+    case .upload: return "arrow.up.circle"
+    case .globe: return "globe"
     }
 }
 

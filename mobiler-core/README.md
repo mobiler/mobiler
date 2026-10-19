@@ -48,7 +48,9 @@ pub type App = MobilerShell<Counter>;
   the app's own appearance choice from the first frame, keep it in `cx.save` state: `Restore`
   arrives before `Start`, while a `securestore` read arrives after the first frame.
 - **Feedback & actions** — `cx.snackbar` (with an optional Undo), an extended FAB
-  (`with_extended_fab`), a pinned bottom bar for a screen's main actions (`with_bottom_bar`),
+  (`with_extended_fab`), a pinned bottom bar for a screen's main actions (`with_bottom_bar`), an
+  iOS-only floating Liquid Glass tab bar and glass FAB (`with_ios_glass_tabs`; Android and the web keep
+  the standard bar, ADR-0059),
   a step indicator (`steps` / `with_step_caption`), status badges with icons (`with_icon`),
   initials avatars (`with_initials`), fixed grid columns (`with_columns`), dashed cards, and
   `cx.open_url_then` (did the link open?).
@@ -88,6 +90,11 @@ scaffolds a project wired to this crate and a generic native shell.
 crux 0.20 pins). Your workspace's `crux_core` pin must move with it, or the build pulls in two crux copies and fails
 with a type mismatch. CLI 0.70's `mobiler upgrade --apply` moves the pin and your codegen's bindgen for you. The wire
 is unchanged; the gain is crux 0.20's bridge fixes (no registry slot leaked per render, effect ids never reused).
+
+**Breaking in mobiler-ui 0.33 / mobiler-core 0.48:** `Scaffold` gained `ios_glass_tabs`, `Icon` gained
+`Ledger`, `Chart`, `Wallet`, `CreditCard`, `Lock`, `Download`, `Upload` and `Globe`, and `ColorRoles` gained
+`outlined_fill`, `outlined_border`, `segment_selected` and `on_segment_selected`. Full literals and exhaustive matches
+need them; custom native shells should draw them (`mobiler upgrade --apply` updates generated ones).
 
 **Breaking in mobiler-ui 0.31 / mobiler-core 0.44:** `Tab` gained `badge: Option<TabBadge>`. A
 `Tab { … }` literal needs `badge: None`; `tab` / `tab_icon` are unaffected. Custom native shells

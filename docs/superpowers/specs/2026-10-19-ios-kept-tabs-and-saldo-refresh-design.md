@@ -22,7 +22,7 @@ no library, Rust or ABI change.
 **New records:**
 - **ADR-0058**: the iOS shell keeps visited tab screens by the same rules as ADR-0057. ADR-0057 stays in force for
   Android and is not edited.
-- **ADR-0059** (my call): Saldo is the showcase app and is CLI-managed. Every CLI release that changes a shell runs
+- **ADR-0060** (my call): Saldo is the showcase app and is CLI-managed. Every CLI release that changes a shell runs
   `mobiler upgrade --apply` on Saldo in its CLI PR, so Saldo never lags the template again. This is a release
   mechanic, so it is a decision, not a PR detail.
 
@@ -160,7 +160,7 @@ A normal CLI app, as if created today:
 
 ### B.3 Record and test
 
-- ADR-0059 (Saldo is CLI-managed and upgraded in each shell-changing CLI PR). Its conformance test (my call: the strict
+- ADR-0060 (Saldo is CLI-managed and upgraded in each shell-changing CLI PR). Its conformance test (my call: the strict
   form) renders the **current** template with Saldo's names and compares Saldo's shell files with it, apart from
   plugin anchor lines. Comparing against `.mobiler/base/` would only catch hand edits, never a forgotten upgrade.
   The cost: every future PR that changes a template shell fails CI until it runs `mobiler upgrade --apply` on Saldo.
