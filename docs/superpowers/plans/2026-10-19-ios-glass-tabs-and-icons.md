@@ -39,7 +39,7 @@ Kotlin/Compose (material-icons-extended), Leptos (mobiler-web).
 3. **Old shell, new core:** the new field and icons are wire changes; every in-repo shell must decode them (CI builds
    every demo).
 4. **Palette under glass:** a set `fab` / `on_fab` must still show (tinted glass / coloured glyph).
-5. **ADR-0059 test strictness:** a hand-written plugin registration above an anchor must fail it.
+5. **ADR-0060 test strictness:** a hand-written plugin registration above an anchor must fail it.
 
 ---
 
@@ -123,20 +123,20 @@ fullstack-todo/mobile, saldo, barbershop).
     `on_fab` colours glyph/label, else brand colour; raised above the capsule;
   - `bottom_bar` stays pinned above the capsule; snackbar lifted above both;
   - rail (regular width) unchanged; flag false → byte-identical rendering to before.
-- [ ] **Step 4:** Commit `feat(ios): glass tabs option in barbershop (ADR-0060)`.
+- [ ] **Step 4:** Commit `feat(ios): glass tabs option in barbershop (ADR-0059)`.
 
-### Task 6: ADR-0060 + conformance + docs
+### Task 6: ADR-0059 + conformance + docs
 
-**Files:** `docs/adr/ADR-0060-platform-only-options.md`, `docs/adr/index.md`, `xtask/tests/adr_conformance.rs`,
+**Files:** `docs/adr/ADR-0059-platform-only-options.md`, `docs/adr/index.md`, `xtask/tests/adr_conformance.rs`,
 READMEs (`mobiler-ui/README.md` icon / scaffold docs, root `README.md`, `mobiler/README.md`: grep `bottom_bar`,
 `with_bottom_bar`, `Icon`), `capabilities.json` if it lists scaffold options (then `cargo run -p xtask -- gen-readme`).
 
-- [ ] **Step 1: Failing test** `adr_0060_platform_only_option_is_named_and_ignored_elsewhere`: the field name starts
+- [ ] **Step 1: Failing test** `adr_0059_platform_only_option_is_named_and_ignored_elsewhere`: the field name starts
   with `ios_`; its doc in `mobiler-ui` contains "iOS only"; barbershop's and (later) the template's `Render.swift`
   read `iosGlassTabs`; no Android `MainActivity.kt` and no `mobiler-web/src` code reads `iosGlassTabs` /
   `ios_glass_tabs` except an ignore binding (`ios_glass_tabs: _`). Run: fails until the template has it — scope the
   template path in Task 8 (ledger a ruling if the test is split).
-- [ ] **Step 2:** ADR-0060 (decision: a shared-core option only one platform renders is named for that platform and
+- [ ] **Step 2:** ADR-0059 (decision: a shared-core option only one platform renders is named for that platform and
   ignored elsewhere; first use `ios_glass_tabs`; considered: a `Theme` field (breaks literal construction), an Android
   floating toolbar (Material's is for actions), hiding the option per platform (impossible in one shared core)).
   Mutation proof: (a) read the flag in barbershop's `MainActivity.kt`; (b) drop "iOS only" from the doc; (c) remove
@@ -161,7 +161,7 @@ READMEs (`mobiler-ui/README.md` icon / scaffold docs, root `README.md`, `mobiler
 - [ ] **Step 1:** Rebase `saldo-cli-managed` onto `main` (after Task 7). Resolve conflicts in favour of main for
   libraries/demos, keeping the branch's Saldo work.
 - [ ] **Step 2:** Port barbershop's shell diff from the libraries PR to the template (drift count unchanged, as in
-  #303). Run the ADR-0060 test over the template too: pass.
+  #303). Run the ADR-0059 test over the template too: pass.
 - [ ] **Step 3:** Bump pins + CLI version. `cargo test --workspace`: pass. Commit.
 
 ### Task 9: Saldo on the 0.72 template, with its look
@@ -175,9 +175,9 @@ READMEs (`mobiler-ui/README.md` icon / scaffold docs, root `README.md`, `mobiler
   text so no system blue; dark as before) — values from `git show ff3ccdb` and `7dbfb5e`. Saldo's Rust tests pass.
 - [ ] **Step 3:** Each Task 1 audit item is now covered; list them for the PR body. Commit.
 
-### Task 10: ADR-0059 test tightened (review I4, I5, M1, M3)
+### Task 10: ADR-0060 test tightened (review I4, I5, M1, M3)
 
-**Files:** `xtask/tests/adr_conformance.rs`, `docs/adr/ADR-0059-saldo-is-cli-managed.md` (unmerged: edit in place),
+**Files:** `xtask/tests/adr_conformance.rs`, `docs/adr/ADR-0060-saldo-is-cli-managed.md` (unmerged: edit in place),
 `mobiler/src/new.rs` test, `demos/saldo/Android/build-android.sh` mode.
 
 - [ ] **Step 1: Failing tests:**
@@ -191,7 +191,7 @@ READMEs (`mobiler-ui/README.md` icon / scaffold docs, root `README.md`, `mobiler
   - `new_app_scripts_are_executable` asserts the three script paths exist in `mobiler/templates`.
 - [ ] **Step 2:** Watch each fail (mutate where the code already passes), implement, pass. `git update-index
   --chmod=+x demos/saldo/Android/build-android.sh`.
-- [ ] **Step 3:** ADR-0059 text and mutation proof updated (add: a hand-written registration above an anchor). Commit.
+- [ ] **Step 3:** ADR-0060 text and mutation proof updated (add: a hand-written registration above an anchor). Commit.
 
 ### Task 11: Picker, workflow, amendment
 

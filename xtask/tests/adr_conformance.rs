@@ -321,6 +321,33 @@ fn adr_0058_ios_keeps_tab_screens_like_android() {
     }
 }
 
+/// ADR-0059: an option only one platform renders is named for it, documented as such, read by that
+/// platform's shell and ignored by every other: `ios_glass_tabs` is read by the iOS shells, never by an
+/// Android shell, and bound only as ignored by the web shell.
+#[test]
+fn adr_0059_platform_only_option_is_named_and_ignored_elsewhere() {
+    let ui = read("mobiler-ui/src/lib.rs");
+    let at = ui.find("ios_glass_tabs: bool").expect("ADR-0059: Scaffold has no ios_glass_tabs");
+    let doc = &ui[ui[..at].rfind("bottom_bar: Option<Vec<Widget>>,").expect("bottom_bar")..at];
+    assert!(doc.contains("iOS only"), "ADR-0059: ios_glass_tabs' doc must say it is iOS only");
+    // The template's iOS shell joins in the CLI PR that follows the libraries' publish (ADR-0009).
+    for path in ["demos/barbershop/iOS/Sources/Render.swift"] {
+        assert!(live_code(&read(path)).contains("iosGlassTabs"), "ADR-0059: {path} must render ios_glass_tabs");
+    }
+    // Shell code only: generated bindings and build output name every field.
+    let kotlin: Vec<PathBuf> = files_with_extension(&[root().join("mobiler/templates/Android"), root().join("demos")], "kt")
+        .into_iter()
+        .filter(|p| !p.components().any(|c| matches!(c.as_os_str().to_str(), Some("generated" | "build"))))
+        .collect();
+    assert!(kotlin.len() > 20, "ADR-0059: expected the shells' Kotlin sources, found {}", kotlin.len());
+    for path in &kotlin {
+        let kt = std::fs::read_to_string(path).unwrap();
+        assert!(!live_code(&kt).contains("iosGlassTabs"), "ADR-0059: {} reads the iOS-only option", path.display());
+    }
+    let web = live_code(&read("mobiler-web/src/lib.rs"));
+    assert_eq!(web.matches("ios_glass_tabs").count(), web.matches("ios_glass_tabs: _").count(), "ADR-0059: the web shell reads the iOS-only option");
+}
+
 /// ADR-0019: every palette colour role is drawn by both native shells (barbershop, the reference,
 /// and the template): each `ColorRoles` field, in its generated camelCase name, is read by the Android
 /// shell (MainActivity.kt or ui/theme/Theme.kt) and the iOS shell (Render.swift or Core.swift).

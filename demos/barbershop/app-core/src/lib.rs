@@ -324,7 +324,7 @@ pub struct Model {
     picked_day: Option<u8>,
     /// Profile "Large controls" toggle → `Theme.density = Density::Large`.
     large_controls: bool,
-    /// Profile "Glass tabs (iOS)" toggle → `with_ios_glass_tabs` on the root scaffold (ADR-0060).
+    /// Profile "Glass tabs (iOS)" toggle → `with_ios_glass_tabs` on the root scaffold (ADR-0059).
     glass_tabs: bool,
     /// Home Light · Dark · System control → `with_appearance` (Dark is the default; System follows the OS).
     appearance: Appearance,
@@ -2209,7 +2209,7 @@ fn profile_screen(model: &Model) -> Widget {
         progress(Some(completeness(model))),
         // Theme-level switch: Density::Large enlarges every control on every screen.
         toggle("large_controls", "Large controls", model.large_controls),
-        // iOS-only switch (ADR-0060): Android and the web keep the standard bar.
+        // iOS-only switch (ADR-0059): Android and the web keep the standard bar.
         toggle("glass_tabs", "Glass tabs (iOS)", model.glass_tabs),
         caption(format!("Device: {}", if model.device_info.is_empty() { "unknown" } else { &model.device_info })),
         divider(),

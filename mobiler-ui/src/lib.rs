@@ -996,7 +996,7 @@ pub enum Widget {
         /// release): appended — full `Scaffold` literals and patterns need it.
         bottom_bar: Option<Vec<Widget>>,
         /// iOS only: a floating Liquid Glass tab bar (iOS 26; a frosted capsule below) and a glass FAB.
-        /// Android and the web keep the standard bar (ADR-0060). BREAKING (mobiler-ui 0.33): appended —
+        /// Android and the web keep the standard bar (ADR-0059). BREAKING (mobiler-ui 0.33): appended —
         /// full `Scaffold` literals and patterns need it.
         ios_glass_tabs: bool,
     },

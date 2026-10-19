@@ -1444,7 +1444,7 @@ private struct ScaffoldView: View {
     let depth: UInt32
     /// with_bottom_bar: the screen's main actions, pinned between the body and the tabs.
     let bottomBar: [SharedTypes.Widget]?
-    /// with_ios_glass_tabs (ADR-0060): the phone tab bar floats as a glass capsule and the FAB is glass.
+    /// with_ios_glass_tabs (ADR-0059): the phone tab bar floats as a glass capsule and the FAB is glass.
     let iosGlassTabs: Bool
     let send: (Action) -> Void
 

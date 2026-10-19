@@ -1450,7 +1450,7 @@ pub fn with_bottom_bar(widget: Widget, children: Vec<Widget>) -> Widget {
 }
 
 /// iOS only: a floating Liquid Glass tab bar (iOS 26; a frosted capsule below) and a glass FAB.
-/// Android and the web keep the standard bar (ADR-0060), so an app can set it for everyone. Set it on
+/// Android and the web keep the standard bar (ADR-0059), so an app can set it for everyone. Set it on
 /// the root scaffold: `with_ios_glass_tabs(root)`. No-op on any other widget.
 #[must_use]
 pub fn with_ios_glass_tabs(widget: Widget) -> Widget {

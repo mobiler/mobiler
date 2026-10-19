@@ -1,6 +1,6 @@
 # iOS glass tab bar, new icons, and Saldo finished as a CLI-managed app
 
-**Asked by:** the maintainer, 2026-10-19. Saldo's refresh (branch `saldo-cli-managed`, ADR-0059) would drop Saldo's
+**Asked by:** the maintainer, 2026-10-19. Saldo's refresh (branch `saldo-cli-managed`, ADR-0060) would drop Saldo's
 look, which lived as hand edits in its old shells: the iOS floating Liquid Glass tab bar and glass add button
 (#171, #173, #175), the finance tab icons (#180) and the Aqua Mint background and tint (#187). They chose **framework
 first**: add the missing pieces to the framework, then finish Saldo on top. Their words on the glass bar: "it is iOS
@@ -17,15 +17,15 @@ carries the template shells and Saldo's refresh.
 - ADR-0021: iOS 17 deployment target, so iOS 26 APIs need an availability check.
 - ADR-0050: the tab bar and rail draw badges; the glass bar must too.
 - ADR-0057 / ADR-0058: kept tab screens; the glass bar sits over them.
-- ADR-0059 (on the held branch, not yet merged, so it is tightened in place): Saldo equals the current template.
+- ADR-0060 (on the held branch, not yet merged, so it is tightened in place): Saldo equals the current template.
 
-**New record:** ADR-0060 — a platform-only option in the shared core. A widget option that only one platform can
+**New record:** ADR-0059 — a platform-only option in the shared core. A widget option that only one platform can
 render is named for that platform (`ios_…`), documented as a no-op elsewhere, and every other shell ignores it, so an
 app sets it once and each platform shows its own native style. The glass tab bar is the first.
 
 ## Why
 
-Saldo is the showcase app people will try. Its look was built by editing its shells, which ADR-0059 now forbids. The
+Saldo is the showcase app people will try. Its look was built by editing its shells, which ADR-0060 now forbids. The
 pieces must exist in the framework before Saldo can use them through ordinary APIs, and once there, every app gets
 them.
 
@@ -57,7 +57,7 @@ them.
    `ios_glass_tabs`.
 4. **Saldo finished as a CLI-managed app** (the held PR 2, rebased onto the CLI 0.72 template), with the review's
    fixes:
-   - The ADR-0059 test is tightened. An inserted block must be a bundled plugin's `register` / dependency / permission
+   - The ADR-0060 test is tightened. An inserted block must be a bundled plugin's `register` / dependency / permission
      line from its `mobiler-plugin.toml`. Each of Saldo's plugin source files must equal the bundled source rendered.
      Every template file must be in the base snapshot or on an explicit allowlist. `Info.plist` and
      `settings.gradle.kts` are checked. The `CFBundleDisplayName` exception matches exactly
@@ -115,7 +115,7 @@ them.
      re-exports them; `mobiler-web` gets the glyphs. Every demo's shells get the new icon arms (coffee, todo,
      fullstack-todo and main's old Saldo shells have exhaustive icon switches and build against the workspace core;
      only the minimal arms, as in #235). The barbershop shells render the glass option, and a Profile toggle (like
-     "Large controls") turns it on, so TestFlight shows both bars and the stock look and screenshots stay. Then ADR-0060 and the
+     "Large controls") turns it on, so TestFlight shows both bars and the stock look and screenshots stay. Then ADR-0059 and the
      conformance test. Then publish the libraries (an irreversible step that needs the maintainer's OK).
   2. CLI PR: template shells ported from barbershop; template pins move to the new libraries; Saldo's held branch
      rebased and finished as Goals 3–5; `mobiler upgrade --apply` on Saldo; CLI 0.72.0.
@@ -127,7 +127,7 @@ them.
 - The exact SF Symbol / Material / web glyph per new icon, and whether the set needs trimming for availability.
 - The capsule's exact padding, shadow and the FAB's offset above it (start from Saldo's old values: capsule padding
   18/10, outer 16/6, FAB 56 pt raised 92 pt).
-- How the ADR-0060 conformance test proves every non-iOS shell ignores the option and the iOS shell reads it (and its
+- How the ADR-0059 conformance test proves every non-iOS shell ignores the option and the iOS shell reads it (and its
   mutation proof).
 - The palette's exact role values beyond the background, taken from #187's diff.
 

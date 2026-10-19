@@ -7,7 +7,7 @@ becomes a CLI-managed app that equals the current template.
 
 **Architecture:** PR 1 adds a `TabSlots`-style slot host to `ScaffoldView` in barbershop's `Render.swift`, ported to the
 template, plus three one-file `Theme.kt` fixes. PR 2 regenerates Saldo's native shells with the current CLI, commits its
-`.mobiler/` state, and guards it with a strict conformance test (ADR-0059).
+`.mobiler/` state, and guards it with a strict conformance test (ADR-0060).
 
 **Tech Stack:** SwiftUI (iOS 17), Kotlin/Compose, Rust (`xtask` conformance tests, the `mobiler` CLI), GitHub Actions.
 
@@ -38,7 +38,7 @@ template, plus three one-file `Theme.kt` fixes. PR 2 regenerates Saldo's native 
    (`mainColumn` is shared). Task 3 puts it in `mainColumn`'s body.
 4. **Saldo shell edits silently lost:** a behaviour Saldo had only in its hand-edited shell. Task 7's diff report
    lists every difference with a ruling.
-5. **Plugin anchor lines vs the strict test:** `plugin add` inserts lines above `mobiler:` anchors; the ADR-0059 test
+5. **Plugin anchor lines vs the strict test:** `plugin add` inserts lines above `mobiler:` anchors; the ADR-0060 test
    must accept exactly those and nothing else. Task 8's helper unit test pins both directions.
 
 ---
@@ -201,7 +201,7 @@ Design (the spec's A.1, A.2):
   `androidx.biometric` dependency (check the biometric plugin adds it through its manifest), exifinterface (template
   adds).
 
-### Task 8: ADR-0059 conformance test (RED)
+### Task 8: ADR-0060 conformance test (RED)
 
 **Files:** Modify `xtask/tests/adr_conformance.rs`
 
@@ -217,8 +217,8 @@ Design (the spec's A.1, A.2):
   - for every `.kt`, `.swift`, `.kts`, `.xml`, `.yml` file under `.mobiler/base/` that comes from the template:
     render the template file with Saldo's substitutions (the `{{PACKAGE}}`-family replacements, in
     `mobiler/src/templating.rs` order; package `rs.mobiler.saldo`, name `saldo`, the NDK version from the template's
-    default) and assert the base copy equals it ("ADR-0059: Saldo's base is behind the template: run mobiler upgrade
-    --apply in demos/saldo") and `plugin_insertions_only(rendered, saldo_file)` ("ADR-0059: {file} is edited by hand").
+    default) and assert the base copy equals it ("ADR-0060: Saldo's base is behind the template: run mobiler upgrade
+    --apply in demos/saldo") and `plugin_insertions_only(rendered, saldo_file)` ("ADR-0060: {file} is edited by hand").
   Keep the substitution in the test small; if it can't reproduce a file exactly, ledger which and why.
 - [ ] **Step 3:** Run it. Expected: FAIL "demos/saldo/mobiler.toml" missing.
 
@@ -233,7 +233,7 @@ Design (the spec's A.1, A.2):
 - [ ] **Step 2:** `cd demos/saldo && cargo run --manifest-path ../../mobiler/Cargo.toml -- upgrade`. Expected: nothing
   to do, nothing pending. `… -- doctor`: clean. Any upgrade finding on an in-repo demo is a CLI bug: fix it in
   `mobiler/src/` test-first, ledger it.
-- [ ] **Step 3:** Run the ADR-0059 test. Expected: PASS. Run `cargo test --workspace`: pass.
+- [ ] **Step 3:** Run the ADR-0060 test. Expected: PASS. Run `cargo test --workspace`: pass.
 - [ ] **Step 4:** Build Android locally: `cargo run -p mobiler -- build --no-install`… from `demos/saldo` (or
   `build-android.sh`), with a data2 target dir. Expected: APK built.
 - [ ] **Step 5:** Commit: `chore(saldo): regenerate the shells with the current CLI; Saldo is CLI-managed`.
@@ -248,16 +248,16 @@ Design (the spec's A.1, A.2):
   adjust.
 - [ ] **Step 2:** Commit: `ci(saldo): sign the release APK in the workflow`.
 
-### Task 11: ADR-0059, mutation proof, release skill
+### Task 11: ADR-0060, mutation proof, release skill
 
-**Files:** Create `docs/adr/ADR-0059-saldo-is-cli-managed.md`; modify `docs/adr/index.md`,
+**Files:** Create `docs/adr/ADR-0060-saldo-is-cli-managed.md`; modify `docs/adr/index.md`,
 `.claude/skills/release-cli/SKILL.md` (a step: "if the CLI PR changes a template shell, run `mobiler upgrade --apply`
 in `demos/saldo` and commit it"); Saldo's mention in the root `README.md` if any.
 
 - [ ] **Step 1: Mutations:** (a) add a comment line to Saldo's `MainActivity.kt` outside an anchor block → "edited by
   hand"; (b) change one line in the template's `Render.swift` without upgrading Saldo → "base is behind";
   (c) delete `demos/saldo/mobiler.toml`. Each fails, restore, passes. Record in §4.
-- [ ] **Step 2:** `cargo test -p xtask`: pass. Commit: `docs(adr): ADR-0059 Saldo is CLI-managed`.
+- [ ] **Step 2:** `cargo test -p xtask`: pass. Commit: `docs(adr): ADR-0060 Saldo is CLI-managed`.
 
 ### Task 12: Device check, ship PR 2, TestFlight Saldo
 
