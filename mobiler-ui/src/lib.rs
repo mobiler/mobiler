@@ -278,6 +278,18 @@ pub enum Icon {
     Scissors,
     // status: a double check ("finished")
     DoneAll,
+    /// A list of entries: a ledger, transactions, receipts.
+    Ledger,
+    /// A rising line chart: statistics, trends.
+    Chart,
+    /// A wallet: accounts, balances, net worth.
+    Wallet,
+    CreditCard,
+    Lock,
+    Download,
+    Upload,
+    /// A globe: language, region.
+    Globe,
 }
 
 #[derive(Facet, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -510,6 +522,15 @@ pub struct ColorRoles {
     pub error_fill: Option<Rgb>,
     /// A filled Danger button's text. Unset: as before.
     pub on_error_fill: Option<Rgb>,
+    /// An outlined button's background (alpha allowed: a soft tint). Unset: transparent, as before.
+    pub outlined_fill: Option<Rgba>,
+    /// An outlined button's border (alpha allowed). Unset: `outline`, as before.
+    pub outlined_border: Option<Rgba>,
+    /// The selected segment's fill, apart from chips and tonal buttons. Unset: `secondary_container`,
+    /// as before.
+    pub segment_selected: Option<Rgb>,
+    /// The selected segment's text and check mark. Unset: `on_secondary_container`, as before.
+    pub on_segment_selected: Option<Rgb>,
 }
 
 /// A tone's soft background and its foreground.
@@ -974,6 +995,10 @@ pub enum Widget {
         /// row); the body ends above it. `None` / empty = no bar. BREAKING (Moj Termin design
         /// release): appended — full `Scaffold` literals and patterns need it.
         bottom_bar: Option<Vec<Widget>>,
+        /// iOS only: a floating Liquid Glass tab bar (iOS 26; a frosted capsule below) and a glass FAB.
+        /// Android and the web keep the standard bar (ADR-0060). BREAKING (mobiler-ui 0.33): appended —
+        /// full `Scaffold` literals and patterns need it.
+        ios_glass_tabs: bool,
     },
     /// A step indicator for a multi-step flow: `total` equal segments, the first `current` filled.
     /// Spoken as one element, "Step 2 of 3" (or [`ShellLabels::step_of`]), never as a percentage.
@@ -1097,6 +1122,45 @@ mod tests {
     }
 
     #[test]
+    fn button_and_segment_roles_round_trip_and_default_to_none() {
+        let d = ColorRoles::default();
+        assert_eq!((d.outlined_fill, d.outlined_border, d.segment_selected, d.on_segment_selected), (None, None, None, None));
+        let light = ColorRoles {
+            outlined_fill: Some(Rgba { r: 14, g: 159, b: 142, a: 26 }),
+            outlined_border: Some(Rgba { r: 14, g: 159, b: 142, a: 115 }),
+            segment_selected: Some(Rgb::hex(0x0e9f8e)),
+            on_segment_selected: Some(Rgb::hex(0xffffff)),
+            ..Default::default()
+        };
+        round_trips(&Theme { palette: Some(Palette { light, dark: ColorRoles::default() }), ..Default::default() });
+    }
+
+    #[test]
+    fn new_icons_and_the_ios_glass_tabs_flag_round_trip() {
+        for icon in [Icon::Ledger, Icon::Chart, Icon::Wallet, Icon::CreditCard, Icon::Lock, Icon::Download, Icon::Upload, Icon::Globe] {
+            round_trips(&Widget::Badge { label: "x".into(), tone: Tone::Info, icon: Some(icon) });
+        }
+        round_trips(&Widget::Scaffold {
+            title: "t".into(),
+            body: Box::new(Widget::Text { content: "b".into(), style: TextStyle::Body }),
+            tabs: vec![],
+            back: None,
+            dark_mode: false,
+            theme: None,
+            fab: None,
+            sheet: None,
+            on_refresh: None,
+            refreshing: false,
+            route: "r".into(),
+            depth: 1,
+            labels: None,
+            appearance: None,
+            bottom_bar: None,
+            ios_glass_tabs: true,
+        });
+    }
+
+    #[test]
     fn widget_round_trips() {
         round_trips(&Widget::Text { content: "hi".to_string(), style: TextStyle::Title });
         round_trips(&Widget::ColorDot { color: ProjectColor::Teal });
@@ -1151,6 +1215,7 @@ mod tests {
             labels: None,
             appearance: None,
             bottom_bar: None,
+            ios_glass_tabs: false,
         });
         // Themed scaffold — all four theme knobs must round-trip.
         round_trips(&Widget::Scaffold {
@@ -1176,6 +1241,7 @@ mod tests {
             labels: None,
             appearance: None,
             bottom_bar: Some(vec![Widget::Divider]),
+            ios_glass_tabs: false,
         });
         // Themed scaffold with Density::Large — the big-touch-target density must round-trip.
         round_trips(&Widget::Scaffold {
@@ -1201,6 +1267,7 @@ mod tests {
             labels: None,
             appearance: None,
             bottom_bar: None,
+            ios_glass_tabs: false,
         });
         // Labelled scaffold — every ShellLabels field must round-trip.
         round_trips(&Widget::Scaffold {
@@ -1230,6 +1297,7 @@ mod tests {
             ),
             appearance: Some(Appearance::System),
             bottom_bar: None,
+            ios_glass_tabs: false,
         });
     }
 }
