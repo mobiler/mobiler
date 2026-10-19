@@ -732,7 +732,9 @@ fn demo_shared_crates() -> Vec<PathBuf> {
         for e in entries.flatten() {
             let p = e.path();
             let name = e.file_name();
-            if !e.file_type().is_ok_and(|t| t.is_dir()) || [".git", "target", "node_modules", "build"].contains(&name.to_str().unwrap_or("")) {
+            // Dot-dirs too: `.mobiler/base/` holds a snapshot of the template's shared/ files, not a crate.
+            let name_str = name.to_str().unwrap_or("");
+            if !e.file_type().is_ok_and(|t| t.is_dir()) || name_str.starts_with('.') || ["target", "node_modules", "build"].contains(&name_str) {
                 continue;
             }
             if name == "shared" && p.join("src/bin/codegen.rs").is_file() {
@@ -823,4 +825,95 @@ fn adr_0055_template_crux_pin_matches_the_workspace() {
         .find_map(|l| l.strip_prefix("const FACET_PIN: &str = \"")?.split('"').next().map(str::to_string))
         .expect("ADR-0055: upgrade.rs has no FACET_PIN");
     assert_eq!(told, core_facet, "ADR-0055: upgrade tells apps facet {told}, mobiler-core builds with {core_facet}");
+}
+
+/// Whether `app` is `template` plus only what `mobiler plugin add` inserts: blocks of extra lines, each
+/// ending directly above a `mobiler:` anchor line both files have. `Err` names the first line that isn't.
+fn plugin_insertions_only(template: &str, app: &str) -> Result<(), String> {
+    let (t, a): (Vec<&str>, Vec<&str>) = (template.lines().collect(), app.lines().collect());
+    let (mut i, mut j) = (0, 0);
+    while j < a.len() {
+        if i < t.len() && a[j] == t[i] {
+            (i, j) = (i + 1, j + 1);
+            continue;
+        }
+        let start = j;
+        while j < a.len() && (i >= t.len() || a[j] != t[i]) {
+            j += 1;
+        }
+        if i >= t.len() || !t[i].contains("mobiler:") {
+            return Err(format!("line {}: {}", start + 1, a[start]));
+        }
+    }
+    match t.get(i) {
+        Some(missing) => Err(format!("missing template line {}: {missing}", i + 1)),
+        None => Ok(()),
+    }
+}
+
+#[test]
+fn plugin_insertions_only_accepts_anchor_blocks_only() {
+    let t = "a\nb\n// mobiler:plugins — insert above\nc";
+    assert_eq!(plugin_insertions_only(t, t), Ok(()));
+    assert_eq!(plugin_insertions_only(t, "a\nb\nx\ny\n// mobiler:plugins — insert above\nc"), Ok(()));
+    assert!(plugin_insertions_only(t, "a\nx\nb\n// mobiler:plugins — insert above\nc").is_err(), "an extra line away from an anchor");
+    assert!(plugin_insertions_only(t, "a\nB\n// mobiler:plugins — insert above\nc").is_err(), "a changed template line");
+    assert!(plugin_insertions_only(t, "a\nb\n// mobiler:plugins — insert above").is_err(), "a missing template line");
+}
+
+/// ADR-0060: Saldo, the showcase app, is CLI-managed and equals the current template. Its `.mobiler/base/`
+/// snapshot must equal the template rendered with Saldo's names (so a CLI PR that changes a shell without
+/// running `mobiler upgrade --apply` in `demos/saldo` fails), and its shell code must equal the template
+/// apart from plugin insertions at anchors (so a hand edit fails). `res/` and `.gitignore` may carry
+/// Saldo's own edits (its icon, its local folders); upgrade's 3-way merge keeps those.
+#[test]
+fn adr_0060_saldo_equals_the_current_template() {
+    let app = root().join("demos/saldo");
+    let version = std::fs::read_to_string(app.join(".mobiler/version")).expect("ADR-0060: demos/saldo/.mobiler/version is missing");
+    // The CLI's own version: the first `version = "…"` line of its manifest is the package's.
+    let cli = read("mobiler/Cargo.toml").lines().find_map(|l| l.strip_prefix("version = \"")?.split('"').next().map(str::to_string));
+    assert_eq!(Some(version.trim().to_string()), cli, "ADR-0060: Saldo is stamped {version}: run mobiler upgrade --apply in demos/saldo");
+    let base = app.join(".mobiler/base");
+    let ndk = std::fs::read_to_string(app.join("Android/shared/build.gradle.kts"))
+        .unwrap()
+        .lines()
+        .find_map(|l| l.split("ndkVersion = \"").nth(1)?.split('"').next().map(str::to_string))
+        .expect("ADR-0060: no ndkVersion in Saldo's Android/shared/build.gradle.kts");
+    let render = |raw: &str| {
+        raw.replace("{{PACKAGE_SHARED_TYPES}}", "rs.mobiler.saldo.shared.types")
+            .replace("{{PACKAGE_SHARED}}", "rs.mobiler.saldo.shared")
+            .replace("{{PACKAGE_PATH}}", "rs/mobiler/saldo")
+            .replace("{{PACKAGE}}", "rs.mobiler.saldo")
+            .replace("{{NDK_VERSION}}", &ndk)
+            .replace("{{NAME}}", "Saldo")
+    };
+    let mut files = Vec::new();
+    let mut dirs = vec![base.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() { dirs.push(path) } else { files.push(path) }
+        }
+    }
+    let mut code = 0;
+    for path in &files {
+        let rel = path.strip_prefix(&base).unwrap().to_string_lossy().replace('\\', "/");
+        let tpl = root().join("mobiler/templates").join(rel.replace("rs/mobiler/saldo", "__PACKAGE_PATH__"));
+        let raw = std::fs::read_to_string(&tpl)
+            .or_else(|_| std::fs::read_to_string(format!("{}.tmpl", tpl.display())))
+            .unwrap_or_else(|_| panic!("ADR-0060: Saldo's base has {rel}, the template doesn't: run mobiler upgrade --apply in demos/saldo"));
+        let rendered = render(&raw);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), rendered, "ADR-0060: Saldo's base is behind the template ({rel}): run mobiler upgrade --apply in demos/saldo");
+        if rel.contains("/res/") || rel.ends_with(".gitignore") {
+            continue;
+        }
+        let ours = std::fs::read_to_string(app.join(&rel)).unwrap_or_else(|_| panic!("ADR-0060: demos/saldo/{rel} is missing"));
+        // `mobiler new --display-name` / `mobiler display-name` write the iOS display name: a CLI line, not a hand edit.
+        let ours: String = ours.lines().filter(|l| !(rel == "iOS/project.yml" && l.trim_start().starts_with("CFBundleDisplayName:"))).map(|l| format!("{l}\n")).collect();
+        if let Err(at) = plugin_insertions_only(&rendered, &ours) {
+            panic!("ADR-0060: demos/saldo/{rel} is edited by hand ({at}); change the template, then upgrade");
+        }
+        code += 1;
+    }
+    assert!(code >= 15, "ADR-0060: expected Saldo's shell code in its base, checked {code} files");
 }
