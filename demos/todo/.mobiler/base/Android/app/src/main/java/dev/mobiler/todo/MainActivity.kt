@@ -605,6 +605,10 @@ private val LocalFillList = compositionLocalOf { false }
 /** The colour behind a swipe row: the page's, unless the row sits on another surface (a sheet sets its own). */
 private val LocalSwipeCover = compositionLocalOf<Color?> { null }
 
+/** True over a scrim `Box`'s darkened image: text is white there (captions a little dimmer), as on iOS and the
+ *  web. A card inside resets it, so its own surface keeps the theme's text colours. */
+private val LocalOnScrim = compositionLocalOf { false }
+
 /** The scaffold body's fill list, per the shared rule: the body itself, or the first direct child of
  *  the body's column, that is a `LazyList { fill: true }`. `-1` ⇒ the body itself; `i >= 0` ⇒ child
  *  `i` of the body's column; `null` ⇒ no fill mode (the body scrolls as a page, as today). */
@@ -1245,7 +1249,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             if (widget.scrim && kids.size > 1) {
                 Render(kids.first(), send)
                 Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.40f)))
-                CompositionLocalProvider(LocalContentColor provides Color.White) {
+                CompositionLocalProvider(LocalContentColor provides Color.White, LocalOnScrim provides true) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { KeyedChildren(kids.drop(1)) { _, child -> Render(child, send) } }
                 }
             } else {
@@ -1737,8 +1741,9 @@ private fun scaled(spec: dev.mobiler.todo.shared.types.TypeSpec, base: androidx.
     applySpec(base, spec, tight, activeTheme?.font == dev.mobiler.todo.shared.types.FontFamily.CUSTOM, androidx.compose.ui.platform.LocalContext.current)
 
 @Composable
-private fun colorFor(style: ModelTextStyle): Color = when (style) {
-    ModelTextStyle.CAPTION -> MaterialTheme.colorScheme.onSurfaceVariant
+private fun colorFor(style: ModelTextStyle): Color = when {
+    LocalOnScrim.current -> if (style == ModelTextStyle.CAPTION) Color.White.copy(alpha = 0.8f) else Color.White
+    style == ModelTextStyle.CAPTION -> MaterialTheme.colorScheme.onSurfaceVariant
     else -> MaterialTheme.colorScheme.onSurface
 }
 
@@ -2294,7 +2299,7 @@ private fun boxAlignFor(align: BoxAlign): Alignment = when (align) {
 
 @Composable
 private fun CardBody(child: Widget, send: (Action) -> Unit) {
-    Box(modifier = Modifier.padding(16.dp)) { Render(child, send) }
+    CompositionLocalProvider(LocalOnScrim provides false) { Box(modifier = Modifier.padding(16.dp)) { Render(child, send) } }
 }
 
 // `Widget::Map` on Android — MapLibre Native (no API key) via Compose AndroidView interop. Markers are a
