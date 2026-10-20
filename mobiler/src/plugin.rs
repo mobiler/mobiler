@@ -1210,6 +1210,17 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_picker_registers_on_both_shells() {
+        let root = skeleton();
+        add_at(&root, "picker").unwrap();
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/PickerPlugin.kt").contains("package dev.mobiler.demo"));
+        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"picker\" to PickerPlugin(),"));
+        assert!(read(&root, "iOS/Sources/PickerPlugin.swift").contains("enum PickerPlugin"));
+        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"picker\": return await PickerPlugin.handle"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_bundled_review_registers_and_adds_gradle_dep() {
         let root = skeleton();
         add_at(&root, "review").unwrap();

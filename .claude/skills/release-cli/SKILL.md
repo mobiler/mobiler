@@ -11,6 +11,9 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which publishes the
 - `mobiler/Cargo.toml` `version` is already bumped (minor for features, patch for fixes) **and merged to `main`** via ship-pr, with CI green.
 - If this CLI release also depends on newly-published libs, those must already be live on crates.io first (see **release-libs**) — the template pins published lib versions.
 - Working tree clean; on `main` at the intended commit.
+- **Saldo is current (ADR-0060):** if the release changes any template shell file, the CLI PR must already have run
+  `mobiler upgrade --apply` in `demos/saldo` (with that PR's CLI) and committed the result.
+  `adr_0060_saldo_equals_the_current_template` fails CI until it has.
 - **Packaging pre-check (mandatory — the CLI ships embedded assets via `include_dir!`):** run
   `cargo package -p mobiler --allow-dirty --list` and confirm every asset the binary embeds is
   present — **all of `templates/**` and every `plugins/<name>/**`** (especially any dirs added

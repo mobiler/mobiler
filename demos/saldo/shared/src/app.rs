@@ -12,7 +12,8 @@ use std::sync::OnceLock;
 use mobiler_core::format::{format_currency, format_date, month_name};
 use mobiler_core::{
     ButtonStyle, CardStyle, Catalog, ChartSeries, ChartStyle, Corner, Currency, Cx, Density, FontFamily,
-    Icon, InputValue, Locale, MobilerApp, MobilerShell, Rgb, Segment, Spacing, Theme, Tone, Widget,
+    ColorRoles, Icon, InputValue, Locale, MobilerApp, MobilerShell, Palette, Rgb, Rgba, Segment, Spacing, Theme,
+    Tone, TonePair, Widget, with_ios_glass_tabs,
     badge, button, caption, card, card_button, chart, chip, column, decimal_field, divider,
     donut_chart, emphasis, negotiate, row, scaffold, scroller, segment, segmented, spacer, subtitle,
     swipe_action, text, text_field, with_fab, with_sheet, with_theme,
@@ -968,9 +969,9 @@ impl MobilerApp for SaldoApp {
             return with_theme(scaffold("Saldo", model.dark, vec![], lock), saldo_theme());
         }
         let tabs = vec![
-            tab(model.screen, Screen::Bills, tr(model, "tab.bills"), Icon::Home),
-            tab(model.screen, Screen::Stats, tr(model, "tab.stats"), Icon::Star),
-            tab(model.screen, Screen::Assets, tr(model, "tab.assets"), Icon::Cart),
+            tab(model.screen, Screen::Bills, tr(model, "tab.bills"), Icon::Ledger),
+            tab(model.screen, Screen::Stats, tr(model, "tab.stats"), Icon::Chart),
+            tab(model.screen, Screen::Assets, tr(model, "tab.assets"), Icon::Wallet),
             tab(model.screen, Screen::Settings, tr(model, "tab.settings"), Icon::Settings),
         ];
         // The Bills screen keeps the brand as its heading; the others use the (translated) tab name.
@@ -993,7 +994,9 @@ impl MobilerApp for SaldoApp {
             Screen::Settings => (tr(model, "tab.settings"), settings(model)),
         };
 
-        let mut root = scaffold(heading, model.dark, tabs, body);
+        // iOS: the tab bar floats as a Liquid Glass capsule with a glass FAB (Android and the web keep
+        // the standard bar).
+        let mut root = with_ios_glass_tabs(scaffold(heading, model.dark, tabs, body));
         match model.screen {
             Screen::Bills => root = with_fab(root, Icon::Add, Msg::StartAdd),
             Screen::Assets => root = with_fab(root, Icon::Add, Msg::StartAddAccount),
@@ -1022,7 +1025,34 @@ fn saldo_theme() -> Theme {
         corner: Corner::Large,
         density: Density::Comfortable,
         font: FontFamily::System,
+        palette: Some(saldo_palette()),
         ..Default::default()
+    }
+}
+
+/// Aqua Mint: a faint mint page in light mode (cards float on it, the glass tab bar refracts it), the
+/// system background in dark. Brand teal everywhere the system would show blue: solid teal segments
+/// with white text, pale teal chips, outlined buttons with a soft teal fill and border, the Info tone.
+fn saldo_palette() -> Palette {
+    let teal = Rgb::new(0x0E, 0x9F, 0x8E);
+    let white = Rgb::new(0xFF, 0xFF, 0xFF);
+    let roles = |chip: Rgb| ColorRoles {
+        primary: Some(teal),
+        on_primary: Some(white),
+        primary_text: Some(teal),
+        // A selected chip: teal at 18% over the page, a teal label and stroke.
+        secondary_container: Some(chip),
+        on_secondary_container: Some(teal),
+        segment_selected: Some(teal),
+        on_segment_selected: Some(white),
+        outlined_fill: Some(Rgba { r: 0x0E, g: 0x9F, b: 0x8E, a: 26 }),
+        outlined_border: Some(Rgba { r: 0x0E, g: 0x9F, b: 0x8E, a: 115 }),
+        info: Some(TonePair { container: teal, on_container: white }),
+        ..Default::default()
+    };
+    Palette {
+        light: ColorRoles { background: Some(Rgb::new(0xE9, 0xF6, 0xF1)), ..roles(Rgb::new(0xC2, 0xE6, 0xDF)) },
+        dark: roles(Rgb::new(0x10, 0x30, 0x2C)),
     }
 }
 
@@ -2524,6 +2554,32 @@ mod test {
             Category { id: 4, name: "Coffee".into(), kind: "expense".into(), parent_id: Some(1) },
             Category { id: 5, name: "Salary".into(), kind: "income".into(), parent_id: None },
         ]
+    }
+
+    #[test]
+    fn tabs_use_the_finance_icons_and_ios_glass_tabs() {
+        let v = SaldoApp.view(&Model::default());
+        let Widget::Scaffold { tabs, ios_glass_tabs, .. } = &v else { panic!("no scaffold") };
+        let icons: Vec<Option<Icon>> = tabs.iter().map(|t| t.icon).collect();
+        assert_eq!(icons, vec![Some(Icon::Ledger), Some(Icon::Chart), Some(Icon::Wallet), Some(Icon::Settings)]);
+        assert!(ios_glass_tabs);
+    }
+
+    #[test]
+    fn the_aqua_mint_palette_matches_saldos_design() {
+        let p = saldo_theme().palette.expect("palette");
+        let (teal, white) = (Rgb::new(0x0E, 0x9F, 0x8E), Rgb::new(0xFF, 0xFF, 0xFF));
+        assert_eq!(p.light.background, Some(Rgb::new(0xE9, 0xF6, 0xF1)));
+        assert_eq!(p.dark.background, None, "dark keeps the system background");
+        for r in [p.light, p.dark] {
+            assert_eq!((r.primary, r.on_primary, r.primary_text), (Some(teal), Some(white), Some(teal)));
+            assert_eq!((r.segment_selected, r.on_segment_selected), (Some(teal), Some(white)));
+            assert_eq!(r.on_secondary_container, Some(teal));
+            assert_eq!(r.outlined_fill.map(|c| c.a), Some(26));
+            assert_eq!(r.outlined_border.map(|c| c.a), Some(115));
+            assert_eq!(r.info.map(|t| (t.container, t.on_container)), Some((teal, white)));
+            assert!(r.danger.is_none(), "swipe Delete stays solid red");
+        }
     }
 
     #[test]

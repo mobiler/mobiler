@@ -27,19 +27,23 @@
             android:launchMode="singleTask"
             android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:windowSoftInputMode="adjustResize|stateHidden"
             android:theme="@style/Theme.Saldo">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Deep links: rs.mobiler.saldo://… open the app (and route in-app via the `system` stream). -->
+            <!-- Deep links: rs.mobiler.saldo://… open the app (and route in-app via the `system` stream).
+                 mobiler.toml `[deep_links] enabled = false` comments this filter out (ADR-0051). -->
+            <!-- mobiler:deep-links-begin -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="rs.mobiler.saldo" />
             </intent-filter>
+            <!-- mobiler:deep-links-end -->
         </activity>
 
         <!-- Lets cx.capture_photo hand the system camera app a writable file URI.
@@ -55,8 +59,8 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <activity android:name=".FileExportActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity android:name=".FilePickerActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity android:name=".FileExportActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
     </application>
 

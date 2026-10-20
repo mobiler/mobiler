@@ -330,8 +330,7 @@ fn adr_0059_platform_only_option_is_named_and_ignored_elsewhere() {
     let at = ui.find("ios_glass_tabs: bool").expect("ADR-0059: Scaffold has no ios_glass_tabs");
     let doc = &ui[ui[..at].rfind("bottom_bar: Option<Vec<Widget>>,").expect("bottom_bar")..at];
     assert!(doc.contains("iOS only"), "ADR-0059: ios_glass_tabs' doc must say it is iOS only");
-    // The template's iOS shell joins in the CLI PR that follows the libraries' publish (ADR-0009).
-    for path in ["demos/barbershop/iOS/Sources/Render.swift"] {
+    for path in ["demos/barbershop/iOS/Sources/Render.swift", "mobiler/templates/iOS/Sources/Render.swift"] {
         let code = live_code(&read(path));
         assert!(code.contains("iosGlassTabs"), "ADR-0059: {path} must render ios_glass_tabs");
         // The capsule grows with Dynamic Type: what it covers is measured, never a fixed height.
@@ -376,8 +375,9 @@ fn every_palette_role_is_read_by_both_native_shells() {
     assert!(roles.len() >= 28, "expected the ColorRoles fields, found {roles:?}");
     let shells = [
         ("demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/", vec!["MainActivity.kt", "ui/theme/Theme.kt"]),
+        ("mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/", vec!["MainActivity.kt", "ui/theme/Theme.kt"]),
         ("demos/barbershop/iOS/Sources/", vec!["Render.swift", "Core.swift"]),
-        // The template joins in the CLI PR that follows the libraries' publish (ADR-0009).
+        ("mobiler/templates/iOS/Sources/", vec!["Render.swift", "Core.swift"]),
     ];
     for (dir, files) in shells {
         let code: String = files.iter().map(|f| live_code(&read(&format!("{dir}{f}")))).collect();
@@ -392,6 +392,28 @@ fn every_palette_role_is_read_by_both_native_shells() {
                 ends && (code[..at].ends_with('?') || next == Some('?') || ["p", "pal", "roles", "palette"].contains(&owner))
             });
             assert!(read, "ADR-0019: {dir} never reads the palette role {role}");
+        }
+    }
+}
+
+/// Not an ADR: the CLI embeds `mobiler/templates` and `mobiler/plugins` whole, so a leftover from a
+/// `patch` run or a review copy would ship in every new app (a `MainActivity.kt.orig` once did, #305).
+#[test]
+fn templates_and_plugins_hold_no_leftover_files() {
+    let mut dirs = vec![root().join("mobiler/templates"), root().join("mobiler/plugins")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            assert!(
+                ![".orig", ".rej", ".mobiler-new", ".mobiler-bak", ".swp", "~"].iter().any(|e| name.ends_with(e)),
+                "{} is a leftover, not a template file",
+                path.display()
+            );
         }
     }
 }
@@ -732,7 +754,9 @@ fn demo_shared_crates() -> Vec<PathBuf> {
         for e in entries.flatten() {
             let p = e.path();
             let name = e.file_name();
-            if !e.file_type().is_ok_and(|t| t.is_dir()) || [".git", "target", "node_modules", "build"].contains(&name.to_str().unwrap_or("")) {
+            // Dot-dirs too: `.mobiler/base/` holds a snapshot of the template's shared/ files, not a crate.
+            let name_str = name.to_str().unwrap_or("");
+            if !e.file_type().is_ok_and(|t| t.is_dir()) || name_str.starts_with('.') || ["target", "node_modules", "build"].contains(&name_str) {
                 continue;
             }
             if name == "shared" && p.join("src/bin/codegen.rs").is_file() {
@@ -823,4 +847,229 @@ fn adr_0055_template_crux_pin_matches_the_workspace() {
         .find_map(|l| l.strip_prefix("const FACET_PIN: &str = \"")?.split('"').next().map(str::to_string))
         .expect("ADR-0055: upgrade.rs has no FACET_PIN");
     assert_eq!(told, core_facet, "ADR-0055: upgrade tells apps facet {told}, mobiler-core builds with {core_facet}");
+}
+
+/// A plugin-insertion anchor: a comment line naming `mobiler:` (not a line that merely mentions it).
+fn is_anchor(line: &str) -> bool {
+    let t = line.trim_start();
+    ["// mobiler:", "# mobiler:", "<!-- mobiler:"].iter().any(|a| t.starts_with(a))
+}
+
+/// Whether `app` is `template` plus only what `mobiler plugin add` inserts: blocks of extra lines, each
+/// ending directly above an anchor comment both files have, and each line exactly one of `allowed` (a
+/// used bundled plugin's rendered insertions: its registration, dependency, manifest and plist lines;
+/// a trailing comma is the registration list's). `Err` names the first line that isn't.
+fn plugin_insertions_only(template: &str, app: &str, allowed: &[String]) -> Result<(), String> {
+    let (t, a): (Vec<&str>, Vec<&str>) = (template.lines().collect(), app.lines().collect());
+    let (mut i, mut j) = (0, 0);
+    while j < a.len() {
+        if i < t.len() && a[j] == t[i] {
+            (i, j) = (i + 1, j + 1);
+            continue;
+        }
+        let start = j;
+        while j < a.len() && (i >= t.len() || a[j] != t[i]) {
+            j += 1;
+        }
+        if i >= t.len() || !is_anchor(t[i]) {
+            return Err(format!("line {}: {}", start + 1, a[start]));
+        }
+        let inserted = |line: &str| {
+            let line = line.trim();
+            allowed.iter().any(|ok| line == ok.as_str() || line.strip_suffix(',') == Some(ok.as_str()))
+        };
+        if let Some(k) = (start..j).find(|&k| !inserted(a[k])) {
+            return Err(format!("line {}: {} (no bundled plugin inserts it)", k + 1, a[k]));
+        }
+    }
+    match t.get(i) {
+        Some(missing) => Err(format!("missing template line {}: {missing}", i + 1)),
+        None => Ok(()),
+    }
+}
+
+#[test]
+fn plugin_insertions_only_accepts_anchor_blocks_only() {
+    let t = "a\nb\n// mobiler:plugins — insert above\nc";
+    let ok = vec!["\"x\" to XPlugin()".to_string()];
+    assert_eq!(plugin_insertions_only(t, t, &ok), Ok(()));
+    assert_eq!(plugin_insertions_only(t, "a\nb\n    \"x\" to XPlugin(),\n// mobiler:plugins — insert above\nc", &ok), Ok(()));
+    assert!(plugin_insertions_only(t, "a\nb\n    \"foo\" to FooPlugin(),\n// mobiler:plugins — insert above\nc", &ok).is_err(), "a hand-written registration above an anchor");
+    assert!(plugin_insertions_only(t, "a\nx\nb\n// mobiler:plugins — insert above\nc", &ok).is_err(), "an extra line away from an anchor");
+    assert!(plugin_insertions_only(t, "a\nB\n// mobiler:plugins — insert above\nc", &ok).is_err(), "a changed template line");
+    assert!(plugin_insertions_only(t, "a\nb\n// mobiler:plugins — insert above", &ok).is_err(), "a missing template line");
+    // A line merely containing an allowed word (here `false`, from `exported="false"`) is not an insertion.
+    let manifest = vec!["<activity android:name=\".X\" android:exported=\"false\" />".to_string()];
+    assert!(plugin_insertions_only(t, "a\nb\n    case \"x\": return PluginResponse(ok: false, output: \"\")\n// mobiler:plugins — insert above\nc", &manifest).is_err(), "a line sharing a word with a manifest value");
+    // Only a comment anchor takes insertions, not a line that merely mentions `mobiler:`.
+    let printed = "a\n    print(\"mobiler: font family\")\nc";
+    assert!(plugin_insertions_only(printed, "a\n    \"x\" to XPlugin(),\n    print(\"mobiler: font family\")\nc", &ok).is_err(), "a block above a non-anchor line");
+}
+
+/// The exact lines `mobiler plugin add` inserts for a plugin manifest (as plugin.rs renders them): its
+/// `register` lines, `implementation("…")` per gradle dependency, its manifest entries, a `<uses-permission>`
+/// per plain permission, and `KEY: "value"` per `[ios.info_plist]` entry.
+fn manifest_insertions(toml: &str) -> Vec<String> {
+    let quoted = |rest: &str| -> Vec<String> {
+        let q = if rest.trim_start().trim_start_matches('[').trim_start().starts_with('\'') { '\'' } else { '"' };
+        rest.split(q).skip(1).step_by(2).map(str::to_string).collect()
+    };
+    let mut out = Vec::new();
+    let mut plist = false;
+    for line in toml.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        if line.starts_with('[') {
+            plist = line == "[ios.info_plist]";
+            continue;
+        }
+        let Some((key, rest)) = line.split_once(" = ") else { continue };
+        if plist {
+            out.push(format!("{key}: {rest}"));
+            continue;
+        }
+        match key {
+            "register" | "manifest_application" => out.extend(quoted(rest)),
+            "gradle_deps" => out.extend(quoted(rest).into_iter().map(|d| format!("implementation(\"{d}\")"))),
+            "permissions" => out.extend(quoted(rest).into_iter().map(|p| format!("<uses-permission android:name=\"{p}\" />"))),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Template files an app owns (upgrade's Own and Seed classes): never in the base snapshot, by design.
+fn app_owned(rel: &str) -> bool {
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    (rel.starts_with("shared/src/") && rel != "shared/src/bin/codegen.rs")
+        || name == "Cargo.toml"
+        || rel == "Android/settings.gradle.kts"
+        || rel == "Android/app/src/main/res/values/strings.xml"
+        || rel == "iOS/Sources/Info.plist"
+        || rel.starts_with("iOS/Sources/Assets.xcassets/")
+        || ["jar", "webp", "png", "ico"].iter().any(|e| rel.ends_with(&format!(".{e}")))
+        || name == "gradlew.bat"
+        || rel.ends_with("mobiler_splash.xml")
+        || rel == "Android/app/src/main/res/drawable/mobiler_launch.xml"
+}
+
+/// ADR-0060: Saldo, the showcase app, is CLI-managed and equals the current template. Its `.mobiler/base/`
+/// snapshot must equal the template rendered with Saldo's names (so a CLI PR that changes a shell without
+/// running `mobiler upgrade --apply` in `demos/saldo` fails), and its shell code must equal the template
+/// apart from plugin insertions at anchors (so a hand edit fails). `res/` and `.gitignore` may carry
+/// Saldo's own edits (its icon, its local folders); upgrade's 3-way merge keeps those.
+#[test]
+fn adr_0060_saldo_equals_the_current_template() {
+    let app = root().join("demos/saldo");
+    let version = std::fs::read_to_string(app.join(".mobiler/version")).expect("ADR-0060: demos/saldo/.mobiler/version is missing");
+    // The CLI's own version: the first `version = "…"` line of its manifest is the package's.
+    let cli = read("mobiler/Cargo.toml").lines().find_map(|l| l.strip_prefix("version = \"")?.split('"').next().map(str::to_string));
+    assert_eq!(Some(version.trim().to_string()), cli, "ADR-0060: Saldo is stamped {version}: run mobiler upgrade --apply in demos/saldo");
+    let base = app.join(".mobiler/base");
+    let ndk = std::fs::read_to_string(app.join("Android/shared/build.gradle.kts"))
+        .unwrap()
+        .lines()
+        .find_map(|l| l.split("ndkVersion = \"").nth(1)?.split('"').next().map(str::to_string))
+        .expect("ADR-0060: no ndkVersion in Saldo's Android/shared/build.gradle.kts");
+    let render = |raw: &str| {
+        raw.replace("{{PACKAGE_SHARED_TYPES}}", "rs.mobiler.saldo.shared.types")
+            .replace("{{PACKAGE_SHARED}}", "rs.mobiler.saldo.shared")
+            .replace("{{PACKAGE_PATH}}", "rs/mobiler/saldo")
+            .replace("{{PACKAGE}}", "rs.mobiler.saldo")
+            .replace("{{NDK_VERSION}}", &ndk)
+            .replace("{{NAME}}", "Saldo")
+    };
+    let walk = |top: PathBuf| {
+        let mut files = Vec::new();
+        let mut dirs = vec![top];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() { dirs.push(path) } else { files.push(path) }
+            }
+        }
+        files
+    };
+    let files = walk(base.clone());
+
+    // The bundled plugins Saldo uses (their Android source is in its package), and what they may insert.
+    let pkg = app.join("Android/app/src/main/java/rs/mobiler/saldo");
+    let mut allowed = Vec::new();
+    let mut plugin_files = Vec::new();
+    for dir in std::fs::read_dir(root().join("mobiler/plugins")).unwrap().map(|e| e.unwrap().path()) {
+        let toml = std::fs::read_to_string(dir.join("mobiler-plugin.toml")).unwrap();
+        let mut section = "";
+        let mut sources: Vec<(String, String)> = Vec::new();
+        for line in toml.lines().map(str::trim) {
+            if line.starts_with('[') { section = if line.starts_with("[android") { "android" } else if line.starts_with("[ios") { "ios" } else { "" }; }
+            if let Some(list) = line.strip_prefix("sources = [") {
+                sources.extend(list.split('"').skip(1).step_by(2).map(|src| (section.to_string(), src.to_string())));
+            }
+        }
+        let used = sources.iter().any(|(sec, src)| sec == "android" && pkg.join(src.rsplit('/').next().unwrap()).exists());
+        if !used {
+            continue;
+        }
+        allowed.extend(manifest_insertions(&toml));
+        for (sec, src) in sources {
+            let name = src.rsplit('/').next().unwrap().to_string();
+            let ours = if sec == "android" { pkg.join(&name) } else { app.join("iOS/Sources").join(&name) };
+            let bundled = render(&std::fs::read_to_string(dir.join(&src)).unwrap());
+            let mine = std::fs::read_to_string(&ours).unwrap_or_else(|_| panic!("ADR-0060: Saldo is missing {}", ours.display()));
+            assert_eq!(mine, bundled, "ADR-0060: {} differs from the bundled plugin's {src}: a plugin is never edited in the app", ours.display());
+            plugin_files.push(ours);
+        }
+    }
+    // A plugin no bundled package provides is a hand-written shell edit.
+    let template_names: Vec<String> = walk(root().join("mobiler/templates")).iter().filter_map(|p| p.file_name()?.to_str().map(str::to_string)).collect();
+    for path in walk(pkg.clone()).into_iter().chain(walk(app.join("iOS/Sources"))) {
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        if (name.ends_with("Plugin.kt") || name.ends_with("Plugin.swift") || name.ends_with("Activity.kt"))
+            && !plugin_files.contains(&path) && !template_names.contains(&name)
+        {
+            panic!("ADR-0060: {} is not from the template or a bundled plugin", path.display());
+        }
+    }
+
+    // Every template file is in the snapshot (a forgotten upgrade that only adds a file), unless the app owns it.
+    for tpl in walk(root().join("mobiler/templates")) {
+        let rel = tpl.strip_prefix(root().join("mobiler/templates")).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = rel.replace("__PACKAGE_PATH__", "rs/mobiler/saldo");
+        let rel = rel.strip_suffix(".tmpl").unwrap_or(&rel).to_string();
+        if !app_owned(&rel) {
+            assert!(base.join(&rel).exists(), "ADR-0060: the template has {rel}, Saldo's base doesn't: run mobiler upgrade --apply in demos/saldo");
+        }
+    }
+    // App-owned, but Saldo keeps them as generated: compared whole.
+    for rel in ["iOS/Sources/Info.plist", "Android/settings.gradle.kts"] {
+        let tpl = root().join("mobiler/templates").join(rel);
+        let raw = std::fs::read_to_string(&tpl).or_else(|_| std::fs::read_to_string(format!("{}.tmpl", tpl.display()))).unwrap();
+        assert_eq!(std::fs::read_to_string(app.join(rel)).unwrap(), render(&raw), "ADR-0060: demos/saldo/{rel} is edited by hand");
+    }
+    let mut code = 0;
+    for path in &files {
+        let rel = path.strip_prefix(&base).unwrap().to_string_lossy().replace('\\', "/");
+        let tpl = root().join("mobiler/templates").join(rel.replace("rs/mobiler/saldo", "__PACKAGE_PATH__"));
+        let raw = std::fs::read_to_string(&tpl)
+            .or_else(|_| std::fs::read_to_string(format!("{}.tmpl", tpl.display())))
+            .unwrap_or_else(|_| panic!("ADR-0060: Saldo's base has {rel}, the template doesn't: run mobiler upgrade --apply in demos/saldo"));
+        let rendered = render(&raw);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), rendered, "ADR-0060: Saldo's base is behind the template ({rel}): run mobiler upgrade --apply in demos/saldo");
+        if rel.contains("/res/") || rel.ends_with(".gitignore") {
+            continue;
+        }
+        let ours = std::fs::read_to_string(app.join(&rel)).unwrap_or_else(|_| panic!("ADR-0060: demos/saldo/{rel} is missing"));
+        // `mobiler new --display-name` / `mobiler display-name` write the iOS display name: a CLI line, not a hand
+        // edit — exactly Saldo's, once.
+        let ours = if rel == "iOS/project.yml" {
+            let name = "        CFBundleDisplayName: \"Saldo\"\n";
+            assert_eq!(ours.matches(name).count(), 1, "ADR-0060: Saldo's project.yml must name it exactly once: {name}");
+            ours.replacen(name, "", 1)
+        } else {
+            ours
+        };
+        if let Err(at) = plugin_insertions_only(&rendered, &ours, &allowed) {
+            panic!("ADR-0060: demos/saldo/{rel} is edited by hand ({at}); change the template, then upgrade");
+        }
+        code += 1;
+    }
+    assert!(code >= 15, "ADR-0060: expected Saldo's shell code in its base, checked {code} files");
 }

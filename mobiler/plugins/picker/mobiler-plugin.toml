@@ -1,0 +1,17 @@
+# Free, bundled Mobiler plugin: a native single-choice picker (Android dialog list, iOS wheel sheet).
+# Call from Rust:
+#   let input = serde_json::json!({"title": "Language", "options": ["System", "English"], "selected": 0}).to_string();
+#   cx.plugin("picker", "choose", input, |r| Msg::Picked(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }))
+#   → r.ok == true with the chosen index as text ("1"); r.ok == false on cancel.
+#
+# Install:  mobiler plugin add picker
+name = "picker"
+summary = "Native single-choice picker: a list of options, one chosen (free)"
+
+[android]
+sources = ["android/PickerPlugin.kt"]
+register = '"picker" to PickerPlugin()'
+
+[ios]
+sources = ["ios/PickerPlugin.swift"]
+register = 'case "picker": return await PickerPlugin.handle(op: op, input: input)'

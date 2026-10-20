@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SharedTypes
 import UIKit
 import PhotosUI
@@ -36,7 +37,10 @@ final class Core: ObservableObject {
     init() {
         // First frame straight from the core's view model.
         self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-        if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels, _, _, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
+        if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+        // Light/dark is a window-level override set from the root (see applyWindowStyle); the window
+        // exists by the next tick.
+        DispatchQueue.main.async { [weak self] in if let v = self?.view { applyWindowStyle(v) } }
         // The app's own version first, so the core's restore/init already see it (cx.app_info()).
         let info = Bundle.main.infoDictionary
         update(.appInfo(
@@ -60,7 +64,8 @@ final class Core: ObservableObject {
             switch request.effect {
             case .render:
                 self.view = try! Widget.bincodeDeserialize(input: [UInt8](core.view()))
-                if case let .scaffold(_, _, _, _, _, theme, _, _, _, _, _, _, labels, _, _, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels } else { ActiveTheme.current = nil; ActiveLabels.current = nil }
+                if case let .scaffold(_, _, _, _, darkMode, theme, _, _, _, _, _, _, labels, appearance, _, _) = view { ActiveTheme.current = theme; ActiveLabels.current = labels; let dark = resolvedDark(appearance, darkMode); ActivePalette.current = theme?.palette.map { dark ? $0.dark : $0.light } } else { ActiveTheme.current = nil; ActiveLabels.current = nil; ActivePalette.current = nil }
+                applyWindowStyle(view)
 
             // Fire-and-forget: dispatch, ignore the result, don't resolve. The
             // `stream`/`unsubscribe` control notify cancels a live subscription.
@@ -137,6 +142,127 @@ enum SystemStream {
     }
 }
 
+/// The scaffold's dark flag outside a view (Core's per-render palette resolution): `.system` reads
+/// the OS via the window scene; ScaffoldView refines it with the live environment scheme.
+@MainActor
+func resolvedDark(_ appearance: Appearance?, _ darkMode: Bool) -> Bool {
+    switch appearance {
+    case .some(.light): return false
+    case .some(.dark): return true
+    case .some(.system): return AppearanceBridge.osDark()
+    case .none: return darkMode
+    }
+}
+
+/// Light/dark for the whole window, from the ROOT view: a scaffold's appearance (System → the OS,
+/// `.unspecified`) or its `dark_mode`; any other root follows the OS. A window-level override (not
+/// SwiftUI's `preferredColorScheme`, which doesn't reliably let go when set back to nil) — and it sits
+/// below the window scene, so the scene's trait always stays the OS value the appearance query reads.
+@MainActor
+func applyWindowStyle(_ view: Widget) {
+    let style: UIUserInterfaceStyle
+    if case let .scaffold(_, _, _, _, darkMode, _, _, _, _, _, _, _, _, appearance, _, _) = view {
+        switch appearance {
+        case .some(.system): style = .unspecified
+        case .some(.light): style = .light
+        case .some(.dark): style = .dark
+        case .none: style = darkMode ? .dark : .light
+        }
+    } else {
+        style = .unspecified
+    }
+    for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+        for window in scene.windows where window.overrideUserInterfaceStyle != style {
+            window.overrideUserInterfaceStyle = style
+        }
+    }
+}
+
+/// The OS light/dark setting: the active window scene's trait (system-level — the app's own
+/// light/dark override is set on its windows, below the scene). iOS 17 trait-change registration feeds
+/// the `appearance` stream; every subscription (key) gets its own sink, and the scene registration
+/// lives while at least one is attached.
+@MainActor
+final class AppearanceBridge {
+    static let shared = AppearanceBridge()
+    private var sinks: [UUID: @Sendable (String) -> Void] = [:]
+    private var registration: (any UITraitChangeRegistration)?
+    private weak var registeredScene: UIWindowScene?
+    private var last: String?
+    private var activation: NSObjectProtocol?
+
+    static func scene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
+    static func osDark() -> Bool {
+        (scene()?.traitCollection.userInterfaceStyle ?? UITraitCollection.current.userInterfaceStyle) == .dark
+    }
+    private static func name(_ dark: Bool) -> String { dark ? "dark" : "light" }
+
+    /// Add a subscriber: it gets the current value at once; returns its token for `detach`.
+    func attach(_ sink: @escaping @Sendable (String) -> Void) -> UUID {
+        let id = UUID()
+        sinks[id] = sink
+        let now = Self.name(Self.osDark())
+        sink(now)
+        if last == nil { last = now }
+        registerIfNeeded()
+        if activation == nil {
+            // A scene that (re)activates — first launch, reconnect after a long background, iPad
+            // multi-window — gets the registration, and a change made meanwhile is delivered.
+            activation = NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.registerIfNeeded()
+                    self?.changed(Self.name(Self.osDark()))
+                }
+            }
+        }
+        return id
+    }
+    /// Register on the current scene if it isn't the one already registered (none yet, or replaced).
+    private func registerIfNeeded() {
+        guard !sinks.isEmpty, let scene = Self.scene(), scene !== registeredScene else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
+        registeredScene = scene
+        registration = scene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
+            self?.changed(Self.name(scene.traitCollection.userInterfaceStyle == .dark))
+        }
+    }
+    private func changed(_ value: String) {
+        // iOS flips traits while it snapshots a backgrounded app for the switcher — ignore those; the
+        // activation observer re-reads the real value when the app comes back.
+        guard UIApplication.shared.applicationState != .background else { return }
+        guard value != last else { return }
+        last = value
+        for sink in sinks.values { sink(value) }
+    }
+    /// Remove one subscriber; the scene registration goes with the last one.
+    func detach(_ id: UUID) {
+        sinks[id] = nil
+        guard sinks.isEmpty else { return }
+        if let r = registration { registeredScene?.unregisterForTraitChanges(r) }
+        registration = nil
+        registeredScene = nil
+        last = nil
+        if let a = activation { NotificationCenter.default.removeObserver(a) }
+        activation = nil
+    }
+}
+
+/// Built-in `appearance` stream: the OS light/dark setting — the current value first, then each change.
+enum AppearanceStream {
+    static func run(emit: @escaping @Sendable (PluginResponse) -> Void) async {
+        let sink: @Sendable (String) -> Void = { emit(PluginResponse(ok: true, output: $0)) }
+        let id = await MainActor.run { AppearanceBridge.shared.attach(sink) }
+        await withTaskCancellationHandler {
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        } onCancel: {
+            Task { @MainActor in AppearanceBridge.shared.detach(id) }
+        }
+    }
+}
+
 /// Dispatches the opaque `{plugin, op, input}` envelope by name. Adding a plugin
 /// never touches the wire ABI — only this registry.
 enum Plugins {
@@ -146,6 +272,7 @@ enum Plugins {
         switch plugin {
         case "ticker": await TickerStream.run(input: input, emit: emit)
         case "system": await SystemStream.run(emit: emit)
+        case "appearance": await AppearanceStream.run(emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break
         }
@@ -156,20 +283,22 @@ enum Plugins {
         case "http": return await HttpPlugin.handle(op: op, input: input)
         case "storage": return StoragePlugin.handle(op: op, input: input)
         case "clipboard": return await ClipboardPlugin.handle(op: op, input: input)
+        case "clipboard_with": return await ClipboardWithPlugin.handle(op: op, input: input)
         case "share": return await SharePlugin.handle(op: op, input: input)
         case "browser": return await BrowserPlugin.handle(op: op, input: input)
         case "toast": return await ToastPlugin.handle(op: op, input: input)
+        case "snackbar": return await SnackbarPlugin.handle(op: op, input: input)
         case "device": return await DevicePlugin.handle(op: op, input: input)
         case "haptics": return await HapticsPlugin.handle(op: op, input: input)
         case "dialog": return await DialogPlugin.handle(op: op, input: input)
         case "datetime": return await DateTimePlugin.handle(op: op, input: input)
-        case "picker": return await PickerPlugin.handle(op: op, input: input)
         case "photo": return await PhotoPlugin.handle(op: op, input: input)
         case "camera": return await CameraPlugin.handle(op: op, input: input)
-        case "sqlite": return await SqlitePlugin.handle(op: op, input: input)
-        case "files": return await FilesPlugin.handle(op: op, input: input)
-        case "filepicker": return await FilePickerPlugin.handle(op: op, input: input)
         case "biometric": return await BiometricPlugin.handle(op: op, input: input)
+        case "filepicker": return await FilePickerPlugin.handle(op: op, input: input)
+        case "files": return await FilesPlugin.handle(op: op, input: input)
+        case "sqlite": return await SqlitePlugin.handle(op: op, input: input)
+        case "picker": return await PickerPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
@@ -261,6 +390,38 @@ enum ClipboardPlugin {
     }
 }
 
+/// Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052). iOS has no system sensitive flag;
+/// a sensitive copy carries the `org.nspasteboard.ConcealedType` convention, `local_only` keeps it out of Universal
+/// Clipboard and `expires_ms` lets the system remove it. `ok: true` carries the report (ADR-0053).
+@MainActor
+enum ClipboardWithPlugin {
+    static func handle(op: String, input: String) -> PluginResponse {
+        guard op == "copy" else { return PluginResponse(ok: false, output: "unknown clipboard_with op '\(op)'") }
+        guard let data = input.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return PluginResponse(ok: false, output: "invalid input JSON") }
+        guard let text = obj["text"] as? String else { return PluginResponse(ok: false, output: "missing text") }
+        let sensitive = (obj["sensitive"] as? Bool) == true
+        let localOnly = (obj["local_only"] as? Bool) == true
+        var item: [String: Any] = [UTType.utf8PlainText.identifier: text]
+        // The nspasteboard.org convention (1Password, Bitwarden): a Mac's clipboard managers skip a concealed item.
+        if sensitive { item["org.nspasteboard.ConcealedType"] = Data() }
+        var options: [UIPasteboard.OptionsKey: Any] = [:]
+        if localOnly { options[.localOnly] = true }
+        var expires = "none"
+        if let ms = (obj["expires_ms"] as? NSNumber)?.doubleValue {
+            // A huge value (the core sends up to u64::MAX) is capped at distantFuture, i.e. never.
+            options[.expirationDate] = min(Date().addingTimeInterval(ms / 1000), Date.distantFuture)
+            expires = "system"
+        }
+        UIPasteboard.general.setItems([item], options: options)
+        // What this copy got (ADR-0053).
+        let report: [String: Any] = ["sensitive": sensitive, "expires": expires, "local_only": localOnly]
+        let out = (try? JSONSerialization.data(withJSONObject: report)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        return PluginResponse(ok: true, output: out)
+    }
+}
+
 /// Share capability — the system share sheet (UIActivityViewController).
 @MainActor
 enum SharePlugin {
@@ -278,12 +439,27 @@ enum SharePlugin {
 /// Open a URL externally (Safari / the default handler).
 @MainActor
 enum BrowserPlugin {
-    static func handle(op: String, input: String) -> PluginResponse {
+    /// Honest result (cx.open_url_then): iOS reports whether an app took the link — e.g. `tel:` on
+    /// an iPad without calling answers `ok: false`.
+    static func handle(op: String, input: String) async -> PluginResponse {
         guard let url = URL(string: input) else {
             return PluginResponse(ok: false, output: "invalid url")
         }
-        UIApplication.shared.open(url)
-        return PluginResponse(ok: true, output: "")
+        let opened = await UIApplication.shared.open(url)
+        if opened { return PluginResponse(ok: true, output: "opened") }
+        // A declined confirmation (the tel: "Call …?" prompt) also reports false; only say nothing
+        // can open it when that is actually true.
+        return PluginResponse(ok: false, output: UIApplication.shared.canOpenURL(url) ? "cancelled" : "no app can open this link")
+    }
+}
+
+/// The hardware identifier (`utsname.machine`, e.g. "iPhone15,2"); on the simulator, the simulated one.
+private func hardwareModel() -> String {
+    if let sim = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return sim }
+    var sys = utsname()
+    uname(&sys)
+    return withUnsafeBytes(of: &sys.machine) { raw in
+        String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
     }
 }
 
@@ -295,8 +471,16 @@ enum DevicePlugin {
         case "model":
             let d = UIDevice.current
             return PluginResponse(ok: true, output: "Apple \(d.model) (\(d.systemName) \(d.systemVersion))")
+        case "info":
+            // Structured (cx.device_info): OS version and the hardware identifier ("iPhone15,2"),
+            // not the user-set device name. The simulator reports its simulated model.
+            let info = DeviceInfo(osVersion: UIDevice.current.systemVersion, osApiLevel: 0, manufacturer: "Apple", model: hardwareModel())
+            return PluginResponse(ok: true, output: (try? info.bincodeSerialize()) ?? [])
         case "locale":
             return PluginResponse(ok: true, output: Locale.preferredLanguages.first ?? Locale.current.identifier)
+        case "appearance":
+            // The OS setting, whatever the app forces.
+            return PluginResponse(ok: true, output: AppearanceBridge.osDark() ? "dark" : "light")
         default:
             return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
@@ -344,6 +528,63 @@ enum ToastPlugin {
         UIView.animate(withDuration: 0.2) { label.alpha = 1 }
         UIView.animate(withDuration: 0.3, delay: 2.3) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
         return PluginResponse(ok: true, output: "")
+    }
+}
+
+/// The snackbar on screen, drawn by `ScaffoldView` (`SnackbarView`). `nonisolated(unsafe)` like
+/// `ActiveTheme`: only ever touched on the main thread, from the plugin and the view.
+@Observable final class SnackbarHost {
+    nonisolated(unsafe) static let shared = SnackbarHost()
+    struct Request: Identifiable {
+        let id: Int
+        let text: String
+        let action: String?
+        let seconds: Double
+    }
+    var current: Request?
+    /// ScaffoldViews on screen: the timeout runs in `SnackbarView`, so with none there'd be no end.
+    @ObservationIgnored var hosts = 0
+    @ObservationIgnored private var answer: ((String) -> Void)?
+    @ObservationIgnored private var nextId = 0
+
+    /// Show a snackbar; a visible one answers "replaced" first (one at a time).
+    func show(text: String, action: String?, seconds: Double, answer: @escaping (String) -> Void) {
+        finish("replaced")
+        nextId += 1
+        current = Request(id: nextId, text: text, action: action, seconds: seconds)
+        self.answer = answer
+    }
+
+    /// Resolve and hide the visible snackbar — only if it's still request `id`, when one is given
+    /// (a late timer or swipe must not close a newer snackbar).
+    func finish(_ outcome: String, id: Int? = nil) {
+        guard let cur = current, id == nil || id == cur.id else { return }
+        let a = answer
+        answer = nil
+        current = nil
+        a?(outcome)
+    }
+}
+
+/// Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+/// "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout", "dismissed"
+/// (swiped down) or "replaced" (a newer snackbar).
+@MainActor
+enum SnackbarPlugin {
+    static func handle(op: String, input: String) async -> PluginResponse {
+        guard op == "show" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
+        let obj = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any]
+        let text = obj?["text"] as? String ?? ""
+        let action = (obj?["action_label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        var seconds: Double = (obj?["duration"] as? String) == "long" ? 10 : 4
+        // VoiceOver needs time to reach the action (Android's M3 host lengthens it the same way).
+        if action != nil && UIAccessibility.isVoiceOverRunning { seconds = max(seconds, 10) }
+        // No scaffold on screen → nothing to show it on, and nothing would ever time it out.
+        if SnackbarHost.shared.hosts == 0 { return PluginResponse(ok: false, output: "timeout") }
+        let outcome: String = await withCheckedContinuation { cont in
+            SnackbarHost.shared.show(text: text, action: action, seconds: seconds) { cont.resume(returning: $0) }
+        }
+        return PluginResponse(ok: outcome == "action", output: outcome)
     }
 }
 
@@ -572,134 +813,6 @@ enum DateTimePlugin {
     }
 }
 
-/// Native single-choice picker — request/response. Input `{"title": String, "options": [String],
-/// "selected": Int}`. Presents a `UIPickerView` **wheel** in a half-height **bottom sheet** (a Cancel /
-/// title / Done toolbar above the wheel) — like the new-transaction sheet, so it has no stray popover
-/// arrow. Resolves `ok=true` with the chosen index as a string, or `ok=false` on cancel/dismiss.
-@MainActor
-enum PickerPlugin {
-    static func handle(op: String, input: String) async -> PluginResponse {
-        guard op == "choose" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
-        guard let data = input.data(using: .utf8),
-              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let options = obj["options"] as? [String], !options.isEmpty else {
-            return PluginResponse(ok: false, output: "bad input")
-        }
-        let title = obj["title"] as? String
-        let selected = obj["selected"] as? Int ?? 0
-        guard let presenter = topViewController() else {
-            return PluginResponse(ok: false, output: "no view controller to present from")
-        }
-        return await withCheckedContinuation { cont in
-            var resumed = false
-            func done(_ r: PluginResponse) { if !resumed { resumed = true; cont.resume(returning: r) } }
-            let vc = PickerSheetController(
-                title: title, options: options, selected: selected,
-                onDone: { done(PluginResponse(ok: true, output: String($0))) },
-                onCancel: { done(PluginResponse(ok: false, output: "cancel")) })
-            vc.modalPresentationStyle = .pageSheet
-            if let sheet = vc.sheetPresentationController {
-                sheet.detents = [.medium()]
-                sheet.prefersGrabberVisible = true
-            }
-            vc.presentationController?.delegate = vc // swipe-to-dismiss = cancel
-            presenter.present(vc, animated: true)
-        }
-    }
-}
-
-/// The bottom-sheet host for the picker wheel — a Cancel / title / Done toolbar over a single-column
-/// `UIPickerView`. Owns its data source/delegate (retained by the presentation, so no static needed).
-private final class PickerSheetController: UIViewController, UIPickerViewDataSource, UIPickerViewDelegate, UIAdaptivePresentationControllerDelegate {
-    private let options: [String]
-    private let initialSelected: Int
-    private let onDone: (Int) -> Void
-    private let onCancel: () -> Void
-    private let picker = UIPickerView()
-    private var finished = false
-
-    init(title: String?, options: [String], selected: Int, onDone: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
-        self.options = options
-        self.initialSelected = selected
-        self.onDone = onDone
-        self.onCancel = onCancel
-        super.init(nibName: nil, bundle: nil)
-        self.title = title
-    }
-    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-        // Match the app's brand tint (this sheet is presented outside SwiftUI's `.tint`).
-        if let seed = ActiveTheme.current?.seed {
-            view.tintColor = UIColor(red: CGFloat(seed.r) / 255, green: CGFloat(seed.g) / 255,
-                                     blue: CGFloat(seed.b) / 255, alpha: 1)
-        }
-
-        let toolbar = UIToolbar()
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        let titleItem = UIBarButtonItem(title: title, style: .plain, target: nil, action: nil)
-        titleItem.isEnabled = false
-        // The title is a non-tappable label; keep it fully legible (a disabled item is greyed out by default).
-        let titleAttrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: UIColor.label,
-            .font: UIFont.preferredFont(forTextStyle: .headline),
-        ]
-        titleItem.setTitleTextAttributes(titleAttrs, for: .normal)
-        titleItem.setTitleTextAttributes(titleAttrs, for: .disabled)
-        toolbar.items = [
-            UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)),
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-            titleItem,
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-            UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(doneTapped)),
-        ]
-
-        picker.translatesAutoresizingMaskIntoConstraints = false
-        picker.dataSource = self
-        picker.delegate = self
-        if initialSelected >= 0, initialSelected < options.count {
-            picker.selectRow(initialSelected, inComponent: 0, animated: false)
-        }
-
-        view.addSubview(toolbar)
-        view.addSubview(picker)
-        NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            picker.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            picker.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            picker.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            picker.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-        ])
-    }
-
-    @objc private func doneTapped() {
-        guard !finished else { return }
-        finished = true
-        let idx = picker.selectedRow(inComponent: 0)
-        dismiss(animated: true) { self.onDone(idx) }
-    }
-    @objc private func cancelTapped() {
-        guard !finished else { return }
-        finished = true
-        dismiss(animated: true) { self.onCancel() }
-    }
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        guard !finished else { return }
-        finished = true
-        onCancel()
-    }
-
-    func numberOfComponents(in pickerView: UIPickerView) -> Int { 1 }
-    func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int { options.count }
-    func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
-        row >= 0 && row < options.count ? options[row] : nil
-    }
-}
-
 /// Photo picker — request/response, permission-less (the system PHPicker). Loads the
 /// pick into a temp file and returns its `file://` URL (which the image widget renders).
 @MainActor
@@ -714,7 +827,7 @@ enum PhotoPlugin {
             config.filter = .images
             config.selectionLimit = 1
             let picker = PHPickerViewController(configuration: config)
-            let delegate = PhotoPickerDelegate { cont.resume(returning: $0) }
+            let delegate = PhotoPickerDelegate(input: input) { cont.resume(returning: $0) }
             PhotoPickerDelegate.retained = delegate // PHPicker holds its delegate weakly
             picker.delegate = delegate
             presenter.present(picker, animated: true)
@@ -724,8 +837,10 @@ enum PhotoPlugin {
 
 private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegate {
     static var retained: PhotoPickerDelegate?
+    private let input: String
     private let onResult: (PluginResponse) -> Void
-    init(onResult: @escaping (PluginResponse) -> Void) { self.onResult = onResult }
+    /// An empty `input` returns the picked file (cx.pick_photo); options re-encode it (ADR-0045).
+    init(input: String, onResult: @escaping (PluginResponse) -> Void) { self.input = input; self.onResult = onResult }
 
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
@@ -741,7 +856,11 @@ private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegat
             let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
             do {
                 try FileManager.default.copyItem(at: url, to: dest)
-                self.finish(PluginResponse(ok: true, output: dest.absoluteString))
+                if self.input.isEmpty {
+                    self.finish(PluginResponse(ok: true, output: dest.absoluteString))
+                } else {
+                    self.finish(PhotoPipeline.processReplacing(dest, input: self.input))
+                }
             } catch {
                 self.finish(PluginResponse(ok: false, output: error.localizedDescription))
             }
@@ -750,7 +869,8 @@ private final class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegat
 
     private func finish(_ r: PluginResponse) {
         onResult(r)
-        PhotoPickerDelegate.retained = nil
+        // Runs on the loadFileRepresentation queue: clear the static on main, and only if it is still us.
+        DispatchQueue.main.async { if PhotoPickerDelegate.retained === self { PhotoPickerDelegate.retained = nil } }
     }
 }
 
@@ -763,7 +883,7 @@ enum CameraPlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "capture" else { return PluginResponse(ok: false, output: "unknown op '\(op)'") }
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-            return PluginResponse(ok: false, output: "camera not available")
+            return PluginResponse(ok: false, output: input.isEmpty ? "camera not available" : "unavailable")
         }
         guard let presenter = topViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
@@ -771,7 +891,7 @@ enum CameraPlugin {
         return await withCheckedContinuation { cont in
             let picker = UIImagePickerController()
             picker.sourceType = .camera
-            let delegate = CameraCaptureDelegate { cont.resume(returning: $0) }
+            let delegate = CameraCaptureDelegate(input: input) { cont.resume(returning: $0) }
             CameraCaptureDelegate.retained = delegate // the picker holds its delegate weakly
             picker.delegate = delegate
             presenter.present(picker, animated: true)
@@ -781,20 +901,29 @@ enum CameraPlugin {
 
 private final class CameraCaptureDelegate: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     static var retained: CameraCaptureDelegate?
+    private let input: String
     private let onResult: (PluginResponse) -> Void
-    init(onResult: @escaping (PluginResponse) -> Void) { self.onResult = onResult }
+    /// An empty `input` returns the captured JPEG (cx.capture_photo); options re-encode it (ADR-0045).
+    init(input: String, onResult: @escaping (PluginResponse) -> Void) { self.input = input; self.onResult = onResult }
 
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
         picker.dismiss(animated: true)
-        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.9) else {
+        // With options, keep full quality here: the pipeline does the one lossy encode.
+        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: input.isEmpty ? 0.9 : 1.0) else {
             finish(PluginResponse(ok: false, output: "no image")); return
         }
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
         do {
             try data.write(to: dest)
-            finish(PluginResponse(ok: true, output: dest.absoluteString))
         } catch {
-            finish(PluginResponse(ok: false, output: error.localizedDescription))
+            finish(PluginResponse(ok: false, output: error.localizedDescription)); return
+        }
+        if input.isEmpty {
+            finish(PluginResponse(ok: true, output: dest.absoluteString))
+        } else {
+            // Up to five full-size encodes: off the main thread.
+            let input = self.input
+            DispatchQueue.global(qos: .userInitiated).async { self.finish(PhotoPipeline.processReplacing(dest, input: input)) }
         }
     }
 
@@ -805,7 +934,8 @@ private final class CameraCaptureDelegate: NSObject, UIImagePickerControllerDele
 
     private func finish(_ r: PluginResponse) {
         onResult(r)
-        CameraCaptureDelegate.retained = nil
+        // May run off the main thread (the encode): clear the static there, and only if it is still us.
+        DispatchQueue.main.async { if CameraCaptureDelegate.retained === self { CameraCaptureDelegate.retained = nil } }
     }
 }
 

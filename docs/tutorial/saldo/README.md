@@ -3,7 +3,8 @@
 A hands-on, chapter-by-chapter tutorial that builds **Saldo** — a multilingual, SQLite-backed
 personal expense & money manager — from an empty scaffold to a store-ready app, entirely in Rust on
 [Mobiler](../../../README.md). Every chapter is a working increment with the exact code, and the
-finished app lives in [`demos/saldo/`](../../../demos/saldo).
+finished app lives in [`demos/saldo/`](../../../demos/saldo). Its native shells are exactly what `mobiler new` and
+`mobiler plugin add` produce, kept current with `mobiler upgrade` on every CLI release (ADR-0060).
 
 Saldo is a real, full-featured money manager — a ledger of **income / expense / transfer** entries
 across multiple **accounts**, organized by **categories**, summarized with **charts**, exportable to

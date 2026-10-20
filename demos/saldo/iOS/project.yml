@@ -35,8 +35,12 @@ targets:
       # Info.plist (which gets overwritten). Without UILaunchScreen iOS runs the app
       # letterboxed (black bars top/bottom) instead of full screen.
       properties:
+        CFBundleDisplayName: "Saldo"
         PRODUCT_BUNDLE_IDENTIFIER: rs.mobiler.saldo
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: MobilerSplashBackground
+          # mobiler:splash-begin
+          # mobiler:splash-end
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four
@@ -45,14 +49,22 @@ targets:
         # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
         # the "Missing export compliance" question.
         ITSAppUsesNonExemptEncryption: false
+        # cx.open_url_then: canOpenURL may only ask about declared schemes. It tells "no app can open
+        # tel:/sms:" apart from "the user cancelled the Call prompt".
+        LSApplicationQueriesSchemes:
+          - tel
+          - sms
         # Deep links: register the app's custom URL scheme (default = the bundle id) so
         # `rs.mobiler.saldo://…` opens the app — delivered to the core via the built-in `system` stream.
         # (Universal/App Links over https additionally need an associated-domains entitlement + a
         # server-side apple-app-site-association file — not auto-wired.)
+        # mobiler.toml `[deep_links] enabled = false` comments this registration out (ADR-0051).
+        # mobiler:deep-links-begin
         CFBundleURLTypes:
           - CFBundleURLName: rs.mobiler.saldo
             CFBundleURLSchemes:
               - rs.mobiler.saldo
+        # mobiler:deep-links-end
         # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
         # requires this usage string to access the camera; the App Store flags apps that
         # ship it without using the camera, so it's left off by default.
