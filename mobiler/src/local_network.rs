@@ -90,6 +90,28 @@ fn read_enabled(root: &Path, report: &mut SyncReport) -> anyhow::Result<Option<b
     }
 }
 
+/// `mobiler local-network sync` — run the sync from the app root and print what happened. Fails (non-zero
+/// exit) when the config couldn't be applied.
+pub fn run_sync_cli() -> anyhow::Result<()> {
+    let root = std::env::current_dir().context("reading current directory")?;
+    let report = sync(&root)?;
+    for w in &report.warnings {
+        eprintln!("warning: local network: {w}");
+    }
+    for p in &report.written {
+        println!("  wrote   {p}");
+    }
+    if report.failed {
+        anyhow::bail!("[ios] local_network not applied (see the warnings above)");
+    }
+    if report.written.is_empty() {
+        let mut ignored = SyncReport::default();
+        let on = read_enabled(&root, &mut ignored)?.unwrap_or(false);
+        println!("iOS local networking {}, up to date.", if on { "on" } else { "off" });
+    }
+    Ok(())
+}
+
 /// Called at the start of `mobiler build` / `dev` / `watch`: sync and print warnings, never fail.
 pub fn sync_for_build(root: &Path) {
     match sync(root) {

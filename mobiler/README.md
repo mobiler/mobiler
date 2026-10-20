@@ -49,6 +49,7 @@ mobiler upgrade         # pull the latest generic shells + mobiler-core into an 
 mobiler display-name "Appointments Admin"   # set the name users see (omit the name to print it)
 mobiler fonts sync      # copy mobiler.toml [fonts] into the shells (build/dev/watch do it too)
 mobiler deep-links sync # apply mobiler.toml [deep_links] to the shells (build/dev/watch do it too)
+mobiler local-network sync # apply mobiler.toml [ios] local_network to iOS (build/dev do it too)
 ```
 
 **Application id.** `mobiler dev` and `watch` take the id from what gradle built
@@ -248,7 +249,7 @@ An app that talks to a server on the same machine or network over plain HTTP (a 
 local_network = true
 ```
 
-`mobiler build` and `mobiler dev` switch on `NSAppTransportSecurity` → `NSAllowsLocalNetworking` in
+`mobiler build`, `mobiler dev` and `mobiler local-network sync` switch on `NSAppTransportSecurity` → `NSAllowsLocalNetworking` in
 `iOS/project.yml`, between its `mobiler:local-network` markers (ADR-0064). It allows local addresses only
 (`localhost`, `.local` names, LAN IPs), never plain HTTP to the internet. Android needs nothing: its debug
 build already allows the dev hosts. Commit the synced `project.yml` with `mobiler.toml`; an app made before

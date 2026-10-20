@@ -6,7 +6,7 @@ import UserNotifications
 /// App entry — the generic Mobiler shell. `Core` drives the Rust core; `render`
 /// turns its `Widget` tree into SwiftUI. The whole UI is decided in Rust.
 @main
-struct FullstackTodoApp: App {
+struct MobileApp: App {
     // Bridges UIKit app-lifecycle + APNs/notification callbacks (which only arrive on a
     // UIApplicationDelegate) into the SwiftUI app — see AppDelegate + PushBridge below.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate

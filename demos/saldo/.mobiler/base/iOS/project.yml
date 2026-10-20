@@ -64,6 +64,12 @@ targets:
             CFBundleURLSchemes:
               - rs.mobiler.saldo
         # mobiler:deep-links-end
+        # mobiler.toml `[ios] local_network = true` switches this on: plain-HTTP loads to local addresses
+        # (localhost, .local names, LAN IPs) only, never the open internet (ADR-0064).
+        # mobiler:local-network-begin
+        # off: NSAppTransportSecurity:
+          # off: NSAllowsLocalNetworking: true
+        # mobiler:local-network-end
         # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
         # requires this usage string to access the camera; the App Store flags apps that
         # ship it without using the camera, so it's left off by default.

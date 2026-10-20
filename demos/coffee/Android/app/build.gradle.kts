@@ -1,9 +1,17 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+// The Rust targets the core is built for (see shared/build.gradle.kts), as Android ABIs. The APK
+// ships only these, which also drops stale slices (mips, armeabi) that dependencies bundle.
+val rustTargets = (findProperty("mobilerRustTargets") as String?)
+    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+    ?: listOf("arm64", "x86_64")
+val abiForRustTarget = mapOf("arm64" to "arm64-v8a", "arm" to "armeabi-v7a", "x86_64" to "x86_64", "x86" to "x86")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // mobiler:gradle-plugins
 }
 
 android {
@@ -18,6 +26,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        ndk {
+            abiFilters += rustTargets.mapNotNull { abiForRustTarget[it] }
+        }
     }
 
     buildTypes {
@@ -27,10 +38,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Sign with the debug key so the release APK still sideloads (no Play
-            // Store / release keystore needed) — it's for sharing/feedback, not the
-            // store. Build it with: assembleRelease -PrustRelease.
-            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -64,14 +71,18 @@ dependencies {
     // Async image loading (Coil 3 + OkHttp network fetcher)
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
-    implementation("androidx.biometric:biometric:1.1.0")
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // HTTP capability (Core.kt HttpPlugin)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Photo options (cx.pick_photo_with): the EXIF orientation.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Media3/ExoPlayer for Widget.Video (MP4 + HLS playback)
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("org.maplibre.gl:android-sdk:11.5.2")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     // mobiler:gradle-deps — `mobiler plugin add` inserts plugin Gradle dependencies above this line
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

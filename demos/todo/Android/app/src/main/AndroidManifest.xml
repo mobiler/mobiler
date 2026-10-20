@@ -2,7 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- HTTP (cx.http/get/post/…) and haptics (cx.haptic) are core, so INTERNET and VIBRATE are on by
+         default: both are normal permissions (granted at install, no prompt). Every other permission is
+         opt-in: a capability ships in the shell, but you add its permission only when you use it. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- mobiler:permissions (plugin add inserts uses-permission lines above this line) -->
 
     <application
         android:allowBackup="true"
@@ -19,20 +25,39 @@
             android:launchMode="singleTask"
             android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:windowSoftInputMode="adjustResize|stateHidden"
             android:theme="@style/Theme.Todo">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Deep links: dev.mobiler.todo://… open the app (and route in-app via the `system` stream). -->
+            <!-- Deep links: dev.mobiler.todo://… open the app (and route in-app via the `system` stream).
+                 mobiler.toml `[deep_links] enabled = false` comments this filter out (ADR-0051). -->
+            <!-- mobiler:deep-links-begin -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="dev.mobiler.todo" />
             </intent-filter>
+            <!-- mobiler:deep-links-end -->
         </activity>
+
+        <!-- Lets cx.capture_photo hand the system camera app a writable file URI.
+             Capture is intent-based (the system camera app), so no CAMERA permission is
+             needed — this provider just shares the destination file. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- mobiler:manifest-application (plugin add inserts <receiver>/<service> entries above this line) -->
     </application>
 
 </manifest>

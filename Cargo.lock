@@ -1020,7 +1020,7 @@ dependencies = [
 
 [[package]]
 name = "mobiler"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1793,6 +1793,7 @@ dependencies = [
  "mobiler-core",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
