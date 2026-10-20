@@ -51,7 +51,7 @@ jobs:
       - name: Build the release APK (release Rust via -PrustRelease)
         run: ./Android/gradlew -p Android --no-daemon :app:assembleRelease -PrustRelease
 
-      # The shell's release build is unsigned (the template's, ADR-0059: Saldo's shell equals it). Sign
+      # The shell's release build is unsigned (the template's, ADR-0060: Saldo's shell equals it). Sign
       # it here with a throwaway debug key so the shareable APK sideloads onto any device; a Play upload
       # uses an upload key in its own lane.
       - name: Sign the release APK with a debug key

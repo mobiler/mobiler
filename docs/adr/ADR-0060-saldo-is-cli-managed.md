@@ -31,8 +31,8 @@ current by the same `mobiler upgrade --apply` every app developer runs, so the s
   template rendered with Saldo's names, and the version stamp equals the CLI's version.
   - **Validation Metric:** `adr_0060_saldo_equals_the_current_template` ("Saldo's base is behind the template").
 - **Condition 2: Saldo's shell code is not edited by hand.** Each of its shell code files equals the rendered template
-  apart from the blocks `mobiler plugin add` inserts directly above a `mobiler:` anchor. Every inserted line must carry
-  a value from a used bundled plugin's manifest. The one other exception is the iOS display name the CLI writes,
+  apart from the blocks `mobiler plugin add` inserts directly above a `mobiler:` comment anchor. Every inserted line
+  must equal one of a used bundled plugin's rendered insertions. The one other exception is the iOS display name the CLI writes,
   exactly `CFBundleDisplayName: "Saldo"`, once. Each plugin source equals the bundled one, and a `…Plugin` or
   `…Activity` file from neither the template nor a bundled plugin fails. `Info.plist` and `settings.gradle.kts` equal
   the template. Its own resources (`res/`, the icon, `.gitignore`) may differ; upgrade's 3-way merge keeps those.
@@ -82,6 +82,11 @@ noticed a template file missing from the base), six more breaks each failed it:
   (`ADR-0060: the template has …/PhotoPipeline.kt, Saldo's base doesn't: run mobiler upgrade --apply …`).
 - The display name became "Saldo Pro" (`ADR-0060: Saldo's project.yml must name it exactly once: …`).
 - A key was added to `Info.plist` (`ADR-0060: demos/saldo/iOS/Sources/Info.plist is edited by hand`).
+
+The second review then found that an inserted line only had to share a word with a plugin manifest (`false`, from
+`exported="false"`), and that any line mentioning `mobiler:` counted as an anchor. Now an inserted line must equal one
+of a used plugin's rendered insertions, above a comment anchor. `case "x": return PluginResponse(ok: false, …)`
+written above Core.swift's plugin anchor passed before and fails now (`… Core.swift is edited by hand (line 276: …`).
 
 ## 5. Consequences (Positive and Negative Predictions)
 

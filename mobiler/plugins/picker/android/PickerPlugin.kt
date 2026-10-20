@@ -22,6 +22,8 @@ class PickerPlugin : MobilerPlugin {
         val title = obj.optString("title")
         val selected = obj.optInt("selected", -1)
         val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
+        // A finishing or destroyed activity can't host a dialog (show() would throw).
+        if (activity.isFinishing || activity.isDestroyed) return PluginResponse(false, "no activity")
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
                 var resumed = false
@@ -35,11 +37,12 @@ class PickerPlugin : MobilerPlugin {
                     }
                     .setOnCancelListener { done(PluginResponse(false, "cancel")) }
                     .create()
-                // Any other dismissal (the activity torn down, a configuration change) still answers, so
-                // the request never hangs; after a pick or a cancel this is a no-op.
+                // Any other dismissal still answers; after a pick or a cancel this is a no-op. (An activity
+                // recreated around an open dialog leaks it without a dismissal; the shell's configChanges
+                // keep that rare.)
                 dlg.setOnDismissListener { done(PluginResponse(false, "cancel")) }
                 cont.invokeOnCancellation { dlg.dismiss() }
-                dlg.show()
+                if (runCatching { dlg.show() }.isFailure) done(PluginResponse(false, "could not show"))
             }
         }
     }
