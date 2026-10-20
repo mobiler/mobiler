@@ -849,10 +849,16 @@ fn adr_0055_template_crux_pin_matches_the_workspace() {
     assert_eq!(told, core_facet, "ADR-0055: upgrade tells apps facet {told}, mobiler-core builds with {core_facet}");
 }
 
+/// A plugin-insertion anchor: a comment line naming `mobiler:` (not a line that merely mentions it).
+fn is_anchor(line: &str) -> bool {
+    let t = line.trim_start();
+    ["// mobiler:", "# mobiler:", "<!-- mobiler:"].iter().any(|a| t.starts_with(a))
+}
+
 /// Whether `app` is `template` plus only what `mobiler plugin add` inserts: blocks of extra lines, each
-/// ending directly above a `mobiler:` anchor line both files have, and each line carrying one of `allowed`
-/// (a used bundled plugin's manifest values: its registration, dependency, manifest and plist lines).
-/// `Err` names the first line that isn't.
+/// ending directly above an anchor comment both files have, and each line exactly one of `allowed` (a
+/// used bundled plugin's rendered insertions: its registration, dependency, manifest and plist lines;
+/// a trailing comma is the registration list's). `Err` names the first line that isn't.
 fn plugin_insertions_only(template: &str, app: &str, allowed: &[String]) -> Result<(), String> {
     let (t, a): (Vec<&str>, Vec<&str>) = (template.lines().collect(), app.lines().collect());
     let (mut i, mut j) = (0, 0);
@@ -865,10 +871,14 @@ fn plugin_insertions_only(template: &str, app: &str, allowed: &[String]) -> Resu
         while j < a.len() && (i >= t.len() || a[j] != t[i]) {
             j += 1;
         }
-        if i >= t.len() || !t[i].contains("mobiler:") {
+        if i >= t.len() || !is_anchor(t[i]) {
             return Err(format!("line {}: {}", start + 1, a[start]));
         }
-        if let Some(k) = (start..j).find(|&k| !allowed.iter().any(|tok| a[k].contains(tok.as_str()))) {
+        let inserted = |line: &str| {
+            let line = line.trim();
+            allowed.iter().any(|ok| line == ok.as_str() || line.strip_suffix(',') == Some(ok.as_str()))
+        };
+        if let Some(k) = (start..j).find(|&k| !inserted(a[k])) {
             return Err(format!("line {}: {} (no bundled plugin inserts it)", k + 1, a[k]));
         }
     }
@@ -888,20 +898,39 @@ fn plugin_insertions_only_accepts_anchor_blocks_only() {
     assert!(plugin_insertions_only(t, "a\nx\nb\n// mobiler:plugins — insert above\nc", &ok).is_err(), "an extra line away from an anchor");
     assert!(plugin_insertions_only(t, "a\nB\n// mobiler:plugins — insert above\nc", &ok).is_err(), "a changed template line");
     assert!(plugin_insertions_only(t, "a\nb\n// mobiler:plugins — insert above", &ok).is_err(), "a missing template line");
+    // A line merely containing an allowed word (here `false`, from `exported="false"`) is not an insertion.
+    let manifest = vec!["<activity android:name=\".X\" android:exported=\"false\" />".to_string()];
+    assert!(plugin_insertions_only(t, "a\nb\n    case \"x\": return PluginResponse(ok: false, output: \"\")\n// mobiler:plugins — insert above\nc", &manifest).is_err(), "a line sharing a word with a manifest value");
+    // Only a comment anchor takes insertions, not a line that merely mentions `mobiler:`.
+    let printed = "a\n    print(\"mobiler: font family\")\nc";
+    assert!(plugin_insertions_only(printed, "a\n    \"x\" to XPlugin(),\n    print(\"mobiler: font family\")\nc", &ok).is_err(), "a block above a non-anchor line");
 }
 
-/// The quoted values (and `info_plist` keys) of a plugin manifest: what `plugin add` may insert.
-fn manifest_tokens(toml: &str) -> Vec<String> {
+/// The exact lines `mobiler plugin add` inserts for a plugin manifest (as plugin.rs renders them): its
+/// `register` lines, `implementation("…")` per gradle dependency, its manifest entries, a `<uses-permission>`
+/// per plain permission, and `KEY: "value"` per `[ios.info_plist]` entry.
+fn manifest_insertions(toml: &str) -> Vec<String> {
+    let quoted = |rest: &str| -> Vec<String> {
+        let q = if rest.trim_start().trim_start_matches('[').trim_start().starts_with('\'') { '\'' } else { '"' };
+        rest.split(q).skip(1).step_by(2).map(str::to_string).collect()
+    };
     let mut out = Vec::new();
-    for line in toml.lines().map(str::trim).filter(|l| !l.starts_with('#')) {
-        for q in ['\'', '"'] {
-            let parts: Vec<&str> = line.split(q).collect();
-            out.extend(parts.iter().skip(1).step_by(2).filter(|p| p.len() >= 4).map(|p| (*p).to_string()));
+    let mut plist = false;
+    for line in toml.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        if line.starts_with('[') {
+            plist = line == "[ios.info_plist]";
+            continue;
         }
-        if let Some((key, _)) = line.split_once(" = ") {
-            if key.chars().all(|c| c.is_ascii_alphanumeric()) && key.len() >= 8 {
-                out.push(key.to_string());
-            }
+        let Some((key, rest)) = line.split_once(" = ") else { continue };
+        if plist {
+            out.push(format!("{key}: {rest}"));
+            continue;
+        }
+        match key {
+            "register" | "manifest_application" => out.extend(quoted(rest)),
+            "gradle_deps" => out.extend(quoted(rest).into_iter().map(|d| format!("implementation(\"{d}\")"))),
+            "permissions" => out.extend(quoted(rest).into_iter().map(|p| format!("<uses-permission android:name=\"{p}\" />"))),
+            _ => {}
         }
     }
     out
@@ -979,7 +1008,7 @@ fn adr_0060_saldo_equals_the_current_template() {
         if !used {
             continue;
         }
-        allowed.extend(manifest_tokens(&toml));
+        allowed.extend(manifest_insertions(&toml));
         for (sec, src) in sources {
             let name = src.rsplit('/').next().unwrap().to_string();
             let ours = if sec == "android" { pkg.join(&name) } else { app.join("iOS/Sources").join(&name) };
