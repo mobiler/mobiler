@@ -1227,6 +1227,16 @@ fn adr_0065_sqlite_calls_run_in_issue_order() {
             request.contains("viewModelScope.launch { val resp = dispatch(call.plugin, call.op, call.input)"),
             "ADR-0065: {path} must start a request on the main dispatcher straight into the plugin, in issue order"
         );
+        // A reply or stream event processed nested inside the batch loop would start its calls before the batch's later ones.
+        assert!(
+            request.contains("withContext(Dispatchers.Main) { process(core.resolve(id, resp.bincodeSerialize())) }"),
+            "ADR-0065: {path} must process a reply in its own main-looper turn"
+        );
+        let stream = squash(between(&code, "is Effect.PluginStream -> {", "private suspend fun dispatch(", path));
+        assert!(
+            stream.contains("collect { resp -> withContext(Dispatchers.Main) { process(core.resolve(id, resp.bincodeSerialize())) }"),
+            "ADR-0065: {path} must process a stream event in its own main-looper turn"
+        );
         let notify = squash(between(&code, "is Effect.PluginNotify -> {", "is Effect.Plugin -> {", path));
         // A notify awaited inline would suspend process() and let a later batch's calls reach the lane first.
         assert!(
@@ -1259,6 +1269,18 @@ fn adr_0065_sqlite_calls_run_in_issue_order() {
         kotlin_run.contains("if (db != null && db.isOpen && db.inTransaction()) { try { while (db.inTransaction()) db.endTransaction() }")
             && kotlin_run.contains("return PluginResponse(false,"),
         "ADR-0065: an Android call must not leave a transaction open"
+    );
+    // Transaction-control statements are refused before they run (Android's session can't see SAVEPOINT).
+    let control = "\"BEGIN\", \"COMMIT\", \"END\", \"ROLLBACK\", \"SAVEPOINT\", \"RELEASE\"";
+    assert!(kotlin.contains(&format!("val transactionControl = setOf({control})")), "ADR-0065: the Android plugin must list the transaction-control keywords");
+    assert!(
+        kotlin.contains("firstKeyword(sql) in transactionControl -> PluginResponse(false,"),
+        "ADR-0065: the Android plugin must refuse a transaction-control statement"
+    );
+    assert!(swift.contains(&format!("transactionControl: Set<String> = [{control}]")), "ADR-0065: the iOS plugin must list the transaction-control keywords");
+    assert!(
+        squash(&swift).contains("if transactionControl.contains(firstKeyword(sql)) { return PluginResponse(ok: false,"),
+        "ADR-0065: the iOS plugin must refuse a transaction-control statement"
     );
     assert_eq!(kotlin.matches("openOrCreateDatabase(").count(), 1, "ADR-0065: the Android sqlite plugin opens one connection, in one place");
     assert!(kotlin.contains("connection = db"), "ADR-0065: the Android sqlite connection must be kept");

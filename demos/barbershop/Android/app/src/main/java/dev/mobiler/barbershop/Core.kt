@@ -757,23 +757,27 @@ class Core(application: Application) : AndroidViewModel(application) {
                 // requests) apply at once instead of waiting a network round trip. It resolves
                 // the core with the response and processes the effects that produces. Launches
                 // run FIFO on the main dispatcher, so requests still start in batch order, and
-                // core calls stay on the main thread.
+                // core calls stay on the main thread. A reply is processed in its own main-looper
+                // turn (plain Main, not Main.immediate), never nested inside this loop: a plugin
+                // that answers without suspending would otherwise start the reply's calls before
+                // this batch's later ones (ADR-0065).
                 is Effect.Plugin -> {
                     val call = effect.value
                     val id = request.id
                     viewModelScope.launch {
                         val resp = dispatch(call.plugin, call.op, call.input)
-                        process(core.resolve(id, resp.bincodeSerialize()))
+                        withContext(Dispatchers.Main) { process(core.resolve(id, resp.bincodeSerialize())) }
                     }
                 }
                 // Streaming subscription: a native source (Flow) resolves the SAME
-                // request id once per event until the Job is cancelled (unsubscribe).
+                // request id once per event until the Job is cancelled (unsubscribe). Each event
+                // is processed in its own main-looper turn, like a reply.
                 is Effect.PluginStream -> {
                     val call = effect.value
                     val id = request.id
                     streamJobs[call.key] = viewModelScope.launch {
                         dispatchStream(call.plugin, call.op, call.input).collect { resp ->
-                            process(core.resolve(id, resp.bincodeSerialize()))
+                            withContext(Dispatchers.Main) { process(core.resolve(id, resp.bincodeSerialize())) }
                         }
                     }
                 }

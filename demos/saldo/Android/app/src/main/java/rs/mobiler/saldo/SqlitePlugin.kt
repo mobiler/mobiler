@@ -28,6 +28,25 @@ class SqlitePlugin(private val application: Application) : MobilerPlugin {
 
         // The one connection, opened on first use and kept for the life of the process. Touched only on `lane`.
         var connection: SQLiteDatabase? = null
+
+        // A statement that opens, ends or marks a transaction is refused: on the kept connection a
+        // transaction would outlive its call. Android's session sees only some of them (not SAVEPOINT or
+        // a comment-prefixed BEGIN), so this check, not inTransaction(), is what stops them.
+        val transactionControl = setOf("BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE")
+
+        /** The statement's first keyword, past leading whitespace and `--` / `/* */` comments, upper-cased. */
+        fun firstKeyword(sql: String): String {
+            var i = 0
+            while (i < sql.length) {
+                i = when {
+                    sql[i].isWhitespace() -> i + 1
+                    sql.startsWith("--", i) -> sql.indexOf('\n', i).let { if (it < 0) sql.length else it + 1 }
+                    sql.startsWith("/*", i) -> sql.indexOf("*/", i + 2).let { if (it < 0) sql.length else it + 2 }
+                    else -> break
+                }
+            }
+            return sql.substring(i).takeWhile { it.isLetter() }.uppercase()
+        }
     }
 
     // NonCancellable: a call already queued still runs when the screen's scope is cancelled (the activity
@@ -68,6 +87,7 @@ class SqlitePlugin(private val application: Application) : MobilerPlugin {
         val args = Array(argsArr?.length() ?: 0) { argsArr!!.getString(it) }
         when {
             sql.isEmpty() -> PluginResponse(false, "no sql")
+            firstKeyword(sql) in transactionControl -> PluginResponse(false, "a transaction can't span calls")
             op == "exec" -> {
                 open().execSQL(sql, args)
                 PluginResponse(true, "executed")

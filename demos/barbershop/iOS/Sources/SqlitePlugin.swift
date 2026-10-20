@@ -49,6 +49,9 @@ enum SqlitePlugin {
     private static func run(op: String, input: String) -> PluginResponse {
         let (sql, args) = parse(input)
         if sql.isEmpty { return PluginResponse(ok: false, output: "no sql") }
+        if transactionControl.contains(firstKeyword(sql)) {
+            return PluginResponse(ok: false, output: "a transaction can't span calls")
+        }
         let (opened, failure) = open()
         guard let db = opened else { return PluginResponse(ok: false, output: failure) }
         let response = execute(db: db, op: op, sql: sql, args: args)
@@ -107,6 +110,27 @@ enum SqlitePlugin {
         default:
             return PluginResponse(ok: false, output: "unknown op '\(op)'")
         }
+    }
+
+    // A statement that opens, ends or marks a transaction is refused: on the kept connection a transaction
+    // would outlive its call (the open-transaction check in `run` is the backstop).
+    private static let transactionControl: Set<String> = ["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"]
+
+    /// The statement's first keyword, past leading whitespace and `--` / `/* */` comments, upper-cased.
+    private static func firstKeyword(_ sql: String) -> String {
+        var rest = Substring(sql)
+        while true {
+            rest = rest.drop(while: { $0.isWhitespace })
+            if rest.hasPrefix("--") {
+                rest = rest.firstIndex(of: "\n").map { rest[rest.index(after: $0)...] } ?? ""
+            } else if rest.hasPrefix("/*") {
+                let body = rest.dropFirst(2)
+                rest = body.range(of: "*/").map { body[$0.upperBound...] } ?? ""
+            } else {
+                break
+            }
+        }
+        return String(rest.prefix(while: { $0.isLetter })).uppercased()
     }
 
     /// Plain SQL string, or `{"sql": "...", "args": [...]}` (args coerced to strings, like Android).
