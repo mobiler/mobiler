@@ -84,15 +84,24 @@ fn main() {
 
 Then `cd web && trunk serve`, and open the address it prints.
 
+Two things to know about this layout:
+
+- `mobiler watch` follows `shared/src`, not `app-core/src`. After moving the app, run `mobiler dev` again
+  after a change, or keep `trunk serve` open for the web.
+- `mobiler upgrade` (CLI 0.73) reports `mobiler-web 0.49 -> 0.48 (edit by hand)` for `web/Cargo.toml`.
+  Ignore it: `mobiler-web` 0.49 is the current release and works with `mobiler-core` 0.48.
+
 ## What to know
 
 - **No CSS needed.** The shell injects its own stylesheet, first in `<head>`, so your own stylesheet can
   override any widget class.
 - **Every widget renders,** including charts (SVG), video, maps (MapLibre GL), PDF and web views.
-- **Built-in capabilities work** through browser APIs, with a few limits a page can't get past: a copied
-  text can't be marked sensitive or expire, and the clipboard needs a secure context (HTTPS or
-  localhost).
-- **Plugins don't run on the web yet.** A plugin call answers "not available"; handle that in `update`.
+- **Built-in capabilities work through browser APIs, with limits a page can't get past:** a copied text
+  can't be marked sensitive or expire, and the clipboard needs a secure context (HTTPS or localhost);
+  `cx.device_info` answers `None`; haptics do nothing where the browser has no vibration (iOS Safari);
+  and `cx.now()` isn't answered by the web shell yet, so take the date from your server there.
+- **Plugins:** `websocket` and `transfer` work on the web. Any other plugin request answers `ok: false`
+  ("not available"), and a stream from one never sends an event; handle that in `update`.
 - **Fonts and the launch screen:** when the app has `web/index.html`, `mobiler build` and `dev` also write
   the `[fonts]` and `[splash]` options there. A web-only workflow runs `mobiler fonts sync` and
   `mobiler splash sync` itself.

@@ -127,13 +127,6 @@ jobs:
       - name: Build (trunk)
         run: trunk build
 
-  # The iOS shell only builds on macOS (uniffi Swift FFI + xcodebuild). Build each
-  # demo for the simulator — no signing, no booted sim — so a shell or build-ios.sh
-  # regression is caught for free, without the rented Mac. (macOS runners are arm64,
-  # so the sim slice is aarch64-apple-ios-sim / arm64.) Render.swift is kept byte-identical
-  # between templates/iOS and demos/barbershop (the reference shells, ADR-0015), so the
-  # barbershop leg guards the template's renderer. Saldo, coffee, todo and fullstack-todo's
-  # mobile app equal the template (ADR-0063), so their legs build it with each one's plugins.
   # The mobiler.rs site (site/, Astro + Starlight). The build regenerates the tutorial, the
   # capability and plugin reference and the demo screenshots from the repo, fails on a broken
   # internal link (starlight-links-validator) or a crate version the pages quote that is behind
@@ -141,6 +134,8 @@ jobs:
   site:
     name: Site build (mobiler.rs)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: site
@@ -154,6 +149,13 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+  # The iOS shell only builds on macOS (uniffi Swift FFI + xcodebuild). Build each
+  # demo for the simulator — no signing, no booted sim — so a shell or build-ios.sh
+  # regression is caught for free, without the rented Mac. (macOS runners are arm64,
+  # so the sim slice is aarch64-apple-ios-sim / arm64.) Render.swift is kept byte-identical
+  # between templates/iOS and demos/barbershop (the reference shells, ADR-0015), so the
+  # barbershop leg guards the template's renderer. Saldo, coffee, todo and fullstack-todo's
+  # mobile app equal the template (ADR-0063), so their legs build it with each one's plugins.
   ios:
     name: iOS build (${{ matrix.app }})
     runs-on: macos-latest

@@ -9,7 +9,8 @@ its own way.
 
 ## Built-in capabilities
 
-Every app made by `mobiler new` has them, on Android, iOS and the web:
+Every app made by `mobiler new` has them, on Android and iOS, and on the web with a few
+[browser limits](/guides/web/#what-to-know):
 
 ```rust
 fn update(&self, msg: Msg, model: &mut Model, cx: &mut Cx<Msg>) {
@@ -56,8 +57,10 @@ README where it has one, otherwise at the top of its Kotlin and Swift sources.
 `cx.subscribe(key, plugin, op, input, on_event)`, which calls `on_event` for every event until
 `cx.unsubscribe(key)`.
 
-**Where plugins run.** Plugins run in the Android and iOS apps. The web shell doesn't run them yet: a call
-answers `ok: false` with "not available", so handle that case if your core also runs in a browser.
+**Where plugins run.** Plugins run in the Android and iOS apps. On the web only `websocket` and `transfer`
+work. Elsewhere a request answers `ok: false` with "not available", and a stream never sends an event, so
+handle that if your core also runs in a browser. The same happens on a phone where the plugin wasn't
+added: `cx.upload` and `cx.download`, for example, need `mobiler plugin add transfer` on Android and iOS.
 
 **Updates.** A plugin's native code is copied into your app, so a new CLI release doesn't change it by
 itself. `mobiler upgrade` tells you when a plugin you use has a newer version, and running

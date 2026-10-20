@@ -21,7 +21,7 @@ Everything an app *decides* lives in the core and runs unchanged on Android, iOS
 | Look and brand | A `Theme` value: seed colour or a full light/dark palette, corners, fonts, density. |
 | Translations | `mobiler_core::i18n`: language negotiation and a catalogue with fallbacks. |
 | Numbers, money and dates | `mobiler_core::format`, per locale. |
-| Network calls | `cx.get`, `cx.post`, `cx.request`, streaming upload and download. |
+| Network calls | `cx.get`, `cx.post`, `cx.request`; streaming upload and download with the `transfer` plugin. |
 | Device features | `cx.*` capabilities and plugins: storage, camera, photos, clipboard, haptics, SQLite, biometrics, push, and [more](/reference/capabilities/). |
 | Tests | `cargo test` on your machine: the core is a pure function of messages, so a test sends messages and checks the model and the screen it returns. |
 
@@ -36,7 +36,7 @@ These parts exist once per platform, are the same for every app, and are maintai
 |---|---|---|---|
 | The shell that draws the widget tree | Jetpack Compose, Material 3 | SwiftUI | The DOM, via Leptos and WebAssembly |
 | Built-in capabilities (HTTP, storage, camera…) | Kotlin | Swift | Browser APIs |
-| Plugins you add | Kotlin, copied into your app | Swift, copied into your app | Not on the web yet: a plugin call answers "not available", so the core can show something else |
+| Plugins you add | Kotlin, copied into your app | Swift, copied into your app | Only `websocket` and `transfer`, built into the web shell |
 | Where it comes from | `mobiler new`, updated by `mobiler upgrade` | `mobiler new`, updated by `mobiler upgrade` | The `mobiler-web` crate |
 
 What stays yours on each platform is configuration, not code: the app icon, the name users see, the
@@ -75,10 +75,12 @@ The [full-stack guide](/guides/full-stack/) shows how to set this up.
   The widget tree is the same; the pixels are not, by design.
 - **Platform-only options.** A few options exist on one platform only and are ignored elsewhere, for
   example iOS's floating glass tab bar.
-- **Plugins are mobile-only for now.** Built-in capabilities work in the browser, some with limits (a page
-  can't mark a copied text sensitive), but plugins such as SQLite or biometrics run only on Android and
-  iOS. A web client that needs them gets a "not available" answer it can handle, or talks to your server
-  instead.
+- **Most plugins are mobile-only.** SQLite, biometrics, push and the rest run on Android and iOS; on the
+  web only `websocket` and `transfer` work. A request to a plugin the platform lacks answers `ok: false`
+  ("not available"), so the core can show something else; a stream from one never sends an event. A web
+  client that needs those features usually gets them from your server.
+- **Some built-ins are weaker in a browser.** See [Add a web client](/guides/web/#what-to-know).
 - **The web redraws.** The web shell rebuilds the page on every update. It keeps each tab's scroll
-  position, but not a half-typed field on a tab you left, which the native shells keep.
+  position, but not a field's cursor or an open disclosure on a tab you left, which the native shells keep
+  (the text you typed is in your model, so it isn't lost).
 - **Store work.** Signing, store listings and review are per platform, as with any app.

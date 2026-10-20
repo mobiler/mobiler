@@ -27,7 +27,8 @@ mobiler upgrade --apply          # write them in place (old versions go to .mobi
 - **Dependencies move too.** `--apply` moves the framework's own pins (`crux_core`, `mobiler-core`) in
   your app. A pin in another crate, such as a shared `app-core` or a crate outside the app folder, is
   listed for you to change by hand.
-- **It never touches your Rust code** in `shared/src/`.
+- **It never touches your app's Rust code.** The one framework file in `shared/src/`, the
+  `bin/codegen.rs` that generates the bindings, is merged like the shells.
 - **Nothing is forgotten.** Files waiting for review are recorded in `.mobiler/pending/`, and every run
   lists them. After resolving a conflict yourself, run `mobiler upgrade --resolved <file>`.
 - **Plugins.** A plugin's native code is copied into your app. When a release updates a plugin you use,

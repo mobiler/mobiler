@@ -3,7 +3,8 @@ title: Widgets
 description: The widget vocabulary a Mobiler core builds its screens from, rendered natively on Android, iOS and the web.
 ---
 
-Your `view` returns a `Widget` tree built from these functions (all in `mobiler_core`). Each shell renders
+Your `view` returns a `Widget` tree built from these functions (all in `mobiler_core`). This page lists
+the main builders. Each shell renders
 every widget: Compose on Android, SwiftUI on iOS, the DOM on the web. The full signatures are on
 [docs.rs/mobiler-core](https://docs.rs/mobiler-core).
 
@@ -13,9 +14,10 @@ every widget: Compose on Android, SwiftUI on iOS, the DOM on the web. The full s
 |---|---|
 | `column`, `row`, `stack` | Vertical, horizontal and layered layout. |
 | `grid`, `with_columns` | A grid of cells. |
-| `card` | A card with a style; it can take a tap and a long press. |
+| `card`, `card_button`, `with_long_press` | A card with a style; a tappable card; press-and-hold for a second action. |
+| `split` | Master and detail side by side on wide screens. |
 | `scroller`, `scroller_hinted` | A horizontal scroller; the hinted one fades its trailing edge. |
-| `lazy_list`, `lazy_list_static`, `with_fill` | A paged list with infinite scroll and pull-to-refresh. |
+| `lazy_list`, `lazy_list_static` | A paged list with infinite scroll and pull-to-refresh; `with_fill` makes it fill the screen's remaining height, `with_end_label` names its end. |
 | `spacer`, `divider` | Space and separators. |
 
 ## Text
@@ -28,7 +30,9 @@ every widget: Compose on Android, SwiftUI on iOS, the DOM on the web. The full s
 |---|---|
 | `button`, `button_with`, `icon_button` | Filled, outlined, text and tonal buttons; with a tone, a leading icon or full width; icon-only buttons. |
 | `text_field`, `field`, `secure_field`, `email_field`, `phone_field`, `number_field`, `decimal_field`, `url_field`, `multiline_field`, `search_field` | Text input, each with the right keyboard; `with_error` shows a validation message. |
-| `checkbox`, `toggle`, `slider`, `segmented`, `rating` | Choices and values. |
+| `checkbox`, `toggle`, `chip`, `slider`, `stepper`, `segmented`, `rating` | Choices and values. |
+| `calendar`, `calendar_in` | An inline month calendar, localized, with busy dots per day. |
+| `swipe_action` | A row with actions revealed by a swipe. |
 | `steps` | A step indicator. |
 
 Inputs report their value to your core's `input(id, value, …)`.
@@ -37,7 +41,9 @@ Inputs report their value to your core's `input(id, value, …)`.
 
 | Builder | What it is |
 |---|---|
-| `scaffold` | A screen with a top bar, bottom tabs, a floating action button and a bottom sheet. Adaptive on tablets (a side rail). |
+| `scaffold`, `scaffold_back`, `nav_scaffold` | A screen with a top bar and bottom tabs, adaptive on tablets (a side rail); the other two add the back arrow and system back for a pushed screen, `nav_scaffold` driven by `Nav`. |
+| `tab`, `tab_icon` | A bottom tab, with an optional icon. |
+| `with_fab`, `with_sheet`, `with_refresh` | A floating action button, a bottom sheet, pull-to-refresh. |
 | `with_tab_dot`, `with_tab_count` | A badge on a tab, read aloud after its name. |
 | `with_bottom_bar` | A bar pinned above the tabs or the keyboard. |
 | `Nav` (`new`, `push`, `pop`, `current`) | The navigation stack in your model. |

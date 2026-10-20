@@ -98,7 +98,7 @@ available" instead of crashing, so an app degrades gracefully.
 ## Navigation, theme and state
 
 - **Navigation** is a `Nav` stack in your model. Push and pop are model changes; the shells animate them
-  and wire up the system back button. A screen with bottom tabs keeps each visited tab where it was left.
+  and wire up the system back button. On Android and iOS a visited tab keeps its screen; the web keeps its scroll position.
 - **Theme** is data: a `Theme` on the scaffold sets colours (a seed, or a full light and dark palette),
   corners, fonts and density, and every shell applies it.
 - **State** is yours. `cx.save` stores it and `restore` reads it back at launch; apps with more data use the

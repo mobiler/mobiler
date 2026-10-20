@@ -48,7 +48,8 @@ fn load(cx: &mut Cx<Msg>) {
 
 fn parse_list(resp: &HttpOutcome) -> Msg {
     if !resp.is_success() {
-        return Msg::Failed(format!("server returned {:?}", resp.status()));
+        let status = resp.status().map_or("no answer".to_string(), |s| s.to_string());
+        return Msg::Failed(format!("server returned {status}"));
     }
     match serde_json::from_str::<Vec<domain::Todo>>(resp.text().unwrap_or_default()) {
         Ok(todos) => Msg::Loaded(todos),

@@ -7,7 +7,8 @@ Saldo is a real app built with Mobiler, and the [tutorial](/tutorial/) builds it
 It keeps a ledger of income, expenses and transfers across your accounts, sorts them into categories,
 shows where the money goes with charts, posts recurring entries by itself, exports to CSV, backs up and
 restores, speaks English, German, French, Italian and Ukrainian, and can lock behind Face ID or your
-fingerprint. Everything stays on the phone.
+fingerprint. There is no account and no server: your data lives on your phone and in its normal
+iCloud or Google backup.
 
 :::note[Coming soon to the App Store and Google Play]
 Saldo is in testing now. The store links will be here as soon as it is published.

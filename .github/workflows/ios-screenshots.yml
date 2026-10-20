@@ -1,6 +1,8 @@
 # iOS simulator screenshots of the demos, for the READMEs and the mobiler.rs site. Linux can't run
-# the iOS simulator, so this is the one place they can be taken. Download the `ios-screenshots`
-# artifact and copy each file into demos/<app>/screenshots/.
+# the iOS simulator, so this is the one place they can be taken. Download the run's artifacts
+# (`gh run download <id>`): each `ios-screenshot-<demo>` holds `<demo>-ios.png`, a 9:41 light-mode
+# shot of the first screen. Scale it to 603 px wide and save it over the demo's iOS screenshot
+# (coffee and todo: screenshots/ios.png, barbershop: screenshots/ios-home.png).
 name: iOS screenshots
 
 on:
@@ -8,6 +10,9 @@ on:
   push:
     paths:
       - .github/workflows/ios-screenshots.yml
+
+permissions:
+  contents: read
 
 jobs:
   shoot:

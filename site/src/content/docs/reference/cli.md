@@ -11,10 +11,10 @@ Install it with `cargo install mobiler`. Run the app commands from the app root 
 | `mobiler doctor` | Checks that this machine has what building needs, and says what is missing. |
 | `mobiler new <name>` | Creates an app: the Rust core and the generic Android and iOS shells. `--package` sets the app id, `--display-name` the name users see, `--agentic` adds a guide for coding agents. |
 | `mobiler dev` | Builds the core, generates the bindings, builds the Android app, installs it and launches it. `--device <serial>` picks a device. |
-| `mobiler watch` | `dev`, again on every change. |
+| `mobiler watch` | `dev`, again on every change in `shared/src` and the Android sources. |
 | `mobiler build [android\|ios]` | Builds the app without installing it. iOS needs a Mac. |
 | `mobiler plugin list` | Lists the bundled [plugins](/reference/plugins/). |
-| `mobiler plugin add <name>…` | Copies plugins into your shells and registers them; again to update one. |
+| `mobiler plugin add <name>` | Copies a plugin into your shells and registers it; run it again to update the plugin. One plugin per command. |
 | `mobiler upgrade` | Brings a new release's shells and framework pins into the app. See [Upgrading](/guides/upgrading/). |
 | `mobiler display-name [name]` | Prints or sets the name users see. |
 | `mobiler fonts sync` | Applies `mobiler.toml` `[fonts]`. |

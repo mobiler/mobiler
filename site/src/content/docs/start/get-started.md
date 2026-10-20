@@ -5,13 +5,14 @@ description: Install the mobiler CLI, create an app, and run it on Android, iOS 
 
 ## What you need
 
-- **Rust** through rustup. The scaffold pins its toolchain and Android targets in `rust-toolchain.toml`.
+- **Rust** through rustup. The scaffold's `rust-toolchain.toml` uses stable Rust and lists the Android
+  targets, so rustup installs them.
 - **For Android:** the Android SDK and NDK, a JDK, and an emulator or a phone with USB debugging.
 - **For iOS:** a Mac with Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The simulator needs no
   Apple account or signing.
 - **For the web:** [Trunk](https://trunkrs.dev) and the `wasm32-unknown-unknown` target.
 
-`mobiler doctor` checks your machine and says what is missing.
+`mobiler doctor` checks the Rust, Android and (on a Mac) iOS tools and says what is missing.
 
 ## Create an app
 
@@ -27,7 +28,7 @@ mobiler dev
 launches it. With several devices connected, pick one with `--device <serial>`. `mobiler watch` does the same
 on every change.
 
-On a Mac, `mobiler build ios` builds the iOS app (or run `bash iOS/build-ios.sh` for the simulator).
+On a Mac, `mobiler build ios` builds the iOS app for the simulator (it runs `iOS/build-ios.sh`).
 
 ## What you got
 
@@ -39,6 +40,7 @@ myapp/
   iOS/                the generic iOS shell (Swift, SwiftUI; project.yml for XcodeGen)
   .mobiler/           the CLI's baseline for upgrades: commit it
   Cargo.toml          the workspace
+  rust-toolchain.toml stable Rust and the Android targets
 ```
 
 Edit `shared/src/app.rs` and run `mobiler dev` again. You shouldn't need to open `Android/` or `iOS/`: they
