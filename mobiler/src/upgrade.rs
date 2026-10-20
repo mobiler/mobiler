@@ -2420,9 +2420,11 @@ mod test {
         let r = upgrade_at(&root, true).unwrap();
         let notes = &r.deps_notes;
         let has = |suffix: &str| notes.iter().any(|n| n.starts_with("../") && n.contains(suffix));
-        assert!(has("/crates/mobile-admin/Cargo.toml: mobiler-core 0.46 -> 0.47 (edit by hand)"), "{notes:?}");
+        // The template's current pin, so the test follows every core release.
+        let core = template_pin("shared/Cargo.toml.tmpl", "mobiler-core").unwrap();
+        assert!(has(&format!("/crates/mobile-admin/Cargo.toml: mobiler-core 0.46 -> {core} (edit by hand)")), "{notes:?}");
         assert!(has("/crates/mobile-admin/Cargo.toml: crux_core 0.18 -> 0.20.0 (edit by hand)"), "{notes:?}");
-        assert!(has("_outer/Cargo.toml: mobiler-core 0.46 -> 0.47 (edit by hand)"), "{notes:?}");
+        assert!(has(&format!("_outer/Cargo.toml: mobiler-core 0.46 -> {core} (edit by hand)")), "{notes:?}");
         assert_eq!(notes.len(), 3, "{notes:?}");
         // Outside the app is read, never written.
         assert_eq!(fs::read_to_string(outer.join("crates/mobile-admin/Cargo.toml")).unwrap(), ADMIN_046);
@@ -2457,8 +2459,9 @@ mod test {
 
     #[test]
     fn crates_outside_the_app_at_target_are_quiet() {
-        let admin = ADMIN_046.replace("\"0.46\"", "\"0.47\"").replace("\"0.18\"", "\"0.20\"");
-        let (root, outer) = app_with_outside_core(&admin, DOMAIN_046, &OUTER_046.replace("0.46", "0.47"));
+        let core = template_pin("shared/Cargo.toml.tmpl", "mobiler-core").unwrap();
+        let admin = ADMIN_046.replace("\"0.46\"", &format!("\"{core}\"")).replace("\"0.18\"", "\"0.20\"");
+        let (root, outer) = app_with_outside_core(&admin, DOMAIN_046, &OUTER_046.replace("0.46", &core));
         let r = upgrade_at(&root, true).unwrap();
         assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
         let _ = fs::remove_dir_all(&root);
@@ -2471,7 +2474,8 @@ mod test {
         fs::create_dir_all(root.join("app-core")).unwrap();
         fs::create_dir_all(root.join("web")).unwrap();
         fs::write(root.join("app-core/Cargo.toml"), "[dependencies]\ncrux_core = \"0.20\"\n").unwrap();
-        fs::write(root.join("web/Cargo.toml"), "[dependencies]\nmobiler-web = { version = \"0.47.1\" }\n").unwrap();
+        let core = template_pin("shared/Cargo.toml.tmpl", "mobiler-core").unwrap();
+        fs::write(root.join("web/Cargo.toml"), format!("[dependencies]\nmobiler-web = {{ version = \"{core}.1\" }}\n")).unwrap();
         let r = upgrade_at(&root, true).unwrap();
         assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
         assert_eq!(set_pin("crux_core = \"^0.20\"\n", "crux_core", "0.20.0"), Edit::Unchanged);
