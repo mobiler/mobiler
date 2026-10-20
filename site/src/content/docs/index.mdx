@@ -20,10 +20,11 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 import Shots from '../../components/Shots.astro';
 
 <Shots
+	row
 	items={[
 		{ src: '/demos/coffee/storefront.png', alt: 'The coffee demo on Android', caption: 'Android · Jetpack Compose' },
 		{ src: '/demos/coffee/ios.png', alt: 'The same coffee demo on iOS', caption: 'iOS · SwiftUI' },
-		{ src: '/demos/coffee/web.png', alt: 'The same coffee demo in a browser', caption: 'Web · Rust compiled to WebAssembly' },
+		{ src: '/demos/coffee/web.png', alt: 'The same coffee demo in a browser', caption: 'Web · WebAssembly' },
 	]}
 />
 

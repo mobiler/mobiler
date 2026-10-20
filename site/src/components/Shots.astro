@@ -1,12 +1,14 @@
 ---
 // A row of screenshots: `items` = [{ src, alt, caption }]. `src` is a path under public/.
+// `row` keeps every item on one line at any width (the home page's three-platform comparison).
 interface Props {
 	items: { src: string; alt: string; caption?: string }[];
+	row?: boolean;
 }
-const { items } = Astro.props;
+const { items, row = false } = Astro.props;
 ---
 
-<div class="shots not-content">
+<div class:list={['shots', 'not-content', { row }]}>
 	{
 		items.map((s) => (
 			<figure>

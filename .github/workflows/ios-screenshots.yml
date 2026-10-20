@@ -50,7 +50,7 @@ jobs:
           xcrun simctl ui "$UDID" appearance light
           xcrun simctl install "$UDID" "iOS/build/Build/Products/Debug-iphonesimulator/${{ matrix.scheme }}.app"
           xcrun simctl launch "$UDID" "${{ matrix.bundle }}"
-          sleep 12
+          sleep 25
           mkdir -p "$GITHUB_WORKSPACE/shots"
           xcrun simctl io "$UDID" screenshot "$GITHUB_WORKSPACE/shots/${{ matrix.name }}-ios.png"
 

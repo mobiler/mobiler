@@ -34,3 +34,14 @@
 	text-align: center;
 	margin-top: 0.4rem;
 }
+
+/* One line at any width: equal columns that shrink on a phone. */
+.shots.row {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+	max-width: 760px;
+	gap: 0.75rem;
+}
+.shots.row figure {
+	max-width: none;
+}
