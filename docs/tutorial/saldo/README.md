@@ -10,8 +10,10 @@ Saldo is a real, full-featured money manager — a ledger of **income / expense 
 across multiple **accounts**, organized by **categories**, summarized with **charts**, exportable to
 **CSV**, localized into **English, German, French, Italian and Ukrainian**, and locked behind a
 **passcode**. We build it on the framework's existing capabilities: the `sqlite`, `files`,
-`filepicker`, `biometric` and `securestore` plugins, the `Chart` widget, `mobiler_core::format`, and a
-new `mobiler_core::i18n` translation primitive we add along the way.
+`filepicker` and `biometric` plugins, the `Chart` widget, `mobiler_core::format`, and the
+`mobiler_core::i18n` translation primitive. Saldo is the app that added `i18n`, `cx.now()` and Ukrainian
+formatting to the framework; all three shipped in `mobiler-core` 0.31, so on today's framework you just
+use them. The chapters say where each one came from.
 
 ## Chapters
 
@@ -19,7 +21,7 @@ new `mobiler_core::i18n` translation primitive we add along the way.
    project layout, the `MobilerApp` (Model / Msg / `update` / `input` / `view`), the four-tab
    `scaffold`, a floating action button, a bottom sheet, and an in-memory expense ledger.
 2. **[Persist with SQLite](02-persist-with-sqlite.md)** — the schema, creating it on launch,
-   insert/query with bound params, a new `cx.now()` capability, day-grouping, period filters, and the
+   insert/query with bound params, the `cx.now()` capability (added for Saldo), day-grouping, period filters, and the
    "the Model isn't persisted — re-read it on launch" pattern.
 3. **[Accounts & transfers](03-accounts-and-transfers.md)** — a unified income/expense/transfer
    ledger across accounts, balances + net worth on the Assets tab, and a `PRAGMA user_version` schema
@@ -32,8 +34,8 @@ new `mobiler_core::i18n` translation primitive we add along the way.
    `Chart` widget over pure aggregation helpers.
 6. **[Money & formatting](06-money-and-formatting.md)** — route every amount and date through
    `mobiler_core::format`, pick the locale from the device (`cx.device_locale`), and add **Ukrainian**
-   (`Locale::UkUa` / `Currency::Uah`) to the framework.
-7. **[Go multilingual](07-go-multilingual.md)** — the new `mobiler_core::i18n` (language negotiation +
+   (`Locale::UkUa` / `Currency::Uah`) to the framework (in `mobiler-core` since 0.31).
+7. **[Go multilingual](07-go-multilingual.md)** — `mobiler_core::i18n` (since `mobiler-core` 0.31; language negotiation +
    a fallback-aware `Catalog`): translate every string into en/de/fr/it/uk, pick the language from the
    device, and let the user override it in Settings.
 8. **[Recurring transactions](08-recurring.md)** — a `recurring` rules table, a "Repeat" choice on the

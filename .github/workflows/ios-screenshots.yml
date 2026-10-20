@@ -1,0 +1,60 @@
+# iOS simulator screenshots of the demos, for the READMEs and the mobiler.rs site. Linux can't run
+# the iOS simulator, so this is the one place they can be taken. Download the `ios-screenshots`
+# artifact and copy each file into demos/<app>/screenshots/.
+name: iOS screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/ios-screenshots.yml
+
+jobs:
+  shoot:
+    name: iOS screenshot (${{ matrix.app }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { app: demos/coffee, scheme: Coffee, bundle: dev.mobiler.coffee, name: coffee }
+          - { app: demos/barbershop, scheme: Fadehouse, bundle: dev.mobiler.barbershop, name: barbershop }
+          - { app: demos/todo, scheme: Todo, bundle: dev.mobiler.todo, name: todo }
+          - { app: demos/saldo, scheme: Saldo, bundle: rs.mobiler.saldo, name: saldo }
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + iOS simulator target
+        run: rustup target add aarch64-apple-ios-sim
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.app }}
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build for the iOS simulator
+        run: bash iOS/build-ios.sh
+
+      - name: Boot an iPhone, launch the app, take the screenshot
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(v['udid'] for rt,devs in d['devices'].items() if 'iOS' in rt for v in devs if v.get('isAvailable') and v['name'].startswith('iPhone') and 'Pro' in v['name'] and 'Max' not in v['name']))")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
+          xcrun simctl ui "$UDID" appearance light
+          xcrun simctl install "$UDID" "iOS/build/Build/Products/Debug-iphonesimulator/${{ matrix.scheme }}.app"
+          xcrun simctl launch "$UDID" "${{ matrix.bundle }}"
+          sleep 12
+          mkdir -p "$GITHUB_WORKSPACE/shots"
+          xcrun simctl io "$UDID" screenshot "$GITHUB_WORKSPACE/shots/${{ matrix.name }}-ios.png"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshot-${{ matrix.name }}
+          path: shots/

@@ -1,0 +1,36 @@
+/* Mobiler's accent: a teal (Starlight's own dark/light handling does the rest). */
+:root {
+	--sl-color-accent-low: #0b2f2b;
+	--sl-color-accent: #14a394;
+	--sl-color-accent-high: #b8efe7;
+}
+:root[data-theme='light'] {
+	--sl-color-accent-low: #c9f1eb;
+	--sl-color-accent: #0e8f82;
+	--sl-color-accent-high: #0a4a43;
+}
+
+/* Side-by-side phone screenshots that wrap on a narrow screen. */
+.shots {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+	align-items: flex-start;
+}
+.shots figure {
+	margin: 0;
+	flex: 1 1 160px;
+	max-width: 240px;
+}
+.shots img {
+	width: 100%;
+	height: auto;
+	border-radius: 0.75rem;
+	border: 1px solid var(--sl-color-gray-5);
+}
+.shots figcaption {
+	font-size: var(--sl-text-sm);
+	color: var(--sl-color-gray-3);
+	text-align: center;
+	margin-top: 0.4rem;
+}

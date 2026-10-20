@@ -24,7 +24,9 @@ The locale drives digit grouping, the decimal mark, the currency symbol's placem
 
 ## 2. Adding Ukrainian to the framework
 
-Ukrainian wasn't one of the module's locales, so we add it — a small, **additive** change to
+Ukrainian wasn't one of the module's locales, so we added it. That change shipped in `mobiler-core` 0.31,
+so on today's framework `Locale::UkUa` and `Currency::Uah` are already there: read this section for how
+it was done, and skip to §3 to continue the app. It was a small, **additive** change to
 `mobiler-core/src/format.rs` (a new enum variant breaks nothing, since the module's own `match`es are the
 only exhaustive ones and we update them):
 
@@ -42,8 +44,9 @@ assert_eq!(format_date(2026, 12, 31, Locale::UkUa), "31.12.2026");
 assert_eq!(Locale::from_tag("uk-UA"), Some(Locale::UkUa));
 ```
 
-Because Saldo depends on `mobiler-core` by path, it picks this up immediately — no publish needed yet
-(the core release that ships this to *other* apps rides along with the `i18n` primitive in Chapter 7).
+Because Saldo depends on `mobiler-core` by path, it picked this up immediately — no publish needed
+(the core release that shipped it to *other* apps, `mobiler-core` 0.31, rode along with the `i18n`
+primitive in Chapter 7).
 
 ## 3. Picking the locale from the device
 
@@ -64,7 +67,7 @@ Msg::GotLocale(tag) => {
 }
 ```
 
-The base currency is a real user setting (it lands in the Settings screen in Chapter 10); until then we
+The base currency is a real user setting (it lands in the Settings screen later); until then we
 default it from the locale — hryvnia for Ukrainian, francs for Switzerland, dollars for the US, euros
 otherwise — so the very first launch already looks right:
 

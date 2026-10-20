@@ -1,0 +1,18 @@
+---
+// A row of screenshots: `items` = [{ src, alt, caption }]. `src` is a path under public/.
+interface Props {
+	items: { src: string; alt: string; caption?: string }[];
+}
+const { items } = Astro.props;
+---
+
+<div class="shots not-content">
+	{
+		items.map((s) => (
+			<figure>
+				<img src={s.src} alt={s.alt} loading="lazy" />
+				{s.caption && <figcaption>{s.caption}</figcaption>}
+			</figure>
+		))
+	}
+</div>
