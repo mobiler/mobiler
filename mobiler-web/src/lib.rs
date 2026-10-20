@@ -1047,6 +1047,11 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     }
     if call.plugin == "datetime" {
         return match call.op.as_str() {
+            // "now" needs no UI: the current local date-time, as the native shells stamp it.
+            "now" => {
+                let d = js_sys::Date::new_0();
+                PluginResponse::text(true, local_stamp(d.get_full_year(), d.get_month() + 1, d.get_date(), d.get_hours(), d.get_minutes(), d.get_seconds()))
+            }
             "date" => take_datetime("date").await,
             "time" => take_datetime("time").await,
             other => PluginResponse::text(false, format!("unknown datetime op '{other}'")),
@@ -4206,5 +4211,22 @@ mod tab_position_tests {
         assert!(!t.step(None, "login", || TOP).switched);
         t.step(Some(1), "stats", || TOP);
         assert_eq!(t.step(Some(0), "bills", || TOP).restore, TOP, "positions from before the untabbed screen are gone");
+    }
+}
+
+/// `cx.now()`'s answer: local "yyyy-MM-dd HH:mm:ss", zero-padded, as the Android and iOS shells give it.
+fn local_stamp(year: u32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> String {
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}")
+}
+
+#[cfg(test)]
+mod datetime_now {
+    use super::*;
+
+    #[test]
+    fn now_is_stamped_like_the_native_shells() {
+        // Android and iOS answer "now" as local "yyyy-MM-dd HH:mm:ss", zero-padded (sortable).
+        assert_eq!(local_stamp(2026, 1, 5, 7, 3, 9), "2026-01-05 07:03:09");
+        assert_eq!(local_stamp(2026, 12, 31, 23, 59, 59), "2026-12-31 23:59:59");
     }
 }

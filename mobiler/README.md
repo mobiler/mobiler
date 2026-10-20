@@ -361,7 +361,7 @@ Device APIs are async **capabilities** via `cx`, fulfilled by the generic shell 
 every platform — adding one is a shell-registry entry, never an ABI change. Built in:
 
 <!-- capabilities:start format=inline (generated from capabilities.json — run `cargo run -p xtask -- gen-readme`) -->
-HTTP, storage, clipboard, share, browser, toast, snackbar, device info, the app's version/build, the OS light/dark setting, haptics, a confirm dialog, the photo picker, camera capture, the date picker, and the time picker.
+HTTP, storage, clipboard, share, browser, toast, snackbar, device info, the app's version/build, the OS light/dark setting, haptics, a confirm dialog, the photo picker, camera capture, the current time, the date picker, and the time picker.
 <!-- capabilities:end -->
 
 A copy can be marked sensitive, expire, or stay on the device: `cx.copy_with(text, CopyOptions, then)`,
