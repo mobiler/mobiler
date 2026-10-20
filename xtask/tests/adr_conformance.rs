@@ -98,6 +98,30 @@ fn adr_0037_template_backups_exclude_the_secure_store() {
     }
 }
 
+/// ADR-0061: app data, the SQLite database included, stays in the platform's backup and transfer on
+/// Android and iOS: the template's and Saldo's rules exclude nothing but the secure store (ADR-0037), and no
+/// shell or bundled plugin marks a file as excluded from iCloud backup. A finance app is not an exception.
+#[test]
+fn adr_0061_app_data_stays_in_backups() {
+    for app in ["mobiler/templates", "demos/saldo"] {
+        for file in ["backup_rules.xml", "data_extraction_rules.xml"] {
+            let path = format!("{app}/Android/app/src/main/res/xml/{file}");
+            let xml = xml_without_comments(&read(&path));
+            let excludes: Vec<&str> = xml.match_indices("<exclude").map(|(at, _)| &xml[at..xml[at..].find("/>").map_or(xml.len(), |e| at + e + 2)]).collect();
+            assert!(!excludes.is_empty(), "ADR-0061: {path} has no exclude at all (ADR-0037's secure store)");
+            for ex in excludes {
+                assert!(ex.contains("mobiler_secure.xml"), "ADR-0061: {path} excludes app data from backup: {ex}");
+            }
+        }
+    }
+    let swift = files_with_extension(&[root().join("mobiler/templates/iOS"), root().join("mobiler/plugins"), root().join("demos/saldo/iOS")], "swift");
+    assert!(swift.len() > 10, "ADR-0061: expected the iOS sources, found {}", swift.len());
+    for path in &swift {
+        let code = live_code(&std::fs::read_to_string(path).unwrap());
+        assert!(!code.contains("isExcludedFromBackup"), "ADR-0061: {} excludes a file from iCloud backup", path.display());
+    }
+}
+
 /// ADR-0038: plain HTTP is allowed only in debug builds, and only to the local dev hosts. The
 /// main manifest (release builds) never opts into cleartext.
 #[test]
