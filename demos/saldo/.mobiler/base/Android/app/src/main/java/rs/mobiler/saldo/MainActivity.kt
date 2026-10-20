@@ -86,6 +86,14 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
@@ -1465,10 +1473,20 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
 
         is Widget.Segmented -> SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             widget.segments.forEachIndexed { i, seg ->
+                // A palette's segment_selected pair, apart from chips; unset: secondary_container, as before.
+                val segPal = LocalPalette.current
                 SegmentedButton(
                     selected = seg.selected,
                     onClick = { send(Action.Fired(seg.onSelect)) },
                     shape = SegmentedButtonDefaults.itemShape(index = i, count = widget.segments.size),
+                    colors = if (segPal?.segmentSelected != null || segPal?.onSegmentSelected != null) {
+                        SegmentedButtonDefaults.colors(
+                            activeContainerColor = segPal?.segmentSelected?.color() ?: MaterialTheme.colorScheme.secondaryContainer,
+                            activeContentColor = segPal?.onSegmentSelected?.color() ?: MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    } else {
+                        SegmentedButtonDefaults.colors()
+                    },
                     modifier = if (isLarge) Modifier.height(56.dp) else Modifier,
                 ) { Text(seg.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) }
             }
@@ -1835,6 +1853,14 @@ private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.Image
     WidgetIcon.PLAY -> Icons.Default.PlayArrow
     WidgetIcon.SCISSORS -> Icons.Default.ContentCut
     WidgetIcon.DONEALL -> Icons.Default.DoneAll
+    WidgetIcon.LEDGER -> Icons.AutoMirrored.Filled.ReceiptLong
+    WidgetIcon.CHART -> Icons.AutoMirrored.Filled.ShowChart
+    WidgetIcon.WALLET -> Icons.Default.AccountBalanceWallet
+    WidgetIcon.CREDITCARD -> Icons.Default.CreditCard
+    WidgetIcon.LOCK -> Icons.Default.Lock
+    WidgetIcon.DOWNLOAD -> Icons.Default.Download
+    WidgetIcon.UPLOAD -> Icons.Default.Upload
+    WidgetIcon.GLOBE -> Icons.Default.Language
 }
 
 @Composable
@@ -1995,10 +2021,23 @@ private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
             content = content,
         )
         ButtonStyle.OUTLINED -> if (neutral) {
-            val pt = LocalPalette.current?.primaryText?.color()
-            OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
-                shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape,
-                colors = if (pt != null) ButtonDefaults.outlinedButtonColors(contentColor = pt) else ButtonDefaults.outlinedButtonColors(), content = content)
+            val pal = LocalPalette.current
+            val pt = pal?.primaryText?.color()
+            // outlined_fill / outlined_border (alpha allowed); unset: transparent and the outline, as before.
+            val fill = pal?.outlinedFill?.color()
+            val edge = pal?.outlinedBorder?.color()
+            val colors = if (pt != null || fill != null) {
+                ButtonDefaults.outlinedButtonColors(containerColor = fill ?: Color.Transparent, contentColor = pt ?: MaterialTheme.colorScheme.primary)
+            } else {
+                ButtonDefaults.outlinedButtonColors()
+            }
+            if (edge != null) {
+                OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                    shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape, colors = colors, border = BorderStroke(1.dp, edge), content = content)
+            } else {
+                OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                    shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape, colors = colors, content = content)
+            }
         } else {
             OutlinedButton(
                 onClick = onClick,

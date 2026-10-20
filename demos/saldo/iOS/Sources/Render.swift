@@ -325,8 +325,9 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                         Text(seg.label).font(large ? CustomFonts.bodyOr(.body, size: 17, relativeTo: .body).weight(.semibold) : CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline).weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: large ? 48 : nil)
                             .padding(.vertical, large ? 0 : 8)
-                            .background(seg.selected ? role(pal?.secondaryContainer, else: Color.accentColor) : Color.clear)
-                            .foregroundColor(seg.selected ? role(pal?.onSecondaryContainer, else: .white) : role(pal?.onSurfaceVariant, else: .secondary))
+                            // A palette's segment_selected pair, apart from chips; else secondary_container, as before.
+                            .background(seg.selected ? role(pal?.segmentSelected ?? pal?.secondaryContainer, else: Color.accentColor) : Color.clear)
+                            .foregroundColor(seg.selected ? role(pal?.onSegmentSelected ?? pal?.onSecondaryContainer, else: .white) : role(pal?.onSurfaceVariant, else: .secondary))
                             .clipShape(Capsule())
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
@@ -380,7 +381,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
             }
         )
 
-    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, let appearance, let bottomBar):
+    case .scaffold(let title, let body, let tabs, let back, let darkMode, let theme, let fab, let sheet, let onRefresh, let refreshing, let route, let depth, _, let appearance, let bottomBar, let iosGlassTabs):
         // Theme-as-data: the non-View mapper helpers — spacing(), imageShape(), CardMod,
         // TextStyleMod — read `ActiveTheme.current` (set from the root view in Core.swift, not
         // here) for corner/density/font. `theme` itself still flows into ScaffoldView, which uses
@@ -388,7 +389,8 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         return AnyView(ScaffoldView(
             title: title, content: body, tabs: tabs, back: back,
             darkMode: darkMode, appearance: appearance, theme: theme, fab: fab, sheet: sheet,
-            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, bottomBar: bottomBar, send: send
+            onRefresh: onRefresh, refreshing: refreshing, route: route, depth: depth, bottomBar: bottomBar,
+            iosGlassTabs: iosGlassTabs, send: send
         ))
     }
 }
@@ -1398,6 +1400,31 @@ private struct SplitView: View {
     }
 }
 
+private extension View {
+    /// iOS 26 Liquid Glass in `shape`, optionally tinted; a frosted `.ultraThinMaterial` below iOS 26 (and
+    /// on SDKs older than Xcode 26, where `glassEffect` doesn't exist), so it builds and degrades anywhere.
+    @ViewBuilder
+    func glassPill(_ shape: AnyShape, tint: Color?) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(tint.map { Glass.regular.tint($0) } ?? Glass.regular, in: shape)
+        } else {
+            self.frostedPill(shape, tint: tint)
+        }
+        #else
+        self.frostedPill(shape, tint: tint)
+        #endif
+    }
+
+    @ViewBuilder
+    func frostedPill(_ shape: AnyShape, tint: Color?) -> some View {
+        self.background((tint ?? .clear).opacity(0.35), in: shape)
+            .background(.ultraThinMaterial, in: shape)
+            .overlay(shape.stroke(Color.primary.opacity(0.08)))
+            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+}
+
 private struct ScaffoldView: View {
     let title: String
     let content: SharedTypes.Widget
@@ -1414,8 +1441,13 @@ private struct ScaffoldView: View {
     let depth: UInt32
     /// with_bottom_bar: the screen's main actions, pinned between the body and the tabs.
     let bottomBar: [SharedTypes.Widget]?
+    /// with_ios_glass_tabs (ADR-0059): the phone tab bar floats as a glass capsule and the FAB is glass.
+    let iosGlassTabs: Bool
     let send: (Action) -> Void
 
+    /// with_ios_glass_tabs: how much the floating capsule (with its 6pt gap) covers above the bottom edge,
+    /// measured, since its labels grow with Dynamic Type. 74 until the first layout.
+    @State private var glassBarHeight: CGFloat = 74
     // Remember the depth of the previous route so a route change knows its
     // direction (push vs pop). Updated after each route settles.
     @State private var prevDepth: UInt32 = 0
@@ -1521,7 +1553,12 @@ private struct ScaffoldView: View {
 
     // Top bar + scrollable body, optionally with the phone's bottom tab-bar.
     private func mainColumn(showBottomTabs: Bool) -> some View {
-        VStack(spacing: 0) {
+        // with_ios_glass_tabs: the tab bar floats over the body as a glass capsule (content scrolls behind
+        // it); the body's end, a bottom bar, the FAB and the snackbar stay clear of it.
+        let floating = iosGlassTabs && showBottomTabs && !tabs.isEmpty
+        let hasBar = !(bottomBar ?? []).isEmpty
+        let clearance: CGFloat = floating && !hasBar ? glassBarHeight : 0
+        return VStack(spacing: 0) {
             HStack {
                 if let back = back {
                     Button(action: { send(.fired(token: back)) }) {
@@ -1560,24 +1597,35 @@ private struct ScaffoldView: View {
                 }
             }
             .transition(navTransition)
+            // The floating capsule covers the body's bottom: its scroll content ends clear of it.
+            .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: clearance) }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Floating action button — the raised primary action, over the body bottom-trailing.
             .overlay(alignment: .bottomTrailing) {
                 if let fab = fab {
                     Button(action: { send(.fired(token: fab.onPress)) }) {
-                        fabContent(fab)
-                            .background(role(pal?.fab, else: theme?.brandColor ?? .accentColor))
-                            .foregroundColor(role(pal?.onFab, else: .white))
-                            .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.fab) ?? AnyShape(RoundedRectangle(cornerRadius: 18)))
-                            .shadow(radius: 6, y: 3)
+                        if iosGlassTabs {
+                            // Glass: a circle, or a capsule keeping an extended FAB's label. A palette's
+                            // `fab` tints the glass; `on_fab` colours the glyph, else the brand colour.
+                            fabContent(fab)
+                                .foregroundColor(role(pal?.onFab, else: theme?.brandColor ?? .accentColor))
+                                .glassPill(fab.label == nil ? AnyShape(Circle()) : AnyShape(Capsule()), tint: pal?.fab?.color)
+                        } else {
+                            fabContent(fab)
+                                .background(role(pal?.fab, else: theme?.brandColor ?? .accentColor))
+                                .foregroundColor(role(pal?.onFab, else: .white))
+                                .clipShape(ShapeTokens.shape(ShapeTokens.shapes?.fab) ?? AnyShape(RoundedRectangle(cornerRadius: 18)))
+                                .shadow(radius: 6, y: 3)
+                        }
                     }
                     .padding(18)
+                    .padding(.bottom, clearance)
                 }
             }
             // cx.snackbar — bottom-centre over the body (which ends above the tab bar), lifted above the FAB.
             .overlay(alignment: .bottom) {
                 SnackbarView(seed: theme?.seed)
-                    .padding(.bottom, fab != nil ? 56 + 18 + 12 : 12)
+                    .padding(.bottom, (fab != nil ? 56 + 18 + 12 : 12) + clearance)
             }
 
             // with_bottom_bar: pinned above the tabs; the body (with the FAB and snackbar overlays)
@@ -1593,34 +1641,52 @@ private struct ScaffoldView: View {
                 .padding(.vertical, 12)
                 // Without tabs below it, the bar's fill runs under the home indicator (as the tabs' does).
                 .background(role(pal?.surfaceBar, else: Color(.systemBackground)).ignoresSafeArea(edges: .bottom))
+                // The glass capsule floats below the bar, over this space.
+                if floating { Color.clear.frame(height: glassBarHeight) }
             }
 
-            if showBottomTabs && !tabs.isEmpty {
+            if showBottomTabs && !tabs.isEmpty && !floating {
                 PaletteDivider()
-                HStack {
-                    ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
-                        Button(action: { send(.fired(token: tab.onSelect)) }) {
-                            VStack(spacing: 2) {
-                                if let icon = tab.icon {
-                                    Image(systemName: sfSymbol(icon)).font(.system(size: 20))
-                                        .overlay(alignment: .topTrailing) {
-                                            if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
-                                        }
-                                }
-                                HStack(spacing: 4) {
-                                    Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
-                                    if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
-                                }
-                            }
-                            .fontWeight(tab.selected ? .semibold : .regular)
-                            .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
-                            .frame(maxWidth: .infinity)
-                        }
-                        .accessibilityValue(tabSpoken(tab))
-                    }
-                }
+                tabButtons
                 .padding(.vertical, 10)
                 .background(role(pal?.surfaceBar, else: .clear).ignoresSafeArea(edges: .bottom))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if floating {
+                tabButtons
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 18)
+                    .glassPill(AnyShape(Capsule()), tint: nil)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { glassBarHeight = $0 }
+            }
+        }
+    }
+
+    // The row of tab buttons (badges included), shared by the classic bar and the glass capsule.
+    private var tabButtons: some View {
+        HStack {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                Button(action: { send(.fired(token: tab.onSelect)) }) {
+                    VStack(spacing: 2) {
+                        if let icon = tab.icon {
+                            Image(systemName: sfSymbol(icon)).font(.system(size: 20))
+                                .overlay(alignment: .topTrailing) {
+                                    if let b = tab.badge { tabBadgeMark(b).offset(x: b.text.isEmpty ? 4 : 10, y: -4) }
+                                }
+                        }
+                        HStack(spacing: 4) {
+                            Text(tab.label).font(isLargeDensity() ? CustomFonts.bodyOr(.subheadline, size: 15, relativeTo: .subheadline) : CustomFonts.bodyOr(.caption, size: 12, relativeTo: .caption))
+                            if tab.icon == nil, let b = tab.badge { tabBadgeMark(b) }
+                        }
+                    }
+                    .fontWeight(tab.selected ? .semibold : .regular)
+                    .foregroundColor(tab.selected ? role(pal?.primaryText, else: .accentColor) : role(pal?.onSurfaceVariant, else: .secondary))
+                    .frame(maxWidth: .infinity)
+                }
+                .accessibilityValue(tabSpoken(tab))
             }
         }
     }
@@ -1893,7 +1959,7 @@ fileprivate func holdsAny(_ w: SharedTypes.Widget, _ hit: (SharedTypes.Widget) -
         return holdsAny(child, hit)
     case .split(let primary, let detail, _, _):
         return holdsAny(primary, hit) || holdsAny(detail, hit)
-    case .scaffold(_, let body, _, _, _, _, _, let sheet, _, _, _, _, _, _, let bottomBar):
+    case .scaffold(_, let body, _, _, _, _, _, let sheet, _, _, _, _, _, _, let bottomBar, _):
         return holdsAny(body, hit) || sheet.map { holdsAny($0.child, hit) } == true
             || (bottomBar ?? []).contains { holdsAny($0, hit) }
     default:
@@ -2022,8 +2088,10 @@ private struct MobilerButton: View {
             guard let bg = p.secondaryContainer else { return nil }
             return (bg.color, role(p.onSecondaryContainer, else: role(p.primary, else: .accentColor)), .clear)
         case .outlined:
-            guard let text = p.primaryText else { return nil }
-            return (.clear, text.color, role(p.outline, else: text.color))
+            // outlined_fill / outlined_border (alpha allowed) over the outline role; unset: as before.
+            guard p.primaryText != nil || p.outlinedFill != nil || p.outlinedBorder != nil else { return nil }
+            let text = role(p.primaryText, else: .accentColor)
+            return (p.outlinedFill?.color ?? .clear, text, p.outlinedBorder?.color ?? role(p.outline, else: text))
         case .text:
             guard let text = p.primaryText else { return nil }
             return (.clear, text.color, .clear)
@@ -2232,6 +2300,14 @@ private func sfSymbol(_ icon: Icon) -> String {
     case .play: return "play.fill"
     case .scissors: return "scissors"
     case .doneAll: return "checkmark.circle"
+    case .ledger: return "list.bullet.rectangle.fill"
+    case .chart: return "chart.line.uptrend.xyaxis"
+    case .wallet: return "wallet.bifold.fill"
+    case .creditCard: return "creditcard.fill"
+    case .lock: return "lock.fill"
+    case .download: return "arrow.down.circle"
+    case .upload: return "arrow.up.circle"
+    case .globe: return "globe"
     }
 }
 
