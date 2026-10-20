@@ -259,7 +259,12 @@ mod test {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("mobiler-new-exec-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let scripts = ["Android/gradlew", "Android/build-android.sh", "iOS/build-ios.sh"];
+        let scripts = super::SCRIPTS;
+        // The list names real template files (a renamed script would otherwise stop being made executable).
+        for s in scripts {
+            let tpl = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates").join(s);
+            assert!(tpl.is_file(), "{s} is not a template file");
+        }
         for s in scripts {
             fs::create_dir_all(dir.join(s).parent().unwrap()).unwrap();
             fs::write(dir.join(s), "#!/bin/sh\n").unwrap();

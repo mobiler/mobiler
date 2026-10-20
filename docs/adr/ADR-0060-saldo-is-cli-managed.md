@@ -31,8 +31,13 @@ current by the same `mobiler upgrade --apply` every app developer runs, so the s
   template rendered with Saldo's names, and the version stamp equals the CLI's version.
   - **Validation Metric:** `adr_0060_saldo_equals_the_current_template` ("Saldo's base is behind the template").
 - **Condition 2: Saldo's shell code is not edited by hand.** Each of its shell code files equals the rendered template
-  apart from the blocks `mobiler plugin add` inserts directly above a `mobiler:` anchor (and the iOS display name the
-  CLI writes). Its own resources (`res/`, the icon, `.gitignore`) may differ; upgrade's 3-way merge keeps those.
+  apart from the blocks `mobiler plugin add` inserts directly above a `mobiler:` anchor. Every inserted line must carry
+  a value from a used bundled plugin's manifest. The one other exception is the iOS display name the CLI writes,
+  exactly `CFBundleDisplayName: "Saldo"`, once. Each plugin source equals the bundled one, and a `…Plugin` or
+  `…Activity` file from neither the template nor a bundled plugin fails. `Info.plist` and `settings.gradle.kts` equal
+  the template. Its own resources (`res/`, the icon, `.gitignore`) may differ; upgrade's 3-way merge keeps those.
+- **Condition 2b: nothing the template ships is missing.** Every template file is in Saldo's base snapshot, unless it
+  is app-owned (upgrade's Own and Seed classes, listed in the test's `app_owned`).
   - **Validation Metric:** the same test ("is edited by hand"), with `plugin_insertions_only` unit-tested by
     `plugin_insertions_only_accepts_anchor_blocks_only`.
 - **Condition 3: upgrade agrees.** `mobiler upgrade` in `demos/saldo` reports "Up to date" right after the refresh.
@@ -59,13 +64,24 @@ Saldo's own choices stay its own: the app icon (its PNG foreground renamed `sald
 template's vector foreground can never replace it), the icon background colour, `refs/` and `tmp/` in `.gitignore`,
 its Rust core and its Cargo manifests (path dependencies on the workspace libraries, as for every in-repo demo).
 
-**Mutation proof:** the invariant was broken three times on purpose. The test failed each time; each file was then
-restored, and the test passed again.
+**Mutation proof:** the invariant was broken on purpose; the test failed each time, the file was restored, and the
+test passed again. First round:
 - A comment line was added to Saldo's `MainActivity.kt` away from an anchor
   (`ADR-0060: demos/saldo/Android/app/src/main/java/rs/mobiler/saldo/MainActivity.kt is edited by hand …`).
 - One line of the template's `Render.swift` was changed without upgrading Saldo
   (`ADR-0060: Saldo's base is behind the template (iOS/Sources/Render.swift) …`).
 - `demos/saldo/.mobiler/version` was deleted (`ADR-0060: demos/saldo/.mobiler/version is missing`).
+
+After the review pass (the first version accepted any line above an anchor, never read plugin sources and never
+noticed a template file missing from the base), six more breaks each failed it:
+- `"foo" to FooPlugin(),` was written above Core.kt's plugin anchor (`… Core.kt is edited by hand (line 689: …`). The
+  first version of the test passed this one.
+- A `FooPlugin.kt` was added to Saldo's package (`… FooPlugin.kt is not from the template or a bundled plugin`).
+- A comment was appended to Saldo's `SqlitePlugin.kt` (`… SqlitePlugin.kt differs from the bundled plugin's …`).
+- `PhotoPipeline.kt` was removed from the base
+  (`ADR-0060: the template has …/PhotoPipeline.kt, Saldo's base doesn't: run mobiler upgrade --apply …`).
+- The display name became "Saldo Pro" (`ADR-0060: Saldo's project.yml must name it exactly once: …`).
+- A key was added to `Info.plist` (`ADR-0060: demos/saldo/iOS/Sources/Info.plist is edited by hand`).
 
 ## 5. Consequences (Positive and Negative Predictions)
 

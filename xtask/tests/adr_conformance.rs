@@ -396,6 +396,28 @@ fn every_palette_role_is_read_by_both_native_shells() {
     }
 }
 
+/// Not an ADR: the CLI embeds `mobiler/templates` and `mobiler/plugins` whole, so a leftover from a
+/// `patch` run or a review copy would ship in every new app (a `MainActivity.kt.orig` once did, #305).
+#[test]
+fn templates_and_plugins_hold_no_leftover_files() {
+    let mut dirs = vec![root().join("mobiler/templates"), root().join("mobiler/plugins")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            assert!(
+                ![".orig", ".rej", ".mobiler-new", ".mobiler-bak", ".swp", "~"].iter().any(|e| name.ends_with(e)),
+                "{} is a leftover, not a template file",
+                path.display()
+            );
+        }
+    }
+}
+
 /// Not an ADR: the bug fixed beside ADR-0057 (#302). A theme that builds a new `ColorScheme` on every core
 /// update recomposes the whole app on every update, so every shell's theme builds it once per distinct theme.
 #[test]
