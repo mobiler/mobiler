@@ -306,7 +306,7 @@ ABI change. Bundled free plugins:
 | 📁 `files` | read/write/list app files, download a URL, export to Files/Downloads |
 | 🎬 `video` | record a video → local URI |
 | 🎤 `speech` | speech-to-text (dictation) |
-| 🗃️ `sqlite` | on-device SQLite (exec / query → JSON) |
+| 🗃️ `sqlite` | on-device SQLite (exec / query → JSON; calls run one at a time, in order) |
 | 🔵 `bluetooth` | BLE scan / connect / read / write / notify (notify is a `cx.subscribe` stream) |
 | 🔑 `oauth` | OAuth 2.0 / OIDC login (system auth browser → redirect) |
 | 📲 `push` | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** |

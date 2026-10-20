@@ -33,6 +33,8 @@ final class Core: ObservableObject {
     // Live streaming subscriptions (cx.subscribe), keyed by subscription key, so
     // cx.unsubscribe(key) can cancel the matching native source.
     private var streamTasks: [String: Task<Void, Never>] = [:]
+    // The last call started for each plugin in `Plugins.inOrder`, which the next call to it waits for.
+    private var laneTails: [String: Task<Void, Never>] = [:]
 
     init() {
         // First frame straight from the core's view model.
@@ -74,14 +76,14 @@ final class Core: ObservableObject {
                     streamTasks[notify.input]?.cancel()
                     streamTasks[notify.input] = nil
                 } else {
-                    Task { _ = await Plugins.handle(plugin: notify.plugin, op: notify.op, input: notify.input) }
+                    start(notify.plugin) { _ = await Plugins.handle(plugin: notify.plugin, op: notify.op, input: notify.input) }
                 }
 
             // Request/response: dispatch (awaiting async work), resolve the core
             // with the response, then process the effects that produces.
             case .plugin(let call):
                 let id = request.id
-                Task {
+                start(call.plugin) { [self] in
                     let resp = await Plugins.handle(plugin: call.plugin, op: call.op, input: call.input)
                     let next = core.resolve(id: id, data: Data(try! resp.bincodeSerialize()))
                     process(next)
@@ -102,6 +104,22 @@ final class Core: ObservableObject {
                     await Plugins.subscribe(plugin: call.plugin, op: call.op, input: call.input, emit: emit)
                 }
             }
+        }
+    }
+
+    /// Starts one plugin call off the main thread. A call to a plugin in `Plugins.inOrder` first waits
+    /// for the previous call to that plugin, answer and all (ADR-0065). The chain is built here, on the
+    /// main actor, as the core's effects arrive, so calls run in the order the core issued them; a
+    /// plain `Task` per call would let them reach the plugin in any order.
+    private func start(_ plugin: String, _ call: @escaping @MainActor () async -> Void) {
+        guard Plugins.inOrder.contains(plugin) else {
+            Task { await call() }
+            return
+        }
+        let previous = laneTails[plugin]
+        laneTails[plugin] = Task {
+            await previous?.value
+            await call()
         }
     }
 }
@@ -266,6 +284,11 @@ enum AppearanceStream {
 /// Dispatches the opaque `{plugin, op, input}` envelope by name. Adding a plugin
 /// never touches the wire ABI — only this registry.
 enum Plugins {
+    /// Plugins whose request/response and notify calls run one at a time, each starting once the one
+    /// before it has answered, in the order the core issued them (ADR-0065). Naming a plugin that
+    /// isn't installed costs nothing.
+    static let inOrder: Set<String> = ["sqlite"]
+
     /// Streaming dispatch (cx.subscribe): start a long-lived source that calls `emit`
     /// per event until cancelled. Streaming-capable capabilities are matched here.
     static func subscribe(plugin: String, op: String, input: String, emit: @escaping @Sendable (PluginResponse) -> Void) async {

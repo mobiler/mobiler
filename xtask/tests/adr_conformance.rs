@@ -1184,3 +1184,115 @@ fn assert_cli_managed(dir: &str, pkg: &str, name: &str, display: Option<&str>, l
     assert!(code >= 15, "ADR-0063: expected {dir}'s shell code in its base, checked {code} files");
 }
 
+/// `src` from `from` up to (not including) the first `to` after it; panics naming `what` when either is missing.
+fn between<'a>(src: &'a str, from: &str, to: &str, what: &str) -> &'a str {
+    let start = src.find(from).unwrap_or_else(|| panic!("{what}: no `{from}`"));
+    let len = src[start..].find(to).unwrap_or_else(|| panic!("{what}: no `{to}` after `{from}`"));
+    &src[start..start + len]
+}
+
+/// ADR-0065: `sqlite` calls run one at a time, in the order the core issued them, on one connection. iOS: the shell
+/// chains each call to an in-order plugin behind the previous one, on the main actor, as the effect arrives (a bare
+/// `Task` per call would let them reach the plugin in any order), and the plugin runs on one serial queue that owns
+/// the one connection. Android: the shell starts a request on the main dispatcher straight into the plugin, and the
+/// plugin hops onto one single-thread lane that owns the one connection. Barbershop (ADR-0015) carries the same shell
+/// code and plugin; the CLI-managed demos' plugin copies are held equal to the bundled one by ADR-0063's test.
+#[test]
+fn adr_0065_sqlite_calls_run_in_issue_order() {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut starts = Vec::new();
+    for path in ["mobiler/templates/iOS/Sources/Core.swift", "demos/barbershop/iOS/Sources/Core.swift"] {
+        let code = live_code(&read(path));
+        let set = between(&code, "static let inOrder: Set<String> = [", "]", path);
+        assert!(set.contains("\"sqlite\""), "ADR-0065: {path}'s Plugins.inOrder doesn't name sqlite");
+        let notify = between(&code, "case .pluginNotify(let notify):", "case .plugin(let call):", path);
+        let request = between(&code, "case .plugin(let call):", "case .pluginStream(let call):", path);
+        for (what, block, needle) in [("notify", notify, "start(notify.plugin)"), ("request", request, "start(call.plugin)")] {
+            assert!(block.contains(needle), "ADR-0065: {path} starts a plugin {what} without `start`");
+            let own_task = ["Task {", "Task{", "Task(", "Task.detached"].iter().any(|t| block.contains(t));
+            assert!(!own_task, "ADR-0065: {path} starts a plugin {what} in its own Task, out of order");
+        }
+        let start = squash(between(&code, "private func start(", "\n    }\n", path));
+        let chain = "let previous = laneTails[plugin] laneTails[plugin] = Task { await previous?.value await call() }";
+        assert!(start.contains(chain), "ADR-0065: {path}'s `start` doesn't chain an in-order call behind the previous one");
+        assert!(start.contains("guard Plugins.inOrder.contains(plugin) else"), "ADR-0065: {path}'s `start` doesn't check Plugins.inOrder");
+        starts.push(start);
+    }
+    assert_eq!(starts[0], starts[1], "ADR-0065: the template's `start` differs from barbershop's");
+
+    for path in ["mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/Core.kt", "demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/Core.kt"] {
+        let code = live_code(&read(path));
+        let request = squash(between(&code, "is Effect.Plugin -> {", "is Effect.PluginStream -> {", path));
+        assert!(
+            request.contains("viewModelScope.launch { val resp = dispatch(call.plugin, call.op, call.input)"),
+            "ADR-0065: {path} must start a request on the main dispatcher straight into the plugin, in issue order"
+        );
+        // A reply or stream event processed nested inside the batch loop would start its calls before the batch's later ones.
+        assert!(
+            request.contains("withContext(Dispatchers.Main) { process(core.resolve(id, resp.bincodeSerialize())) }"),
+            "ADR-0065: {path} must process a reply in its own main-looper turn"
+        );
+        let stream = squash(between(&code, "is Effect.PluginStream -> {", "private suspend fun dispatch(", path));
+        assert!(
+            stream.contains("collect { resp -> withContext(Dispatchers.Main) { process(core.resolve(id, resp.bincodeSerialize())) }"),
+            "ADR-0065: {path} must process a stream event in its own main-looper turn"
+        );
+        let notify = squash(between(&code, "is Effect.PluginNotify -> {", "is Effect.Plugin -> {", path));
+        // A notify awaited inline would suspend process() and let a later batch's calls reach the lane first.
+        assert!(
+            notify.contains("else viewModelScope.launch { dispatch(n.plugin, n.op, n.input) }"),
+            "ADR-0065: {path} must launch a notify like a request, never await it in process()"
+        );
+    }
+
+    let swift = live_code(&read("mobiler/plugins/sqlite/ios/SqlitePlugin.swift"));
+    assert!(swift.contains("private static let lane = DispatchQueue(label: \"mobiler.sqlite\")\n"), "ADR-0065: the iOS sqlite lane must be one serial queue");
+    assert!(squash(&swift).contains("lane.async { cont.resume(returning: run(op: op, input: input)) }"), "ADR-0065: an iOS sqlite call must run on the lane");
+    assert_eq!(swift.matches("sqlite3_open(").count(), 1, "ADR-0065: the iOS sqlite plugin opens one connection, in one place");
+    assert!(swift.contains("if let db = connection { return (db, \"\") }") && swift.contains("connection = db"), "ADR-0065: the iOS sqlite connection must be kept");
+    assert!(swift.contains("while rc == SQLITE_ROW { rc = sqlite3_step(stmt) }"), "ADR-0065: an iOS exec must run its statement to the end");
+    // ok:true means committed: a transaction left open at the end of a call is rolled back and the call fails.
+    let swift_run = squash(between(&swift, "private static func run(", "\n    }\n", "SqlitePlugin.swift"));
+    assert!(
+        swift_run.contains("if sqlite3_get_autocommit(db) == 0 { sqlite3_exec(db, \"ROLLBACK\", nil, nil, nil) return PluginResponse(ok: false"),
+        "ADR-0065: an iOS call must not leave a transaction open"
+    );
+
+    let kotlin = live_code(&read("mobiler/plugins/sqlite/android/SqlitePlugin.kt"));
+    assert!(kotlin.contains("val lane = java.util.concurrent.Executors.newSingleThreadExecutor().asCoroutineDispatcher()"), "ADR-0065: the Android sqlite lane must be one thread");
+    assert!(
+        kotlin.contains("override suspend fun handle(op: String, input: String): PluginResponse = withContext(NonCancellable + lane) { run(op, input) }"),
+        "ADR-0065: an Android sqlite call must run on the lane, and a queued one must not be dropped"
+    );
+    let kotlin_run = squash(between(&kotlin, "private fun run(", "\n    }\n", "SqlitePlugin.kt"));
+    assert!(
+        kotlin_run.contains("if (db != null && db.isOpen && db.inTransaction()) { try { while (db.inTransaction()) db.endTransaction() }")
+            && kotlin_run.contains("return PluginResponse(false,"),
+        "ADR-0065: an Android call must not leave a transaction open"
+    );
+    // Transaction-control statements are refused before they run (Android's session can't see SAVEPOINT).
+    let control = "\"BEGIN\", \"COMMIT\", \"END\", \"ROLLBACK\", \"SAVEPOINT\", \"RELEASE\"";
+    assert!(kotlin.contains(&format!("val transactionControl = setOf({control})")), "ADR-0065: the Android plugin must list the transaction-control keywords");
+    assert!(
+        kotlin.contains("firstKeyword(sql) in transactionControl -> PluginResponse(false,"),
+        "ADR-0065: the Android plugin must refuse a transaction-control statement"
+    );
+    assert!(swift.contains(&format!("transactionControl: Set<String> = [{control}]")), "ADR-0065: the iOS plugin must list the transaction-control keywords");
+    assert!(
+        squash(&swift).contains("if transactionControl.contains(firstKeyword(sql)) { return PluginResponse(ok: false,"),
+        "ADR-0065: the iOS plugin must refuse a transaction-control statement"
+    );
+    assert_eq!(kotlin.matches("openOrCreateDatabase(").count(), 1, "ADR-0065: the Android sqlite plugin opens one connection, in one place");
+    assert!(kotlin.contains("connection = db"), "ADR-0065: the Android sqlite connection must be kept");
+    assert!(!kotlin.contains("Dispatchers."), "ADR-0065: the Android sqlite plugin must not run on a shared pool");
+
+    // Barbershop's copies are the bundled plugin, rendered with its package.
+    let render = |raw: String| raw.replace("{{PACKAGE_SHARED_TYPES}}", "dev.mobiler.barbershop.shared.types").replace("{{PACKAGE}}", "dev.mobiler.barbershop");
+    for (bundled, copy) in [
+        ("mobiler/plugins/sqlite/ios/SqlitePlugin.swift", "demos/barbershop/iOS/Sources/SqlitePlugin.swift"),
+        ("mobiler/plugins/sqlite/android/SqlitePlugin.kt", "demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/SqlitePlugin.kt"),
+    ] {
+        assert_eq!(read(copy), render(read(bundled)), "ADR-0065: {copy} differs from the bundled {bundled}");
+    }
+}
+

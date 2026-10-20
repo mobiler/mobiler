@@ -92,7 +92,8 @@ Msg::RestoreRead(json) => match serde_json::from_str::<Backup>(&json) {
 },
 ```
 
-The writes run before `load_all` because the `sqlite` plugin serializes on one connection — the same
+The writes run before `load_all` because the `sqlite` plugin runs its calls one at a time, in the order the
+core issued them, on one connection (ADR-0065) — the same
 ordering guarantee we relied on for migrations and recurring materialization. A bad/foreign file fails the
 `from_str` and just toasts an error; it never half-applies.
 

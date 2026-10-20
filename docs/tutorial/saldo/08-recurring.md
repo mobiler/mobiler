@@ -86,8 +86,8 @@ Two subtleties make this robust:
 - **Idempotent.** Once a rule's `next_date` is advanced past today, `due_posts` returns nothing, so the
   reload that follows materialization re-fires it harmlessly. No "already posted?" bookkeeping needed.
 
-The writes run before the reload because the `sqlite` plugin serializes on one connection — the queue we
-already relied on for migrations.
+The writes run before the reload because the `sqlite` plugin runs its calls one at a time, in the order the
+core issued them, on one connection (ADR-0065) — the queue we already relied on for migrations.
 
 ## 4. Creating a rule from the entry sheet
 

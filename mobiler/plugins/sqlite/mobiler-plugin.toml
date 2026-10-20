@@ -1,3 +1,16 @@
+# Free, bundled Mobiler plugin: on-device SQLite, one database (`mobiler.db`). Call from Rust:
+#   cx.plugin("sqlite", "exec",  r#"{"sql":"INSERT INTO t(a) VALUES (?)","args":["x"]}"#, |r| Msg::Saved(r.ok))
+#   cx.plugin("sqlite", "query", "SELECT a FROM t", |r| Msg::Rows(r.output))   // JSON array of {column: text}
+#
+# Calls run one at a time, in the order the core issued them, on one connection (ADR-0065): an exec's
+# ok:true means the write is committed, and a query issued after it sees it. The order also needs the
+# CLI 0.73.2+ shells: run `mobiler upgrade --apply` along with re-adding this plugin. "Issue order" is
+# the core's batch order for one update: its notifies, then its requests.
+# A transaction can't span calls: BEGIN / COMMIT / END / ROLLBACK / SAVEPOINT / RELEASE answer ok:false,
+# and a transaction still open when a call ends is rolled back and the call answers ok:false. The connection is kept for the process, so its settings (PRAGMAs, TEMP objects, ATTACH) last
+# too: pass untrusted values as "args", never spliced into the SQL.
+#
+# Install:  mobiler plugin add sqlite
 name = "sqlite"
 summary = "On-device SQLite — exec / query → JSON rows (free)"
 
