@@ -1277,8 +1277,10 @@ private struct SwipeActionView: View {
                 }
             }
             .padding(.vertical, 4)
+            // The cover hiding the actions is the page's colour: a row sits on the page, so a rounded card's
+            // corners blend in (a surface-coloured rectangle showed as square corners on a tinted page).
             render(content, send)
-                .background(role(pal?.surface, else: Color(.systemBackground)))
+                .background(role(pal?.background, else: Color(.systemBackground)))
                 .offset(x: offset)
                 .gesture(
                     DragGesture()
