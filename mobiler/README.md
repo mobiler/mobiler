@@ -237,6 +237,23 @@ it off and on again. Without `[deep_links]` the CLI leaves these lines alone.
 - Between the markers, `<!-- off: … -->` and `# off: …` are the switch's own: `enabled = true` uncomments
   any line written that way.
 
+
+## Local network on iOS — `mobiler.toml` `[ios]`
+
+An app that talks to a server on the same machine or network over plain HTTP (a dev server at
+`http://localhost:3000`, a device on the LAN) needs iOS to allow it:
+
+```toml
+[ios]
+local_network = true
+```
+
+`mobiler build` and `mobiler dev` switch on `NSAppTransportSecurity` → `NSAllowsLocalNetworking` in
+`iOS/project.yml`, between its `mobiler:local-network` markers (ADR-0064). It allows local addresses only
+(`localhost`, `.local` names, LAN IPs), never plain HTTP to the internet. Android needs nothing: its debug
+build already allows the dev hosts. Commit the synced `project.yml` with `mobiler.toml`; an app made before
+CLI 0.73 runs `mobiler upgrade --apply` first to get the markers.
+
 ## Debugging a text field on Android
 
 If a `text_field` / `search_field` shows text you didn't expect, turn on the field log in a **debug
