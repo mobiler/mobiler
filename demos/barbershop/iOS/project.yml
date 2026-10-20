@@ -68,6 +68,12 @@ targets:
             CFBundleURLSchemes:
               - dev.mobiler.barbershop
         # mobiler:deep-links-end
+        # mobiler.toml `[ios] local_network = true` switches this on: plain-HTTP loads to local addresses
+        # (localhost, .local names, LAN IPs) only, never the open internet (ADR-0064).
+        # mobiler:local-network-begin
+        # off: NSAppTransportSecurity:
+          # off: NSAllowsLocalNetworking: true
+        # mobiler:local-network-end
         # Picture-in-Picture: an app that uses Widget::Video with allow_pip must declare the audio
         # background mode so playback (hence PiP) continues when the app is backgrounded. The Mobiler
         # template ships WITHOUT this (App Store review hygiene) — adding this one line is the

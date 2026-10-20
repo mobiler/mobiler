@@ -5,6 +5,7 @@ mod deep_links;
 mod dev;
 mod fonts;
 mod fsguard;
+mod local_network;
 mod lockcheck;
 mod display_name;
 mod doctor;
