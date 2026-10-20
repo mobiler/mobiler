@@ -32,6 +32,7 @@ pub fn run(platform: Platform) -> Result<()> {
             crate::fonts::sync_for_build(&project.root);
             crate::splash::sync_for_build(&project.root);
             crate::deep_links::sync_for_build(&project.root);
+            crate::local_network::sync_for_build(&project.root);
             // iOS builds run the reproducible script (macOS only). The CLI doesn't
             // scaffold an iOS shell yet, so guide the user if it's absent.
             let script = project.root.join("iOS/build-ios.sh");

@@ -1,0 +1,2606 @@
+package dev.mobiler.todo
+
+import android.net.Uri
+import android.os.Bundle
+import androidx.core.content.FileProvider
+import java.io.File
+import java.lang.ref.WeakReference
+import androidx.fragment.app.FragmentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.ComponentActivity as PaletteActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.layout.Layout
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.focus.focusTarget
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.StarHalf
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.NavigationRailDefaults
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextFieldColors
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.ProgressIndicatorDefaults
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
+import dev.mobiler.todo.ui.theme.LocalPalette
+import dev.mobiler.todo.ui.theme.color
+import dev.mobiler.todo.ui.theme.applySpec
+import dev.mobiler.todo.ui.theme.radiusShape
+import dev.mobiler.todo.shared.types.Tab
+import dev.mobiler.todo.shared.types.TabBadge
+import dev.mobiler.todo.shared.types.TonePair
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgeDefaults
+import androidx.compose.material3.BadgedBox
+import dev.mobiler.todo.shared.types.Appearance
+import dev.mobiler.todo.ui.theme.TodoTheme
+import dev.mobiler.todo.shared.types.A11yRole
+import dev.mobiler.todo.shared.types.Action
+import dev.mobiler.todo.shared.types.BoxAlign
+import dev.mobiler.todo.shared.types.ButtonStyle
+import dev.mobiler.todo.shared.types.Caption
+import dev.mobiler.todo.shared.types.CardStyle
+import dev.mobiler.todo.shared.types.ChartStyle
+import dev.mobiler.todo.shared.types.Corner
+import dev.mobiler.todo.shared.types.Density
+import dev.mobiler.todo.shared.types.FieldKind
+import dev.mobiler.todo.shared.types.Icon as WidgetIcon
+import dev.mobiler.todo.shared.types.ImageRatio
+import dev.mobiler.todo.shared.types.ImageShape
+import dev.mobiler.todo.shared.types.InputValue
+import dev.mobiler.todo.shared.types.MapMarker
+import dev.mobiler.todo.shared.types.ProjectColor
+import dev.mobiler.todo.shared.types.ShellLabels
+import dev.mobiler.todo.shared.types.Spacing
+import dev.mobiler.todo.shared.types.TextStyle as ModelTextStyle
+import dev.mobiler.todo.shared.types.Theme as ModelTheme
+import dev.mobiler.todo.shared.types.Tone
+import dev.mobiler.todo.shared.types.Widget
+
+// FragmentActivity (a ComponentActivity subclass — Compose/ActivityResult work unchanged) so the
+// biometric plugin's androidx.biometric BiometricPrompt has the FragmentActivity host it requires.
+class MainActivity : FragmentActivity() {
+    private var pendingPhoto: ((String?) -> Unit)? = null
+    // The photo picker's result launcher must be registered on the Activity (before
+    // it's STARTED), so the photo capability is wired to it via the PhotoPicker holder.
+    private val pickMedia = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        pendingPhoto?.invoke(uri?.toString())
+        pendingPhoto = null
+    }
+
+    // Camera capture (cx.capture_photo): TakePicture writes the full photo to a
+    // FileProvider URI we supply and reports success; we hand that URI back. It launches
+    // the system camera app, so no CAMERA permission is required.
+    private var pendingCamera: ((String?) -> Unit)? = null
+    private var pendingCameraUri: Uri? = null
+    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        pendingCamera?.invoke(if (success) pendingCameraUri?.toString() else null)
+        pendingCamera = null
+        pendingCameraUri = null
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        FieldLog.init(applicationInfo)
+        enableEdgeToEdge()
+        // A deep link that launched the app — buffered by SystemBus until the core subscribes.
+        intent?.data?.let { SystemBus.emitDeepLink(it.toString()) }
+        PhotoPicker.launch = { onResult ->
+            pendingPhoto = onResult
+            pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+        CameraCapture.launch = { onResult ->
+            pendingCamera = onResult
+            val dir = File(cacheDir, "captures").apply { mkdirs() }
+            val file = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            pendingCameraUri = uri
+            takePicture.launch(uri)
+        }
+        setContent { App() }
+    }
+
+    // Track the current Activity so window-bound capabilities (e.g. the confirm
+    // dialog) can reach it — plugins only hold the Application context.
+    override fun onResume() {
+        super.onResume()
+        MobilerActivity.current = WeakReference(this)
+    }
+
+    override fun onPause() {
+        MobilerActivity.current = null
+        super.onPause()
+    }
+
+    // Inbound system events → SystemBus → the built-in `system` stream.
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.data?.let { SystemBus.emitDeepLink(it.toString()) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        SystemBus.emitLifecycle("active")
+    }
+
+    override fun onStop() {
+        SystemBus.emitLifecycle("background")
+        super.onStop()
+    }
+}
+
+@Composable
+fun App(core: Core = viewModel()) {
+    val view = core.view
+    // Theme is data: a Scaffold carries dark_mode + an optional brand `theme`, from the Rust core.
+    // Brand color, corner radius (Cards via MaterialTheme.shapes), and font flow through
+    // MaterialTheme automatically. Density (spacing) + image-corner aren't MaterialTheme knobs,
+    // so the non-composable mapper helpers (spacingFor/shapeFor) read them from `activeTheme`.
+    val osDark = isSystemInDarkTheme()
+    // Appearance: Light/Dark force the mode, System follows the OS (recomposes on its change); none →
+    // dark_mode, as before. A non-Scaffold root follows the OS, as before.
+    val dark = (view as? Widget.Scaffold)?.let { sc ->
+        when (sc.appearance) {
+            Appearance.LIGHT -> false
+            Appearance.DARK -> true
+            Appearance.SYSTEM -> osDark
+            null -> sc.darkMode
+        }
+    } ?: osDark
+    val appTheme = (view as? Widget.Scaffold)?.theme
+    // Stash the active theme before rendering (app-global, like dark mode; render runs on the
+    // main thread, so a plain holder is safe — the SwiftUI shell's `ActiveTheme` twin).
+    activeTheme = appTheme
+    ActiveLabels.current = (view as? Widget.Scaffold)?.labels
+    ActiveAppearance.dark = dark
+    // With a palette the system-bar icons follow the resolved `dark` (appearance / dark_mode), not the OS.
+    // If a palette goes away at runtime, restore the default (OS-following) bars once.
+    val hasPalette = appTheme?.palette != null
+    val activity = androidx.compose.ui.platform.LocalContext.current as? PaletteActivity
+    var paletteBars by remember { mutableStateOf(false) }
+    LaunchedEffect(dark, hasPalette, activity) {
+        if (hasPalette) {
+            val t = android.graphics.Color.TRANSPARENT
+            val style = if (dark) SystemBarStyle.dark(t) else SystemBarStyle.light(t, t)
+            activity?.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            paletteBars = true
+        } else if (paletteBars) {
+            activity?.enableEdgeToEdge()
+            paletteBars = false
+        }
+    }
+    TodoTheme(darkTheme = dark, theme = appTheme) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            // Before Android 9 the platform gives a focusable view focus even in touch mode, and Compose
+            // hands it to its first focus target: the first text field looked focused at launch and took
+            // focus (and the keyboard) on a tab switch. An empty full-size focus target, first in traversal
+            // order, catches that automatic focus instead; tapping a field still focuses it.
+            PrePieFocusSink(Modifier.fillMaxSize())
+            if (view is Widget.Scaffold) {
+                // Scaffold provides its own bars + scrollable body.
+                Render(view) { action -> core.update(action) }
+            } else {
+                // Cap + center the content column so a phone layout doesn't stretch
+                // edge-to-edge on a tablet (the widthIn is a no-op on a phone).
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        // Keyboard: the column ends above it, so the focused field stays in view.
+                        .imePadding()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 760.dp)
+                            .align(Alignment.TopCenter)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Render(view) { action -> core.update(action) }
+                    }
+                }
+            }
+        }
+        // A pending confirm from the dialog capability (see ConfirmHost in Core.kt).
+        ConfirmHost.pending?.let { ConfirmDialog(it) }
+    }
+}
+
+// The confirm capability's dialog: the app's own labels, the confirming action in the theme's error
+// colour when destructive, and Density.LARGE button height + label size like other buttons.
+@Composable
+private fun ConfirmDialog(req: ConfirmRequest) {
+    val large = isLarge
+    val labelSize = if (large) 16.sp else TextUnit.Unspecified
+    val buttonModifier = if (large) Modifier.heightIn(min = 56.dp) else Modifier
+    AlertDialog(
+        onDismissRequest = { req.answer(false) },
+        title = if (req.title.isNotEmpty()) { { Text(req.title) } } else null,
+        text = if (req.message.isNotEmpty()) { { Text(req.message) } } else null,
+        confirmButton = {
+            TextButton(
+                onClick = { req.answer(true) },
+                modifier = buttonModifier,
+                shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
+                colors = if (req.destructive) ButtonDefaults.textButtonColors(contentColor = LocalPalette.current?.error?.color() ?: MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
+            ) { Text(req.confirmLabel, fontSize = labelSize) }
+        },
+        dismissButton = {
+            TextButton(onClick = { req.answer(false) }, modifier = buttonModifier, shape = shapeOf { it.button } ?: ButtonDefaults.textShape) { Text(req.cancelLabel, fontSize = labelSize) }
+        },
+    )
+}
+
+/** Field debug log (ADR-0040). Never on in a release build, and off by default in a debug one:
+ *  `adb shell setprop log.tag.MobilerField DEBUG`, then restart the app. It logs every edit, every
+ *  value the app renders and every adoption, each value as its length and a short hash, enough to
+ *  tell which value was adopted over which. `log.tag.MobilerFieldValues DEBUG` as well logs the raw
+ *  text. A SECURE field only ever logs its length, in every mode, for the rest of the field's life. */
+private object FieldLog {
+    var on = false
+        private set
+    private var values = false
+
+    /** Called once from `onCreate`, before any field exists. */
+    fun init(info: android.content.pm.ApplicationInfo) {
+        val debuggable = (info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        on = debuggable && android.util.Log.isLoggable("MobilerField", android.util.Log.DEBUG)
+        values = on && android.util.Log.isLoggable("MobilerFieldValues", android.util.Log.DEBUG)
+    }
+
+    /** The only way a field's text reaches the log. */
+    fun show(text: String?, secure: Boolean): String = when {
+        text == null -> "none"
+        secure -> "<secure len=${text.length}>"
+        values -> "'$text'"
+        else -> "<len=${text.length} #${"%04x".format(text.hashCode() and 0xffff)}>"
+    }
+
+    fun show(texts: Collection<String>, secure: Boolean): String = texts.joinToString(", ", "[", "]") { show(it, secure) }
+
+    fun d(msg: () -> String) {
+        if (on) android.util.Log.d("MobilerField", msg())
+    }
+}
+
+/** Local editing state for a controlled text field. The field owns its text, cursor and
+ *  selection; the app's rendered `value` is adopted only when it isn't an echo of an edit the
+ *  field itself sent (a current or a late one), so a delayed render can never rewind the text
+ *  or move the cursor. An app-side change — clear, formatting, or rejecting/reformatting an
+ *  edit (e.g. max length, digits only) — is adopted, cursor at the end. */
+private class FieldSync(initial: String) {
+    var field by mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
+    private val pending = ArrayDeque<String>()
+    private var lastApp: String? = initial
+
+    /** Sticky: a field that was ever SECURE (a show-password toggle flips the kind) logs as one. */
+    private var secure = false
+
+    fun noteKind(kind: FieldKind) {
+        if (kind == FieldKind.SECURE) secure = true
+    }
+
+    fun onEdit(next: TextFieldValue, send: (String) -> Unit) {
+        FieldLog.d { "edit ${FieldLog.show(next.text, secure)} (composing ${next.composition}) over ${FieldLog.show(field.text, secure)}; pending ${FieldLog.show(pending, secure)}" }
+        val changed = next.text != field.text
+        field = next
+        if (changed) {
+            // The first render after an edit is always examined, so a rejected keystroke
+            // (an app value that isn't pending) is adopted — i.e. reverted.
+            lastApp = null
+            pending.addLast(next.text)
+            send(next.text)
+        }
+    }
+
+    fun onAppValue(v: String) {
+        FieldLog.d { "app ${FieldLog.show(v, secure)} (last app ${FieldLog.show(lastApp, secure)}); field ${FieldLog.show(field.text, secure)}; pending ${FieldLog.show(pending, secure)}" }
+        if (v == lastApp) return
+        lastApp = v
+        // lastIndexOf drops every older entry on a match; a repeated text (a, "", a) can
+        // make a later late render look like an app change for one frame, while indexOf
+        // would let coalesced renders leave stale entries that swallow a later app clear.
+        val echo = pending.lastIndexOf(v)
+        if (echo >= 0) {
+            repeat(echo + 1) { pending.removeFirst() }
+            return
+        }
+        pending.clear()
+        if (v != field.text) {
+            FieldLog.d { "adopt ${FieldLog.show(v, secure)} over ${FieldLog.show(field.text, secure)} (composing ${field.composition})" }
+            field = TextFieldValue(v, TextRange(v.length))
+        }
+    }
+}
+
+/** A widget's own id, for the kinds that have one. */
+private fun ownId(w: Widget): String? = when (w) {
+    is Widget.TextField -> w.id
+    is Widget.SearchField -> w.id
+    is Widget.Toggle -> w.id
+    is Widget.Checkbox -> w.id
+    is Widget.Slider -> w.id
+    is Widget.Video -> w.id
+    is Widget.Map -> w.id
+    else -> null
+}
+
+/** The first id in a widget's subtree (depth first): how an id-less container is known by what it holds. */
+private fun firstId(w: Widget): String? = ownId(w) ?: when (w) {
+    is Widget.Row -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Column -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Box -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Grid -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Scroller -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.LazyList -> w.children.firstNotNullOfOrNull(::firstId)
+    is Widget.Card -> firstId(w.child)
+    is Widget.A11y -> firstId(w.child)
+    is Widget.SwipeAction -> firstId(w.child)
+    is Widget.Split -> firstId(w.primary) ?: firstId(w.detail)
+    else -> null
+}
+
+/** A child's identity across renders (ADR-0047): its id; else its kind, plus the first id inside it for
+ *  a container (`Row[email]`); then `#n` for its place among siblings with the same base, so keys are
+ *  unique Strings (saveable, and a lazy list key). A row appearing above a field, or above the row or
+ *  card holding it, never moves the field's key, so Compose keeps its text, cursor and focus. */
+private fun childKeys(children: List<Widget>): List<String> {
+    val seen = HashMap<String, Int>()
+    return children.map { w ->
+        val id = ownId(w)
+        val base = if (id != null) "id:$id" else w::class.java.simpleName + (firstId(w)?.let { "[$it]" } ?: "")
+        val n = seen.getOrDefault(base, 0)
+        seen[base] = n + 1
+        "$base#$n"
+    }
+}
+
+/** Renders siblings each under its `childKeys` identity, so widget state follows the widget, not its position. */
+@Composable
+private inline fun KeyedChildren(children: List<Widget>, content: @Composable (Int, Widget) -> Unit) {
+    val keys = childKeys(children)
+    children.forEachIndexed { i, child -> key(keys[i]) { content(i, child) } }
+}
+
+/** Before Android 9, an empty focus target that catches the focus the platform hands a window in touch
+ *  mode (see App()); nothing on newer Android. It needs an area (the initial focus search skips a
+ *  0-size target): give it its container's size. It draws nothing, takes no touches, has no semantics. */
+@Composable
+private fun PrePieFocusSink(modifier: Modifier) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.P) {
+        Box(modifier.focusTarget())
+    }
+}
+
+/** Set true only around the Scaffold body's designated fill `LazyList` (see [bodyFillIndex]) — the
+ *  `LazyList` branch reads it to switch from the 480.dp cap to filling its parent, and resets it to
+ *  false around its own children so a nested or second `fill: true` list keeps the cap. */
+private val LocalFillList = compositionLocalOf { false }
+
+/** The colour behind a swipe row: the page's, unless the row sits on another surface (a sheet sets its own). */
+private val LocalSwipeCover = compositionLocalOf<Color?> { null }
+
+/** The scaffold body's fill list, per the shared rule: the body itself, or the first direct child of
+ *  the body's column, that is a `LazyList { fill: true }`. `-1` ⇒ the body itself; `i >= 0` ⇒ child
+ *  `i` of the body's column; `null` ⇒ no fill mode (the body scrolls as a page, as today). */
+private fun bodyFillIndex(body: Widget): Int? = when {
+    body is Widget.LazyList && body.fill -> -1
+    body is Widget.Column -> body.children.indexOfFirst { it is Widget.LazyList && it.fill }.takeIf { it >= 0 }
+    else -> null
+}
+
+/**
+ * The ENTIRE shell. It knows only the fixed Mobiler ABI — `Widget` (what to
+ * draw) + `Action` (what to send back). No app-specific types; this exact code
+ * renders any Mobiler app. Style *intent* (TextStyle, Tone, …) is decided in
+ * Rust; the concrete look (fonts, colors, dp) is decided here.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun Render(widget: Widget, send: (Action) -> Unit) {
+    when (widget) {
+        is Widget.Text -> Text(
+            text = widget.content,
+            style = typographyFor(widget.style),
+            // Emphasis is Medium unless the type scale sets its weight.
+            fontWeight = if (widget.style == ModelTextStyle.EMPHASIS && activeTheme?.typeScale?.emphasis == null) FontWeight.Medium else null,
+            color = colorFor(widget.style),
+            modifier = Modifier.padding(vertical = 2.dp),
+        )
+
+        is Widget.PdfView -> PdfViewWidget(widget.url)
+        is Widget.Video -> VideoWidget(widget.url, widget.id, widget.playing, widget.seekToMs, widget.controls, widget.looping, widget.muted, widget.onEnded, widget.poster, widget.startAtMs, widget.captions, widget.rate, widget.volume, widget.urls, widget.startIndex, widget.seekIndex, widget.allowPip, send)
+        is Widget.WebView -> WebViewWidget(widget.url)
+        is Widget.Map -> MapWidget(widget.id, widget.centerLat, widget.centerLng, widget.zoom, widget.markers, widget.styleUrl, widget.interactive, send)
+
+        is Widget.Image -> AsyncImage(
+            model = widget.source,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxWidth().aspectRatio(ratioFor(widget.ratio)).clip(shapeFor(widget.shape)),
+        )
+
+        is Widget.Badge -> {
+            val (bg, fg) = toneColors(widget.tone)
+            Box(
+                modifier = Modifier.background(color = bg, shape = shapeOf { it.badge } ?: RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                val icon = widget.icon
+                if (icon == null) {
+                    Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg)
+                } else {
+                    // with_icon: the status reads without its colour; the icon is decorative.
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(iconFor(icon), contentDescription = null, modifier = Modifier.size(14.dp), tint = fg)
+                        Text(text = widget.label, style = MaterialTheme.typography.labelMedium, color = fg)
+                    }
+                }
+            }
+        }
+
+        is Widget.ColorDot -> Box(
+            modifier = Modifier.size(12.dp).clip(CircleShape).background(projectColorOf(widget.color)),
+        )
+
+        is Widget.Avatar -> Box {
+            val d = (widget.size?.toInt() ?: 48).dp
+            val initials = widget.initials
+            if (initials == null) {
+                AsyncImage(
+                    model = widget.source,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(d).clip(CircleShape),
+                )
+            } else if (widget.source.isEmpty()) {
+                AvatarInitials(initials, d)
+            } else {
+                // with_initials: drawn when the image fails to load; a loaded image wins.
+                SubcomposeAsyncImage(
+                    model = widget.source,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(d).clip(CircleShape),
+                    // Loading: the plain placeholder (as on iOS); failed: the initials.
+                    loading = { Box(Modifier.size(d).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))) },
+                    error = { AvatarInitials(initials, d) },
+                )
+            }
+            widget.status?.let { st ->
+                Box(modifier = Modifier.size(12.dp).align(Alignment.BottomEnd).clip(CircleShape).background(if (tonePair(LocalPalette.current, st) != null) toneColors(st).second else toneColors(st).first))
+            }
+        }
+
+        is Widget.Steps -> {
+            val total = widget.total.toInt()
+            val current = minOf(widget.current.toInt(), total)
+            if (total > 0) {
+                val tpl = ActiveLabels.current?.stepOf?.takeIf { it.isNotEmpty() } ?: "Step {current} of {total}"
+                val spoken = tpl.replace("{current}", "$current").replace("{total}", "$total")
+                val on = LocalPalette.current?.primary?.color() ?: MaterialTheme.colorScheme.primary
+                // Unfilled segments carry the step count, so they use the outline colour (~3:1).
+                val off = LocalPalette.current?.outline?.color() ?: MaterialTheme.colorScheme.outline
+                // One element named by the step text (the optional caption is part of it); no progress
+                // range, so TalkBack never reads a percentage.
+                Column(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (widget.caption) Text(spoken, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        repeat(total) { i -> Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(50)).background(if (i < current) on else off)) }
+                    }
+                }
+            }
+        }
+
+        is Widget.Rating -> Row(verticalAlignment = Alignment.CenterVertically) {
+            val tint = LocalPalette.current?.primaryText?.color() ?: MaterialTheme.colorScheme.primary
+            val onRate = widget.onRate
+            for (i in 1..widget.max.toInt()) {
+                val threshold = (i * 10).toUInt()
+                val ic = when {
+                    widget.value >= threshold -> Icons.Default.Star
+                    widget.value + 5u >= threshold -> Icons.Default.StarHalf
+                    else -> Icons.Default.StarBorder
+                }
+                if (onRate != null && i - 1 < onRate.size) {
+                    val token = onRate[i - 1]
+                    IconButton(onClick = { send(Action.Fired(token)) }, modifier = Modifier.size(32.dp)) {
+                        Icon(ic, contentDescription = null, tint = tint)
+                    }
+                } else {
+                    Icon(ic, contentDescription = null, tint = tint)
+                }
+            }
+        }
+
+        is Widget.Divider -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        is Widget.Progress -> {
+            val v = widget.value
+            if (v != null) {
+                LinearProgressIndicator(progress = { v }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
+            }
+        }
+        is Widget.Skeleton -> Box(
+            modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp)
+                .clip(RoundedCornerShape(8.dp)).background(LocalPalette.current?.surfaceMuted?.color() ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+        )
+        is Widget.Chart -> {
+            // Multi-series chart: cartesian (bar/line/stacked) with optional y-axis + legend, or
+            // circular (pie/donut/rings/gauge). Series colors: explicit override → theme primary
+            // (series 0) → a fixed palette. See mobiler-web's chart_view for the shared model.
+            val series = widget.series
+            val style = widget.style
+            val primary = MaterialTheme.colorScheme.primary
+            val primaryText = LocalPalette.current?.primaryText?.color()
+            val trackColor = MaterialTheme.colorScheme.surfaceVariant
+            val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+            val palette = listOf(
+                Color(0xFFE0772C), Color(0xFF2EA06A), Color(0xFFC0466B),
+                Color(0xFF8A5CC0), Color(0xFFC9A227), Color(0xFF3FA7D6),
+            )
+            fun colorFor(i: Int): Color {
+                val c = series.getOrNull(i)?.color
+                return when {
+                    c != null -> Color(c.r.toInt(), c.g.toInt(), c.b.toInt())
+                    i == 0 -> primaryText ?: primary
+                    else -> palette[(i - 1) % palette.size]
+                }
+            }
+            fun mag(i: Int): Float = series.getOrNull(i)?.values?.sum() ?: 0f
+            fun fmtTick(v: Float): String =
+                if (kotlin.math.abs(v - kotlin.math.round(v)) < 0.05f) "${v.toInt()}" else "%.1f".format(v)
+            val cartesian = style == ChartStyle.BAR || style == ChartStyle.LINE ||
+                style == ChartStyle.STACKEDBAR || style == ChartStyle.STACKEDBAR100
+            val nslots = (series.maxOfOrNull { it.values.size } ?: 0).coerceAtLeast(1)
+            val maxV = when (style) {
+                ChartStyle.STACKEDBAR -> (0 until nslots)
+                    .map { j -> series.sumOf { (it.values.getOrNull(j) ?: 0f).toDouble() }.toFloat() }
+                    .maxOrNull() ?: 1f
+                ChartStyle.STACKEDBAR100 -> 1f
+                else -> series.flatMap { it.values }.maxOrNull() ?: 1f
+            }.coerceAtLeast(1e-6f)
+            val capRound = androidx.compose.ui.graphics.StrokeCap.Round
+
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                if (cartesian) {
+                    Row(modifier = Modifier.fillMaxWidth().height(120.dp)) {
+                        if (widget.axis) {
+                            Column(
+                                modifier = Modifier.fillMaxHeight().padding(end = 4.dp),
+                                verticalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                listOf(maxV, maxV / 2f, 0f).forEach {
+                                    Text(fmtTick(it), style = MaterialTheme.typography.labelSmall, color = labelColor)
+                                }
+                            }
+                        }
+                        Canvas(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                            val w = size.width
+                            val top = 2f
+                            val plot = (size.height - 4f).coerceAtLeast(1f)
+                            val bottom = top + plot
+                            if (widget.axis) {
+                                for (k in 0..4) {
+                                    val y = top + k * plot / 4f
+                                    drawLine(trackColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+                                }
+                            }
+                            when (style) {
+                                ChartStyle.LINE -> series.forEachIndexed { i, s ->
+                                    val n = s.values.size.coerceAtLeast(1)
+                                    val path = Path()
+                                    s.values.forEachIndexed { j, v ->
+                                        val x = if (n == 1) w / 2f else w * j / (n - 1)
+                                        val y = top + (1f - (v / maxV).coerceIn(0f, 1f)) * plot
+                                        if (j == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                    }
+                                    drawPath(path, colorFor(i), style = Stroke(width = 3f, cap = capRound))
+                                }
+                                ChartStyle.BAR -> {
+                                    val sw = w / nslots
+                                    val ns = series.size.coerceAtLeast(1)
+                                    series.forEachIndexed { i, s ->
+                                        s.values.forEachIndexed { j, v ->
+                                            val bh = (v / maxV).coerceIn(0f, 1f) * plot
+                                            val bw = sw * 0.8f / ns
+                                            val x = j * sw + sw * 0.1f + i * bw
+                                            drawRect(colorFor(i), topLeft = Offset(x, bottom - bh), size = Size(bw, bh))
+                                        }
+                                    }
+                                }
+                                else -> {
+                                    val sw = w / nslots
+                                    for (j in 0 until nslots) {
+                                        val slotTotal = series
+                                            .sumOf { (it.values.getOrNull(j) ?: 0f).toDouble() }
+                                            .toFloat().coerceAtLeast(1e-6f)
+                                        val denom = if (style == ChartStyle.STACKEDBAR100) slotTotal else maxV
+                                        var acc = 0f
+                                        series.forEachIndexed { i, s ->
+                                            val v = s.values.getOrNull(j) ?: 0f
+                                            val bh = (v / denom).coerceIn(0f, 1f) * plot
+                                            val x = j * sw + sw * 0.15f
+                                            drawRect(colorFor(i), topLeft = Offset(x, bottom - acc - bh), size = Size(sw * 0.7f, bh))
+                                            acc += bh
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (widget.labels.isNotEmpty()) {
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            widget.labels.forEach {
+                                Text(it, style = MaterialTheme.typography.labelSmall, color = labelColor, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                } else {
+                    val gaugePct = if (style == ChartStyle.GAUGE) {
+                        val g = series.firstOrNull()?.goal ?: mag(0)
+                        ((mag(0) / (if (g <= 0f) 1e-6f else g)).coerceIn(0f, 1f) * 100f).toInt()
+                    } else {
+                        0
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
+                        Canvas(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
+                            val cx = size.width / 2f
+                            val cy = size.height / 2f
+                            val rad = (minOf(size.width, size.height) / 2f) - 6f
+                            when (style) {
+                                ChartStyle.PIE, ChartStyle.DONUT -> {
+                                    val total = (0 until series.size).sumOf { mag(it).toDouble() }.toFloat().coerceAtLeast(1e-6f)
+                                    var start = -90f
+                                    series.forEachIndexed { i, _ ->
+                                        val sweep = mag(i) / total * 360f
+                                        if (style == ChartStyle.DONUT) {
+                                            val r = rad - 10f
+                                            drawArc(colorFor(i), start, sweep, useCenter = false, topLeft = Offset(cx - r, cy - r), size = Size(r * 2f, r * 2f), style = Stroke(width = 20f))
+                                        } else {
+                                            drawArc(colorFor(i), start, sweep, useCenter = true, topLeft = Offset(cx - rad, cy - rad), size = Size(rad * 2f, rad * 2f))
+                                        }
+                                        start += sweep
+                                    }
+                                }
+                                ChartStyle.RINGS -> {
+                                    val n = series.size.coerceAtLeast(1)
+                                    series.forEachIndexed { i, s ->
+                                        val r = rad - i * (rad * 0.62f / n) - 2f
+                                        val tl = Offset(cx - r, cy - r)
+                                        val sz = Size(r * 2f, r * 2f)
+                                        val g = s.goal ?: mag(i)
+                                        val prog = (mag(i) / (if (g <= 0f) 1e-6f else g)).coerceIn(0f, 1f)
+                                        drawArc(trackColor, 0f, 360f, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 10f))
+                                        drawArc(colorFor(i), -90f, 360f * prog, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 10f, cap = capRound))
+                                    }
+                                }
+                                else -> {
+                                    val r = rad - 4f
+                                    val tl = Offset(cx - r, cy - r)
+                                    val sz = Size(r * 2f, r * 2f)
+                                    val g = series.firstOrNull()?.goal ?: mag(0)
+                                    val prog = (mag(0) / (if (g <= 0f) 1e-6f else g)).coerceIn(0f, 1f)
+                                    drawArc(trackColor, 135f, 270f, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 12f, cap = capRound))
+                                    drawArc(colorFor(0), 135f, 270f * prog, useCenter = false, topLeft = tl, size = sz, style = Stroke(width = 12f, cap = capRound))
+                                }
+                            }
+                        }
+                        if (style == ChartStyle.GAUGE) {
+                            Text("$gaugePct%", style = bodyFamily(MaterialTheme.typography.titleLarge), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+                if (widget.legend && series.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                    ) {
+                        series.forEachIndexed { i, s ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(colorFor(i)))
+                                Text(s.name, style = MaterialTheme.typography.labelSmall, color = labelColor)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        is Widget.RegionChart -> {
+            // Variable-width stacked-region ("coverage-gap") chart: absolute-positioned region
+            // rectangles in the [0,xMax]×[0,yMax] plane + ref lines/chips + irregular x-ticks +
+            // optional right bracket + legend. The Android twin of mobiler-web's region_chart_view.
+            val xm = widget.xMax.coerceAtLeast(1e-6f)
+            val ym = widget.yMax.coerceAtLeast(1e-6f)
+            val palette = listOf(
+                Color(0xFFE0772C), Color(0xFF2EA06A), Color(0xFFC0466B),
+                Color(0xFF8A5CC0), Color(0xFFC9A227), Color(0xFF3FA7D6),
+            )
+            fun regionColor(i: Int): Color {
+                val c = widget.regions.getOrNull(i)?.color
+                return if (c != null) Color(c.r.toInt(), c.g.toInt(), c.b.toInt()) else palette[i % palette.size]
+            }
+            // Black or white label text, whichever reads on the band's fill (perceived luminance).
+            fun textOn(c: Color): Color =
+                if (0.299f * c.red + 0.587f * c.green + 0.114f * c.blue > 0.55f) Color(0xFF1A1A1A) else Color(0xFFF5F5F5)
+            fun fmtTick(v: Float): String =
+                if (kotlin.math.abs(v - kotlin.math.round(v)) < 0.05f) "${v.toInt()}" else "%.1f".format(v)
+            val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+            val refColor = Color(0xFFC0392B)
+            val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+            val bracketColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.width(40.dp).height(300.dp).padding(end = 3.dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        horizontalAlignment = Alignment.End,
+                    ) {
+                        for (k in 4 downTo 0) {
+                            Text(fmtTick(ym * k / 4f), style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = labelColor, maxLines = 1)
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(300.dp)) {
+                            val pw = maxWidth
+                            val ph = maxHeight
+                            widget.regions.forEachIndexed { i, r ->
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = pw * (r.x0 / xm), y = ph * (1f - r.y1 / ym))
+                                        .width(pw * ((r.x1 - r.x0) / xm))
+                                        .height(ph * ((r.y1 - r.y0) / ym))
+                                        .background(regionColor(i))
+                                        .border(0.5.dp, Color.White.copy(alpha = 0.4f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (r.label.isNotEmpty()) {
+                                        Text(
+                                            r.label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = textOn(regionColor(i)),
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 3,
+                                            modifier = if (r.vertical) Modifier.rotate(-90f) else Modifier,
+                                        )
+                                    }
+                                }
+                            }
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                widget.refLines.forEach { rl ->
+                                    val y = size.height * (1f - rl.value / ym)
+                                    val effect = if (rl.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 8f)) else null
+                                    drawLine(refColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 2f, pathEffect = effect)
+                                }
+                                widget.bracket?.let { b ->
+                                    val yt = size.height * (1f - b.y1 / ym)
+                                    val yb = size.height * (1f - b.y0 / ym)
+                                    val x = size.width - 2f
+                                    drawLine(bracketColor, Offset(x, yt), Offset(x, yb), strokeWidth = 2f)
+                                    drawLine(bracketColor, Offset(x, yt), Offset(x - 6f, yt), strokeWidth = 2f)
+                                    drawLine(bracketColor, Offset(x, yb), Offset(x - 6f, yb), strokeWidth = 2f)
+                                }
+                                drawLine(axisColor, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                                drawLine(axisColor, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
+                                for (k in 0..4) {
+                                    val y = size.height * k / 4f
+                                    drawLine(axisColor, Offset(0f, y), Offset(6f, y), strokeWidth = 1.5f)
+                                }
+                                widget.ticks.forEach { t ->
+                                    val tx = size.width * (t.at / xm)
+                                    drawLine(axisColor, Offset(tx, size.height), Offset(tx, size.height - 6f), strokeWidth = 1.5f)
+                                }
+                            }
+                            widget.refLines.forEach { rl ->
+                                val y = ph * (1f - rl.value / ym)
+                                Box(modifier = Modifier.offset(x = pw - 78.dp, y = y + 2.dp)) {
+                                    Text(
+                                        rl.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp,
+                                        color = Color(0xFF1A1A1A),
+                                        modifier = Modifier
+                                            .background(Color.White, RoundedCornerShape(4.dp))
+                                            .border(0.5.dp, Color(0x33000000), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            widget.bracket?.let { b ->
+                                val yc = ph * (1f - (b.y0 + b.y1) / 2f / ym)
+                                Box(modifier = Modifier.offset(x = pw - 70.dp, y = yc - 14.dp).width(64.dp)) {
+                                    Text(
+                                        (if (b.info) "ⓘ\n" else "") + b.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 8.sp,
+                                        color = labelColor,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 4,
+                                    )
+                                }
+                            }
+                        }
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(16.dp)) {
+                            val pw = maxWidth
+                            widget.ticks.forEach { t ->
+                                Text(
+                                    t.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = labelColor,
+                                    maxLines = 1,
+                                    modifier = Modifier.offset(x = (pw * (t.at / xm)) - 24.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                if (widget.legend.isNotEmpty()) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                        widget.legend.chunked(3).forEach { rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                            ) {
+                                rowItems.forEach { li ->
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(Color(li.color.r.toInt(), li.color.g.toInt(), li.color.b.toInt())))
+                                        Text(li.label, style = MaterialTheme.typography.labelSmall, color = labelColor)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        is Widget.Calendar -> {
+            // Title, weekday header and leading blanks are pre-localized by the core — just draw.
+            val cells = ArrayList<Int?>()
+            val cellH = if (isLarge) 52.dp else 40.dp
+            repeat(widget.leadingBlanks.toInt()) { cells.add(null) }
+            for (d in 1..widget.onDay.size) cells.add(d)
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text(widget.title, style = bodyFamily(MaterialTheme.typography.titleMedium))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    widget.weekdayLabels.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.Center) }
+                }
+                cells.chunked(7).forEach { week ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        week.forEach { day ->
+                            if (day == null) {
+                                Box(modifier = Modifier.weight(1f).height(cellH))
+                            } else {
+                                val isSel = widget.selected?.toInt() == day
+                                val token = widget.onDay[day - 1]
+                                val level = (widget.markers.getOrNull(day - 1)?.toInt() ?: 0).coerceIn(0, 3)
+                                Box(
+                                    modifier = Modifier.weight(1f).height(cellH).padding(2.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                        .clickable { send(Action.Fired(token)) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text("$day", color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                                    // 0–3 busy-dots under the number, in the theme primary (onPrimary when selected).
+                                    if (level > 0) {
+                                        Row(
+                                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        ) {
+                                            repeat(level) {
+                                                Box(Modifier.size(4.dp).clip(CircleShape).background(if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        repeat(7 - week.size) { Box(modifier = Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+        is Widget.SwipeAction -> {
+            val actions = widget.actions
+            val density = LocalDensity.current
+            val revealPx = with(density) { (actions.size * 84).dp.toPx() }
+            var offsetX by remember(widget) { mutableStateOf(0f) }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
+                    actions.forEach { a ->
+                        val (bgSoft, fg) = toneColors(a.tone)
+                        // A palette pair: container behind on-container; otherwise the strong colour + white.
+                        val pal = tonePair(LocalPalette.current, a.tone) != null
+                        Box(
+                            modifier = Modifier.fillMaxHeight().width(84.dp).padding(vertical = 4.dp, horizontal = 4.dp).clip(RoundedCornerShape(12.dp)).background(if (pal) bgSoft else fg)
+                                .clickable { send(Action.Fired(a.onTap)); offsetX = 0f },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(a.label, color = if (pal) fg else Color.White, style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .offset { IntOffset(offsetX.roundToInt(), 0) }
+                        // The page's colour, not the surface: a rounded card's corners blend into the page.
+                        .background(LocalSwipeCover.current ?: MaterialTheme.colorScheme.background)
+                        .draggable(
+                            orientation = Orientation.Horizontal,
+                            state = rememberDraggableState { delta -> offsetX = (offsetX + delta).coerceIn(-revealPx, 0f) },
+                        ),
+                ) { Render(widget.child, send) }
+            }
+        }
+        is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
+
+        is Widget.Row -> Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(if (isLarge) 12.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Let greedy inputs (which fill width) share the row with trailing
+            // controls (buttons/chips/icons) instead of pushing them off-screen.
+            KeyedChildren(widget.children) { _, child ->
+                when (child) {
+                    is Widget.TextField, is Widget.Checkbox, is Widget.Column ->
+                        Box(modifier = Modifier.weight(1f)) { Render(child, send) }
+                    else -> Render(child, send)
+                }
+            }
+        }
+
+        is Widget.Column -> Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(if (isLarge) 12.dp else 6.dp),
+        ) { KeyedChildren(widget.children) { _, child -> Render(child, send) } }
+
+        is Widget.Card -> {
+            val op = widget.onPress
+            val lp = widget.onLongPress
+            // Tap and/or long-press via one `combinedClickable` so a card can carry both. The M3
+            // `Card(onClick=)` overload has no long-click, so we use the plain Card variants and
+            // attach the gesture as a modifier.
+            val clickMod = if (op != null || lp != null)
+                Modifier.combinedClickable(
+                    onClick = { if (op != null) send(Action.Fired(op)) },
+                    onLongClick = if (lp != null) ({ send(Action.Fired(lp)) }) else null,
+                )
+            else Modifier
+            val mod = Modifier.fillMaxWidth().then(clickMod)
+            when (widget.style) {
+                CardStyle.OUTLINED -> OutlinedCard(modifier = mod, shape = shapeOf { it.card } ?: CardDefaults.outlinedShape) { CardBody(widget.child, send) }
+                CardStyle.FILLED -> {
+                    val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    Card(modifier = mod, colors = colors, shape = shapeOf { it.card } ?: CardDefaults.shape) { CardBody(widget.child, send) }
+                }
+                CardStyle.ELEVATED -> {
+                    val elev = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    Card(modifier = mod, elevation = elev, shape = shapeOf { it.card } ?: CardDefaults.shape) { CardBody(widget.child, send) }
+                }
+                CardStyle.DASHED -> {
+                    // No fill; a 1.5dp dashed outline (dash 6 / gap 4) in the palette's outline, inset by
+                    // half the stroke so the clip doesn't cut it.
+                    val shape = shapeOf { it.card } ?: CardDefaults.outlinedShape
+                    val color = LocalPalette.current?.outline?.color() ?: MaterialTheme.colorScheme.outline
+                    val dashMod = Modifier.fillMaxWidth().clip(shape).then(clickMod).drawBehind {
+                        val w = 1.5.dp.toPx()
+                        translate(w / 2, w / 2) {
+                            drawOutline(
+                                shape.createOutline(Size(size.width - w, size.height - w), layoutDirection, this),
+                                color,
+                                style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))),
+                            )
+                        }
+                    }
+                    // Content colour as on the outlined card, whatever the surroundings (e.g. inside a Brand card).
+                    Box(modifier = dashMod) {
+                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onSurface?.color() ?: MaterialTheme.colorScheme.onSurface)) {
+                            CardBody(widget.child, send)
+                        }
+                    }
+                }
+                CardStyle.BRAND -> {
+                    // Brand gradient (seed → accent, via the M3 primary → secondary scheme).
+                    val cs = MaterialTheme.colorScheme
+                    val grad = Brush.linearGradient(listOf(cs.primary, cs.secondary))
+                    val brandMod = Modifier.fillMaxWidth()
+                        .clip(shapeOf { it.card } ?: MaterialTheme.shapes.medium)
+                        .background(grad)
+                        .then(clickMod)
+                    Box(modifier = brandMod) {
+                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onPrimary?.color() ?: Color.White)) { CardBody(widget.child, send) }
+                    }
+                }
+            }
+        }
+
+        is Widget.Box -> Box(contentAlignment = boxAlignFor(widget.align)) {
+            val kids = widget.children
+            if (widget.scrim && kids.size > 1) {
+                Render(kids.first(), send)
+                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.40f)))
+                CompositionLocalProvider(LocalContentColor provides Color.White) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { KeyedChildren(kids.drop(1)) { _, child -> Render(child, send) } }
+                }
+            } else {
+                KeyedChildren(kids) { _, child -> Render(child, send) }
+            }
+        }
+
+        is Widget.Grid -> BoxWithConstraints {
+            // Column count follows the available width: 2 on a phone, more on a
+            // tablet (the web/iOS twin of auto-fill / adaptive grids).
+            // with_columns: exactly that many (1-4) at every width.
+            val cols = widget.columns?.toInt()?.coerceIn(1, 4) ?: maxOf(2, (maxWidth.value / 190f).toInt())
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val keys = childKeys(widget.children)
+                widget.children.indices.chunked(cols).forEach { rowIdx ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        rowIdx.forEach { i -> key(keys[i]) { Box(modifier = Modifier.weight(1f)) { Render(widget.children[i], send) } } }
+                        repeat(cols - rowIdx.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+
+        // The edge fade is an off-screen layer, which a WebView must never be drawn into (see holdsWebView).
+        is Widget.Scroller -> if (!widget.edgeFade || widget.children.any(::holdsWebView)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) { KeyedChildren(widget.children) { _, child -> Render(child, send) } }
+        } else {
+            // Fade the viewport's trailing 32.dp (DstIn over an offscreen layer, so it works on any
+            // background) + 32.dp of trailing room so the last item clears the fade at scroll-end.
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        val fade = 32.dp.toPx()
+                        drawRect(
+                            brush = Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = size.width - fade, endX = size.width),
+                            topLeft = Offset(size.width - fade, 0f),
+                            size = Size(fade, size.height),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    }
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                KeyedChildren(widget.children) { _, child -> Render(child, send) }
+                Spacer(Modifier.width(32.dp))
+            }
+        }
+
+        // Two-pane master-detail (Widget.Split). Wide (≥600.dp — the Scaffold-rail threshold) →
+        // primary + detail side-by-side; narrow → one pane: primary, or detail + a back row when
+        // showDetail. Mirrors the Scaffold's BoxWithConstraints size switch.
+        is Widget.Split -> BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            if (maxWidth >= 600.dp) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Box(modifier = Modifier.width(320.dp)) { Render(widget.primary, send) }
+                    Box(modifier = Modifier.weight(1f)) { Render(widget.detail, send) }
+                }
+            } else if (widget.showDetail) {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val back = widget.onBack
+                    if (back != null) {
+                        TextButton(onClick = { send(Action.Fired(back)) }) {
+                            Text("‹ ${ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back"}", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Render(widget.detail, send)
+                }
+            } else {
+                Render(widget.primary, send)
+            }
+        }
+
+        // A paged feed list: pull-to-refresh on top (PullToRefreshBox) + load-more when the user
+        // scrolls near the end. Bounded height so the inner LazyColumn scrolls inside the body.
+        is Widget.LazyList -> {
+            val onLoadMore = widget.onLoadMore
+            val loading = widget.loading
+            val hasMore = widget.hasMore
+            val endLabel = widget.endLabel
+            // Only fills when the Scaffold body arm marked this exact list (LocalFillList) AND the
+            // app asked for it (widget.fill) — a nested or second `fill: true` list, not the one the
+            // Scaffold marked, keeps the 480.dp cap.
+            val fillParent = LocalFillList.current && widget.fill
+            val boundedOrFill = if (fillParent) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(max = 480.dp)
+            val list: @Composable () -> Unit = {
+                val lazyKeys = childKeys(widget.children)
+                // Keyed items keep the first visible one in place, so an item inserted above it would
+                // land just off-screen: a list that was at the very top stays at the top.
+                val listState = rememberLazyListState()
+                val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 } }
+                val firstKey = lazyKeys.firstOrNull()
+                val wasAtTop = remember(firstKey) { atTop }
+                LaunchedEffect(firstKey) { if (wasAtTop) listState.scrollToItem(0) }
+                LazyColumn(
+                    state = listState,
+                    modifier = boundedOrFill,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    itemsIndexed(widget.children, key = { i, _ -> lazyKeys[i] }) { idx, child ->
+                        // Reset the flag around the list's own children so a nested list (or a
+                        // second `fill: true` list further down) doesn't inherit fill mode.
+                        CompositionLocalProvider(LocalFillList provides false) { Render(child, send) }
+                        // Fire load-more once when the second-to-last item composes (near the end).
+                        if (onLoadMore != null && hasMore && !loading && idx >= widget.children.size - 2) {
+                            LaunchedEffect(widget.children.size, idx) { send(Action.Fired(onLoadMore)) }
+                        }
+                    }
+                    if (loading) {
+                        item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(8.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor) }
+                    } else if (!hasMore && onLoadMore != null && endLabel != null) {
+                        item {
+                            Text(
+                                endLabel,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            val onRefresh = widget.onRefresh
+            if (onRefresh != null) {
+                val ptr = rememberPullToRefreshState()
+                PullToRefreshBox(
+                    isRefreshing = widget.refreshing,
+                    onRefresh = { send(Action.Fired(onRefresh)) },
+                    modifier = boundedOrFill,
+                    state = ptr,
+                    indicator = {
+                        PullToRefreshDefaults.Indicator(
+                            state = ptr,
+                            isRefreshing = widget.refreshing,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                            color = selectionColor() ?: PullToRefreshDefaults.indicatorColor,
+                        )
+                    },
+                ) { list() }
+            } else {
+                list()
+            }
+        }
+
+        is Widget.A11y -> {
+            val desc = widget.hint?.let { "${widget.label}. $it" } ?: widget.label
+            Box(
+                modifier = Modifier.semantics(mergeDescendants = true) {
+                    contentDescription = desc
+                    when (widget.role) {
+                        A11yRole.BUTTON -> role = Role.Button
+                        A11yRole.IMAGE -> role = Role.Image
+                        A11yRole.HEADER -> heading()
+                        A11yRole.LINK, A11yRole.ADJUSTABLE, null -> {}
+                    }
+                },
+            ) {
+                Render(widget.child, send)
+            }
+        }
+
+        is Widget.Button -> MobilerButton(widget, send)
+
+        is Widget.IconButton -> IconButton(onClick = { send(Action.Fired(widget.onPress)) }, modifier = if (isLarge) Modifier.size(56.dp) else Modifier) {
+            Icon(imageVector = iconFor(widget.icon), contentDescription = widget.icon.name.lowercase(), tint = iconTintFor(widget.icon))
+        }
+
+        is Widget.Chip -> FilterChip(
+            shape = shapeOf { it.chip } ?: FilterChipDefaults.shape,
+            selected = widget.selected,
+            onClick = { send(Action.Fired(widget.onPress)) },
+            label = { Text(widget.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) },
+            modifier = if (isLarge) Modifier.height(48.dp) else Modifier,
+            colors = LocalPalette.current?.surfaceMuted?.let { FilterChipDefaults.filterChipColors(containerColor = it.color()) } ?: FilterChipDefaults.filterChipColors(),
+            border = LocalPalette.current?.outline?.let { FilterChipDefaults.filterChipBorder(enabled = true, selected = widget.selected, borderColor = it.color()) }
+                ?: FilterChipDefaults.filterChipBorder(enabled = true, selected = widget.selected),
+        )
+
+        is Widget.TextField -> {
+            val multiline = widget.kind == FieldKind.MULTILINE
+            val kbType = when (widget.kind) {
+                FieldKind.EMAIL -> KeyboardType.Email
+                FieldKind.NUMBER -> KeyboardType.Number
+                FieldKind.DECIMAL -> KeyboardType.Decimal
+                FieldKind.PHONE -> KeyboardType.Phone
+                FieldKind.URL -> KeyboardType.Uri
+                FieldKind.SECURE -> KeyboardType.Password
+                else -> KeyboardType.Text
+            }
+            val sync = remember(widget.id) { FieldSync(widget.value) }
+            sync.noteKind(widget.kind)
+            SideEffect { sync.onAppValue(widget.value) }
+            OutlinedTextField(
+                shape = shapeOf { it.input } ?: OutlinedTextFieldDefaults.shape,
+                value = sync.field,
+                onValueChange = { sync.onEdit(it) { t -> send(Action.Input(widget.id, InputValue.Text(t))) } },
+                placeholder = { Text(widget.placeholder) },
+                singleLine = !multiline,
+                minLines = if (multiline) 3 else 1,
+                visualTransformation = if (widget.kind == FieldKind.SECURE) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(keyboardType = kbType),
+                isError = widget.error != null,
+                supportingText = widget.error?.let { msg -> { Text(msg) } },
+                modifier = Modifier.fillMaxWidth(),
+                colors = paletteFieldColors(),
+            )
+        }
+
+        is Widget.SearchField -> {
+            val sync = remember(widget.id) { FieldSync(widget.value) }
+            SideEffect { sync.onAppValue(widget.value) }
+            OutlinedTextField(
+                value = sync.field,
+                onValueChange = { sync.onEdit(it) { t -> send(Action.Input(widget.id, InputValue.Text(t))) } },
+                placeholder = { Text(widget.placeholder) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                shape = shapeOf { it.input } ?: RoundedCornerShape(50),
+                modifier = Modifier.fillMaxWidth(),
+                colors = paletteFieldColors(),
+            )
+        }
+
+        is Widget.Segmented -> SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            widget.segments.forEachIndexed { i, seg ->
+                // A palette's segment_selected pair, apart from chips; unset: secondary_container, as before.
+                val segPal = LocalPalette.current
+                SegmentedButton(
+                    selected = seg.selected,
+                    onClick = { send(Action.Fired(seg.onSelect)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = widget.segments.size),
+                    colors = if (segPal?.segmentSelected != null || segPal?.onSegmentSelected != null) {
+                        SegmentedButtonDefaults.colors(
+                            activeContainerColor = segPal?.segmentSelected?.color() ?: MaterialTheme.colorScheme.secondaryContainer,
+                            activeContentColor = segPal?.onSegmentSelected?.color() ?: MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    } else {
+                        SegmentedButtonDefaults.colors()
+                    },
+                    modifier = if (isLarge) Modifier.height(56.dp) else Modifier,
+                ) { Text(seg.label, fontSize = if (isLarge) 16.sp else TextUnit.Unspecified) }
+            }
+        }
+
+        is Widget.Toggle -> Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text = widget.label, modifier = Modifier.weight(1f))
+            Switch(
+                checked = widget.value,
+                onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) },
+                colors = selectionColor()?.let { SwitchDefaults.colors(checkedTrackColor = it) } ?: SwitchDefaults.colors(),
+            )
+        }
+
+        is Widget.Checkbox -> Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = widget.value,
+                onCheckedChange = { send(Action.Input(widget.id, InputValue.Bool(it))) },
+                colors = selectionColor()?.let { CheckboxDefaults.colors(checkedColor = it) } ?: CheckboxDefaults.colors(),
+            )
+            Text(text = widget.label, modifier = Modifier.weight(1f))
+        }
+
+        is Widget.Slider -> Slider(
+            value = widget.value.toFloat(),
+            onValueChange = { send(Action.Input(widget.id, InputValue.Int(it.toLong()))) },
+            valueRange = 0f..widget.max.toFloat(),
+            modifier = Modifier.fillMaxWidth(),
+            colors = selectionColor()?.let { SliderDefaults.colors(thumbColor = it, activeTrackColor = it) } ?: SliderDefaults.colors(),
+        )
+
+        is Widget.Stepper -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { send(Action.Fired(widget.onDecrement)) }) { Text("−") }
+            Text(text = "${widget.value}", style = bodyFamily(MaterialTheme.typography.titleMedium))
+            OutlinedButton(onClick = { send(Action.Fired(widget.onIncrement)) }) { Text("+") }
+        }
+
+        is Widget.Scaffold -> {
+            // Hardware/gesture back pops the nav stack (fires the core's back
+            // event). At the root (back == null) the system back exits the app.
+            val back = widget.back
+            if (back != null) {
+                BackHandler { send(Action.Fired(back)) }
+            }
+            // Modal bottom sheet — present in the tree ⇒ shown (a Popup, so it overlays
+            // everything regardless of where it's composed). Scrim/swipe fires on_dismiss.
+            widget.sheet?.let { sheet ->
+                ModalBottomSheet(onDismissRequest = { send(Action.Fired(sheet.onDismiss)) }, shape = activeTheme?.shapes?.sheetTop?.let { r ->
+                    // Pill is capped at 32dp: a dome would clip the sheet's content.
+                    val top = if (r is dev.mobiler.todo.shared.types.Radius.Dp) r.value.toInt().dp else 32.dp
+                    RoundedCornerShape(topStart = top, topEnd = top)
+                } ?: BottomSheetDefaults.ExpandedShape, scrimColor = LocalPalette.current?.scrim?.color() ?: BottomSheetDefaults.ScrimColor) {
+                    // The sheet is its own window: the same pre-Android-9 automatic focus happens there. The
+                    // sink spans the content (a 0-size target is skipped by the initial focus search) without
+                    // adding height.
+                    Box {
+                        PrePieFocusSink(Modifier.matchParentSize())
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(sheet.title, style = activeTheme?.typeScale?.headline?.let { scaled(it, MaterialTheme.typography.titleLarge, true) } ?: MaterialTheme.typography.titleLarge)
+                            CompositionLocalProvider(LocalSwipeCover provides BottomSheetDefaults.ContainerColor) { Render(sheet.child, send) }
+                        }
+                    }
+                }
+            }
+            BoxWithConstraints {
+                // On a wide screen (tablet / landscape) the bottom tab-bar becomes a
+                // side navigation rail; a phone keeps its bottom tabs.
+                val wide = maxWidth >= 600.dp && widget.tabs.isNotEmpty()
+                Row(modifier = Modifier.fillMaxSize()) {
+                    if (wide) {
+                        NavigationRail(containerColor = LocalPalette.current?.surfaceBar?.color() ?: NavigationRailDefaults.ContainerColor) {
+                            widget.tabs.forEach { t ->
+                                NavigationRailItem(
+                                    selected = t.selected,
+                                    onClick = { send(Action.Fired(t.onSelect)) },
+                                    label = { TabLabel(t) },
+                                    icon = { TabIcon(t) },
+                                    colors = LocalPalette.current?.primaryText?.color()?.let { NavigationRailItemDefaults.colors(selectedTextColor = it) } ?: NavigationRailItemDefaults.colors(),
+                                )
+                            }
+                        }
+                    }
+                    // cx.snackbar needs a composed host to time out; count this one while it's on screen.
+                    DisposableEffect(Unit) {
+                        SnackbarBus.hosts++
+                        onDispose {
+                            SnackbarBus.hosts--
+                            // The last host went: nothing would time the snackbar out any more. Its call
+                            // answers "timeout" (a dismiss, unlike a replace).
+                            if (SnackbarBus.hosts == 0) SnackbarBus.state.currentSnackbarData?.dismiss()
+                        }
+                    }
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        // cx.snackbar — M3 stacks it above the bottom bar and the FAB.
+                        snackbarHost = { SnackbarHost(SnackbarBus.state) },
+                        topBar = {
+                            CenterAlignedTopAppBar(
+                                // The type scale's `title` spec, else the app bar's own style.
+                                title = { activeTheme?.typeScale?.title?.let { Text(widget.title, style = scaled(it, MaterialTheme.typography.titleLarge, true)) } ?: Text(widget.title) },
+                                navigationIcon = {
+                                    if (back != null) {
+                                        IconButton(onClick = { send(Action.Fired(back)) }) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = ActiveLabels.current?.back?.takeIf { it.isNotEmpty() } ?: "Back",
+                                                tint = LocalPalette.current?.primaryText?.color() ?: LocalContentColor.current)
+                                        }
+                                    }
+                                },
+                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = LocalPalette.current?.surfaceBar?.color() ?: MaterialTheme.colorScheme.surface),
+                            )
+                        },
+                        bottomBar = {
+                          Column {
+                            val pinned = widget.bottomBar.orEmpty()
+                            val bottomTabs = !wide && widget.tabs.isNotEmpty()
+                            // The tabs' measured height, system bar inset included (like the keyboard's); until
+                            // measured, M3's 80dp bar plus that inset, so a first frame with the keyboard up is right.
+                            val density = LocalDensity.current
+                            val navInset = WindowInsets.navigationBars.getBottom(density)
+                            var tabsHeight by remember { mutableIntStateOf(with(density) { 80.dp.roundToPx() } + navInset) }
+                            if (pinned.isNotEmpty()) {
+                                // with_bottom_bar: the screen's main actions above the tabs. M3 lifts the FAB and
+                                // snackbar above this slot. Without tabs below it, it clears the system bar and
+                                // rises with the keyboard. Above tabs, it rides on the keyboard once the keyboard
+                                // is taller than the tabs (which stay behind it): the extra padding is the
+                                // keyboard's height minus the tabs', computed at layout, so the bar moves with the
+                                // keyboard frame by frame and nothing appears or disappears.
+                                val barInsets = if (bottomTabs) {
+                                    Modifier.windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets(bottom = tabsHeight)))
+                                } else {
+                                    Modifier.navigationBarsPadding().imePadding()
+                                }
+                                Surface(color = LocalPalette.current?.surfaceBar?.color() ?: MaterialTheme.colorScheme.surfaceContainer) {
+                                    Column(barInsets) {
+                                        HorizontalDivider(color = LocalPalette.current?.outlineVariant?.color() ?: MaterialTheme.colorScheme.outlineVariant)
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            KeyedChildren(pinned) { _, child -> Box(Modifier.weight(1f)) { Render(child, send) } }
+                                        }
+                                    }
+                                }
+                            }
+                            if (bottomTabs) {
+                                NavigationBar(Modifier.onSizeChanged { tabsHeight = it.height }) {
+                                    widget.tabs.forEach { t ->
+                                        NavigationBarItem(
+                                            selected = t.selected,
+                                            onClick = { send(Action.Fired(t.onSelect)) },
+                                            label = { TabLabel(t) },
+                                            icon = { TabIcon(t) },
+                                            // M3 colours the selected label with `secondary` (the brand accent); a palette uses primary_text.
+                                            colors = LocalPalette.current?.primaryText?.color()?.let { NavigationBarItemDefaults.colors(selectedTextColor = it) } ?: NavigationBarItemDefaults.colors(),
+                                        )
+                                    }
+                                }
+                            }
+                          }
+                        },
+                        floatingActionButton = {
+                            widget.fab?.let { fab ->
+                                val label = fab.label
+                                if (label != null) {
+                                    // Extended FAB (with_extended_fab): icon + label; the label is the spoken name.
+                                    ExtendedFloatingActionButton(
+                                        onClick = { send(Action.Fired(fab.onPress)) },
+                                        // M3 clears its label's semantics (inside the expand animation), which left the
+                                        // button unnamed for TalkBack; name it by the label.
+                                        // Capped like web/iOS so a very long label ellipsizes on screen instead of
+                                        // pushing the FAB's leading edge off it.
+                                        modifier = Modifier
+                                            .semantics { contentDescription = label }
+                                            .widthIn(max = LocalConfiguration.current.screenWidthDp.dp - 32.dp),
+                                        icon = { Icon(iconFor(fab.icon), contentDescription = null) },
+                                        text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.extendedFabShape,
+                                    )
+                                } else {
+                                    FloatingActionButton(onClick = { send(Action.Fired(fab.onPress)) }, shape = shapeOf { it.fab } ?: FloatingActionButtonDefaults.shape) {
+                                        Icon(iconFor(fab.icon), contentDescription = null)
+                                    }
+                                }
+                            }
+                        },
+                    ) { padding ->
+                        // Animate the body when the route changes: slide for push/pop (direction from depth), a
+                        // crossfade for a lateral move at the same depth. Every screen with tabs shares one content
+                        // key, so a tab switch happens inside TabSlots, which keeps each visited tab composed
+                        // (ADR-0057). Same route = a data update → no transition (contentKey).
+                        AnimatedContent(
+                            targetState = widget,
+                            contentKey = { if (tabSlotOf(it) != null) TABS_KEY else it.route },
+                            transitionSpec = { navTransition() },
+                            label = "nav",
+                        ) { screen ->
+                            val slot = tabSlotOf(screen)
+                            if (slot != null) TabSlots(screen, slot, padding, send) else ScreenBody(screen, padding, send)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------- Style-token mappings (the only place that decides concrete looks) ----------
+
+@Composable
+private fun typographyFor(style: ModelTextStyle): androidx.compose.ui.text.TextStyle {
+    val base = when (style) {
+        ModelTextStyle.BODY -> MaterialTheme.typography.bodyLarge
+        ModelTextStyle.TITLE -> MaterialTheme.typography.headlineMedium
+        ModelTextStyle.SUBTITLE -> MaterialTheme.typography.titleMedium
+        ModelTextStyle.CAPTION -> MaterialTheme.typography.bodySmall
+        ModelTextStyle.EMPHASIS -> MaterialTheme.typography.bodyLarge
+        ModelTextStyle.DISPLAY -> MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold)
+        ModelTextStyle.HEADLINE -> MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
+    }
+    val ts = activeTheme?.typeScale ?: return base
+    val (spec, tight) = when (style) {
+        ModelTextStyle.DISPLAY -> ts.display to true
+        ModelTextStyle.HEADLINE -> ts.headline to true
+        ModelTextStyle.TITLE -> ts.title to true
+        ModelTextStyle.SUBTITLE -> ts.subtitle to false
+        ModelTextStyle.BODY -> ts.body to false
+        ModelTextStyle.EMPHASIS -> ts.emphasis to false
+        ModelTextStyle.CAPTION -> ts.caption to false
+    }
+    return spec?.let { scaled(it, base, tight) } ?: base
+}
+
+/** A type-scale spec applied over `base` (see ui/theme applySpec). */
+@Composable
+private fun scaled(spec: dev.mobiler.todo.shared.types.TypeSpec, base: androidx.compose.ui.text.TextStyle, tight: Boolean): androidx.compose.ui.text.TextStyle =
+    applySpec(base, spec, tight, activeTheme?.font == dev.mobiler.todo.shared.types.FontFamily.CUSTOM, androidx.compose.ui.platform.LocalContext.current)
+
+@Composable
+private fun colorFor(style: ModelTextStyle): Color = when (style) {
+    ModelTextStyle.CAPTION -> MaterialTheme.colorScheme.onSurfaceVariant
+    else -> MaterialTheme.colorScheme.onSurface
+}
+
+// Active app theme (set by App() when a Scaffold renders), read by the non-composable mapper
+// helpers below for density (spacing) + image-corner — knobs MaterialTheme can't carry.
+// null = framework defaults (no visual change). App-global, like dark mode; the SwiftUI
+// shell's `ActiveTheme.current` twin.
+private var activeTheme: ModelTheme? = null
+
+// Theme.shapes per component: the set radius's shape, else null (the call site keeps its default).
+private fun shapeOf(pick: (dev.mobiler.todo.shared.types.Shapes) -> dev.mobiler.todo.shared.types.Radius?): androidx.compose.ui.graphics.Shape? =
+    activeTheme?.shapes?.let(pick)?.let { radiusShape(it) }
+
+// Under FontFamily.CUSTOM the title slots carry the display family; non-title text that borrows a
+// title slot's size (calendar month, stepper value, gauge %) keeps the body family. Unchanged otherwise.
+@Composable
+private fun bodyFamily(style: androidx.compose.ui.text.TextStyle): androidx.compose.ui.text.TextStyle =
+    if (activeTheme?.font == dev.mobiler.todo.shared.types.FontFamily.CUSTOM) style.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily) else style
+
+/** The current scaffold's app-wide shell text (ShellLabels), set when App() renders. Core.kt's
+ *  dialog/picker plugins read it for their defaults; null ⇒ English/platform defaults. */
+object ActiveLabels {
+    @Volatile var current: ShellLabels? = null
+}
+
+/** The current scaffold's resolved light/dark (appearance, else dark_mode, else the OS), set when App()
+ *  renders. Core.kt's picker dialogs follow it. */
+object ActiveAppearance {
+    @Volatile var dark: Boolean = false
+}
+
+// Spacing multiplier from the theme's density. Comfortable (or un-themed) = 1.0; Compact tightens;
+// Large loosens.
+private val densityScale: Float
+    get() = when (activeTheme?.density) {
+        Density.COMPACT -> 0.75f
+        Density.COMFORTABLE, null -> 1.0f
+        Density.LARGE -> 1.25f
+    }
+
+// Density.LARGE also enlarges controls (56.dp buttons/segmented, 48.dp chips, 48.dp day-cell tap
+// targets, 16.sp control labels, 14.sp nav labels). Every use is `if (isLarge) <large> else <the
+// original value>` so other densities stay pixel-identical.
+private val isLarge: Boolean
+    get() = activeTheme?.density == Density.LARGE
+
+private val LargeButtonPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)
+
+// Image corner radius (dp) from the theme's corner; 16 when un-themed (the original look).
+private val imageCornerDp: Int
+    get() = when (activeTheme?.corner) {
+        Corner.NONE -> 0
+        Corner.SMALL -> 10
+        Corner.MEDIUM -> 16
+        Corner.LARGE -> 24
+        null -> 16
+    }
+
+private fun spacingFor(size: Spacing): Dp {
+    val base = when (size) {
+        Spacing.XS -> 4
+        Spacing.SM -> 8
+        Spacing.MD -> 12
+        Spacing.LG -> 16
+        Spacing.XL -> 24
+    }
+    return (base * densityScale).dp
+}
+
+/** An avatar's initials (the first two characters) on the secondary container, 40% of the diameter. */
+@Composable
+private fun AvatarInitials(initials: String, d: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier.size(d).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            // Two code points, not UTF-16 units (which could split an emoji); like web.
+            initials.codePoints().limit(2).toArray().let { String(it, 0, it.size) },
+            style = MaterialTheme.typography.bodyLarge.copy(fontSize = (d.value * 0.4f).sp, fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
+}
+
+private fun iconFor(icon: WidgetIcon): androidx.compose.ui.graphics.vector.ImageVector = when (icon) {
+    WidgetIcon.DELETE -> Icons.Default.Delete
+    WidgetIcon.ADD -> Icons.Default.Add
+    WidgetIcon.EDIT -> Icons.Default.Edit
+    WidgetIcon.CLOSE -> Icons.Default.Close
+    WidgetIcon.SETTINGS -> Icons.Default.Settings
+    WidgetIcon.CHECK -> Icons.Default.Check
+    WidgetIcon.STAR -> Icons.Default.Star
+    WidgetIcon.INFO -> Icons.Default.Info
+    WidgetIcon.HOME -> Icons.Default.Home
+    WidgetIcon.SEARCH -> Icons.Default.Search
+    WidgetIcon.MENU -> Icons.Default.Menu
+    WidgetIcon.FILTER -> Icons.Default.FilterList
+    WidgetIcon.BACK -> Icons.AutoMirrored.Filled.ArrowBack
+    WidgetIcon.FORWARD -> Icons.AutoMirrored.Filled.ArrowForward
+    WidgetIcon.DOWN -> Icons.Default.KeyboardArrowDown
+    WidgetIcon.BELL -> Icons.Default.Notifications
+    WidgetIcon.CART -> Icons.Default.ShoppingCart
+    WidgetIcon.SHARE -> Icons.Default.Share
+    WidgetIcon.HEART -> Icons.Default.FavoriteBorder
+    WidgetIcon.HEARTFILLED -> Icons.Default.Favorite
+    WidgetIcon.PERSON -> Icons.Default.Person
+    WidgetIcon.PEOPLE -> Icons.Default.People
+    WidgetIcon.PHONE -> Icons.Default.Phone
+    WidgetIcon.MAIL -> Icons.Default.Email
+    WidgetIcon.CALENDAR -> Icons.Default.CalendarMonth
+    WidgetIcon.CLOCK -> Icons.Default.Schedule
+    WidgetIcon.MAPPIN -> Icons.Default.Place
+    WidgetIcon.CAMERA -> Icons.Default.PhotoCamera
+    WidgetIcon.PHOTO -> Icons.Default.Image
+    WidgetIcon.PLAY -> Icons.Default.PlayArrow
+    WidgetIcon.SCISSORS -> Icons.Default.ContentCut
+    WidgetIcon.DONEALL -> Icons.Default.DoneAll
+    WidgetIcon.LEDGER -> Icons.AutoMirrored.Filled.ReceiptLong
+    WidgetIcon.CHART -> Icons.AutoMirrored.Filled.ShowChart
+    WidgetIcon.WALLET -> Icons.Default.AccountBalanceWallet
+    WidgetIcon.CREDITCARD -> Icons.Default.CreditCard
+    WidgetIcon.LOCK -> Icons.Default.Lock
+    WidgetIcon.DOWNLOAD -> Icons.Default.Download
+    WidgetIcon.UPLOAD -> Icons.Default.Upload
+    WidgetIcon.GLOBE -> Icons.Default.Language
+}
+
+@Composable
+private fun iconTintFor(icon: WidgetIcon): Color = when (icon) {
+    WidgetIcon.STAR -> LocalPalette.current?.primaryText?.color() ?: MaterialTheme.colorScheme.primary
+    else -> LocalContentColor.current
+}
+
+@Composable
+private fun toneColors(tone: Tone): Pair<Color, Color> {
+    val cs = MaterialTheme.colorScheme
+    val pal = LocalPalette.current
+    tonePair(pal, tone)?.let { return it.container.color() to it.onContainer.color() }
+    if (pal != null && tone == Tone.NEUTRAL) return (pal.surfaceMuted?.color() ?: cs.surfaceVariant) to (pal.onSurfaceVariant?.color() ?: cs.onSurfaceVariant)
+    return when (tone) {
+        Tone.NEUTRAL -> cs.surfaceVariant to cs.onSurfaceVariant
+        Tone.SUCCESS -> Color(0xFF2E7D32).copy(alpha = 0.15f) to Color(0xFF2E7D32)
+        Tone.WARNING -> Color(0xFFE65100).copy(alpha = 0.15f) to Color(0xFFE65100)
+        Tone.DANGER -> cs.errorContainer to cs.onErrorContainer
+        Tone.INFO -> cs.tertiaryContainer to cs.onTertiaryContainer
+    }
+}
+
+// ADR-0050: a tab's badge. The mark is drawn in the palette's error_fill / on_error_fill (else M3's badge colours) and
+// is silent; the spoken suffix (label, else text) rides on the tab's label, so TalkBack reads "Nalog, 3 nove poruke".
+@Composable
+private fun TabBadgeMark(b: TabBadge) {
+    val pal = LocalPalette.current
+    val fill = pal?.errorFill?.color() ?: BadgeDefaults.containerColor
+    val ink = pal?.onErrorFill?.color() ?: MaterialTheme.colorScheme.onError
+    val quiet = Modifier.clearAndSetSemantics {}
+    if (b.text.isEmpty()) Badge(quiet.size(8.dp), containerColor = fill, contentColor = ink)
+    else Badge(quiet, containerColor = fill, contentColor = ink) { Text(b.text, fontSize = if (isLarge) 13.sp else 11.sp) }
+}
+
+@Composable
+private fun TabIcon(t: Tab) {
+    val icon = t.icon ?: return
+    val b = t.badge
+    if (b == null) Icon(iconFor(icon), contentDescription = null)
+    else BadgedBox(badge = { TabBadgeMark(b) }) { Icon(iconFor(icon), contentDescription = null) }
+}
+
+@Composable
+private fun TabLabel(t: Tab) {
+    val b = t.badge
+    val spoken = b?.let { it.label.ifEmpty { it.text } }.orEmpty()
+    val named = if (spoken.isEmpty()) Modifier else Modifier.semantics { contentDescription = "${t.label}, $spoken" }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(t.label, named, fontSize = if (isLarge) 14.sp else TextUnit.Unspecified)
+        // A label-only tab has no icon to carry the badge: it follows the label.
+        if (b != null && t.icon == null) { Spacer(Modifier.width(4.dp)); TabBadgeMark(b) }
+    }
+}
+
+// Strong (filled) color pair for a toned button. A palette's error_fill / on_error_fill replace a filled
+// Danger button's colours, each falling back to today's.
+@Composable
+private fun toneStrong(tone: Tone): Pair<Color, Color> {
+    val (fill, onFill) = toneStrongBase(tone)
+    val pal = LocalPalette.current
+    if (tone != Tone.DANGER || pal == null) return fill to onFill
+    return (pal.errorFill?.color() ?: fill) to (pal.onErrorFill?.color() ?: onFill)
+}
+
+// Outlined/text toned buttons' colour: a palette's `error` for Danger, else today's strong colour.
+@Composable
+private fun toneLine(tone: Tone): Color =
+    (if (tone == Tone.DANGER) LocalPalette.current?.error?.color() else null) ?: toneStrongBase(tone).first
+
+@Composable
+private fun toneStrongBase(tone: Tone): Pair<Color, Color> {
+    val cs = MaterialTheme.colorScheme
+    // A palette pair flips for fills: on-container fill, container text.
+    tonePair(LocalPalette.current, tone)?.let { return it.onContainer.color() to it.container.color() }
+    return when (tone) {
+        Tone.NEUTRAL -> cs.primary to cs.onPrimary
+        Tone.SUCCESS -> Color(0xFF2E7D32) to Color.White
+        Tone.WARNING -> Color(0xFFE65100) to Color.White
+        Tone.DANGER -> cs.error to cs.onError
+        Tone.INFO -> cs.tertiary to cs.onTertiary
+    }
+}
+
+// The palette's container/on-container pair for a tone (null: no palette, NEUTRAL, or unset).
+private fun tonePair(roles: dev.mobiler.todo.shared.types.ColorRoles?, tone: Tone): TonePair? = when (tone) {
+    Tone.SUCCESS -> roles?.success
+    Tone.WARNING -> roles?.warning
+    Tone.DANGER -> roles?.danger
+    Tone.INFO -> roles?.info
+    Tone.NEUTRAL -> null
+}
+
+/** The palette's `selection` mark colour; null = M3's default (primary) at each site, as before. */
+@Composable
+private fun selectionColor(): Color? = LocalPalette.current?.selection?.color()
+
+// Text-field colours from the palette: `surface_muted` fill, `selection` focus border, label, cursor and
+// text-selection handles, `error` for the invalid state. Any unset role keeps the M3 default.
+@Composable
+private fun paletteFieldColors(): TextFieldColors {
+    val pal = LocalPalette.current ?: return OutlinedTextFieldDefaults.colors()
+    val d = OutlinedTextFieldDefaults.colors()
+    val muted = pal.surfaceMuted?.color()
+    val sel = pal.selection?.color()
+    val err = pal.error?.color()
+    return OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = muted ?: d.focusedContainerColor,
+        unfocusedContainerColor = muted ?: d.unfocusedContainerColor,
+        errorContainerColor = muted ?: d.errorContainerColor,
+        focusedBorderColor = sel ?: d.focusedIndicatorColor,
+        focusedLabelColor = sel ?: d.focusedLabelColor,
+        cursorColor = sel ?: d.cursorColor,
+        selectionColors = sel?.let { TextSelectionColors(handleColor = it, backgroundColor = it.copy(alpha = 0.4f)) } ?: d.textSelectionColors,
+        errorBorderColor = err ?: d.errorIndicatorColor,
+        errorLabelColor = err ?: d.errorLabelColor,
+        errorSupportingTextColor = err ?: d.errorSupportingTextColor,
+        errorCursorColor = err ?: d.errorCursorColor,
+    )
+}
+
+// Widget.Button. A NEUTRAL tone keeps each M3 button's default colors (an un-toned button renders
+// exactly as before); other tones recolor FILLED/OUTLINED/TEXT from the strong tone color and TONAL
+// from the tone's container pair. `icon` is a leading glyph; `wide` fills the width.
+@Composable
+private fun MobilerButton(widget: Widget.Button, send: (Action) -> Unit) {
+    val onClick = { send(Action.Fired(widget.onPress)) }
+    val large = isLarge
+    val modifier = Modifier
+        .then(if (widget.wide) Modifier.fillMaxWidth() else Modifier)
+        .then(if (large) Modifier.heightIn(min = 56.dp) else Modifier)
+    val neutral = widget.tone == Tone.NEUTRAL
+    val (strong, onStrong) = toneStrong(widget.tone)
+    val line = toneLine(widget.tone)
+    val (soft, onSoft) = toneColors(widget.tone)
+    val content: @Composable RowScope.() -> Unit = {
+        widget.icon?.let {
+            Icon(iconFor(it), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+        }
+        Text(widget.label, fontSize = if (large) 16.sp else TextUnit.Unspecified)
+    }
+    when (widget.style) {
+        ButtonStyle.FILLED -> Button(
+            onClick = onClick,
+            modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.shape,
+            contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+            colors = if (neutral) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = strong, contentColor = onStrong),
+            content = content,
+        )
+        ButtonStyle.TONAL -> FilledTonalButton(
+            onClick = onClick,
+            modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.filledTonalShape,
+            contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+            colors = if (neutral) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.filledTonalButtonColors(containerColor = soft, contentColor = onSoft),
+            content = content,
+        )
+        ButtonStyle.OUTLINED -> if (neutral) {
+            val pal = LocalPalette.current
+            val pt = pal?.primaryText?.color()
+            // outlined_fill / outlined_border (alpha allowed); unset: transparent and the outline, as before.
+            val fill = pal?.outlinedFill?.color()
+            val edge = pal?.outlinedBorder?.color()
+            val colors = if (pt != null || fill != null) {
+                ButtonDefaults.outlinedButtonColors(containerColor = fill ?: Color.Transparent, contentColor = pt ?: MaterialTheme.colorScheme.primary)
+            } else {
+                ButtonDefaults.outlinedButtonColors()
+            }
+            if (edge != null) {
+                OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                    shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape, colors = colors, border = BorderStroke(1.dp, edge), content = content)
+            } else {
+                OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                    shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape, colors = colors, content = content)
+            }
+        } else {
+            OutlinedButton(
+                onClick = onClick,
+                modifier = modifier,
+                shape = shapeOf { it.button } ?: ButtonDefaults.outlinedShape,
+                contentPadding = if (large) LargeButtonPadding else ButtonDefaults.ContentPadding,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = line),
+                border = BorderStroke(1.dp, line),
+                content = content,
+            )
+        }
+        ButtonStyle.TEXT -> TextButton(
+            onClick = onClick,
+            modifier = modifier,
+            shape = shapeOf { it.button } ?: ButtonDefaults.textShape,
+            contentPadding = if (large) LargeButtonPadding else ButtonDefaults.TextButtonContentPadding,
+            colors = if (neutral) (LocalPalette.current?.primaryText?.color()?.let { ButtonDefaults.textButtonColors(contentColor = it) } ?: ButtonDefaults.textButtonColors()) else ButtonDefaults.textButtonColors(contentColor = line),
+            content = content,
+        )
+    }
+}
+
+// Concrete RGB for each project-identity color (same in light + dark — these are
+// saturated identity colors, not theme surfaces).
+private fun projectColorOf(color: ProjectColor): Color = when (color) {
+    ProjectColor.INDIGO -> Color(0xFF5C6BC0)
+    ProjectColor.TEAL -> Color(0xFF26A69A)
+    ProjectColor.CORAL -> Color(0xFFFF7043)
+    ProjectColor.AMBER -> Color(0xFFFFB300)
+    ProjectColor.LIME -> Color(0xFF9CCC65)
+    ProjectColor.PINK -> Color(0xFFEC407A)
+}
+
+// Native video player (Widget.Video) — Media3 ExoPlayer in a PlayerView. The app drives play/pause
+// (`playing`) + seek (`seekToMs`, applied when it changes); a 1s loop reports the position via
+// Action.Input(id, Int(ms)); onEnded fires (loop is handled by repeatMode). The player is keyed by
+// `url` (remember) and released on dispose — never leaked across the ~1/sec re-render.
+// Build a MediaItem with optional sidecar WebVTT caption tracks (Media3 renders them natively).
+@OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun buildVideoItem(url: String, captions: List<Caption>): MediaItem {
+    val b = MediaItem.Builder().setUri(url)
+    if (captions.isNotEmpty()) {
+        b.setSubtitleConfigurations(captions.map { c ->
+            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(c.url))
+                .setMimeType(androidx.media3.common.MimeTypes.TEXT_VTT)
+                .setLanguage(c.language)
+                .setLabel(c.label)
+                .setSelectionFlags(if (c.defaultOn) androidx.media3.common.C.SELECTION_FLAG_DEFAULT else 0)
+                .build()
+        })
+    }
+    return b.build()
+}
+
+@OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Long, controls: Boolean, looping: Boolean, muted: Boolean, onEnded: String?, poster: String?, startAtMs: Long, captions: List<Caption>, rate: Float, volume: Float, urls: List<String>, startIndex: Long, seekIndex: Long, allowPip: Boolean, send: (Action) -> Unit) {
+    val context = LocalContext.current
+    val player = remember(url, urls) {
+        ExoPlayer.Builder(context).build().apply {
+            if (urls.isEmpty()) {
+                setMediaItem(buildVideoItem(url, captions))
+            } else {
+                setMediaItems(urls.map { buildVideoItem(it, emptyList()) }, startIndex.toInt().coerceIn(0, maxOf(0, urls.size - 1)), 0L)
+            }
+            prepare()
+        }
+    }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED && onEnded != null) send(Action.Fired(onEnded))
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener); player.release() }
+    }
+    LaunchedEffect(looping) { player.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
+    LaunchedEffect(muted, volume) { player.volume = if (muted) 0f else volume.coerceIn(0f, 1f) }
+    LaunchedEffect(rate) { player.setPlaybackSpeed(if (rate > 0f) rate else 1f) }
+    // PiP: on Android 12+ auto-enter when the app is backgrounded (no button needed). Gated by allowPip;
+    // needs android:supportsPictureInPicture on the activity (template manifest).
+    val activity = context as? android.app.Activity
+    LaunchedEffect(allowPip) {
+        if (allowPip && activity != null && android.os.Build.VERSION.SDK_INT >= 31) {
+            activity.setPictureInPictureParams(android.app.PictureInPictureParams.Builder().setAutoEnterEnabled(true).build())
+        }
+    }
+    // Position + transport state (duration / state / buffered / playlist index) via suffixed input ids.
+    var lastDur by remember { mutableStateOf(Long.MIN_VALUE) }
+    var lastState by remember { mutableStateOf(-1L) }
+    var lastIndex by remember { mutableStateOf(-2L) }
+    LaunchedEffect(player, id) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            send(Action.Input(id, InputValue.Int(player.currentPosition)))
+            val dur = if (player.duration == androidx.media3.common.C.TIME_UNSET) -1L else player.duration
+            if (dur != lastDur) { lastDur = dur; send(Action.Input("$id.duration", InputValue.Int(dur))) }
+            send(Action.Input("$id.buffered", InputValue.Int(player.bufferedPosition)))
+            val state = when {
+                player.playbackState == Player.STATE_ENDED -> 4L
+                player.playbackState == Player.STATE_BUFFERING -> 1L
+                player.isPlaying -> 3L
+                player.playbackState == Player.STATE_READY -> 2L
+                else -> 0L
+            }
+            if (state != lastState) { lastState = state; send(Action.Input("$id.state", InputValue.Int(state))) }
+            val idx = player.currentMediaItemIndex.toLong()
+            if (idx != lastIndex) { lastIndex = idx; send(Action.Input("$id.index", InputValue.Int(idx))) }
+        }
+    }
+    LaunchedEffect(playing) { player.playWhenReady = playing }
+    var lastSeek by remember { mutableStateOf(-1L) }
+    LaunchedEffect(seekToMs) {
+        if (seekToMs >= 0 && seekToMs != lastSeek) { lastSeek = seekToMs; player.seekTo(seekToMs) }
+        else if (seekToMs < 0) { lastSeek = -1L }
+    }
+    var startApplied by remember { mutableStateOf(false) }
+    LaunchedEffect(player) {
+        if (startAtMs >= 0 && !startApplied) { startApplied = true; player.seekTo(startAtMs) }
+    }
+    var lastSeekIndex by remember { mutableStateOf(-1L) }
+    LaunchedEffect(seekIndex) {
+        if (seekIndex >= 0 && seekIndex != lastSeekIndex) { lastSeekIndex = seekIndex; player.seekTo(seekIndex.toInt(), 0L) }
+        else if (seekIndex < 0) { lastSeekIndex = -1L }
+    }
+    // Poster: fetch the image off the main thread, show it as PlayerView artwork while idle.
+    val posterDrawable = remember(poster) { mutableStateOf<android.graphics.drawable.Drawable?>(null) }
+    LaunchedEffect(poster) {
+        if (poster != null) {
+            posterDrawable.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    java.net.URL(poster).openStream().use {
+                        android.graphics.drawable.BitmapDrawable(context.resources, android.graphics.BitmapFactory.decodeStream(it))
+                    }
+                } catch (e: Exception) { null }
+            }
+        }
+    }
+    AndroidView(
+        factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = controls } },
+        update = { view ->
+            view.useController = controls
+            view.defaultArtwork = posterDrawable.value
+            view.artworkDisplayMode = if (posterDrawable.value != null) PlayerView.ARTWORK_DISPLAY_MODE_FILL else PlayerView.ARTWORK_DISPLAY_MODE_OFF
+        },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
+    )
+}
+
+// General embedded web content (Widget.WebView) — an android.webkit.WebView in an AndroidView. JS +
+// inline-media autoplay are enabled so hosted players (e.g. Bunny.net embeds) work. Keyed by `url`
+// (remember) and destroyed on dispose — never leaked.
+@Composable
+private fun WebViewWidget(url: String) {
+    val context = LocalContext.current
+    val webView = remember(url) {
+        android.webkit.WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            webViewClient = android.webkit.WebViewClient()
+            loadUrl(url)
+        }
+    }
+    DisposableEffect(webView) { onDispose { webView.destroy() } }
+    AndroidView(
+        factory = { webView },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
+    )
+}
+
+/** In-app PDF viewer (Widget.PdfView). Downloads a remote PDF to the cache (or opens a file URI),
+ *  renders every page to a bitmap with the platform PdfRenderer, and stacks them. The parent
+ *  scroller handles overflow. */
+@Composable
+private fun PdfViewWidget(url: String) {
+    val context = LocalContext.current
+    var pages by remember(url) { mutableStateOf<List<ImageBitmap>>(emptyList()) }
+    var error by remember(url) { mutableStateOf<String?>(null) }
+    LaunchedEffect(url) {
+        try {
+            pages = withContext(Dispatchers.IO) { renderPdfPages(context, url) }
+        } catch (e: Exception) {
+            error = e.message ?: "could not load PDF"
+        }
+    }
+    Column(modifier = Modifier.fillMaxWidth().heightIn(min = 480.dp)) {
+        when {
+            error != null -> Text(ActiveLabels.current?.pdfError?.takeIf { it.isNotEmpty() } ?: "PDF: $error")
+            pages.isEmpty() -> CircularProgressIndicator(modifier = Modifier.padding(16.dp), color = selectionColor() ?: ProgressIndicatorDefaults.circularColor)
+            else -> pages.forEach { page ->
+                Image(
+                    bitmap = page,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun renderPdfPages(context: android.content.Context, url: String): List<ImageBitmap> {
+    val file: java.io.File = if (url.startsWith("http")) {
+        val tmp = java.io.File.createTempFile("mobiler_pdf", ".pdf", context.cacheDir)
+        java.net.URL(url).openStream().use { input -> tmp.outputStream().use { output -> input.copyTo(output) } }
+        tmp
+    } else {
+        val uri = android.net.Uri.parse(url)
+        if (uri.scheme == "file") java.io.File(uri.path!!) else java.io.File(url)
+    }
+    val pfd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+    val renderer = android.graphics.pdf.PdfRenderer(pfd)
+    val pages = ArrayList<ImageBitmap>(renderer.pageCount)
+    for (i in 0 until renderer.pageCount) {
+        val page = renderer.openPage(i)
+        val width = 1080
+        val height = (width.toFloat() / page.width * page.height).toInt().coerceAtLeast(1)
+        val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(android.graphics.Color.WHITE)
+        page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        page.close()
+        pages.add(bmp.asImageBitmap())
+    }
+    renderer.close()
+    pfd.close()
+    return pages
+}
+
+private fun shapeFor(shape: ImageShape): Shape = when (shape) {
+    ImageShape.SQUARE -> RectangleShape
+    ImageShape.ROUNDED -> RoundedCornerShape(imageCornerDp.dp)
+    ImageShape.CIRCLE -> CircleShape
+}
+
+private fun ratioFor(ratio: ImageRatio): Float = when (ratio) {
+    ImageRatio.WIDE -> 16f / 10f
+    ImageRatio.SQUARE -> 1f
+    ImageRatio.TALL -> 3f / 4f
+}
+
+private fun boxAlignFor(align: BoxAlign): Alignment = when (align) {
+    BoxAlign.TOPSTART -> Alignment.TopStart
+    BoxAlign.TOPEND -> Alignment.TopEnd
+    BoxAlign.CENTER -> Alignment.Center
+    BoxAlign.BOTTOMSTART -> Alignment.BottomStart
+    BoxAlign.BOTTOMCENTER -> Alignment.BottomCenter
+    BoxAlign.BOTTOMEND -> Alignment.BottomEnd
+}
+
+@Composable
+private fun CardBody(child: Widget, send: (Action) -> Unit) {
+    Box(modifier = Modifier.padding(16.dp)) { Render(child, send) }
+}
+
+// `Widget::Map` on Android — MapLibre Native (no API key) via Compose AndroidView interop. Markers are a
+// GeoJSON CircleLayer (core API). Map tap → "{id}.tap" (coords); marker tap → "{id}.marker" (id).
+@Composable
+private fun MapWidget(
+    id: String,
+    centerLat: Double,
+    centerLng: Double,
+    zoom: Double,
+    markers: List<MapMarker>,
+    styleUrl: String?,
+    interactive: Boolean,
+    send: (Action) -> Unit,
+) {
+    val context = LocalContext.current
+    val mapView = remember {
+        org.maplibre.android.MapLibre.getInstance(context)
+        org.maplibre.android.maps.MapView(context)
+    }
+    // What was last applied from the app (ADR-0026): a re-render with the same values leaves the
+    // user's pan/zoom and the markers alone. `latest` is read by the tap listener and by the style,
+    // which loads asynchronously and may finish after later updates.
+    val applied = remember { MapApplied() }
+    applied.latestId = id
+    applied.latestSend = send
+    applied.latestMarkers = markers
+    DisposableEffect(Unit) {
+        mapView.onCreate(null); mapView.onStart(); mapView.onResume()
+        onDispose { mapView.onPause(); mapView.onStop(); mapView.onDestroy() }
+    }
+    fun featureCollection(list: List<MapMarker>) = org.maplibre.geojson.FeatureCollection.fromFeatures(
+        list.map { mk ->
+            org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(mk.lng, mk.lat))
+                .also { it.addStringProperty("mid", mk.id) }
+        },
+    )
+    fun markersKey(list: List<MapMarker>) = list.joinToString("\n") { "${it.id}|${it.lat}|${it.lng}|${it.title ?: ""}" }
+    AndroidView(
+        modifier = Modifier.fillMaxWidth().height(240.dp),
+        factory = {
+            mapView.apply {
+                getMapAsync { map ->
+                    val style = styleUrl ?: "https://tiles.openfreemap.org/styles/liberty"
+                    map.setStyle(org.maplibre.android.maps.Style.Builder().fromUri(style)) { s ->
+                        applied.markers = markersKey(applied.latestMarkers)
+                        s.addSource(org.maplibre.android.style.sources.GeoJsonSource("mobiler-markers", featureCollection(applied.latestMarkers)))
+                        s.addLayer(
+                            org.maplibre.android.style.layers.CircleLayer("mobiler-markers-layer", "mobiler-markers").withProperties(
+                                org.maplibre.android.style.layers.PropertyFactory.circleRadius(7f),
+                                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#E5484D")),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                            ),
+                        )
+                    }
+                    map.addOnMapClickListener { latLng ->
+                        val pt = map.projection.toScreenLocation(latLng)
+                        val hits = map.queryRenderedFeatures(pt, "mobiler-markers-layer")
+                        val mid = hits.firstOrNull()?.getStringProperty("mid")
+                        val mapId = applied.latestId
+                        if (mid != null) {
+                            applied.latestSend(Action.Input("$mapId.marker", InputValue.Text(mid)))
+                        } else {
+                            applied.latestSend(Action.Input("$mapId.tap", InputValue.Text("${latLng.latitude},${latLng.longitude}")))
+                        }
+                        true
+                    }
+                }
+            }
+        },
+        update = { mv ->
+            mv.getMapAsync { map ->
+                map.uiSettings.setAllGesturesEnabled(interactive)
+                val camera = listOf(centerLat, centerLng, zoom)
+                if (applied.camera != camera) {
+                    applied.camera = camera
+                    map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                        .target(org.maplibre.android.geometry.LatLng(centerLat, centerLng)).zoom(zoom).build()
+                }
+                // Before the style loads there is no source yet; the style callback adds the latest markers.
+                val key = markersKey(markers)
+                val source = map.style?.getSourceAs<org.maplibre.android.style.sources.GeoJsonSource>("mobiler-markers")
+                if (source != null && applied.markers != key) {
+                    applied.markers = key
+                    source.setGeoJson(featureCollection(markers))
+                }
+            }
+        },
+    )
+}
+
+/** Per-map state for [MapWidget]: what was last applied from the app, and the latest app values. */
+private class MapApplied {
+    var camera: List<Double>? = null
+    var markers: String? = null
+    var latestId: String = ""
+    var latestSend: (Action) -> Unit = {}
+    var latestMarkers: List<MapMarker> = emptyList()
+}
+
+/** The body's route transition: a slide for push/pop (direction from depth), a crossfade for a lateral
+ *  move at the same depth. */
+private fun AnimatedContentTransitionScope<Widget.Scaffold>.navTransition(): ContentTransform {
+    val dur = 280
+    // A fade draws the screen into an off-screen layer, and a WebView drawn into one
+    // crashes Android's renderer on some devices (Samsung, Android 13). A move to or
+    // from a screen holding a WebView slides without fading. A tab switch never comes here:
+    // it happens inside TabSlots, at once.
+    val fades = !holdsWebView(initialState) && !holdsWebView(targetState)
+    val enterFade = if (fades) fadeIn(tween(dur)) else EnterTransition.None
+    val exitFade = if (fades) fadeOut(tween(dur)) else ExitTransition.None
+    // Unfaded, the outgoing screen slides all the way out, so the two never overlap.
+    val behind = if (fades) 3 else 1
+    return when {
+        targetState.depth > initialState.depth ->
+            (slideInHorizontally(tween(dur)) { it } + enterFade) togetherWith
+                (slideOutHorizontally(tween(dur)) { -it / behind } + exitFade)
+        targetState.depth < initialState.depth ->
+            (slideInHorizontally(tween(dur)) { -it / behind } + enterFade) togetherWith
+                (slideOutHorizontally(tween(dur)) { it } + exitFade)
+        else ->
+            enterFade togetherWith exitFade
+    }
+}
+
+/** One screen's scrollable body under the Scaffold's bars (`padding`). */
+@Composable
+private fun ScreenBody(screen: Widget.Scaffold, padding: PaddingValues, send: (Action) -> Unit) {
+    // Fill mode (screen.body is a `LazyList { fill: true }`, or its first
+    // direct Column child is): the body stops page-scrolling and that list
+    // takes the rest of the height, scrolling itself. `bodyFillIndex` — null
+    // means no fill list, and the column renders exactly as before.
+    val fillIndex = bodyFillIndex(screen.body)
+    // Cap + center the content column so it doesn't stretch on a tablet.
+    val column: @Composable BoxScope.() -> Unit = {
+        Column(
+            modifier = Modifier
+                .let { if (fillIndex != null) it.fillMaxSize() else it.fillMaxWidth() }
+                .widthIn(max = 760.dp)
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 16.dp),
+            // A Column body's own spacing (as its Column arm would give it).
+            verticalArrangement = Arrangement.spacedBy(if (isLarge && screen.body is Widget.Column && fillIndex != -1) 12.dp else 6.dp),
+        ) {
+            if (screen.refreshing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), color = selectionColor() ?: ProgressIndicatorDefaults.linearColor)
+            }
+            // A Column body is walked here whether or not it holds a fill list, so a
+            // fill list appearing (search results) doesn't rebuild the fields above it.
+            val body = screen.body
+            if (fillIndex == null && body !is Widget.Column) {
+                Render(body, send)
+            } else if (fillIndex == -1) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    CompositionLocalProvider(LocalFillList provides true) { Render(screen.body, send) }
+                }
+            } else {
+                KeyedChildren((body as Widget.Column).children) { i, child ->
+                    if (i == fillIndex) {
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            CompositionLocalProvider(LocalFillList provides true) { Render(child, send) }
+                        }
+                    } else {
+                        Render(child, send)
+                    }
+                }
+            }
+        }
+    }
+    val onRefresh = screen.onRefresh
+    if (onRefresh != null) {
+        // Pull-to-refresh — the body is pull-refreshable; the spinner is
+        // driven by the app-owned `refreshing` flag.
+        val ptr = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = screen.refreshing,
+            onRefresh = { send(Action.Fired(onRefresh)) },
+            // Keyboard: the body ends above it (minus what the bars below already cover),
+            // so the scroll area shrinks and the focused field is brought into view.
+            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
+            state = ptr,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = ptr,
+                    isRefreshing = screen.refreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    color = selectionColor() ?: PullToRefreshDefaults.indicatorColor,
+                )
+            },
+        ) {
+            Box(
+                modifier = if (fillIndex != null) Modifier.fillMaxSize() else Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                content = column,
+            )
+        }
+    } else {
+        Box(
+            // Keyboard: as above, the body ends above it and the focused field stays in view.
+            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
+                .let { if (fillIndex != null) it else it.verticalScroll(rememberScrollState()) },
+            content = column,
+        )
+    }
+}
+
+/** Marks every screen with tabs as one `AnimatedContent` content, so a tab switch happens inside [TabSlots]. */
+private const val TABS_KEY = "\u0000tabs"
+
+/** The selected tab's index, or null when the screen has no tabs or not exactly one is selected. */
+private fun tabSlotOf(s: Widget.Scaffold): Int? = s.tabs.indices.singleOrNull { s.tabs[it].selected }
+
+/** A tab's kept screen. A new epoch is a new composition: the old one is disposed. */
+private class Slot(var screen: Widget.Scaffold, val epoch: Int)
+
+/** Each visited tab keeps its last screen composed, so returning to it is a diff, not a rebuild (ADR-0057).
+ *  Only the selected tab is measured, placed and drawn: a hidden one stays composed but costs no frame
+ *  time, sends nothing and holds no focus, and it is shown again only with the screen the core just sent.
+ *  A screen holding a live native view (video, map, web view, PDF) is let go once hidden, as before. */
+@Composable
+private fun TabSlots(screen: Widget.Scaffold, slot: Int, padding: PaddingValues, send: (Action) -> Unit) {
+    // A cache rebuilt from `screen` on every composition: keep each step below idempotent for a given
+    // (screen, slot), since a composition can be abandoned and run again.
+    val slots = remember { mutableMapOf<Int, Slot>() }
+    // [the slot shown last composition, the next epoch]
+    val last = remember { intArrayOf(-1, 0) }
+    slots.keys.retainAll { it < screen.tabs.size }
+    if (last[0] != slot) {
+        // The tab that was showing is hidden now: let it go unless it is safe to keep (keptWhenHidden).
+        slots.keys.retainAll { it == slot || keptWhenHidden(slots.getValue(it).screen) }
+        // The core moved this tab to another screen while it was away: rebuild it, without a transition.
+        if (slots[slot]?.screen?.route.let { it != null && it != screen.route }) slots.remove(slot)
+        last[0] = slot
+    }
+    slots.getOrPut(slot) { Slot(screen, last[1]++) }.screen = screen
+    // A switch drops focus, so the keyboard closes and no hidden field keeps it.
+    val focus = LocalFocusManager.current
+    LaunchedEffect(slot) { focus.clearFocus(force = true) }
+    val order = slots.keys.sorted()
+    val shown = order.indexOf(slot)
+    Layout(
+        modifier = Modifier.fillMaxSize(),
+        content = {
+            order.forEach { i ->
+                val kept = slots.getValue(i)
+                key(i, kept.epoch) {
+                    val isActive by rememberUpdatedState(i == slot)
+                    val gated = remember(send) { { a: Action -> if (isActive) send(a) } }
+                    Box(Modifier.fillMaxSize()) {
+                        AnimatedContent(
+                            targetState = kept.screen,
+                            contentKey = { it.route },
+                            transitionSpec = { navTransition() },
+                            label = "tab",
+                        ) { ScreenBody(it, padding, gated) }
+                    }
+                }
+            }
+        },
+    ) { measurables, constraints ->
+        // Only the shown tab is measured and placed; the others are never measured.
+        val p = measurables[shown].measure(constraints)
+        layout(p.width, p.height) { p.place(0, 0) }
+    }
+}
+
+/** Whether a hidden tab's screen may stay composed (ADR-0057). Not when it holds a live native view
+ *  (its player, map or web view would keep running), still animates (refreshing, an indeterminate
+ *  progress, a loading list: their animations ask for a frame on every vsync, placed or not), nests a
+ *  Scaffold (its BackHandler and sheet outlive placement) or has a SECURE field (its text would stay
+ *  in memory after the user left). */
+private fun keptWhenHidden(s: Widget.Scaffold): Boolean {
+    if (s.refreshing || holdsLiveView(s)) return false
+    return !holdsAny(s.body) {
+        it is Widget.Scaffold || (it is Widget.Progress && it.value == null) ||
+            (it is Widget.LazyList && (it.loading || it.refreshing)) ||
+            (it is Widget.TextField && it.kind == FieldKind.SECURE)
+    }
+}
+
+/** Whether a WebView is anywhere in this subtree. A WebView must never be drawn into an off-screen
+ *  layer (it crashes Android's renderer on some devices), so a screen holding one is never faded (the
+ *  Scaffold's transitionSpec) and a scroller holding one has no edge fade. A Scaffold's sheet and
+ *  bottom bar are not drawn in the faded content; they are checked only as a guard. */
+private fun holdsWebView(w: Widget): Boolean = holdsAny(w) { it is Widget.WebView }
+
+/** Whether a live native view (web view, video, map, PDF) is anywhere in this subtree. A tab screen
+ *  holding one is not kept once hidden (ADR-0057), so its player, map or web view is released as
+ *  before. */
+private fun holdsLiveView(w: Widget): Boolean = holdsAny(w) {
+    it is Widget.WebView || it is Widget.Video || it is Widget.Map || it is Widget.PdfView
+}
+
+/** Whether any widget in this subtree satisfies `hit`. */
+private fun holdsAny(w: Widget, hit: (Widget) -> Boolean): Boolean = hit(w) || when (w) {
+    is Widget.Row -> w.children.any { holdsAny(it, hit) }
+    is Widget.Column -> w.children.any { holdsAny(it, hit) }
+    is Widget.Box -> w.children.any { holdsAny(it, hit) }
+    is Widget.Grid -> w.children.any { holdsAny(it, hit) }
+    is Widget.Scroller -> w.children.any { holdsAny(it, hit) }
+    is Widget.LazyList -> w.children.any { holdsAny(it, hit) }
+    is Widget.Card -> holdsAny(w.child, hit)
+    is Widget.A11y -> holdsAny(w.child, hit)
+    is Widget.SwipeAction -> holdsAny(w.child, hit)
+    is Widget.Split -> holdsAny(w.primary, hit) || holdsAny(w.detail, hit)
+    is Widget.Scaffold -> holdsAny(w.body, hit) || w.sheet?.let { holdsAny(it.child, hit) } == true ||
+        w.bottomBar.orEmpty().any { holdsAny(it, hit) }
+    else -> false
+}

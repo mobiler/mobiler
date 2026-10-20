@@ -31,6 +31,7 @@ pub fn pipeline(
     crate::fonts::sync_for_build(&project.root);
     crate::splash::sync_for_build(&project.root);
     crate::deep_links::sync_for_build(&project.root);
+    crate::local_network::sync_for_build(&project.root);
     stage("Building Rust core (shared, uniffi)", || {
         run_capture(
             Command::new("cargo")

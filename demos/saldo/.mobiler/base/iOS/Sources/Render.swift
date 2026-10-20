@@ -1173,10 +1173,18 @@ private struct RegionChartView: View {
 private struct FillListKey: EnvironmentKey {
     static let defaultValue = false
 }
+/// The colour behind a swipe row: the page's, unless the row sits on another surface (a sheet).
+private struct SwipeCoverKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
 private extension EnvironmentValues {
     var fillList: Bool {
         get { self[FillListKey.self] }
         set { self[FillListKey.self] = newValue }
+    }
+    var swipeCover: Color? {
+        get { self[SwipeCoverKey.self] }
+        set { self[SwipeCoverKey.self] = newValue }
     }
 }
 
@@ -1258,6 +1266,7 @@ private struct SwipeActionView: View {
     let actions: [SwipeButton]
     let send: (Action) -> Void
     @State private var offset: CGFloat = 0
+    @Environment(\.swipeCover) private var swipeCover
     private var revealWidth: CGFloat { CGFloat(actions.count) * 84 }
     @Environment(\.paletteRoles) private var paletteRoles
     var body: some View {
@@ -1280,7 +1289,7 @@ private struct SwipeActionView: View {
             // The cover hiding the actions is the page's colour: a row sits on the page, so a rounded card's
             // corners blend in (a surface-coloured rectangle showed as square corners on a tinted page).
             render(content, send)
-                .background(role(pal?.background, else: Color(.systemBackground)))
+                .background(swipeCover ?? role(pal?.background, else: Color(.systemBackground)))
                 .offset(x: offset)
                 .gesture(
                     DragGesture()
@@ -1530,6 +1539,7 @@ private struct ScaffoldView: View {
                             .frame(width: 40, height: 4).frame(maxWidth: .infinity)
                         Text(sheet.title).font(TypeScaleFonts.scale?.headline.map { TypeScaleFonts.font($0, relativeTo: .title2, uiStyle: .title2, design: theme?.fontDesign ?? .default) } ?? CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.bold() ?? .title3.bold())
                         render(sheet.child, send)
+                            .environment(\.swipeCover, role(pal?.surface, else: Color(.systemBackground)))
                     }
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1643,8 +1653,13 @@ private struct ScaffoldView: View {
                 .padding(.vertical, 12)
                 // Without tabs below it, the bar's fill runs under the home indicator (as the tabs' does).
                 .background(role(pal?.surfaceBar, else: Color(.systemBackground)).ignoresSafeArea(edges: .bottom))
-                // The glass capsule floats below the bar, over this space.
-                if floating { Color.clear.frame(height: glassBarHeight) }
+                // The glass capsule floats below the bar, over this space, which takes the bar's fill so the bar
+                // reads as one surface down to the capsule.
+                if floating {
+                    role(pal?.surfaceBar, else: Color(.systemBackground))
+                        .frame(height: glassBarHeight)
+                        .ignoresSafeArea(edges: .bottom)
+                }
             }
 
             if showBottomTabs && !tabs.isEmpty && !floating {

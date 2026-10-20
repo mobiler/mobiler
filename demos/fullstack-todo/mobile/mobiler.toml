@@ -1,0 +1,3 @@
+# fullstack-todo talks to its own server at http://localhost:3000 during development (ADR-0064).
+[ios]
+local_network = true

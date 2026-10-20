@@ -19,7 +19,7 @@ IOS_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="$(cd "$IOS_DIR/.." && pwd)"
 SHARED="$APP_ROOT/shared"
 GEN="$IOS_DIR/generated"
-SCHEME="FullstackTodo"
+SCHEME="Mobile"
 BUNDLE_ID="dev.mobiler.mobile"
 
 case "$MODE" in

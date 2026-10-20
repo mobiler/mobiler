@@ -68,6 +68,12 @@ targets:
             CFBundleURLSchemes:
               - dev.mobiler.barbershop
         # mobiler:deep-links-end
+        # mobiler.toml `[ios] local_network = true` switches this on: plain-HTTP loads to local addresses
+        # (localhost, .local names, LAN IPs) only, never the open internet (ADR-0064).
+        # mobiler:local-network-begin
+        # off: NSAppTransportSecurity:
+          # off: NSAllowsLocalNetworking: true
+        # mobiler:local-network-end
         # Picture-in-Picture: an app that uses Widget::Video with allow_pip must declare the audio
         # background mode so playback (hence PiP) continues when the app is backgrounded. The Mobiler
         # template ships WITHOUT this (App Store review hygiene) — adding this one line is the
@@ -121,4 +127,22 @@ targets:
     scheme:
       run:
         storeKitConfiguration: Products.storekit
+      # The UI test below is built and run only by `xcodebuild test` (CI's iOS lane for barbershop).
+      testTargets:
+        - FadehouseUITests
     # mobiler:target-extra (plugin add inserts a target-level entitlements block above this line)
+
+  # Behavioral UI test (tap routing in the generic shell): see UITests/FadehouseUITests.swift. Only built
+  # for the `test` action, so build-ios.sh's plain build and unsigned archive never touch it.
+  FadehouseUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: Fadehouse
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        CODE_SIGNING_ALLOWED: "NO"
+        TEST_TARGET_NAME: Fadehouse

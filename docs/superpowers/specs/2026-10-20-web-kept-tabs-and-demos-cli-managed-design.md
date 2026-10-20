@@ -73,3 +73,20 @@ the template is ported from (ADR-0015).
 - The exact web scroll container detection and the restore timing (a post-render `request_animation_frame`).
 - The test shape for the web position logic (a pure function over slot/route keys, unit-tested).
 - Each demo's palette values (from its current hand-edited theme).
+
+## Amendment 2026-10-20 (the demo audit, before PR 2's code)
+
+The commit-by-commit audit (coffee 126, todo 97, fullstack-todo/mobile 94 shell commits) found todo clean. The
+maintainer decided the rest (2026-10-20):
+- **Android VIBRATE: always declared by the template.** It is a normal permission (no prompt), and `cx.haptic` is a
+  core API every app has; coffee's hand-uncommented line was the only way to get haptics.
+- **Coffee's iOS landscape: dropped.** Coffee becomes portrait-only on iOS like the template (Android still rotates).
+- **CoffeeUITests: moved to barbershop.** The template can't add a second Xcode target; barbershop, the hand-maintained
+  reference, keeps the iOS UI test and CI's coverage.
+- **fullstack-todo's plain-HTTP localhost on iOS: a local-network option.** A `mobiler.toml` key sets iOS's
+  `NSAllowsLocalNetworking` (local addresses only, never arbitrary HTTP); fullstack-todo turns it on. A new record
+  (ADR-0064) because it is a `mobiler.toml` surface apps rely on.
+- My calls: fullstack-todo keeps its iOS name with `mobiler display-name FullstackTodo` (a CLI line the guard
+  admits); coffee needs no palette after all: it always renders light (`dark_mode` false, no appearance), and the
+  template's light scheme from its seed matches, so the audit's dark values never apply; the iOS build number needs
+  nothing (the TestFlight export lets Xcode assign it).

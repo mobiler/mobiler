@@ -1,22 +1,54 @@
 package dev.mobiler.todo
 
+import android.app.Activity
 import android.app.Application
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.DialogInterface
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.lang.ref.WeakReference
+import java.util.Calendar
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import dev.mobiler.todo.shared.CoreFfi
 import dev.mobiler.todo.shared.types.Action
 import dev.mobiler.todo.shared.types.Effect
+import dev.mobiler.todo.shared.types.HttpHeader
+import dev.mobiler.todo.shared.types.DeviceInfo
+import dev.mobiler.todo.shared.types.HttpOutcome
 import dev.mobiler.todo.shared.types.PluginResponse
 import dev.mobiler.todo.shared.types.Requests
 import dev.mobiler.todo.shared.types.Widget
@@ -28,19 +60,14 @@ fun PluginResponse(ok: Boolean, output: String): PluginResponse =
     PluginResponse(ok, output.toByteArray(Charsets.UTF_8).toUByteList())
 
 /**
- * The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
- * the wrong element type and will not compile.
- */
-private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
-
-/**
  * A native capability plugin. The opaque `{plugin, op, input}` envelope is
  * dispatched by name to one of these — adding a plugin never touches the wire
- * ABI or the generated bindings, only this registry. Returns a [PluginResponse]
- * (ignored for fire-and-forget calls, sent back to the core for request/response).
+ * ABI or the generated bindings, only this registry. `handle` is `suspend`, so
+ * capabilities can do real async work (network, disk) off the main thread;
+ * fire-and-forget calls ignore the result, request/response calls send it back.
  */
 interface MobilerPlugin {
-    fun handle(op: String, input: String): PluginResponse
+    suspend fun handle(op: String, input: String): PluginResponse
 
     /** Streaming subscription (cx.subscribe): emit a PluginResponse per event until
      *  the collecting coroutine is cancelled (cx.unsubscribe). Default: no stream —
@@ -51,7 +78,7 @@ interface MobilerPlugin {
 
 /** Official, bundled plugin (free tier): fire-and-forget toast. */
 class ToastPlugin(private val context: Context) : MobilerPlugin {
-    override fun handle(op: String, input: String): PluginResponse {
+    override suspend fun handle(op: String, input: String): PluginResponse {
         Toast.makeText(context, input, Toast.LENGTH_SHORT).show()
         return PluginResponse(true, "")
     }
@@ -61,7 +88,7 @@ class ToastPlugin(private val context: Context) : MobilerPlugin {
  *  collecting coroutine is cancelled (cx.unsubscribe). The deterministic demonstrator
  *  for the streaming primitive (cx.subscribe). */
 class TickerPlugin : MobilerPlugin {
-    override fun handle(op: String, input: String): PluginResponse =
+    override suspend fun handle(op: String, input: String): PluginResponse =
         PluginResponse(false, "ticker is a streaming capability — use cx.subscribe")
     override fun subscribe(op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> {
         val ms = input.toLongOrNull() ?: 1000L
@@ -106,7 +133,7 @@ object SystemBus {
 /** Built-in `system` stream: deep-link URLs + app lifecycle (foreground/background), fed by
  *  MainActivity via SystemBus. Mirrors the push plugin's PushBus/callbackFlow shape. */
 class SystemPlugin : MobilerPlugin {
-    override fun handle(op: String, input: String): PluginResponse =
+    override suspend fun handle(op: String, input: String): PluginResponse =
         PluginResponse(false, "system is a streaming capability — use cx.subscribe")
     override fun subscribe(op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> =
         kotlinx.coroutines.flow.callbackFlow {
@@ -118,22 +145,512 @@ class SystemPlugin : MobilerPlugin {
 
 /** Official, bundled plugin: request/response device info. */
 class DevicePlugin : MobilerPlugin {
-    override fun handle(op: String, input: String): PluginResponse = when (op) {
+    override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "model" -> PluginResponse(true, "${Build.MANUFACTURER} ${Build.MODEL}")
+        // Structured (cx.device_info): OS version + API level, manufacturer, model. No serial or ids.
+        "info" -> PluginResponse(
+            true,
+            DeviceInfo(Build.VERSION.RELEASE.orEmpty(), Build.VERSION.SDK_INT.toUInt(), Build.MANUFACTURER.orEmpty(), Build.MODEL.orEmpty())
+                .bincodeSerialize().toUByteList(),
+        )
         "locale" -> PluginResponse(true, java.util.Locale.getDefault().toLanguageTag())
+        // The OS light/dark setting (system resources: unaffected by the app's own appearance).
+        "appearance" -> PluginResponse(true, nightName(android.content.res.Resources.getSystem().configuration))
         else -> PluginResponse(false, "unknown op '$op'")
+    }
+}
+
+private fun nightName(c: android.content.res.Configuration): String =
+    if ((c.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES) "dark" else "light"
+
+/** Built-in `appearance` stream: the OS light/dark setting — the current value first, then each
+ *  change. Application-level callbacks, so it survives Activity recreation on a uiMode change. */
+class AppearancePlugin(private val app: Application) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse =
+        PluginResponse(false, "appearance is a streaming capability — use cx.subscribe_appearance")
+    override fun subscribe(op: String, input: String): kotlinx.coroutines.flow.Flow<PluginResponse> =
+        kotlinx.coroutines.flow.callbackFlow {
+            var last = nightName(android.content.res.Resources.getSystem().configuration)
+            trySend(PluginResponse(true, last))
+            val cb = object : android.content.ComponentCallbacks {
+                override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+                    // The system configuration, as for the first value (it is already updated when
+                    // Application callbacks run) — not the app's, which could carry an app-level override.
+                    val now = nightName(android.content.res.Resources.getSystem().configuration)
+                    if (now != last) { last = now; trySend(PluginResponse(true, now)) }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onLowMemory() {}
+            }
+            app.registerComponentCallbacks(cb)
+            awaitClose { app.unregisterComponentCallbacks(cb) }
+        }
+}
+
+/** Official, bundled plugin: copy text to the system clipboard. */
+class ClipboardPlugin(private val context: Context) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("text", input))
+        return PluginResponse(true, "")
+    }
+}
+
+/** Built-in `clipboard_with` capability (cx.copy_with / cx.copy_sensitive, ADR-0052): a copy with options. */
+class ClipboardWithPlugin(private val context: Context) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "copy") return PluginResponse(false, "unknown clipboard_with op '$op'")
+        val o = runCatching { JSONObject(input) }.getOrNull() ?: return PluginResponse(false, "invalid input JSON")
+        val text = o.opt("text") as? String ?: return PluginResponse(false, "missing text")
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        // A unique label is how ClipboardExpiry later proves the clipboard still holds this copy.
+        val label = "mobiler-copy-" + java.util.UUID.randomUUID()
+        val clip = ClipData.newPlainText(label, text)
+        val sensitive = o.optBoolean("sensitive")
+        if (sensitive) {
+            // ClipDescription.EXTRA_IS_SENSITIVE on API 33+ (hides the preview); the same key asks keyboards not to keep it.
+            clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+        }
+        return try {
+            // ClipboardExpiry is main-confined: arm/disarm only ever run here, on Main.
+            withContext(Dispatchers.Main) {
+                cm.setPrimaryClip(clip)
+                if (o.isNull("expires_ms")) ClipboardExpiry.disarm() else ClipboardExpiry.arm(cm, label, expiresMs(o))
+            }
+            // What this copy got (ADR-0053): Android has no switch to keep a copy off other devices.
+            val report = JSONObject()
+                .put("sensitive", sensitive)
+                .put("expires", if (o.isNull("expires_ms")) "none" else "best_effort")
+                .put("local_only", false)
+            PluginResponse(true, report.toString())
+        } catch (e: CancellationException) {
+            // The copy may already be on the clipboard: never answer "not copied" for a cancelled call.
+            throw e
+        } catch (e: Exception) {
+            PluginResponse(false, "copy failed: ${e.message ?: e.javaClass.simpleName}")
+        }
+    }
+}
+
+/** `expires_ms` as a Long: a value past Long.MAX_VALUE (the core sends up to u64::MAX) saturates instead of wrapping
+ *  to a negative delay, which would clear at once. */
+private fun expiresMs(o: JSONObject): Long =
+    o.optDouble("expires_ms", 0.0).coerceIn(0.0, Long.MAX_VALUE.toDouble()).toLong()
+
+/** Clears a `clipboard_with` copy when its time is up, but only while the clipboard provably still holds it: since
+ *  Android 10 a backgrounded app can't read the clipboard, so there it re-checks every 5 s, reading the clipboard only
+ *  while an activity is resumed (it clears within seconds of the user returning), and gives up after an hour. A newer copy replaces the deadline; a process death drops it.
+ *  Main-confined: call arm/disarm on the main thread only. Time is `SystemClock.elapsedRealtime()`, which keeps
+ *  counting while the phone sleeps (`delay` alone counts uptime, which stops). */
+object ClipboardExpiry {
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
+    private var job: Job? = null
+
+    fun disarm() {
+        job?.cancel()
+        job = null
+    }
+
+    fun arm(cm: ClipboardManager, label: String, ms: Long) {
+        disarm()
+        val now = android.os.SystemClock.elapsedRealtime()
+        val deadline = if (ms > Long.MAX_VALUE - now) Long.MAX_VALUE else now + ms
+        job = scope.launch {
+            // Sleep in steps of at most 5 s, so a deadline passed while the phone slept is noticed within 5 s of waking.
+            while (true) {
+                val left = deadline - android.os.SystemClock.elapsedRealtime()
+                if (left <= 0) break
+                kotlinx.coroutines.delay(minOf(left, 5_000L))
+            }
+            val giveUpAt = android.os.SystemClock.elapsedRealtime() + 60 * 60 * 1000L
+            while (isActive && android.os.SystemClock.elapsedRealtime() < giveUpAt) {
+                // Android 10+ denies (and logs) a read from the background, so there read only while an activity is
+                // resumed; Android 8–9 can read from anywhere and clear on time.
+                if (Build.VERSION.SDK_INT < 29 || MobilerActivity.current?.get() != null) {
+                    // Null when the clipboard is empty (or still unreadable, e.g. before the window has focus).
+                    val desc = cm.primaryClipDescription
+                    if (desc != null) {
+                        if (desc.label?.toString() == label) clear(cm)
+                        return@launch
+                    }
+                }
+                kotlinx.coroutines.delay(5_000)
+            }
+        }
+    }
+
+    private fun clear(cm: ClipboardManager) {
+        if (Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() else cm.setPrimaryClip(ClipData.newPlainText("", ""))
+    }
+}
+
+/** Official, bundled plugin: open the system share sheet with `input` as text. */
+class SharePlugin(private val context: Context) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, input)
+        }
+        // Launched from a non-Activity (Application) context, so NEW_TASK is required.
+        context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return PluginResponse(true, "")
+    }
+}
+
+/** Official, bundled plugin: open a URL in the browser / default handler. */
+class BrowserPlugin(private val context: Context) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        val view = Intent(Intent.ACTION_VIEW, Uri.parse(input)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // No app handles this link (e.g. `tel:` on a tablet without a dialer): answer ok=false
+        // instead of crashing, so a cx.plugin("browser", "open", …) caller can tell the user.
+        return try {
+            context.startActivity(view)
+            PluginResponse(true, "")
+        } catch (e: android.content.ActivityNotFoundException) {
+            PluginResponse(false, "no app can open this link")
+        }
+    }
+}
+
+/** Official, bundled plugin: a haptic tap. `op` is the style; needs VIBRATE (manifest). */
+class HapticsPlugin(private val context: Context) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        // Without VIBRATE (it ships commented out in AndroidManifest.xml) a tap is a no-op, not a crash.
+        if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return notGranted()
+        }
+        return try {
+            vibrator.vibrate(effect(vibrator, op))
+            PluginResponse(true, "")
+        } catch (e: SecurityException) {
+            notGranted()
+        }
+    }
+
+    // The phone's own tuned click effect when it has one (Android 10+ knows it; 11+ can say so). A
+    // phone without tuned effects (e.g. a Samsung A32) plays a click as a ~20 ms pulse, too short
+    // to feel, so it gets a longer one-shot pulse instead. Android scales both by the user's
+    // touch-vibration setting, which is deliberately respected.
+    private fun effect(vibrator: Vibrator, op: String): VibrationEffect {
+        val id = when (op) {
+            "light" -> VibrationEffect.EFFECT_TICK
+            "heavy" -> VibrationEffect.EFFECT_HEAVY_CLICK
+            else -> VibrationEffect.EFFECT_CLICK
+        }
+        val tuned = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            vibrator.areAllEffectsSupported(id) == Vibrator.VIBRATION_EFFECT_SUPPORT_YES
+        return if (tuned) {
+            VibrationEffect.createPredefined(id)
+        } else {
+            val ms = when (op) { "light" -> 30L; "heavy" -> 80L; else -> 50L }
+            VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)
+        }
+    }
+
+    private fun notGranted(): PluginResponse {
+        if (!warned) {
+            warned = true
+            Log.w("mobiler", "haptics: android.permission.VIBRATE isn't granted — uncomment it in AndroidManifest.xml; haptic taps are skipped")
+        }
+        return PluginResponse(false, "VIBRATE permission not granted")
+    }
+
+    private companion object {
+        var warned = false
+    }
+}
+
+/**
+ * Holds the current Activity (weakly) so capabilities that need a window — a dialog
+ * has no Application-context window — can reach it. MainActivity updates it in
+ * onResume/onPause.
+ */
+object MobilerActivity {
+    var current: WeakReference<Activity>? = null
+}
+
+/** A confirm dialog waiting for the user. DialogPlugin sets it; MainActivity's composition draws it
+ *  as a Material 3 AlertDialog (so it gets the theme's error colour and Density.LARGE sizes) and
+ *  calls [answer] with the choice. */
+class ConfirmRequest(
+    val title: String,
+    val message: String,
+    val confirmLabel: String,
+    val cancelLabel: String,
+    val destructive: Boolean,
+    val answer: (Boolean) -> Unit,
+)
+
+object ConfirmHost {
+    var pending by mutableStateOf<ConfirmRequest?>(null)
+}
+
+/** Official, bundled plugin: confirm dialog (request/response). Input is JSON
+ *  {title, message, confirm_label?, cancel_label?, destructive?}; missing labels keep OK / Cancel.
+ *  Resolves ok=true when confirmed; cancel, back or a tap outside resolve ok=false. */
+class DialogPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "confirm") return PluginResponse(false, "unknown op '$op'")
+        if (MobilerActivity.current?.get() == null) return PluginResponse(false, "no activity")
+        val obj = runCatching { JSONObject(input) }.getOrElse { JSONObject() }
+        return withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { cont ->
+                lateinit var request: ConfirmRequest
+                request = ConfirmRequest(
+                    title = obj.optString("title"),
+                    message = obj.optString("message"),
+                    confirmLabel = obj.optString("confirm_label").ifEmpty { ActiveLabels.current?.ok?.takeIf { it.isNotEmpty() } ?: "OK" },
+                    cancelLabel = obj.optString("cancel_label").ifEmpty { ActiveLabels.current?.cancel?.takeIf { it.isNotEmpty() } ?: "Cancel" },
+                    destructive = obj.optBoolean("destructive", false),
+                ) { ok ->
+                    if (ConfirmHost.pending === request) ConfirmHost.pending = null
+                    if (cont.isActive) cont.resumeWith(Result.success(PluginResponse(ok, if (ok) "ok" else "cancel")))
+                }
+                // One dialog at a time: a still-open one is answered "cancel" before the new one shows.
+                ConfirmHost.pending?.answer(false)
+                ConfirmHost.pending = request
+                // Cancellation comes from viewModelScope (main thread); the snapshot-state write is safe either way.
+                cont.invokeOnCancellation { if (ConfirmHost.pending === request) ConfirmHost.pending = null }
+            }
+        }
+    }
+}
+
+/** The scaffold's snackbar host (MainActivity passes it to the M3 Scaffold). `current` is the show in
+ *  flight (showing, or still waiting on the host's queue), so a newer snackbar can cancel it; `hosts`
+ *  counts the composed Scaffolds — M3 runs the timeout in the host, so with none there'd be no end. */
+object SnackbarBus {
+    val state = SnackbarHostState()
+    var current: Job? = null
+    var hosts = 0
+}
+
+/** Built-in `snackbar` capability (request/response). Input is JSON {text, action_label?, duration:
+ *  "short"|"long"}. ok=true "action" when the action is tapped; else ok=false "timeout" | "replaced"
+ *  (M3 snackbars aren't swipeable, so there's no "dismissed" here). A newer snackbar replaces a
+ *  visible or queued one — M3 would queue it. With no Scaffold on screen it resolves "timeout" at
+ *  once (nothing to show it on). */
+class SnackbarPlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "show") return PluginResponse(false, "unknown op '$op'")
+        val obj = runCatching { JSONObject(input) }.getOrElse { JSONObject() }
+        val label = obj.optString("action_label").ifEmpty { null }
+        val duration = if (obj.optString("duration") == "long") SnackbarDuration.Long else SnackbarDuration.Short
+        return withContext(Dispatchers.Main) {
+            if (SnackbarBus.hosts == 0) return@withContext PluginResponse(false, "timeout")
+            // One at a time: cancelling the older show (on screen, or queued on the host's mutex)
+            // removes it and makes that call answer "replaced".
+            SnackbarBus.current?.cancel()
+            val show = async { SnackbarBus.state.showSnackbar(obj.optString("text"), actionLabel = label, duration = duration) }
+            SnackbarBus.current = show
+            try {
+                if (show.await() == SnackbarResult.ActionPerformed) PluginResponse(true, "action") else PluginResponse(false, "timeout")
+            } catch (e: CancellationException) {
+                if (!isActive) throw e // this call itself was cancelled, not replaced
+                PluginResponse(false, "replaced")
+            } finally {
+                if (SnackbarBus.current === show) SnackbarBus.current = null
+            }
+        }
+    }
+}
+
+/** Official, bundled plugin: native date / time capability (request/response). op is
+ *  "now" (→ current local "yyyy-MM-dd HH:mm:ss", no UI), "date" (→ ISO "YYYY-MM-DD")
+ *  or "time" (→ 24-hour "HH:MM"); pickers return ok=false on cancel and suspend until
+ *  the user picks or dismisses. */
+class DateTimePlugin : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        // "now" needs no Activity/UI — stamp the current local date-time and return at once.
+        if (op == "now") {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            return PluginResponse(true, fmt.format(java.util.Date()))
+        }
+        val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no activity")
+        val now = Calendar.getInstance()
+        // Optional app labels ({title?, confirm_label?, cancel_label?}); "" (plain pick_date) → defaults.
+        val labels = runCatching { JSONObject(input) }.getOrNull()
+        val title = labels?.optString("title").orEmpty()
+        val confirmLabel = labels?.optString("confirm_label").orEmpty().ifEmpty { ActiveLabels.current?.done.orEmpty() }
+        val cancelLabel = labels?.optString("cancel_label").orEmpty().ifEmpty { ActiveLabels.current?.cancel.orEmpty() }
+        return withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { cont ->
+                var resumed = false
+                fun done(r: PluginResponse) {
+                    if (!resumed) { resumed = true; cont.resumeWith(Result.success(r)) }
+                }
+                when (op) {
+                    "date" -> {
+                        val dlg = DatePickerDialog(
+                            pickerContext(activity),
+                            { _, y, m, d -> done(PluginResponse(true, String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m + 1, d))) },
+                            now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH),
+                        )
+                        dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }
+                        cont.invokeOnCancellation { dlg.dismiss() }
+                        if (title.isNotEmpty()) dlg.setTitle(title)
+                        // The dialog is its own click listener: POSITIVE delivers the value, NEGATIVE cancels.
+                        if (confirmLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_POSITIVE, confirmLabel, dlg)
+                        if (cancelLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_NEGATIVE, cancelLabel, dlg)
+                        dlg.show()
+                    }
+                    "time" -> {
+                        val dlg = TimePickerDialog(
+                            pickerContext(activity),
+                            { _, h, min -> done(PluginResponse(true, String.format(java.util.Locale.US, "%02d:%02d", h, min))) },
+                            now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), true,
+                        )
+                        dlg.setOnCancelListener { done(PluginResponse(false, "cancel")) }
+                        cont.invokeOnCancellation { dlg.dismiss() }
+                        if (title.isNotEmpty()) dlg.setTitle(title)
+                        // The dialog is its own click listener: POSITIVE delivers the value, NEGATIVE cancels.
+                        if (confirmLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_POSITIVE, confirmLabel, dlg)
+                        if (cancelLabel.isNotEmpty()) dlg.setButton(DialogInterface.BUTTON_NEGATIVE, cancelLabel, dlg)
+                        dlg.show()
+                    }
+                    else -> done(PluginResponse(false, "unknown op '$op'"))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Set by MainActivity: launches the system photo picker and calls back with the
+ * picked image URI (null if cancelled). The ActivityResult launcher must be
+ * registered on the Activity, so it can't live in the (Application-context) plugin.
+ */
+object PhotoPicker {
+    var launch: ((onResult: (String?) -> Unit) -> Unit)? = null
+}
+
+/** Official, bundled plugin: pick an image via the system photo picker (no permission). An empty
+ *  input returns the picked URI (cx.pick_photo); options re-encode it (cx.pick_photo_with, ADR-0045). */
+class PhotoPlugin(private val app: Application) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "pick") return PluginResponse(false, "unknown op '$op'")
+        val launch = PhotoPicker.launch
+            ?: return PluginResponse(false, if (input.isEmpty()) "photo picker unavailable" else "unavailable")
+        val uri = suspendCancellableCoroutine<String?> { cont ->
+            launch { result -> cont.resumeWith(Result.success(result)) }
+        }
+        if (uri == null) return PluginResponse(false, "cancelled")
+        if (input.isEmpty()) return PluginResponse(true, uri)
+        return withContext(Dispatchers.IO) { PhotoPipeline.process(app, Uri.parse(uri), input) }
+    }
+}
+
+/**
+ * Set by MainActivity: launches the system camera and calls back with the captured
+ * image URI (null if cancelled). Like [PhotoPicker], the ActivityResult launcher must
+ * be registered on the Activity, so it can't live in the (Application-context) plugin.
+ */
+object CameraCapture {
+    var launch: ((onResult: (String?) -> Unit) -> Unit)? = null
+}
+
+/** Official, bundled plugin: capture a photo with the system camera (cx.capture_photo).
+ *  Intent-based (the system camera app handles capture), so no CAMERA permission. */
+class CameraPlugin(private val app: Application) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "capture") return PluginResponse(false, "unknown op '$op'")
+        val launch = CameraCapture.launch
+            ?: return PluginResponse(false, if (input.isEmpty()) "camera unavailable" else "unavailable")
+        val uri = suspendCancellableCoroutine<String?> { cont ->
+            launch { result -> cont.resumeWith(Result.success(result)) }
+        }
+        if (uri == null) return PluginResponse(false, "cancelled")
+        if (input.isEmpty()) return PluginResponse(true, uri)
+        return withContext(Dispatchers.IO) {
+            try {
+                PhotoPipeline.process(app, Uri.parse(uri), input)
+            } finally {
+                // The result is always a new file (a pass-through is copied), so the full-size capture,
+                // with the camera's EXIF, goes on every outcome, a throw included.
+                Uri.parse(uri).lastPathSegment?.let { java.io.File(app.cacheDir, "captures/$it").delete() }
+            }
+        }
     }
 }
 
 /** Official, bundled plugin: persist a state blob (paired with cx.save in Rust). */
 class StoragePlugin(private val context: Context) : MobilerPlugin {
     private val prefs get() = context.getSharedPreferences("mobiler", Context.MODE_PRIVATE)
-    override fun handle(op: String, input: String): PluginResponse = when (op) {
+    override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "save" -> { prefs.edit().putString("state", input).apply(); PluginResponse(true, "") }
         "load" -> PluginResponse(true, prefs.getString("state", "") ?: "")
         else -> PluginResponse(false, "unknown op '$op'")
     }
 }
+
+/**
+ * HTTP capability (paired with `cx.request`/`get`/`post`/`put`/... in Rust). `op` is
+ * the method; `input` is `{"url":..., "headers":[{"name":...,"value":...}], "body":...}`.
+ * Runs on the IO dispatcher; returns a bincode `HttpOutcome` with `ok` = 2xx.
+ */
+class HttpPlugin : MobilerPlugin {
+    private val client = OkHttpClient()
+
+    override suspend fun handle(op: String, input: String): PluginResponse = withContext(Dispatchers.IO) {
+        try {
+            val obj = JSONObject(input)
+            val url = obj.getString("url")
+            val bodyStr = if (obj.has("body") && !obj.isNull("body")) obj.getString("body") else null
+
+            var callerSetContentType = false
+            val builder = Request.Builder().url(url)
+            if (obj.has("headers")) {
+                val headers = obj.getJSONArray("headers")
+                for (i in 0 until headers.length()) {
+                    val h = headers.getJSONObject(i)
+                    val name = h.getString("name")
+                    builder.addHeader(name, h.getString("value"))
+                    if (name.lowercase() == "content-type") callerSetContentType = true
+                }
+            }
+
+            // OkHttp REQUIRES a body for these verbs — `.method("PUT", null)` throws.
+            val needsBody = op in setOf("POST", "PUT", "PATCH")
+            val mediaType = if (callerSetContentType) null else "application/json".toMediaType()
+            val reqBody = when {
+                bodyStr != null -> bodyStr.toRequestBody(mediaType)
+                // A bodyless PUT/POST/PATCH must send no Content-Type at all — matching
+                // iOS's addValue and web's fetch, which both omit it for an empty body.
+                needsBody -> "".toRequestBody(null)
+                else -> null
+            }
+
+            val request = builder.method(op, reqBody).build()
+            client.newCall(request).execute().use { resp ->
+                val headers = resp.headers.map { (name, value) -> HttpHeader(name, value) }
+                val bytes = resp.body?.bytes() ?: ByteArray(0)
+                val outcome = HttpOutcome.Response(resp.code.toUShort(), headers, bytes.toUByteList())
+                PluginResponse(resp.isSuccessful, outcome.bincodeSerialize().toUByteList())
+            }
+        } catch (e: IOException) {
+            // IOException means no response was obtained.
+            transportError(e.message ?: "network error")
+        } catch (e: Exception) {
+            transportError(e.message ?: "http error")
+        }
+    }
+
+    private fun transportError(message: String): PluginResponse =
+        PluginResponse(false, HttpOutcome.TransportError(message).bincodeSerialize().toUByteList())
+}
+
+/**
+ * The generated types use List<UByte>, not List<Byte> — ByteArray.toList() gives
+ * the wrong element type and will not compile.
+ */
+private fun ByteArray.toUByteList(): List<UByte> = this.map { it.toUByte() }
 
 // Bridge between the (generic) shell and the Rust core. Speaks ONLY the fixed
 // Mobiler ABI: sends an `Action`, receives a `Widget` tree + capability effects.
@@ -148,10 +665,23 @@ class Core(application: Application) : AndroidViewModel(application) {
     // (e.g. premium plugins); the generic shell ships only the official ones.
     private val plugins: Map<String, MobilerPlugin> = mapOf(
         "toast" to ToastPlugin(application),
+        "snackbar" to SnackbarPlugin(),
         "device" to DevicePlugin(),
         "ticker" to TickerPlugin(),
         "system" to SystemPlugin(),
+        "appearance" to AppearancePlugin(application),
         "storage" to StoragePlugin(application),
+        "http" to HttpPlugin(),
+        "clipboard" to ClipboardPlugin(application),
+        "clipboard_with" to ClipboardWithPlugin(application),
+        "share" to SharePlugin(application),
+        "browser" to BrowserPlugin(application),
+        "haptics" to HapticsPlugin(application),
+        "dialog" to DialogPlugin(),
+        "datetime" to DateTimePlugin(),
+        "photo" to PhotoPlugin(application),
+        "camera" to CameraPlugin(application),
+        // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 
     var view: Widget by mutableStateOf(Widget.bincodeDeserialize(core.view()))
@@ -165,6 +695,8 @@ class Core(application: Application) : AndroidViewModel(application) {
         // Hand any persisted state back to the core before the first frame.
         val saved = application.getSharedPreferences("mobiler", Context.MODE_PRIVATE).getString("state", "") ?: ""
         if (saved.isNotEmpty()) update(Action.Restore(saved))
+        // Always fire Start (after any Restore) so the app can load initial data.
+        update(Action.Start)
     }
 
     // The minimum is Android 8.0 (API 26, ADR-0039): PackageInfoFlags is API 33 and
@@ -187,10 +719,13 @@ class Core(application: Application) : AndroidViewModel(application) {
     }
 
     fun update(action: Action) {
-        process(core.update(action.bincodeSerialize()))
+        // Effects resolve on a coroutine so async capabilities (http) don't block
+        // the main thread. In-flight request/response calls are tracked by the core
+        // via request ids, so interleaved updates are fine.
+        viewModelScope.launch { process(core.update(action.bincodeSerialize())) }
     }
 
-    private fun process(effectBytes: ByteArray) {
+    private suspend fun process(effectBytes: ByteArray) {
         val requests = Requests.bincodeDeserialize(effectBytes).value
         for (request in requests) {
             when (val effect = request.effect) {
@@ -230,7 +765,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun dispatch(plugin: String, op: String, input: String): PluginResponse {
+    private suspend fun dispatch(plugin: String, op: String, input: String): PluginResponse {
         val p = plugins[plugin]
         if (p == null) {
             // An app using this plugin needs a custom build that registers it.
@@ -274,4 +809,14 @@ class Core(application: Application) : AndroidViewModel(application) {
             emit(pluginFailed(plugin, e))
         }
     }
+}
+
+/** The date/time picker dialogs follow the app's resolved appearance (`ActiveAppearance`, set by App()),
+ *  not the OS night mode alone: the app theme resolved for that mode (its values / values-night
+ *  variant). Only this dialog's context is overridden; the app's configuration stays the OS's (ADR-0041). */
+private fun pickerContext(activity: Activity): android.content.Context {
+    val conf = android.content.res.Configuration(activity.resources.configuration)
+    val night = if (ActiveAppearance.dark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO
+    conf.uiMode = (conf.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or night
+    return android.view.ContextThemeWrapper(activity, activity.applicationInfo.theme).apply { applyOverrideConfiguration(conf) }
 }

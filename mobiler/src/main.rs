@@ -5,6 +5,7 @@ mod deep_links;
 mod dev;
 mod fonts;
 mod fsguard;
+mod local_network;
 mod lockcheck;
 mod display_name;
 mod doctor;
@@ -90,6 +91,11 @@ enum Command {
         #[command(subcommand)]
         cmd: DeepLinksCmd,
     },
+    /// iOS local-network loads from `mobiler.toml` `[ios] local_network` (synced automatically by build/dev).
+    LocalNetwork {
+        #[command(subcommand)]
+        cmd: LocalNetworkCmd,
+    },
     /// Manage plugins (add a capability package to this app).
     Plugin {
         #[command(subcommand)]
@@ -122,6 +128,12 @@ enum Command {
 #[derive(Subcommand)]
 enum SplashCmd {
     /// Write `[splash]` (background colours, logo) into the Android, iOS and web shells (idempotent).
+    Sync,
+}
+
+#[derive(Subcommand)]
+enum LocalNetworkCmd {
+    /// Switch iOS's NSAllowsLocalNetworking on or off per `[ios] local_network` (idempotent).
     Sync,
 }
 
@@ -170,6 +182,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Splash { cmd: SplashCmd::Sync } => match splash::run_sync_cli() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::LocalNetwork { cmd: LocalNetworkCmd::Sync } => match local_network::run_sync_cli() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

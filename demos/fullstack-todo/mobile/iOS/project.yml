@@ -5,7 +5,7 @@
 # VERIFY-ON-MAC: the fiddly part is linking the Rust static lib + its uniffi FFI
 # (the modulemap / header / search paths). The settings below are the standard
 # Crux-iOS shape; expect to adjust paths on the first MacinCloud build.
-name: FullstackTodo
+name: Mobile
 options:
   bundleIdPrefix: dev.mobiler.mobile
   deploymentTarget:
@@ -16,9 +16,10 @@ packages:
   # `codegen --language swift` into generated/SharedTypes.
   SharedTypes:
     path: generated/SharedTypes
+  # mobiler:spm-packages — `mobiler plugin add` inserts remote SwiftPM packages above this line
 
 targets:
-  FullstackTodo:
+  Mobile:
     type: application
     platform: iOS
     sources:
@@ -26,28 +27,55 @@ targets:
       - generated/shared.swift         # uniffi Swift wrapper (generated)
     dependencies:
       - package: SharedTypes
+      # mobiler:spm-dependencies — `mobiler plugin add` inserts SwiftPM product deps above this line
     info:
       path: Sources/Info.plist
       # xcodegen regenerates this plist from these properties on every build, so
-      # launch-screen / orientation / ATS keys MUST live here — not just in the
-      # committed Info.plist (which gets overwritten). Without UILaunchScreen iOS
-      # runs the app letterboxed (black bars top/bottom) instead of full screen.
+      # launch-screen / orientation keys MUST live here — not just in the committed
+      # Info.plist (which gets overwritten). Without UILaunchScreen iOS runs the app
+      # letterboxed (black bars top/bottom) instead of full screen.
       properties:
+        CFBundleDisplayName: "FullstackTodo"
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.mobile
+        UILaunchScreen:
+          UIColorName: MobilerSplashBackground
+          # mobiler:splash-begin
+          # mobiler:splash-end
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Portrait-only, so opt out of iPad multitasking (which otherwise requires all four
+        # orientations) by declaring the app full-screen.
+        UIRequiresFullScreen: true
+        # Declare no non-exempt encryption up front, so TestFlight builds aren't held on
+        # the "Missing export compliance" question.
+        ITSAppUsesNonExemptEncryption: false
+        # cx.open_url_then: canOpenURL may only ask about declared schemes. It tells "no app can open
+        # tel:/sms:" apart from "the user cancelled the Call prompt".
+        LSApplicationQueriesSchemes:
+          - tel
+          - sms
         # Deep links: register the app's custom URL scheme (default = the bundle id) so
         # `dev.mobiler.mobile://…` opens the app — delivered to the core via the built-in `system` stream.
+        # (Universal/App Links over https additionally need an associated-domains entitlement + a
+        # server-side apple-app-site-association file — not auto-wired.)
+        # mobiler.toml `[deep_links] enabled = false` comments this registration out (ADR-0051).
+        # mobiler:deep-links-begin
         CFBundleURLTypes:
           - CFBundleURLName: dev.mobiler.mobile
             CFBundleURLSchemes:
               - dev.mobiler.mobile
-        UILaunchScreen: {}
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-        # This demo talks to a plaintext local server (http://localhost:3000), so
-        # allow cleartext loads (the iOS twin of the Android shell's
-        # usesCleartextTraffic). Demo-only — the starter template ships HTTPS-only.
+        # mobiler:deep-links-end
+        # mobiler.toml `[ios] local_network = true` switches this on: plain-HTTP loads to local addresses
+        # (localhost, .local names, LAN IPs) only, never the open internet (ADR-0064).
+        # mobiler:local-network-begin
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        # mobiler:local-network-end
+        # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
+        # requires this usage string to access the camera; the App Store flags apps that
+        # ship it without using the camera, so it's left off by default.
+        # NSCameraUsageDescription: "Take photos to use in the app."
+        # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobiler.mobile
@@ -57,5 +85,11 @@ targets:
         OTHER_LDFLAGS: ["-lshared"]
         # uniffi FFI modulemap so `shared.swift` finds the C symbols.
         SWIFT_INCLUDE_PATHS: ["$(PROJECT_DIR)/generated"]
-        # Simulator-only for now; no code signing needed.
+        # App icon: actool builds the required sizes from the single 1024 source in
+        # Sources/Assets.xcassets/AppIcon.appiconset and injects CFBundleIconName. Replace
+        # the placeholder icon (a neutral diamond) with your own.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The archive is built unsigned (build-ios.sh signs at export for App Store); the
+        # simulator + device compile-check builds need no signing either.
         CODE_SIGNING_ALLOWED: "NO"
+    # mobiler:target-extra (plugin add inserts a target-level entitlements block above this line)

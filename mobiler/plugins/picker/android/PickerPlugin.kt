@@ -2,6 +2,9 @@ package {{PACKAGE}}
 
 import {{PACKAGE_SHARED_TYPES}}.PluginResponse
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -27,8 +30,16 @@ class PickerPlugin : MobilerPlugin {
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
                 var resumed = false
+                // The activity going away (a dark-mode switch recreates it) takes the dialog's window with
+                // it, without a dismissal: close the dialog and answer then, so the request never hangs.
+                val owner = activity as? LifecycleOwner
+                var onDestroy: LifecycleEventObserver? = null
                 fun done(r: PluginResponse) {
-                    if (!resumed) { resumed = true; cont.resumeWith(Result.success(r)) }
+                    if (!resumed) {
+                        resumed = true
+                        onDestroy?.let { owner?.lifecycle?.removeObserver(it) }
+                        cont.resumeWith(Result.success(r))
+                    }
                 }
                 val dlg = android.app.AlertDialog.Builder(activity)
                     .setTitle(title)
@@ -37,10 +48,14 @@ class PickerPlugin : MobilerPlugin {
                     }
                     .setOnCancelListener { done(PluginResponse(false, "cancel")) }
                     .create()
-                // Any other dismissal still answers; after a pick or a cancel this is a no-op. (An activity
-                // recreated around an open dialog leaks it without a dismissal; the shell's configChanges
-                // keep that rare.)
+                // Any other dismissal still answers; after a pick or a cancel this is a no-op.
                 dlg.setOnDismissListener { done(PluginResponse(false, "cancel")) }
+                onDestroy = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_DESTROY) {
+                        runCatching { dlg.dismiss() }
+                        done(PluginResponse(false, "cancel"))
+                    }
+                }.also { owner?.lifecycle?.addObserver(it) }
                 cont.invokeOnCancellation { dlg.dismiss() }
                 if (runCatching { dlg.show() }.isFailure) done(PluginResponse(false, "could not show"))
             }

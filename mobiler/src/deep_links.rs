@@ -63,7 +63,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => return Ok(report.refuse(format!("{rel}: can't read it ({e})"))),
         };
-        match toggle(&text, begin, end, off, enabled) {
+        match toggle(&text, begin, end, off, enabled, "deep-link") {
             Ok(Some(new)) => {
                 if !enabled && live_outside(&new, begin, end, off) {
                     report.warnings.push(format!(
@@ -140,21 +140,22 @@ fn read_enabled(root: &Path, report: &mut SyncReport) -> anyhow::Result<Option<b
     }
 }
 
-/// `text` with the lines between `begin` and `end` switched on or off; `None` if the markers are absent.
+/// `text` with the lines between `begin` and `end` switched on or off; `None` if the markers are absent. `what`
+/// names the block in errors ("deep-link"). Shared with `[ios] local_network` (ADR-0064).
 /// A switched-off line is the original line's indent, then `off.0`, the rest of the line, `off.1`. Lines
 /// that are already comments (the app's own, or already off) and blank lines are left as they are.
-fn toggle(text: &str, begin: &str, end: &str, off: (&str, &str), on: bool) -> Result<Option<String>, &'static str> {
+pub(crate) fn toggle(text: &str, begin: &str, end: &str, off: (&str, &str), on: bool, what: &str) -> Result<Option<String>, String> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let begins: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains(begin)).map(|(i, _)| i).collect();
     let ends: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains(end)).map(|(i, _)| i).collect();
     let (b, e) = match (begins.as_slice(), ends.as_slice()) {
         ([], []) => return Ok(None),
         ([b], [e]) if e > b => (*b, *e),
-        _ => return Err("unbalanced deep-link marker lines (fix them by hand)"),
+        _ => return Err(format!("unbalanced {what} marker lines (fix them by hand)")),
     };
     // Anything else on a marker line would never be switched.
     if lines[b].trim() != begin || lines[e].trim() != end {
-        return Err("a deep-link marker line holds something besides the marker (move it onto its own line)");
+        return Err(format!("a {what} marker line holds something besides the marker (move it onto its own line)"));
     }
     let comment = if off.1.is_empty() { "#" } else { "<!--" };
     let mut out = String::with_capacity(text.len() + 64);
@@ -173,7 +174,7 @@ fn toggle(text: &str, begin: &str, end: &str, off: (&str, &str), on: bool) -> Re
             (false, None) if !rest.is_empty() && !rest.starts_with(comment) => {
                 // An XML comment can't hold `--`; such a line would end the comment early.
                 if !off.1.is_empty() && rest.contains("--") {
-                    return Err("a line between the deep-link markers contains `--`, which can't be commented out");
+                    return Err(format!("a line between the {what} markers contains `--`, which can't be commented out"));
                 }
                 out.push_str(&format!("{indent}{}{rest}{}{eol}", off.0, off.1));
             }
@@ -189,7 +190,7 @@ fn toggle(text: &str, begin: &str, end: &str, off: (&str, &str), on: bool) -> Re
             !strip_xml_comments(&block).trim().is_empty()
         };
         if live {
-            return Err("a line between the deep-link markers mixes a comment with markup, so it can't be switched off (split it)");
+            return Err(format!("a line between the {what} markers mixes a comment with markup, so it can't be switched off (split it)"));
         }
     }
     Ok(Some(out))

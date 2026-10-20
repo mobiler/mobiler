@@ -265,7 +265,8 @@ impl MobilerApp for Coffee {
             ..Default::default()
         };
         // Both screens are themed Scaffolds (title bar + body). Detail keeps its in-body
-        // "← Back" button (guarded by the CoffeeUITests regression), so no top-bar back.
+        // "← Back" button, so no top-bar back (the tap-routing UI test for that shape now runs
+        // in barbershop, FadehouseUITests).
         let root = match model.open_product.and_then(|i| model.products.get(i)) {
             Some(product) => scaffold(product.name, false, vec![], detail(product, model)),
             None => scaffold("Coffee", false, vec![], storefront(model)),

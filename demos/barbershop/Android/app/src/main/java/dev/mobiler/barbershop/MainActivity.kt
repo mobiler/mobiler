@@ -602,6 +602,9 @@ private fun PrePieFocusSink(modifier: Modifier) {
  *  false around its own children so a nested or second `fill: true` list keeps the cap. */
 private val LocalFillList = compositionLocalOf { false }
 
+/** The colour behind a swipe row: the page's, unless the row sits on another surface (a sheet sets its own). */
+private val LocalSwipeCover = compositionLocalOf<Color?> { null }
+
 /** The scaffold body's fill list, per the shared rule: the body itself, or the first direct child of
  *  the body's column, that is a `LazyList { fill: true }`. `-1` ⇒ the body itself; `i >= 0` ⇒ child
  *  `i` of the body's column; `null` ⇒ no fill mode (the body scrolls as a page, as today). */
@@ -1146,7 +1149,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                         .offset { IntOffset(offsetX.roundToInt(), 0) }
                         // The page's colour, not the surface: a rounded card's corners blend into the page.
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(LocalSwipeCover.current ?: MaterialTheme.colorScheme.background)
                         .draggable(
                             orientation = Orientation.Horizontal,
                             state = rememberDraggableState { delta -> offsetX = (offsetX + delta).coerceIn(-revealPx, 0f) },
@@ -1556,7 +1559,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(sheet.title, style = activeTheme?.typeScale?.headline?.let { scaled(it, MaterialTheme.typography.titleLarge, true) } ?: MaterialTheme.typography.titleLarge)
-                            Render(sheet.child, send)
+                            CompositionLocalProvider(LocalSwipeCover provides BottomSheetDefaults.ContainerColor) { Render(sheet.child, send) }
                         }
                     }
                 }

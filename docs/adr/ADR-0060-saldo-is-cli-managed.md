@@ -1,11 +1,11 @@
 # ADR-0060: Saldo, the showcase app, is CLI-managed and equals the current template; every CLI PR that changes a template shell runs `mobiler upgrade --apply` in `demos/saldo`, and a conformance test fails until it does
 
-Status:        Accepted
+Status:        Superseded by ADR-0063
 Date decided:  2026-10-19
 Deciding PRs:  #305
 Supersedes:    none
 Code anchor:   demos/saldo/.mobiler/ (version stamp + base snapshot), .claude/skills/release-cli/SKILL.md (the upgrade step)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0060_saldo_equals_the_current_template
+Conformance:   xtask/tests/adr_conformance.rs::adr_0063_every_demo_but_barbershop_is_cli_managed
 
 ## 1. Context (The Problem)
 
