@@ -51,6 +51,16 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             return Ok(report);
         }
     };
+    // A second `NSAppTransportSecurity:` in the same dictionary would be a duplicate YAML key: refuse, so the
+    // app merges `NSAllowsLocalNetworking` into its own key by hand.
+    if on && ats_outside(&text) {
+        report.warnings.push(format!(
+            "{PROJECT_YML} already has its own NSAppTransportSecurity outside the local-network markers — \
+             add `NSAllowsLocalNetworking: true` to it by hand, or remove it, then sync; nothing synced"
+        ));
+        report.failed = true;
+        return Ok(report);
+    }
     match toggle(&text, YML_BEGIN, YML_END, YML_OFF, on, "local-network") {
         Ok(Some(new)) if new != text => {
             crate::fsguard::write(root, &path, new)?;
@@ -70,6 +80,16 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
         }
     }
     Ok(report)
+}
+
+/// Whether a live `NSAppTransportSecurity:` key sits outside the marker block (comments don't count).
+fn ats_outside(text: &str) -> bool {
+    let mut inside = false;
+    text.lines().any(|l| {
+        let t = l.trim();
+        if t == YML_BEGIN { inside = true } else if t == YML_END { inside = false }
+        !inside && t.starts_with("NSAppTransportSecurity:")
+    })
 }
 
 /// `Some(on)`: `[ios] local_network`, false without the key, table or file. `None` when the table is
@@ -189,6 +209,26 @@ mod test {
         fs::write(root.join(PROJECT_YML), before.replace(YML_BEGIN, "").replace(YML_END, "")).unwrap();
         let r = sync(&root).unwrap();
         assert!(r.failed && r.warnings[0].contains("mobiler upgrade --apply"), "{r:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hand_written_ats_key_outside_the_markers_refuses_rather_than_duplicate_it() {
+        let root = app(Some("[ios]\nlocal_network = true\n"));
+        let own = yml(&root).replace(YML_BEGIN, &format!("NSAppTransportSecurity:\n          NSAllowsArbitraryLoadsInWebContent: true\n        {YML_BEGIN}"));
+        fs::write(root.join(PROJECT_YML), &own).unwrap();
+        let r = sync(&root).unwrap();
+        assert!(r.failed && r.written.is_empty(), "{r:?}");
+        assert!(r.warnings[0].contains("NSAppTransportSecurity"), "{r:?}");
+        assert_eq!(yml(&root), own, "nothing written");
+        // Off leaves the app's own key alone, and a commented-out key is not a key.
+        fs::write(root.join("mobiler.toml"), "[ios]\nlocal_network = false\n").unwrap();
+        assert!(!sync(&root).unwrap().failed);
+        let commented = yml(&app(None)).replace(YML_BEGIN, &format!("# NSAppTransportSecurity:\n        {YML_BEGIN}"));
+        fs::write(root.join(PROJECT_YML), commented).unwrap();
+        fs::write(root.join("mobiler.toml"), "[ios]\nlocal_network = true\n").unwrap();
+        let r = sync(&root).unwrap();
+        assert!(!r.failed && r.written == vec![PROJECT_YML], "{r:?}");
         let _ = fs::remove_dir_all(&root);
     }
 }

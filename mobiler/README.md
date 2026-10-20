@@ -254,7 +254,9 @@ local_network = true
 (`localhost`, `.local` names; a LAN IP on a device also needs iOS's Local Network permission), never plain HTTP to
 the internet. Android needs nothing: its debug
 build already allows the dev hosts. Commit the synced `project.yml` with `mobiler.toml`; an app made before
-CLI 0.73 runs `mobiler upgrade --apply` first to get the markers.
+CLI 0.73 runs `mobiler upgrade --apply` first to get the markers. If `project.yml` already has its own
+`NSAppTransportSecurity` outside the markers, the sync refuses rather than write a second one: add
+`NSAllowsLocalNetworking: true` to your key by hand instead.
 
 ## Debugging a text field on Android
 
