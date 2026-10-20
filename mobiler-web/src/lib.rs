@@ -2498,7 +2498,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let (placeholder, value) = (placeholder.clone(), value.clone());
             view! {
                 <div class="searchfield">
-                    <span class="search-icon">{icon_glyph(Icon::Search)}</span>
+                    <span class="search-icon" aria-hidden="true">{icon_glyph(Icon::Search)}</span>
                     <input
                         class="search-input"
                         placeholder=placeholder
@@ -2723,7 +2723,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             // ADR-0062: the root scaffold keeps each tab's scroll position. Read where the page still on
             // screen is scrolled before this render replaces it; a tab switch shows the new tab at once (no
             // nav animation), where it was left, with focus dropped.
-            let tab_step = root.then(|| TAB_POS.with_borrow_mut(|t| t.step(tab_slot_of(tabs), route, current_pos())));
+            let tab_step = root.then(|| TAB_POS.with_borrow_mut(|t| t.step(tab_slot_of(tabs), route, current_pos)));
             let switched = tab_step.as_ref().is_some_and(|s| s.switched);
             let anim = nav_class(route, *depth);
             let body_class = format!("scaffold-body {}", if switched { "" } else { anim });
@@ -2834,8 +2834,14 @@ fn restore_pos(pos: Pos) {
         #[allow(clippy::cast_possible_truncation)]
         list.set_scroll_top(pos.list as i32);
     }
+    // Only focus the old tab could have held: a field, or anything in the body. A keyboard user who chose
+    // the tab from the tab bar keeps their place there.
     if let Some(active) = document.active_element().and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok()) {
-        let _ = active.blur();
+        let in_body = active.closest(".scaffold-body").ok().flatten().is_some();
+        let field = matches!(active.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT");
+        if in_body || field {
+            let _ = active.blur();
+        }
     }
 }
 
@@ -3123,12 +3129,6 @@ fn put_rgba(s: &mut String, name: &str, c: Option<Rgba>) {
     }
 }
 
-/// Pick the Scaffold body's transition class for this render. Returns `""` for a
-/// same-route data update (re-render in place, no transition). On a route change it
-/// returns a directional class — slide-in from the right when `depth` grew (push),
-/// from the left when it shrank (pop), a crossfade for a lateral move — and *alternates*
-/// the `-a`/`-b` suffix each navigation so the CSS animation restarts even though
-/// Leptos reuses the same DOM node.
 /// Where a screen was scrolled: the page, and a fill list (its own scroller) when there is one.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct Pos {
@@ -3157,7 +3157,7 @@ impl TabPositions {
     /// One frame: `slot` is the selected tab (None without tabs), `route` the screen shown, `current` where the
     /// screen still on the page is scrolled. A switch saves the old tab's position and restores the new
     /// tab's, but only for the same route (a tab moved elsewhere while away starts at the top).
-    fn step(&mut self, slot: Option<usize>, route: &str, current: Pos) -> TabStep {
+    fn step(&mut self, slot: Option<usize>, route: &str, current: impl FnOnce() -> Pos) -> TabStep {
         let Some(slot) = slot else {
             self.last = None;
             self.saved.clear();
@@ -3166,7 +3166,7 @@ impl TabPositions {
         let prev = self.last.replace((slot, route.to_string()));
         match prev {
             Some((p, prev_route)) if p != slot => {
-                self.saved.insert(p, (prev_route, current));
+                self.saved.insert(p, (prev_route, current()));
                 let restore = match self.saved.get(&slot) {
                     Some((r, pos)) if r == route => *pos,
                     _ => Pos::default(),
@@ -3188,6 +3188,12 @@ fn tab_slot_of(tabs: &[Tab]) -> Option<usize> {
     }
 }
 
+/// Pick the Scaffold body's transition class for this render. Returns `""` for a
+/// same-route data update (re-render in place, no transition). On a route change it
+/// returns a directional class — slide-in from the right when `depth` grew (push),
+/// from the left when it shrank (pop), a crossfade for a lateral move — and *alternates*
+/// the `-a`/`-b` suffix each navigation so the CSS animation restarts even though
+/// Leptos reuses the same DOM node.
 fn nav_class(route: &str, depth: u32) -> &'static str {
     NAV.with_borrow_mut(|(prev_route, prev_depth, toggle)| {
         if route == prev_route {
@@ -4148,31 +4154,46 @@ mod tab_position_tests {
     #[test]
     fn a_switch_saves_the_old_tab_and_restores_the_new_one() {
         let mut t = TabPositions::default();
-        assert!(!t.step(Some(0), "bills", TOP).switched, "the first tabbed screen is not a switch");
-        let s = t.step(Some(1), "stats", Pos { page: 420.0, list: 0.0 });
+        assert!(!t.step(Some(0), "bills", || TOP).switched, "the first tabbed screen is not a switch");
+        let s = t.step(Some(1), "stats", || Pos { page: 420.0, list: 0.0 });
         assert!(s.switched);
         assert_eq!(s.restore, TOP, "a tab never visited starts at the top");
-        let back = t.step(Some(0), "bills", Pos { page: 90.0, list: 0.0 });
+        let back = t.step(Some(0), "bills", || Pos { page: 90.0, list: 0.0 });
         assert!(back.switched);
         assert_eq!(back.restore, Pos { page: 420.0, list: 0.0 }, "the tab comes back where it was left");
-        assert_eq!(t.step(Some(1), "stats", TOP).restore, Pos { page: 90.0, list: 0.0 });
+        assert_eq!(t.step(Some(1), "stats", || TOP).restore, Pos { page: 90.0, list: 0.0 });
+    }
+
+    #[test]
+    fn the_position_is_read_only_on_a_switch() {
+        let reads = std::cell::Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            TOP
+        };
+        let mut t = TabPositions::default();
+        t.step(Some(0), "bills", read);
+        t.step(Some(0), "bills", read); // an ordinary update (a keystroke): no layout read
+        assert_eq!(reads.get(), 0);
+        t.step(Some(1), "stats", read);
+        assert_eq!(reads.get(), 1);
     }
 
     #[test]
     fn push_and_pop_inside_a_tab_are_not_switches() {
         let mut t = TabPositions::default();
-        t.step(Some(0), "bills", TOP);
-        assert!(!t.step(Some(0), "bills/detail", Pos { page: 50.0, list: 0.0 }).switched);
-        assert!(!t.step(Some(0), "bills", TOP).switched);
+        t.step(Some(0), "bills", || TOP);
+        assert!(!t.step(Some(0), "bills/detail", || Pos { page: 50.0, list: 0.0 }).switched);
+        assert!(!t.step(Some(0), "bills", || TOP).switched);
     }
 
     #[test]
     fn a_tab_whose_route_changed_while_away_starts_at_the_top() {
         let mut t = TabPositions::default();
-        t.step(Some(0), "bills/detail", TOP);
-        t.step(Some(1), "stats", Pos { page: 300.0, list: 0.0 });
+        t.step(Some(0), "bills/detail", || TOP);
+        t.step(Some(1), "stats", || Pos { page: 300.0, list: 0.0 });
         // The app reset the Bills stack while Stats was showing: never the old screen's offset.
-        let s = t.step(Some(0), "bills", TOP);
+        let s = t.step(Some(0), "bills", || TOP);
         assert!(s.switched);
         assert_eq!(s.restore, TOP);
     }
@@ -4180,10 +4201,10 @@ mod tab_position_tests {
     #[test]
     fn leaving_the_tabbed_screens_forgets_every_position() {
         let mut t = TabPositions::default();
-        t.step(Some(0), "bills", TOP);
-        t.step(Some(1), "stats", Pos { page: 300.0, list: 0.0 });
-        assert!(!t.step(None, "login", TOP).switched);
-        t.step(Some(1), "stats", TOP);
-        assert_eq!(t.step(Some(0), "bills", TOP).restore, TOP, "positions from before the untabbed screen are gone");
+        t.step(Some(0), "bills", || TOP);
+        t.step(Some(1), "stats", || Pos { page: 300.0, list: 0.0 });
+        assert!(!t.step(None, "login", || TOP).switched);
+        t.step(Some(1), "stats", || TOP);
+        assert_eq!(t.step(Some(0), "bills", || TOP).restore, TOP, "positions from before the untabbed screen are gone");
     }
 }
