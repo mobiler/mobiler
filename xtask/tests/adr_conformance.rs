@@ -330,8 +330,7 @@ fn adr_0059_platform_only_option_is_named_and_ignored_elsewhere() {
     let at = ui.find("ios_glass_tabs: bool").expect("ADR-0059: Scaffold has no ios_glass_tabs");
     let doc = &ui[ui[..at].rfind("bottom_bar: Option<Vec<Widget>>,").expect("bottom_bar")..at];
     assert!(doc.contains("iOS only"), "ADR-0059: ios_glass_tabs' doc must say it is iOS only");
-    // The template's iOS shell joins in the CLI PR that follows the libraries' publish (ADR-0009).
-    for path in ["demos/barbershop/iOS/Sources/Render.swift"] {
+    for path in ["demos/barbershop/iOS/Sources/Render.swift", "mobiler/templates/iOS/Sources/Render.swift"] {
         let code = live_code(&read(path));
         assert!(code.contains("iosGlassTabs"), "ADR-0059: {path} must render ios_glass_tabs");
         // The capsule grows with Dynamic Type: what it covers is measured, never a fixed height.
@@ -376,8 +375,9 @@ fn every_palette_role_is_read_by_both_native_shells() {
     assert!(roles.len() >= 28, "expected the ColorRoles fields, found {roles:?}");
     let shells = [
         ("demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/", vec!["MainActivity.kt", "ui/theme/Theme.kt"]),
+        ("mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/", vec!["MainActivity.kt", "ui/theme/Theme.kt"]),
         ("demos/barbershop/iOS/Sources/", vec!["Render.swift", "Core.swift"]),
-        // The template joins in the CLI PR that follows the libraries' publish (ADR-0009).
+        ("mobiler/templates/iOS/Sources/", vec!["Render.swift", "Core.swift"]),
     ];
     for (dir, files) in shells {
         let code: String = files.iter().map(|f| live_code(&read(&format!("{dir}{f}")))).collect();
