@@ -437,6 +437,17 @@ fn every_palette_role_is_read_by_both_native_shells() {
     }
 }
 
+/// Not an ADR: the core capabilities' Android permissions are declared by the template, so an app gets
+/// `cx.http` and `cx.haptic` without a hand edit (which a CLI-managed demo may not carry). Both are normal
+/// permissions: granted at install, no prompt.
+#[test]
+fn the_template_declares_the_core_capabilities_permissions() {
+    let manifest = xml_without_comments(&read("mobiler/templates/Android/app/src/main/AndroidManifest.xml"));
+    for perm in ["android.permission.INTERNET", "android.permission.VIBRATE"] {
+        assert!(manifest.contains(&format!(r#"<uses-permission android:name="{perm}" />"#)), "the template must declare {perm}");
+    }
+}
+
 /// Not an ADR: the CLI embeds `mobiler/templates` and `mobiler/plugins` whole, so a leftover from a
 /// `patch` run or a review copy would ship in every new app (a `MainActivity.kt.orig` once did, #305).
 #[test]
