@@ -165,22 +165,21 @@ jobs:
       - name: Build for the iOS simulator
         run: bash iOS/build-ios.sh
 
-      # Behavioral UI test on a booted simulator (only coffee carries the CoffeeUITests
-      # target). Drives the generic shell with real taps to guard tap-routing
-      # regressions — e.g. the build-4 bug where the hero image swallowed the in-body
-      # "← Back" button's tap — which compile-only builds can't catch. Coffee's shell
-      # may lag the template (barbershop is the reference, ADR-0015), so this guards
-      # tap routing in the shared renderer code, not every release's shell changes.
+      # Behavioral UI test on a booted simulator (only barbershop carries a UI-test target,
+      # FadehouseUITests). Drives the generic shell with real taps to guard tap-routing
+      # regressions — e.g. the bug where an image swallowed the in-body Back button's tap —
+      # which compile-only builds can't catch. It moved here from coffee when coffee became
+      # CLI-managed (ADR-0063); barbershop is the reference shell (ADR-0015).
       # MUST run before the device build below: that step rebuilds the Rust staticlib
       # (generated/lib/libshared.a) for the *device* slice, which would then fail to link
       # against this simulator test build ("built for iOS, linking for iOS-simulator").
-      - name: UI test (behavioral — coffee back button)
-        if: matrix.app == 'demos/coffee'
+      - name: UI test (behavioral — in-body back button)
+        if: matrix.app == 'demos/barbershop'
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(v['udid'] for rt,devs in d['devices'].items() if 'iOS' in rt for v in devs if v.get('isAvailable') and v['name'].startswith('iPhone')))")
           echo "Using simulator $UDID"
           xcrun simctl boot "$UDID" || true
-          xcodebuild test -project iOS/Coffee.xcodeproj -scheme Coffee \
+          xcodebuild test -project iOS/Fadehouse.xcodeproj -scheme Fadehouse \
             -destination "platform=iOS Simulator,id=$UDID" \
             -derivedDataPath iOS/build CODE_SIGNING_ALLOWED=NO
 
