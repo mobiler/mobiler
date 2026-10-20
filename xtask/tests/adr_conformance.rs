@@ -107,18 +107,35 @@ fn adr_0061_app_data_stays_in_backups() {
         for file in ["backup_rules.xml", "data_extraction_rules.xml"] {
             let path = format!("{app}/Android/app/src/main/res/xml/{file}");
             let xml = xml_without_comments(&read(&path));
-            let excludes: Vec<&str> = xml.match_indices("<exclude").map(|(at, _)| &xml[at..xml[at..].find("/>").map_or(xml.len(), |e| at + e + 2)]).collect();
+            // Each exclude tag on its own, up to its first `>` (a paired `<exclude …></exclude>` too).
+            let excludes: Vec<&str> = xml.match_indices("<exclude").map(|(at, _)| &xml[at..xml[at..].find('>').map_or(xml.len(), |e| at + e + 1)]).collect();
             assert!(!excludes.is_empty(), "ADR-0061: {path} has no exclude at all (ADR-0037's secure store)");
             for ex in excludes {
                 assert!(ex.contains("mobiler_secure.xml"), "ADR-0061: {path} excludes app data from backup: {ex}");
             }
+            // An include rule backs up only what it names; encryption-only cloud backup skips devices without it.
+            assert!(!xml.contains("<include"), "ADR-0061: {path} has an include rule, which drops everything it doesn't name");
+            assert!(!xml.contains("disableIfNoEncryptionCapabilities=\"true\""), "ADR-0061: {path} turns cloud backup off on some devices");
         }
+        let manifest = read(&format!("{app}/Android/app/src/main/AndroidManifest.xml"));
+        assert!(manifest.contains(r#"android:allowBackup="true""#), "ADR-0061: {app}'s manifest must allow backup");
     }
+    // The data stays where backups reach: no iCloud exclusion, no move to a never-backed-up folder.
     let swift = files_with_extension(&[root().join("mobiler/templates/iOS"), root().join("mobiler/plugins"), root().join("demos/saldo/iOS")], "swift");
     assert!(swift.len() > 10, "ADR-0061: expected the iOS sources, found {}", swift.len());
     for path in &swift {
         let code = live_code(&std::fs::read_to_string(path).unwrap());
-        assert!(!code.contains("isExcludedFromBackup"), "ADR-0061: {} excludes a file from iCloud backup", path.display());
+        for key in ["isExcludedFromBackup", "NSURLIsExcludedFromBackupKey"] {
+            assert!(!code.contains(key), "ADR-0061: {} excludes a file from iCloud backup ({key})", path.display());
+        }
+    }
+    let kotlin = files_with_extension(&[root().join("mobiler/templates/Android"), root().join("mobiler/plugins"), root().join("demos/saldo/Android/app/src")], "kt");
+    for path in &kotlin {
+        assert!(!live_code(&std::fs::read_to_string(path).unwrap()).contains("noBackupFilesDir"), "ADR-0061: {} keeps data outside backup", path.display());
+    }
+    for path in ["mobiler/plugins/sqlite/ios/SqlitePlugin.swift", "demos/saldo/iOS/Sources/SqlitePlugin.swift"] {
+        let code = live_code(&read(path));
+        assert!(code.contains(".documentDirectory") && !code.contains("cachesDirectory") && !code.contains("temporaryDirectory"), "ADR-0061: {path} must keep mobiler.db in Documents (backed up)");
     }
 }
 
