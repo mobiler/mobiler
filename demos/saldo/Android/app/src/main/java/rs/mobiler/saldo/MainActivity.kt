@@ -1145,7 +1145,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                 Box(
                     modifier = Modifier.fillMaxWidth()
                         .offset { IntOffset(offsetX.roundToInt(), 0) }
-                        .background(MaterialTheme.colorScheme.surface)
+                        // The page's colour, not the surface: a rounded card's corners blend into the page.
+                        .background(MaterialTheme.colorScheme.background)
                         .draggable(
                             orientation = Orientation.Horizontal,
                             state = rememberDraggableState { delta -> offsetX = (offsetX + delta).coerceIn(-revealPx, 0f) },
