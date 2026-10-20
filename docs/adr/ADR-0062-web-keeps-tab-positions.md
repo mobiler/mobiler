@@ -1,11 +1,11 @@
-# ADR-0062: The web shell keeps each visited tab's scroll position and shows a tab switch at once, with focus dropped; it keeps no screen, since it rebuilds the DOM on every update
+# ADR-0062: The web shell keeps each visited tab's scroll position and shows a tab switch at once, with a field's focus dropped; it keeps no screen, since it rebuilds the DOM on every update
 
 Status:        Accepted
 Date decided:  2026-10-20
 Deciding PRs:  #307
 Supersedes:    none
 Code anchor:   mobiler-web/src/lib.rs (TabPositions, Pos, TabStep, tab_slot_of, current_pos, restore_pos, SCAFFOLD_DEPTH, TAB_POS; the Scaffold arm)
-Conformance:   mobiler-web/src/lib.rs::a_switch_saves_the_old_tab_and_restores_the_new_one, mobiler-web/src/lib.rs::a_tab_whose_route_changed_while_away_starts_at_the_top, mobiler-web/src/lib.rs::push_and_pop_inside_a_tab_are_not_switches, mobiler-web/src/lib.rs::leaving_the_tabbed_screens_forgets_every_position
+Conformance:   mobiler-web/src/lib.rs::a_switch_saves_the_old_tab_and_restores_the_new_one, mobiler-web/src/lib.rs::a_tab_whose_route_changed_while_away_starts_at_the_top, mobiler-web/src/lib.rs::push_and_pop_inside_a_tab_are_not_switches, mobiler-web/src/lib.rs::leaving_the_tabbed_screens_forgets_every_position, mobiler-web/src/lib.rs::the_position_is_read_only_on_a_switch
 
 ## 1. Context (The Problem)
 
@@ -29,6 +29,10 @@ everything visible. A tab switch also drops the old tab's focus and skips the na
   while away starts at the top, never at another screen's offset (ADR-0057's "never stale").
 - A push/pop inside one tab is not a switch: it animates as before.
 - Leaving the tabbed screens forgets every offset, as the native shells drop their slots.
+- A switch drops focus held by a field or anything in the body, so no field of the old tab keeps the keyboard. A
+  keyboard user who chose the tab from the tab bar keeps their focus there (WCAG 2.4.3).
+- The position is read only on a switch, never on an ordinary update such as a keystroke (a scroll read can force a
+  layout).
 - Only the root scaffold keeps positions. A scaffold in a sheet, a Split or a body is counted out (`SCAFFOLD_DEPTH`).
 - Nothing runs hidden: the web never holds a hidden screen, so ADR-0057's not-kept list has no web counterpart.
 
@@ -55,17 +59,24 @@ everything visible. A tab switch also drops the old tab's focus and skips the na
 Option: `TabPositions` in the root scaffold, as in §2. The logic is a pure struct, unit-tested on the host. The DOM
 reads and writes are two small functions, `current_pos` and `restore_pos`.
 
-**Mutation proof:** the logic was broken twice on purpose. The tests failed each time; the file was restored, and the
+**Mutation proof:** the logic was broken five times on purpose. The tests failed each time; the file was restored, and the
 tests passed again.
 - A return restored the top instead of the saved offset (`a_switch_saves_the_old_tab_and_restores_the_new_one`
   panicked: "the tab comes back where it was left").
 - The route check was dropped, so any saved offset was restored
   (`a_tab_whose_route_changed_while_away_starts_at_the_top` failed).
+- A route change inside the selected tab counted as a switch (`push_and_pop_inside_a_tab_are_not_switches` failed).
+- An untabbed screen kept the saved offsets (`leaving_the_tabbed_screens_forgets_every_position` failed).
+- The position was read on every update (`the_position_is_read_only_on_a_switch` failed).
 
 ## 5. Consequences (Positive and Negative Predictions)
 
 - **Positive:** the web, Android and iOS all return a user to where they were on a tab, and switch tabs at once.
 - **Negative:** only the scroll position survives on the web, not the rest of a screen's state. The native shells
   also keep an open `Disclosure` or a field's cursor; the web rebuilds those on every update anyway.
+- **Negative:** the same release names icon-only controls for screen readers (an icon button, a plain FAB) in
+  English ("Wallet", "Notifications") instead of letting the emoji speak its own name ("purse"). A localized app's
+  screen-reader users hear those few names in English until the names join `ShellLabels` (a `mobiler-core` change).
+- **Negative:** a tab whose content first renders short (data loaded on select) may clamp the restored offset.
 - **Negative:** a restore happens one tick after the render (`setTimeout(0)`), so a slow device may show a frame at
   the top before it jumps.
