@@ -160,7 +160,9 @@ the test passed again.
   (its connection closed with it), so no working app loses anything. A multi-statement transaction
   needs a capability of its own (a batch op), which is a later decision.
 - **Negative:** on Android each reply and stream event waits one main-looper turn before the core
-  sees it.
+  sees it, and a stream event received but not yet processed when its `unsubscribe` arrives is
+  dropped. "Always posts" rests on kotlinx-coroutines telling `Dispatchers.Main` from
+  `Main.immediate` (true in 1.9, which the template gets through lifecycle 2.10).
 - **Negative:** connection settings an app sets (a PRAGMA, a TEMP trigger, an `ATTACH`) now last for
   the process instead of one call. SQL built from untrusted text would make that worse; the plugin's
   manifest says to pass such values as bound `args`.

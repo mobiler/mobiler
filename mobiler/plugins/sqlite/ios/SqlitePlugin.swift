@@ -122,7 +122,7 @@ enum SqlitePlugin {
         while true {
             rest = rest.drop(while: { $0.isWhitespace })
             if rest.hasPrefix("--") {
-                rest = rest.firstIndex(of: "\n").map { rest[rest.index(after: $0)...] } ?? ""
+                rest = rest.firstIndex(where: { $0.isNewline }).map { rest[rest.index(after: $0)...] } ?? ""
             } else if rest.hasPrefix("/*") {
                 let body = rest.dropFirst(2)
                 rest = body.range(of: "*/").map { body[$0.upperBound...] } ?? ""
