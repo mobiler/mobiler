@@ -25,7 +25,7 @@ use mobiler_core::{
     A11yRole, Action, BoxAlign, ButtonStyle, CardStyle, ChartBracket, ChartLegendItem, ChartRefLine, ChartRegion,
     ChartSeries, ChartStyle, ChartTick, Corner, Density, Effect, FieldKind, FontFamily, HttpHeader, HttpOutcome, Icon,
     ImageRatio, ImageShape, InputValue, PluginCall, PluginNotify, PluginResponse, PluginStreamCall, ProjectColor,
-    ColorRoles, Rgb, Rgba, ShellLabels, Spacing, TabBadge, TextStyle, Theme, Tone, TransferEvent, Widget,
+    ColorRoles, Rgb, Rgba, ShellLabels, Spacing, Tab, TabBadge, TextStyle, Theme, Tone, TransferEvent, Widget,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -2416,7 +2416,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             if *wide {
                 class.push_str(" btn-wide");
             }
-            let glyph = icon.map(|i| view! { <span class="btn-icon">{icon_glyph(i)}</span> });
+            let glyph = icon.map(|i| view! { <span class="btn-icon" aria-hidden="true">{icon_glyph(i)}</span> });
             view! {
                 <button class=class on:click=move |_| send(Action::Fired { token: token.clone() })>
                     {glyph}
@@ -2427,10 +2427,10 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
         }
         Widget::IconButton { icon, on_press } => {
             let (send, token) = (send.clone(), on_press.clone());
-            let glyph = icon_glyph(*icon);
+            let (glyph, name) = (icon_glyph(*icon), icon_name(*icon));
             view! {
-                <button class="iconbtn" on:click=move |_| send(Action::Fired { token: token.clone() })>
-                    {glyph}
+                <button class="iconbtn" aria-label=name on:click=move |_| send(Action::Fired { token: token.clone() })>
+                    <span aria-hidden="true">{glyph}</span>
                 </button>
             }
             .into_any()
@@ -2498,7 +2498,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let (placeholder, value) = (placeholder.clone(), value.clone());
             view! {
                 <div class="searchfield">
-                    <span class="search-icon">{icon_glyph(Icon::Search)}</span>
+                    <span class="search-icon" aria-hidden="true">{icon_glyph(Icon::Search)}</span>
                     <input
                         class="search-input"
                         placeholder=placeholder
@@ -2597,6 +2597,13 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
 
         // ---- shell ----
         Widget::Scaffold { title, body, tabs, back, dark_mode, theme, fab, sheet, on_refresh, refreshing, route, depth, labels: _, appearance, bottom_bar, ios_glass_tabs: _ } => {
+            // Only the root scaffold keeps tab positions: count the nesting over the whole arm, since its
+            // sheet, body and bars may hold a scaffold of their own.
+            let root = SCAFFOLD_DEPTH.with(|d| {
+                let r = d.get() == 0;
+                d.set(d.get() + 1);
+                r
+            });
             // ACTIVE_LABELS is stashed once at the root render closure (from the root widget's
             // own `labels`), not here — a Scaffold nested in a sheet, body or Split must not
             // overwrite the root's labels. This arm's own aria-label reads below still see the
@@ -2621,7 +2628,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                         // Optional leading icon → glyph above the label (icon tab bar); the badge sits on the icon,
                         // or after the label on a label-only tab.
                         let (icon_mark, label_mark) = if tab.icon.is_some() { (mark, None) } else { (None, mark) };
-                        let icon = tab.icon.map(|i| view! { <span class="tab-icon">{icon_glyph(i)}{icon_mark}</span> });
+                        let icon = tab.icon.map(|i| view! { <span class="tab-icon"><span aria-hidden="true">{icon_glyph(i)}</span>{icon_mark}</span> });
                         view! {
                             <button class=class on:click=move |_| send(Action::Fired { token: token.clone() })>
                                 {icon}
@@ -2650,8 +2657,8 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
                         .into_any()
                     }
                     None => view! {
-                        <button class="fab" on:click=move |_| send(Action::Fired { token: token.clone() })>
-                            {icon_glyph(f.icon)}
+                        <button class="fab" aria-label=icon_name(f.icon) on:click=move |_| send(Action::Fired { token: token.clone() })>
+                            <span aria-hidden="true">{icon_glyph(f.icon)}</span>
                         </button>
                     }
                     .into_any(),
@@ -2713,7 +2720,17 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let refresh_bar = refreshing.then(|| {
                 view! { <div class="progress progress-indeterminate"><div class="progress-bar"></div></div> }
             });
-            let body_class = format!("scaffold-body {}", nav_class(route, *depth));
+            // ADR-0062: the root scaffold keeps each tab's scroll position. Read where the page still on
+            // screen is scrolled before this render replaces it; a tab switch shows the new tab at once (no
+            // nav animation), where it was left, with focus dropped.
+            let tab_step = root.then(|| TAB_POS.with_borrow_mut(|t| t.step(tab_slot_of(tabs), route, current_pos)));
+            let switched = tab_step.as_ref().is_some_and(|s| s.switched);
+            let anim = nav_class(route, *depth);
+            let body_class = format!("scaffold-body {}", if switched { "" } else { anim });
+            if let Some(step) = tab_step.filter(|s| s.switched) {
+                let pos = step.restore;
+                gloo_timers::callback::Timeout::new(0, move || restore_pos(pos)).forget();
+            }
             // An app `Theme` overrides the CSS variables inline (brand color, corner, density,
             // font) — the web twin of the native shells' brand/tint + shape + spacing + font.
             let theme_style = theme.as_ref().map(|t| theme_css(t, dark)).unwrap_or_default();
@@ -2737,6 +2754,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             });
             let prev = FILL_TARGET.with(|t| t.replace(target));
             let (title, body) = (title.clone(), render(body, send));
+            SCAFFOLD_DEPTH.with(|d| d.set(d.get() - 1));
             FILL_TARGET.with(|t| *t.borrow_mut() = prev);
             view! {
                 <div class=class style=theme_style>
@@ -2785,6 +2803,46 @@ thread_local! {
     /// function — the whole tree is built eagerly within that call — so the LazyList arm sees this
     /// set only while rendering the marked widget's subtree.
     static FILL_TARGET: std::cell::RefCell<Option<*const Widget>> = const { std::cell::RefCell::new(None) };
+
+    /// How many Scaffold arms the current render is inside: 0 is the root scaffold, the only one that
+    /// keeps tab positions (one in a sheet or a Split never does).
+    static SCAFFOLD_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+
+    /// Each visited tab's scroll position (ADR-0062).
+    static TAB_POS: RefCell<TabPositions> = RefCell::new(TabPositions::default());
+}
+
+/// Where the screen now on the page is scrolled: the page, and the fill list when there is one.
+fn current_pos() -> Pos {
+    let page = web_sys::window().and_then(|w| w.scroll_y().ok()).unwrap_or(0.0);
+    let list = leptos::prelude::document()
+        .query_selector(".scaffold-body .lazylist-fill")
+        .ok()
+        .flatten()
+        .map_or(0.0, |e| f64::from(e.scroll_top()));
+    Pos { page, list }
+}
+
+/// After a tab switch has rendered: scroll the new tab to where it was left, and drop focus so no field of
+/// the old tab keeps the keyboard.
+fn restore_pos(pos: Pos) {
+    if let Some(w) = web_sys::window() {
+        w.scroll_to_with_x_and_y(0.0, pos.page);
+    }
+    let document = leptos::prelude::document();
+    if let Ok(Some(list)) = document.query_selector(".scaffold-body .lazylist-fill") {
+        #[allow(clippy::cast_possible_truncation)]
+        list.set_scroll_top(pos.list as i32);
+    }
+    // Only focus the old tab could have held: a field, or anything in the body. A keyboard user who chose
+    // the tab from the tab bar keeps their place there.
+    if let Some(active) = document.active_element().and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok()) {
+        let in_body = active.closest(".scaffold-body").ok().flatten().is_some();
+        let field = matches!(active.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT");
+        if in_body || field {
+            let _ = active.blur();
+        }
+    }
 }
 
 /// The app's label for a piece of shell text, or `default`. An empty string (an app that set
@@ -3071,6 +3129,65 @@ fn put_rgba(s: &mut String, name: &str, c: Option<Rgba>) {
     }
 }
 
+/// Where a screen was scrolled: the page, and a fill list (its own scroller) when there is one.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Pos {
+    page: f64,
+    list: f64,
+}
+
+/// What the shell does for this frame: whether the selected tab changed, and where to scroll the new screen.
+#[derive(Debug, PartialEq)]
+struct TabStep {
+    switched: bool,
+    restore: Pos,
+}
+
+/// Each visited tab's scroll position (ADR-0062, the web's twin of ADR-0057/0058). The web shell rebuilds
+/// the DOM on every update, so it keeps no screen: it keeps where each tab was scrolled, keyed by the tab's
+/// slot and the route it showed, and puts it back when the tab returns.
+#[derive(Default)]
+struct TabPositions {
+    /// The slot and route shown last frame (None while the screen has no tabs).
+    last: Option<(usize, String)>,
+    saved: HashMap<usize, (String, Pos)>,
+}
+
+impl TabPositions {
+    /// One frame: `slot` is the selected tab (None without tabs), `route` the screen shown, `current` where the
+    /// screen still on the page is scrolled. A switch saves the old tab's position and restores the new
+    /// tab's, but only for the same route (a tab moved elsewhere while away starts at the top).
+    fn step(&mut self, slot: Option<usize>, route: &str, current: impl FnOnce() -> Pos) -> TabStep {
+        let Some(slot) = slot else {
+            self.last = None;
+            self.saved.clear();
+            return TabStep { switched: false, restore: Pos::default() };
+        };
+        let prev = self.last.replace((slot, route.to_string()));
+        match prev {
+            Some((p, prev_route)) if p != slot => {
+                self.saved.insert(p, (prev_route, current()));
+                let restore = match self.saved.get(&slot) {
+                    Some((r, pos)) if r == route => *pos,
+                    _ => Pos::default(),
+                };
+                TabStep { switched: true, restore }
+            }
+            _ => TabStep { switched: false, restore: Pos::default() },
+        }
+    }
+}
+
+/// The selected tab's index, or None when the screen has no tabs or not exactly one is selected (as the
+/// native shells' `tabSlotOf`).
+fn tab_slot_of(tabs: &[Tab]) -> Option<usize> {
+    let mut selected = tabs.iter().enumerate().filter(|(_, t)| t.selected).map(|(i, _)| i);
+    match (selected.next(), selected.next()) {
+        (Some(i), None) => Some(i),
+        _ => None,
+    }
+}
+
 /// Pick the Scaffold body's transition class for this render. Returns `""` for a
 /// same-route data update (re-render in place, no transition). On a route change it
 /// returns a directional class — slide-in from the right when `depth` grew (push),
@@ -3180,6 +3297,53 @@ fn badge_glyph(i: Icon) -> &'static str {
     match i {
         Icon::Clock => "◷",
         other => icon_glyph(other),
+    }
+}
+
+/// An icon's spoken name, for a control the icon alone labels (an icon button, a plain FAB). The glyph is
+/// an emoji a screen reader would otherwise read by its own name ("purse" for Wallet), so it is hidden.
+fn icon_name(i: Icon) -> &'static str {
+    match i {
+        Icon::Delete => "Delete",
+        Icon::Add => "Add",
+        Icon::Edit => "Edit",
+        Icon::Close => "Close",
+        Icon::Settings => "Settings",
+        Icon::Check => "Done",
+        Icon::Star => "Star",
+        Icon::Info => "Info",
+        Icon::Home => "Home",
+        Icon::Search => "Search",
+        Icon::Menu => "Menu",
+        Icon::Filter => "Filter",
+        Icon::Back => "Back",
+        Icon::Forward => "Forward",
+        Icon::Down => "More",
+        Icon::Bell => "Notifications",
+        Icon::Cart => "Cart",
+        Icon::Share => "Share",
+        Icon::Heart => "Favorite",
+        Icon::HeartFilled => "Favorited",
+        Icon::Person => "Profile",
+        Icon::People => "People",
+        Icon::Phone => "Call",
+        Icon::Mail => "Mail",
+        Icon::Calendar => "Calendar",
+        Icon::Clock => "Time",
+        Icon::MapPin => "Location",
+        Icon::Camera => "Camera",
+        Icon::Photo => "Photo",
+        Icon::Play => "Play",
+        Icon::Scissors => "Scissors",
+        Icon::DoneAll => "Done all",
+        Icon::Ledger => "Ledger",
+        Icon::Chart => "Chart",
+        Icon::Wallet => "Wallet",
+        Icon::CreditCard => "Card",
+        Icon::Lock => "Lock",
+        Icon::Download => "Download",
+        Icon::Upload => "Upload",
+        Icon::Globe => "Language",
     }
 }
 
@@ -3675,6 +3839,19 @@ mod palette_tests {
     }
 
     #[test]
+    fn every_icon_has_a_spoken_english_name() {
+        use mobiler_core::Icon::*;
+        let all = [Delete, Add, Edit, Close, Settings, Check, Star, Info, Home, Search, Menu, Filter, Back, Forward, Down, Bell, Cart, Share,
+            Heart, HeartFilled, Person, People, Phone, Mail, Calendar, Clock, MapPin, Camera, Photo, Play, Scissors, DoneAll,
+            Ledger, Chart, Wallet, CreditCard, Lock, Download, Upload, Globe];
+        for i in all {
+            let name = super::icon_name(i);
+            assert!(!name.is_empty() && name.chars().all(|c| c.is_ascii_alphabetic() || c == ' '), "{i:?} is spoken as {name:?}");
+        }
+        assert_eq!(super::icon_name(Wallet), "Wallet", "never the emoji's own name (\"purse\")");
+    }
+
+    #[test]
     fn every_new_icon_has_a_glyph() {
         for i in [Icon::Ledger, Icon::Chart, Icon::Wallet, Icon::CreditCard, Icon::Lock, Icon::Download, Icon::Upload, Icon::Globe] {
             assert!(!icon_glyph(i).is_empty());
@@ -3965,5 +4142,69 @@ mod photo_tests {
         assert!(within_limit(600, Some(600)));
         assert!(!within_limit(601, Some(600)));
         assert!(within_limit(u64::MAX, None));
+    }
+}
+
+#[cfg(test)]
+mod tab_position_tests {
+    use super::{Pos, TabPositions};
+
+    const TOP: Pos = Pos { page: 0.0, list: 0.0 };
+
+    #[test]
+    fn a_switch_saves_the_old_tab_and_restores_the_new_one() {
+        let mut t = TabPositions::default();
+        assert!(!t.step(Some(0), "bills", || TOP).switched, "the first tabbed screen is not a switch");
+        let s = t.step(Some(1), "stats", || Pos { page: 420.0, list: 0.0 });
+        assert!(s.switched);
+        assert_eq!(s.restore, TOP, "a tab never visited starts at the top");
+        let back = t.step(Some(0), "bills", || Pos { page: 90.0, list: 0.0 });
+        assert!(back.switched);
+        assert_eq!(back.restore, Pos { page: 420.0, list: 0.0 }, "the tab comes back where it was left");
+        assert_eq!(t.step(Some(1), "stats", || TOP).restore, Pos { page: 90.0, list: 0.0 });
+    }
+
+    #[test]
+    fn the_position_is_read_only_on_a_switch() {
+        let reads = std::cell::Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            TOP
+        };
+        let mut t = TabPositions::default();
+        t.step(Some(0), "bills", read);
+        t.step(Some(0), "bills", read); // an ordinary update (a keystroke): no layout read
+        assert_eq!(reads.get(), 0);
+        t.step(Some(1), "stats", read);
+        assert_eq!(reads.get(), 1);
+    }
+
+    #[test]
+    fn push_and_pop_inside_a_tab_are_not_switches() {
+        let mut t = TabPositions::default();
+        t.step(Some(0), "bills", || TOP);
+        assert!(!t.step(Some(0), "bills/detail", || Pos { page: 50.0, list: 0.0 }).switched);
+        assert!(!t.step(Some(0), "bills", || TOP).switched);
+    }
+
+    #[test]
+    fn a_tab_whose_route_changed_while_away_starts_at_the_top() {
+        let mut t = TabPositions::default();
+        t.step(Some(0), "bills/detail", || TOP);
+        t.step(Some(1), "stats", || Pos { page: 300.0, list: 0.0 });
+        // The app reset the Bills stack while Stats was showing: never the old screen's offset.
+        let s = t.step(Some(0), "bills", || TOP);
+        assert!(s.switched);
+        assert_eq!(s.restore, TOP);
+    }
+
+    #[test]
+    fn leaving_the_tabbed_screens_forgets_every_position() {
+        let mut t = TabPositions::default();
+        t.step(Some(0), "bills", || TOP);
+        t.step(Some(1), "stats", || Pos { page: 300.0, list: 0.0 });
+        assert!(!t.step(None, "login", || TOP).switched);
+        t.step(Some(1), "stats", || TOP);
+        assert_eq!(t.step(Some(0), "bills", || TOP).restore, TOP, "positions from before the untabbed screen are gone");
     }
 }

@@ -360,7 +360,7 @@ while body text follows the system font scale. Buttons take a `Tonal` style, a `
 `Tone::Danger`), a leading icon, and full width via `button_with(label, style, on_press, ButtonOpts)`.
 `calendar_in(locale, …, markers)` localizes the month title, weekday header and week start and draws
 0–3 busy dots per day, and `scroller_hinted(children)` fades a horizontal scroller's trailing edge to
-hint there is more. A tab can carry a badge (`with_tab_dot`, `with_tab_count`; ADR-0050), drawn by the Android, iOS and web shells and read aloud after the tab's name. On Android and iOS a visited tab keeps its screen, so returning to it finds it where it was left, scroll position included, and a tab switch doesn't animate (ADR-0057, ADR-0058); the web shell still rebuilds the tab. These need the updated shells: in an existing app, run `mobiler upgrade`.
+hint there is more. A tab can carry a badge (`with_tab_dot`, `with_tab_count`; ADR-0050), drawn by the Android, iOS and web shells and read aloud after the tab's name. On Android and iOS a visited tab keeps its screen, so returning to it finds it where it was left, scroll position included, and a tab switch doesn't animate (ADR-0057, ADR-0058); the web shell (mobiler-web 0.49) keeps each tab's scroll position and switches at once too (ADR-0062). These need the updated shells: in an existing app, run `mobiler upgrade`.
 The widget vocabulary and runtime live in the
 [`mobiler-ui`](https://crates.io/crates/mobiler-ui) and
 [`mobiler-core`](https://crates.io/crates/mobiler-core) crates.
