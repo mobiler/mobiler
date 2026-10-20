@@ -202,7 +202,7 @@ free plugins:
 | 📁 **files** | app-sandbox read/write/list, download a URL to disk, export to Files/Downloads | `mobiler plugin add files` |
 | 🎬 **video** | record a video → local URI | `mobiler plugin add video` |
 | 🎤 **speech** | speech-to-text (dictation) | `mobiler plugin add speech` |
-| 🗃️ **sqlite** | on-device SQLite (exec / query → JSON) | `mobiler plugin add sqlite` |
+| 🗃️ **sqlite** | on-device SQLite (exec / query → JSON; calls run one at a time, in order) | `mobiler plugin add sqlite` |
 | 🔵 **bluetooth** | BLE scan / connect / read / write / notify (notify is a `cx.subscribe` stream) | `mobiler plugin add bluetooth` |
 | 🔑 **oauth** | OAuth 2.0 / OIDC login (system auth browser → redirect) | `mobiler plugin add oauth` |
 | 📲 **push** | remote push notifications (APNs / FCM) — **experimental, not yet device-tested** | `mobiler plugin add push` |

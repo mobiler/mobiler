@@ -6,26 +6,51 @@ import SQLite3
 /// op "query" returns rows as a JSON array of `{column: stringValue}` objects (all values strings).
 /// Input is a plain SQL string or `{"sql": "...", "args": ["..."]}`. One shared DB file
 /// (`mobiler.db`) in the app's Documents directory. Uses the system SQLite3 module (no extra link).
+///
+/// Calls run one at a time, in the order the core issued them, on one connection (ADR-0065): the
+/// shell starts a `sqlite` call only once the call before it has answered (`Plugins.inOrder` in
+/// Core.swift), and this lane runs them one by one off the main thread. An `exec` answers ok:true
+/// only once its statement has run to the end, so the write is committed before the next call starts.
 enum SqlitePlugin {
     // SQLite needs to copy bound text (the Swift String is transient), so bind with TRANSIENT.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    static func handle(op: String, input: String) async -> PluginResponse {
-        let (sql, args) = parse(input)
-        if sql.isEmpty { return PluginResponse(ok: false, output: "no sql") }
+    // The lane: one serial queue, the only code that touches the connection. It runs its blocks one at a
+    // time in the order they were queued; the SQLite work blocks a GCD thread, never the main one.
+    private static let lane = DispatchQueue(label: "mobiler.sqlite")
+    // The one connection, opened on first use and kept for the life of the process. Touched only on
+    // `lane`, which is what makes `nonisolated(unsafe)` sound here.
+    nonisolated(unsafe) private static var connection: OpaquePointer?
 
+    static func handle(op: String, input: String) async -> PluginResponse {
+        await withCheckedContinuation { cont in
+            lane.async { cont.resume(returning: run(op: op, input: input)) }
+        }
+    }
+
+    /// The connection, opened on first use (on `lane`); `nil` and the reason when it can't be.
+    private static func open() -> (OpaquePointer?, String) {
+        if let db = connection { return (db, "") }
         let path = (try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true))?
             .appendingPathComponent("mobiler.db").path ?? ":memory:"
         var db: OpaquePointer?
         guard sqlite3_open(path, &db) == SQLITE_OK else {
             let msg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
             sqlite3_close(db)
-            return PluginResponse(ok: false, output: msg)
+            return (nil, msg)
         }
-        defer { sqlite3_close(db) }
-        // Each call opens its own connection, so two writes emitted in one update cycle race on the
-        // file lock. Wait (up to 5s) for a concurrent writer instead of failing with SQLITE_BUSY.
+        // Nothing in this process contends for the file (one connection); another opener of it is
+        // waited for, up to 5s, instead of failing with SQLITE_BUSY.
         sqlite3_busy_timeout(db, 5000)
+        connection = db
+        return (db, "")
+    }
+
+    private static func run(op: String, input: String) -> PluginResponse {
+        let (sql, args) = parse(input)
+        if sql.isEmpty { return PluginResponse(ok: false, output: "no sql") }
+        let (opened, failure) = open()
+        guard let db = opened else { return PluginResponse(ok: false, output: failure) }
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -38,8 +63,11 @@ enum SqlitePlugin {
 
         switch op {
         case "exec":
-            let rc = sqlite3_step(stmt)
-            if rc == SQLITE_DONE || rc == SQLITE_ROW {
+            // Run the statement to the end (past any rows it returns, as a PRAGMA does), so the write
+            // is committed when this answers and a failure on a later row is reported.
+            var rc = sqlite3_step(stmt)
+            while rc == SQLITE_ROW { rc = sqlite3_step(stmt) }
+            if rc == SQLITE_DONE {
                 return PluginResponse(ok: true, output: "executed")
             }
             return PluginResponse(ok: false, output: String(cString: sqlite3_errmsg(db)))
