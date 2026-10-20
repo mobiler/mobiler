@@ -36,10 +36,15 @@ on one serial lane that owns one connection, then:
   (in SQLite's autocommit mode) before the next call starts;
 - no SQLite work runs on the main thread.
 
-On Android the order comes from the shell as it is: Core.kt launches each request on the main
-dispatcher, and the launches run FIFO, so each call enters `SqlitePlugin.handle` in issue order and
+On Android, Core.kt launches each request on the main dispatcher (`Main.immediate`), and the launches
+run FIFO: one either runs at once up to its first suspension or waits in the thread's event loop
+behind the ones launched before it. So each call enters `SqlitePlugin.handle` in issue order and
 queues on the lane (a single-thread executor) before it first suspends. This is the lane the
-`securestore` plugin already uses for the same reason (CLI 0.66.1, #291).
+`securestore` plugin already uses for the same reason (CLI 0.66.1, #291). One shell change was
+needed: `process()` awaited a notify inline, which suspended it part-way through a batch. A request
+launched earlier in the batch could then reach the lane after that notify, and another update's
+calls could reach it before the rest of the batch. A notify is now launched like a request, so
+`process()` never suspends between effects.
 
 On iOS the shell needed a change, since a serial queue in the plugin alone only gives mutual
 exclusion: calls would still reach it in the pool's order. Core.swift now names the plugins whose
@@ -59,12 +64,13 @@ chain.
   - **Validation Metric:** `adr_0065_sqlite_calls_run_in_issue_order`.
 - **Condition 2: the Android shell starts a request straight into the plugin.** In the template and in
   barbershop, the `Effect.Plugin` branch launches on the view-model scope and calls `dispatch` first,
-  and a notify is dispatched inline.
+  and a notify is launched the same way, never awaited in `process()`.
   - **Validation Metric:** `adr_0065_sqlite_calls_run_in_issue_order`.
 - **Condition 3: the plugin runs on one lane with one connection.** iOS: one serial queue, the work
   queued on it, one `sqlite3_open`, the connection kept, an `exec` stepped to the end. Android: one
-  single-thread executor, `handle` is `withContext(lane)`, one `openOrCreateDatabase`, the connection
-  kept, no shared dispatcher.
+  single-thread executor, `handle` is `withContext(NonCancellable + lane)`, one `openOrCreateDatabase`,
+  the connection kept, no shared dispatcher. On both, a call that leaves a transaction open rolls it
+  back and fails.
   - **Validation Metric:** `adr_0065_sqlite_calls_run_in_issue_order`.
 - **Condition 4: every app copy is the bundled plugin.** Barbershop's copies equal the bundled files
   rendered with its package (this test); the CLI-managed demos' copies are held equal by ADR-0063's.
@@ -94,12 +100,15 @@ chain.
 
 ## 4. Decision & Rationale for Corroboration
 
-Option: the shells start in-order plugin calls in issue order (Android as it was; iOS through
-`Plugins.inOrder` and `Core.start`), and the `sqlite` plugin runs them on one serial lane with one
+Option: the shells start in-order plugin calls in issue order (Android by launching notifies as it
+already launched requests; iOS through `Plugins.inOrder` and `Core.start`), and the `sqlite` plugin runs them on one serial lane with one
 connection kept for the life of the process. On iOS an `exec` now steps its statement to the end, like
-Android's `execSQL`, so `ok: true` follows the commit and a failure on a later row is reported.
+Android's `execSQL`, so `ok: true` follows the commit and a failure on a later row is reported. A call
+that ends with a transaction open rolls it back and answers `ok: false`, so `ok: true` keeps meaning
+committed. On Android a call already queued runs even when the screen's scope is cancelled
+(`NonCancellable`), so a write the core issued is never dropped from the lane.
 
-**Mutation proof:** the decision was broken five times on purpose. Each time
+**Mutation proof:** the decision was broken nine times on purpose. Each time
 `adr_0065_sqlite_calls_run_in_issue_order` failed with the message given; the file was restored and
 the test passed again.
 - The template's `start` lost `await previous?.value` ("`start` doesn't chain an in-order call behind
@@ -111,23 +120,37 @@ the test passed again.
   queue").
 - The Android plugin's `handle` ran on `Dispatchers.IO` ("an Android sqlite call must run on the
   lane").
+- The Android plugin's `handle` dropped `NonCancellable` ("… and a queued one must not be dropped").
+- The template's Core.kt awaited a notify inline again ("must launch a notify like a request, never
+  await it in process()").
+- The iOS plugin's open-transaction check became `if false` ("an iOS call must not leave a transaction
+  open").
+- The Android plugin's rollback loop was removed ("an Android call must not leave a transaction
+  open").
 
 ## 5. Consequences (Positive and Negative Predictions)
 
 - **Positive:** an app can issue writes and the read that depends on them in one update, as Saldo
   does, on every platform. The tutorial's "serializes on one connection" is now true.
 - **Positive:** SQLite work no longer runs on Android's main thread.
-- **Positive:** with one kept connection, a `BEGIN` … `COMMIT` sent as separate `exec`s is one
-  transaction; before, each call's connection closed, and an open transaction went with it.
-- **Negative:** one slow statement holds up every later `sqlite` call. The calls are small local
-  statements, so this is the price of the order.
-- **Negative:** an `exec` of `BEGIN` without a `COMMIT` leaves the connection in a transaction for
-  every later call, until the process ends.
+- **Negative:** a transaction can't span calls. With a kept connection, a `BEGIN` sent as its own
+  `exec` would hold every later write uncommitted while each answered `ok: true`, so a call that ends
+  with a transaction open rolls it back and answers `ok: false`. Before, a lone `BEGIN` did nothing
+  either (its connection closed with it), so no working app loses anything.
+- **Negative:** connection settings an app sets (a PRAGMA, a TEMP trigger, an `ATTACH`) now last for
+  the process instead of one call. SQL built from untrusted text would make that worse; the plugin's
+  manifest says to pass such values as bound `args`.
+- **Negative:** one slow statement holds up every later `sqlite` call, and on iOS each waiting call is
+  a pending task. The calls are small local statements, so this is the price of the order.
+- **Negative:** the kept connection is never reopened after an I/O error; nothing replaces
+  `mobiler.db` while an app runs today, and a feature that does must close the connection first.
 - **Negative:** iOS calls to `sqlite` no longer overlap: each waits for the previous one's answer to
   be handed to the core. That costs one main-actor hop per call.
+- **Negative:** on Android every plugin's notify now runs alongside the effects after it instead of
+  holding them up; a notify was fire-and-forget already, so no app should depend on the wait.
 - **Negative:** an app gets this only with both halves: the new plugin (`mobiler plugin add sqlite`
-  again; `mobiler upgrade` reports the plugin as drifted until then) and, on iOS, the new Core.swift
-  (`mobiler upgrade --apply`). With the plugin alone, iOS calls are exclusive but not ordered; with the
-  shell alone, they are ordered.
+  again; `mobiler upgrade` reports the plugin as drifted until then) and the new Core.swift and Core.kt
+  (`mobiler upgrade --apply`). With the plugin alone, iOS calls are exclusive but not ordered, and on
+  Android a sqlite notify can overtake a request; with the iOS shell alone, iOS calls are ordered.
 - **Negative:** a plugin outside `Plugins.inOrder` keeps no order on iOS; `securestore` is one (its
   Android lane orders it there only). Adding it is a one-word change under this decision.

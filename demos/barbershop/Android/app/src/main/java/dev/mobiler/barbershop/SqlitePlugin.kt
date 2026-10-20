@@ -5,6 +5,7 @@ import dev.mobiler.barbershop.shared.types.PluginResponse
 import android.app.Application
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -29,7 +30,27 @@ class SqlitePlugin(private val application: Application) : MobilerPlugin {
         var connection: SQLiteDatabase? = null
     }
 
-    override suspend fun handle(op: String, input: String): PluginResponse = withContext(lane) { run(op, input) }
+    // NonCancellable: a call already queued still runs when the screen's scope is cancelled (the activity
+    // finishing), so a write the core issued is never dropped from the lane.
+    override suspend fun handle(op: String, input: String): PluginResponse = withContext(NonCancellable + lane) { run(op, input) }
+
+    private fun run(op: String, input: String): PluginResponse {
+        val response = execute(op, input)
+        // The connection is kept, so a transaction left open (a `BEGIN` with no `COMMIT`) would hold every
+        // later write uncommitted while each answered ok:true. A transaction can't span calls: roll it back.
+        // inTransaction() sees an exec'd "BEGIN" because SQLiteSession runs BEGIN/COMMIT/ROLLBACK as its own
+        // transaction calls, scoped to the calling thread; every call runs on the one lane thread.
+        val db = connection
+        if (db != null && db.isOpen && db.inTransaction()) {
+            try {
+                while (db.inTransaction()) db.endTransaction()
+            } catch (e: Exception) {
+                // Nothing more to undo here; the call still answers that it failed.
+            }
+            return PluginResponse(false, "a transaction can't span calls: rolled back")
+        }
+        return response
+    }
 
     private fun open(): SQLiteDatabase = connection?.takeIf { it.isOpen }
         ?: application.openOrCreateDatabase("mobiler.db", Context.MODE_PRIVATE, null).also { db ->
@@ -40,7 +61,7 @@ class SqlitePlugin(private val application: Application) : MobilerPlugin {
             connection = db
         }
 
-    private fun run(op: String, input: String): PluginResponse = try {
+    private fun execute(op: String, input: String): PluginResponse = try {
         val obj = if (input.startsWith("{")) JSONObject(input) else JSONObject().put("sql", input)
         val sql = obj.optString("sql")
         val argsArr = obj.optJSONArray("args")

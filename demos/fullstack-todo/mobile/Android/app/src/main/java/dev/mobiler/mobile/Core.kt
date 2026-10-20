@@ -731,11 +731,13 @@ class Core(application: Application) : AndroidViewModel(application) {
             when (val effect = request.effect) {
                 is Effect.Render -> view = Widget.bincodeDeserialize(core.view())
                 // Fire-and-forget: dispatch, ignore the result, don't resolve.
-                // `stream`/`unsubscribe` cancels a live subscription; else dispatch.
+                // `stream`/`unsubscribe` cancels a live subscription; else dispatch. Launched like a
+                // request, never awaited here: process() then never suspends between effects, so every
+                // plugin call (notify or request) starts in the order the core issued it (ADR-0065).
                 is Effect.PluginNotify -> {
                     val n = effect.value
                     if (n.plugin == "stream" && n.op == "unsubscribe") streamJobs.remove(n.input)?.cancel()
-                    else dispatch(n.plugin, n.op, n.input)
+                    else viewModelScope.launch { dispatch(n.plugin, n.op, n.input) }
                 }
                 // Request/response: launch it, so later effects in this batch (a Render, other
                 // requests) apply at once instead of waiting a network round trip. It resolves

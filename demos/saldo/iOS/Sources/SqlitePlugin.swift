@@ -51,7 +51,18 @@ enum SqlitePlugin {
         if sql.isEmpty { return PluginResponse(ok: false, output: "no sql") }
         let (opened, failure) = open()
         guard let db = opened else { return PluginResponse(ok: false, output: failure) }
+        let response = execute(db: db, op: op, sql: sql, args: args)
+        // The connection is kept, so a transaction left open (a `BEGIN` with no `COMMIT`) would hold every
+        // later write uncommitted while each answered ok:true. A transaction can't span calls: roll it back.
+        if sqlite3_get_autocommit(db) == 0 {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            return PluginResponse(ok: false, output: "a transaction can't span calls: rolled back")
+        }
+        return response
+    }
 
+    /// Runs one statement on `db` (its statement is finalized before this returns).
+    private static func execute(db: OpaquePointer, op: String, sql: String, args: [String]) -> PluginResponse {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             return PluginResponse(ok: false, output: String(cString: sqlite3_errmsg(db)))
@@ -73,7 +84,8 @@ enum SqlitePlugin {
             return PluginResponse(ok: false, output: String(cString: sqlite3_errmsg(db)))
         case "query":
             var rows: [[String: String]] = []
-            while sqlite3_step(stmt) == SQLITE_ROW {
+            var rc = sqlite3_step(stmt)
+            while rc == SQLITE_ROW {
                 var row: [String: String] = [:]
                 for c in 0..<sqlite3_column_count(stmt) {
                     let name = String(cString: sqlite3_column_name(stmt, c))
@@ -84,6 +96,11 @@ enum SqlitePlugin {
                     }
                 }
                 rows.append(row)
+                rc = sqlite3_step(stmt)
+            }
+            // A step that fails part-way is an error, never a short list of rows.
+            if rc != SQLITE_DONE {
+                return PluginResponse(ok: false, output: String(cString: sqlite3_errmsg(db)))
             }
             let data = (try? JSONSerialization.data(withJSONObject: rows)) ?? Data("[]".utf8)
             return PluginResponse(ok: true, output: String(data: data, encoding: .utf8) ?? "[]")

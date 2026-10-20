@@ -1209,7 +1209,8 @@ fn adr_0065_sqlite_calls_run_in_issue_order() {
         let request = between(&code, "case .plugin(let call):", "case .pluginStream(let call):", path);
         for (what, block, needle) in [("notify", notify, "start(notify.plugin)"), ("request", request, "start(call.plugin)")] {
             assert!(block.contains(needle), "ADR-0065: {path} starts a plugin {what} without `start`");
-            assert!(!block.contains("Task {"), "ADR-0065: {path} starts a plugin {what} in its own Task, out of order");
+            let own_task = ["Task {", "Task{", "Task(", "Task.detached"].iter().any(|t| block.contains(t));
+            assert!(!own_task, "ADR-0065: {path} starts a plugin {what} in its own Task, out of order");
         }
         let start = squash(between(&code, "private func start(", "\n    }\n", path));
         let chain = "let previous = laneTails[plugin] laneTails[plugin] = Task { await previous?.value await call() }";
@@ -1227,7 +1228,11 @@ fn adr_0065_sqlite_calls_run_in_issue_order() {
             "ADR-0065: {path} must start a request on the main dispatcher straight into the plugin, in issue order"
         );
         let notify = squash(between(&code, "is Effect.PluginNotify -> {", "is Effect.Plugin -> {", path));
-        assert!(notify.contains("else dispatch(n.plugin, n.op, n.input)"), "ADR-0065: {path} must dispatch a notify inline, in issue order");
+        // A notify awaited inline would suspend process() and let a later batch's calls reach the lane first.
+        assert!(
+            notify.contains("else viewModelScope.launch { dispatch(n.plugin, n.op, n.input) }"),
+            "ADR-0065: {path} must launch a notify like a request, never await it in process()"
+        );
     }
 
     let swift = live_code(&read("mobiler/plugins/sqlite/ios/SqlitePlugin.swift"));
@@ -1236,12 +1241,24 @@ fn adr_0065_sqlite_calls_run_in_issue_order() {
     assert_eq!(swift.matches("sqlite3_open(").count(), 1, "ADR-0065: the iOS sqlite plugin opens one connection, in one place");
     assert!(swift.contains("if let db = connection { return (db, \"\") }") && swift.contains("connection = db"), "ADR-0065: the iOS sqlite connection must be kept");
     assert!(swift.contains("while rc == SQLITE_ROW { rc = sqlite3_step(stmt) }"), "ADR-0065: an iOS exec must run its statement to the end");
+    // ok:true means committed: a transaction left open at the end of a call is rolled back and the call fails.
+    let swift_run = squash(between(&swift, "private static func run(", "\n    }\n", "SqlitePlugin.swift"));
+    assert!(
+        swift_run.contains("if sqlite3_get_autocommit(db) == 0 { sqlite3_exec(db, \"ROLLBACK\", nil, nil, nil) return PluginResponse(ok: false"),
+        "ADR-0065: an iOS call must not leave a transaction open"
+    );
 
     let kotlin = live_code(&read("mobiler/plugins/sqlite/android/SqlitePlugin.kt"));
     assert!(kotlin.contains("val lane = java.util.concurrent.Executors.newSingleThreadExecutor().asCoroutineDispatcher()"), "ADR-0065: the Android sqlite lane must be one thread");
     assert!(
-        kotlin.contains("override suspend fun handle(op: String, input: String): PluginResponse = withContext(lane) { run(op, input) }"),
-        "ADR-0065: an Android sqlite call must run on the lane"
+        kotlin.contains("override suspend fun handle(op: String, input: String): PluginResponse = withContext(NonCancellable + lane) { run(op, input) }"),
+        "ADR-0065: an Android sqlite call must run on the lane, and a queued one must not be dropped"
+    );
+    let kotlin_run = squash(between(&kotlin, "private fun run(", "\n    }\n", "SqlitePlugin.kt"));
+    assert!(
+        kotlin_run.contains("if (db != null && db.isOpen && db.inTransaction()) { try { while (db.inTransaction()) db.endTransaction() }")
+            && kotlin_run.contains("return PluginResponse(false,"),
+        "ADR-0065: an Android call must not leave a transaction open"
     );
     assert_eq!(kotlin.matches("openOrCreateDatabase(").count(), 1, "ADR-0065: the Android sqlite plugin opens one connection, in one place");
     assert!(kotlin.contains("connection = db"), "ADR-0065: the Android sqlite connection must be kept");
