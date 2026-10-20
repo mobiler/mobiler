@@ -35,6 +35,9 @@ class PickerPlugin : MobilerPlugin {
                     }
                     .setOnCancelListener { done(PluginResponse(false, "cancel")) }
                     .create()
+                // Any other dismissal (the activity torn down, a configuration change) still answers, so
+                // the request never hangs; after a pick or a cancel this is a no-op.
+                dlg.setOnDismissListener { done(PluginResponse(false, "cancel")) }
                 cont.invokeOnCancellation { dlg.dismiss() }
                 dlg.show()
             }

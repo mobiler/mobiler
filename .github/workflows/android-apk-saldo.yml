@@ -3,7 +3,9 @@ name: Android APK (saldo)
 # On-demand "cloud Android build" for Saldo: click "Run workflow" (or `gh workflow
 # run android-apk-saldo.yml`) and download the APK from the run's artifacts — no
 # local Android toolchain needed. Builds Saldo's release APK (slim: release Rust +
-# stripped, signed with the debug key so it sideloads onto any device).
+# stripped), signed with a key made fresh for each run so it sideloads onto any device.
+# A new key per run means an APK can't update one from an earlier run: uninstall first,
+# which deletes Saldo's data on the phone (export a backup in Settings → Data before).
 on:
   workflow_dispatch:
 
@@ -54,7 +56,7 @@ jobs:
       # uses an upload key in its own lane.
       - name: Sign the release APK with a debug key
         run: |
-          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | grep -v -- '-rc' | sort -V | tail -1)"
           keytool -genkeypair -keystore "$RUNNER_TEMP/debug.keystore" -storepass android -keypass android \
             -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -validity 10000
           OUT=Android/app/build/outputs/apk/release

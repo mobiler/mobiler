@@ -191,3 +191,14 @@ A normal CLI app, as if created today:
 - **Saldo's shell edits** may include behaviour the maintainer relies on that isn't obvious from code. B.2's listed
   diff is how it surfaces.
 - **0.71.0 grows.** Both PRs ride the same unreleased version, so the release waits for both.
+
+## Amendment 2026-10-20 (Part B held, then finished on CLI 0.72)
+
+Part B's review found that Saldo's look had lived as hand edits in its old shells, which the refresh would drop: the
+iOS floating glass tab bar and glass FAB (#171/#173/#175), the finance tab icons (#180) and the Aqua Mint
+background and brand colours (#187/#188). The maintainer chose **framework first** (2026-10-19). CLI 0.71.0 shipped
+Part A alone. The missing pieces became framework features in
+`docs/superpowers/specs/2026-10-19-ios-glass-tabs-and-icons-design.md`: new icons, the iOS-only `ios_glass_tabs`
+(ADR-0059, platform-only options) and four palette roles (mobiler-ui 0.33 / mobiler-core 0.48, #304). Part B then
+finished on the CLI 0.72 template (#305), with Saldo's look restored through ordinary APIs. Because ADR numbers on
+`main` must stay contiguous, Part B's record is **ADR-0060**, not ADR-0059 as written above.

@@ -13,7 +13,8 @@ enum PickerPlugin {
             return PluginResponse(ok: false, output: "bad input")
         }
         let title = obj["title"] as? String
-        let selected = obj["selected"] as? Int ?? 0
+        // No (or an out-of-range) `selected`: the wheel starts at the first row, as on Android's empty choice.
+        let selected = obj["selected"] as? Int ?? -1
         guard let presenter = frontmostViewController() else {
             return PluginResponse(ok: false, output: "no view controller to present from")
         }
@@ -30,7 +31,10 @@ enum PickerPlugin {
                 sheet.prefersGrabberVisible = true
             }
             vc.presentationController?.delegate = vc // swipe-to-dismiss = cancel
-            presenter.present(vc, animated: true)
+            presenter.present(vc, animated: true) {
+                // `present` does nothing when the presenter is busy; answer instead of hanging.
+                if vc.presentingViewController == nil { done(PluginResponse(ok: false, output: "could not present")) }
+            }
         }
     }
 
@@ -42,7 +46,8 @@ enum PickerPlugin {
             .first { $0.activationState == .foregroundActive }?
             .keyWindow
         var top = keyWindow?.rootViewController
-        while let presented = top?.presentedViewController { top = presented }
+        // Skip a controller on its way out: presenting from it would silently do nothing.
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed { top = presented }
         return top
     }
 }
