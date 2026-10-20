@@ -204,6 +204,11 @@ fn upgrade_with(root: &Path, apply: bool, resolved: &[&str]) -> Result<Report> {
 /// dependency, so an app that declares its own is told this rather than edited.
 const FACET_PIN: &str = "=0.46.5";
 
+/// The `mobiler-web` an app's web client should pin (ADR-0066). It publishes on its own, not in lockstep with
+/// `mobiler-core`, and no template pins it, so the CLI carries it; release-libs moves it with each publish, and
+/// a conformance test holds it to `mobiler-web/Cargo.toml`.
+const MOBILER_WEB_PIN: &str = "0.49";
+
 /// One manifest edit: the new text and what changed, nothing to do, or a hand edit to report.
 #[derive(Debug, PartialEq, Eq)]
 enum Edit {
@@ -292,6 +297,22 @@ fn non_registry(content: &str, dep: &str) -> bool {
 
 /// Move a string-form pin `dep = "X"` to `want`. A pin that already accepts `want` stays as it is;
 /// a path, git or workspace dependency is not touched; any other form is reported.
+/// Whether the requirement `have` asks for at least `want`: its version, compared part by part with missing
+/// parts as 0 (`0.49` for `0.48`, `1.0` for `0.48`). A pin ahead of the target is never moved down (ADR-0066).
+/// A range that isn't a plain version (`>=0.1`, `*`) is never ahead.
+fn at_or_above(have: &str, want: &str) -> bool {
+    let parts = |v: &str| v.trim().trim_start_matches(['=', '^', '~']).trim().split('.').map(|p| p.parse::<u64>().ok()).collect::<Option<Vec<_>>>();
+    match (parts(have), parts(want)) {
+        (Some(mut h), Some(mut w)) => {
+            let n = h.len().max(w.len());
+            h.resize(n, 0);
+            w.resize(n, 0);
+            h >= w
+        }
+        _ => false,
+    }
+}
+
 fn set_pin(content: &str, dep: &str, want: &str) -> Edit {
     if non_registry(content, dep) {
         return Edit::Unchanged;
@@ -304,7 +325,7 @@ fn set_pin(content: &str, dep: &str, want: &str) -> Edit {
             && let Some(rest) = line.trim_start().strip_prefix(&prefix)
             && let Some((have, tail)) = rest.split_once('"')
         {
-            if have == want || compatible(have, want) {
+            if have == want || compatible(have, want) || at_or_above(have, want) {
                 return Edit::Unchanged;
             }
             let indent = &line[..line.len() - line.trim_start().len()];
@@ -461,8 +482,8 @@ fn move_framework_pins(root: &Path, apply: bool, report: &mut Report) -> Result<
 fn foreign_pins(root: &Path, skip: &[&Path]) -> Vec<String> {
     let Some(crux) = template_pin("Cargo.toml.tmpl", "crux_core") else { return Vec::new() };
     let Some(core) = template_pin("shared/Cargo.toml.tmpl", "mobiler-core") else { return Vec::new() };
-    // mobiler-web publishes in lockstep with mobiler-core, so it moves to the same version.
-    let targets = [("crux_core", crux), ("mobiler-core", core.clone()), ("mobiler-web", core)];
+    // mobiler-web publishes on its own (ADR-0066): its target is the CLI's MOBILER_WEB_PIN.
+    let targets = [("crux_core", crux), ("mobiler-core", core), ("mobiler-web", MOBILER_WEB_PIN.to_string())];
     let mut manifests = Vec::new();
     collect_manifests(root, &mut manifests);
     manifests.sort();
@@ -483,12 +504,13 @@ fn foreign_pins(root: &Path, skip: &[&Path]) -> Vec<String> {
 }
 
 /// The hand-edit notes for one manifest: each framework dependency in `targets` that its version
-/// doesn't accept, and a `facet` dependency off the framework's.
+/// doesn't accept and isn't ahead of, and a `facet` dependency off the framework's.
 fn pin_notes(rel: &str, content: &str, targets: &[(&str, String)]) -> Vec<String> {
     let mut notes = Vec::new();
     for (dep, want) in targets {
         if let Some(have) = any_dep_version(content, dep)
             && !compatible(&have, want)
+            && !at_or_above(&have, want)
         {
             notes.push(format!("{rel}: {dep} {have} -> {want} (edit by hand)"));
         }
@@ -2475,11 +2497,39 @@ mod test {
         fs::create_dir_all(root.join("web")).unwrap();
         fs::write(root.join("app-core/Cargo.toml"), "[dependencies]\ncrux_core = \"0.20\"\n").unwrap();
         let core = template_pin("shared/Cargo.toml.tmpl", "mobiler-core").unwrap();
-        fs::write(root.join("web/Cargo.toml"), format!("[dependencies]\nmobiler-web = {{ version = \"{core}.1\" }}\n")).unwrap();
+        fs::write(root.join("web/Cargo.toml"), format!("[dependencies]\nmobiler-core = {{ version = \"{core}.1\" }}\nmobiler-web = {{ version = \"{MOBILER_WEB_PIN}.1\" }}\n")).unwrap();
         let r = upgrade_at(&root, true).unwrap();
         assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
         assert_eq!(set_pin("crux_core = \"^0.20\"\n", "crux_core", "0.20.0"), Edit::Unchanged);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mobiler_web_is_reported_against_its_own_version() {
+        // mobiler-web publishes on its own: an app on the current one is up to date even when mobiler-core
+        // stayed a minor behind, and an older one is pointed at mobiler-web's version, not core's.
+        let (root, _, _) = app_with_template_manifests();
+        fs::create_dir_all(root.join("web")).unwrap();
+        fs::write(root.join("web/Cargo.toml"), format!("[dependencies]\nmobiler-web = \"{MOBILER_WEB_PIN}\"\n")).unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert!(r.deps_notes.is_empty(), "{:?}", r.deps_notes);
+        fs::write(root.join("web/Cargo.toml"), "[dependencies]\nmobiler-web = \"0.40\"\n").unwrap();
+        let r = upgrade_at(&root, true).unwrap();
+        assert_eq!(r.deps_notes, vec![format!("web/Cargo.toml: mobiler-web 0.40 -> {MOBILER_WEB_PIN} (edit by hand)")]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_pin_above_the_target_is_never_moved_down() {
+        // An app ahead of this CLI's templates (a newer library taken by hand) is up to date, never downgraded.
+        assert_eq!(set_pin("[dependencies]\nmobiler-core = \"0.49\"\n", "mobiler-core", "0.48"), Edit::Unchanged);
+        assert_eq!(set_pin("[dependencies]\nmobiler-core = \"1.0\"\n", "mobiler-core", "0.48"), Edit::Unchanged);
+        let targets = [("mobiler-web", "0.49".to_string()), ("crux_core", "0.20.0".to_string())];
+        assert!(pin_notes("web/Cargo.toml", "mobiler-web = \"0.50.2\"\ncrux_core = \"0.21\"\n", &targets).is_empty());
+        // Below the target, or a range that can't be compared, is still reported.
+        assert_eq!(pin_notes("w", "mobiler-web = \"0.48.9\"\n", &targets), vec!["w: mobiler-web 0.48.9 -> 0.49 (edit by hand)"]);
+        assert_eq!(pin_notes("w", "mobiler-web = \">=0.1\"\n", &targets).len(), 1);
+        assert!(matches!(set_pin("mobiler-core = \"0.47.3\"\n", "mobiler-core", "0.48"), Edit::Changed(..)));
     }
 
     #[test]

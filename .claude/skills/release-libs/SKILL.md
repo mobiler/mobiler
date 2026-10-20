@@ -15,6 +15,9 @@ Publishes `mobiler-ui`, `mobiler-core`, `mobiler-web` to crates.io. **crates.io 
 - `mobiler-ui/Cargo.toml`: `version`.
 - `mobiler-core/Cargo.toml`: `version` **and** its `mobiler-ui = { ..., version = "X" }` to match.
 - `mobiler-web/Cargo.toml`: `version` **and** its `mobiler-core = { ..., version = "Y" }` to match.
+- When `mobiler-web`'s minor moves: `MOBILER_WEB_PIN` in `mobiler/src/upgrade.rs` to its new `major.minor` (ADR-0066:
+  `mobiler upgrade` points web clients at it). `adr_0066_upgrade_points_mobiler_web_at_its_own_version` fails until it does;
+  the published CLI only tells apps once a CLI with the new value is released.
 - Refresh lockfiles: `cargo update -p mobiler-ui -p mobiler-core` at root; then in each demo + standalone-web dir (`cargo update -p ...`) — demos use bare path deps so their locks auto-track, but run it so nothing is stale. Confirm no lockfile still references the old versions.
 
 ## 3. Verify — including that EVERY demo still compiles

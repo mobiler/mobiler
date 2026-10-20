@@ -901,6 +901,21 @@ fn adr_0055_template_crux_pin_matches_the_workspace() {
     assert_eq!(told, core_facet, "ADR-0055: upgrade tells apps facet {told}, mobiler-core builds with {core_facet}");
 }
 
+/// ADR-0066: the mobiler-web version `mobiler upgrade` points a web client at is the one this repo's
+/// mobiler-web is (its major.minor), so a release-libs publish that forgets to move it fails here.
+#[test]
+fn adr_0066_upgrade_points_mobiler_web_at_its_own_version() {
+    let read = |p: &str| std::fs::read_to_string(root().join(p)).unwrap_or_else(|e| panic!("read {p}: {e}"));
+    let web: toml::Value = toml::from_str(&read("mobiler-web/Cargo.toml")).expect("mobiler-web/Cargo.toml parses");
+    let version = web["package"]["version"].as_str().expect("mobiler-web has a version");
+    let minor = version.splitn(3, '.').take(2).collect::<Vec<_>>().join(".");
+    let told = read("mobiler/src/upgrade.rs")
+        .lines()
+        .find_map(|l| l.strip_prefix("const MOBILER_WEB_PIN: &str = \"")?.split('"').next().map(str::to_string))
+        .expect("ADR-0066: upgrade.rs has no MOBILER_WEB_PIN");
+    assert_eq!(told, minor, "ADR-0066: upgrade tells web clients mobiler-web {told}, mobiler-web is {version}: move MOBILER_WEB_PIN");
+}
+
 /// A plugin-insertion anchor: a comment line naming `mobiler:` (not a line that merely mentions it).
 fn is_anchor(line: &str) -> bool {
     let t = line.trim_start();
