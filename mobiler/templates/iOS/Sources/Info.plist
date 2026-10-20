@@ -20,7 +20,7 @@
     <array>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
-    <!-- Demos that hit a plaintext local server add NSAppTransportSecurity /
-         NSAllowsArbitraryLoads here; the starter uses HTTPS only. -->
+    <!-- Plain HTTP to a local dev server (localhost, .local): set `[ios] local_network = true` in
+         mobiler.toml (ADR-0064), which allows local addresses only. Never allow arbitrary loads. -->
 </dict>
 </plist>

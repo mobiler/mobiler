@@ -160,8 +160,9 @@ body {
   border: none;
   cursor: pointer;
 }
-/* `.card-tappable`'s `color: inherit` outranks `.card-brand`'s text colour; a palette's on_primary wins back. */
-.card-brand.card-tappable { color: var(--pal-on-primary, inherit); }
+/* `.card-tappable`'s `color: inherit` outranks `.card-brand`'s text colour: win it back, with `.card-brand`'s own
+   white when no palette sets on_primary (inheriting gave a light theme's dark page text on the gradient). */
+.card-brand.card-tappable { color: var(--pal-on-primary, #fff); }
 /* `.card-tappable`'s `border: none` would drop the dashed outline, which is the whole card. */
 .card-dashed.card-tappable { border: 1.5px dashed var(--outline, var(--line)); }
 
@@ -179,6 +180,11 @@ body {
   padding: 16px;
   color: #fff;
 }
+/* A caption over the darkened image is white at 80%, as on Android and iOS (`.t-caption`'s muted colour would
+   otherwise beat the white). A card inside keeps its own: the theme's muted, or the brand card's rule. */
+.box-scrim .box-content .t-caption { color: rgba(255, 255, 255, 0.8); }
+.box-scrim .box-content .card:not(.card-brand) .t-caption { color: var(--muted); }
+.box-scrim .box-content .card-brand .t-caption { color: var(--pal-on-primary-85, rgba(255, 255, 255, 0.85)); }
 .align-top-start    > .box-content { justify-content: flex-start; align-items: flex-start; }
 .align-top-end      > .box-content { justify-content: flex-start; align-items: flex-end; }
 .align-center       > .box-content { justify-content: center;     align-items: center; }

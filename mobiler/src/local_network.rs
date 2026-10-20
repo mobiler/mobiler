@@ -55,8 +55,8 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     // app merges `NSAllowsLocalNetworking` into its own key by hand.
     if on && ats_outside(&text) {
         report.warnings.push(format!(
-            "{PROJECT_YML} already has its own NSAppTransportSecurity outside the local-network markers — \
-             add `NSAllowsLocalNetworking: true` to it by hand, or remove it, then sync; nothing synced"
+            "{PROJECT_YML} already has its own NSAppTransportSecurity outside the local-network markers (in any \
+             target) — add `NSAllowsLocalNetworking: true` to it by hand, or remove it, then sync; nothing synced"
         ));
         report.failed = true;
         return Ok(report);
