@@ -38,12 +38,16 @@ the web app are equal clients of the same endpoints.
 domain/       shared types + intents + pure logic (WASM-clean)        ✅
 server/       Axum + in-memory store, JSON REST                       ✅
 todo-core/    the MobilerApp (server-backed via the HTTP capability)  ✅
-mobile/       native shell over todo-core/                            ✅
+mobile/       native shell over todo-core/ (CLI-managed, ADR-0063)    ✅
 web-widgets/  Widget→DOM shell hosting todo-core as WASM (Leptos)     ✅
 web-json/     own Leptos components, fetch JSON (shares domain only)  ✅
 ```
 
 ## Run
+
+The mobile app's shells are exactly what `mobiler new` produces, kept current with `mobiler upgrade`. Its iOS app
+reaches the plain-HTTP server through `mobiler.toml`'s `[ios] local_network = true` (local addresses only, ADR-0064);
+Android's debug build already allows `10.0.2.2`.
 
 ```bash
 # 1) the backend (both clients point at it)
