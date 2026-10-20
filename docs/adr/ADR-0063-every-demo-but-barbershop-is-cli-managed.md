@@ -81,4 +81,7 @@ ADR-0060's own mutations still apply to Saldo, which is one row of the same test
 - **Negative:** each such PR upgrades four demos (one command each), or CI fails.
 - **Negative:** a demo can't carry a shell experiment of its own. A behaviour it needs goes into the template, a
   plugin or a `mobiler.toml` option first, as coffee's haptics permission and fullstack-todo's local networking did.
-- **Negative:** coffee lost iOS landscape, and its UI test now runs on barbershop.
+- **Negative:** coffee lost iOS landscape, and its UI test now runs on barbershop. Its camera prompt is now the scanner
+  plugin's ("Scan barcodes and QR codes."), though it also takes photos.
+- **Negative:** an allowed plugin line is accepted above any anchor, in any file, any number of times; the check pins
+  what may be inserted, not where. A demo that switches a `[deep_links]` block off isn't supported by the test yet.

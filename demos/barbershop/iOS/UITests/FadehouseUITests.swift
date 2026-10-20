@@ -22,8 +22,9 @@ final class FadehouseUITests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 20), "the Classic Cut card should appear")
         card.tap()
 
-        // The detail shows the in-body Back above the service's image.
-        let back = app.buttons["Back"]
+        // The detail shows the in-body Back above the service's image (barbershop names it "Back to shop" through
+        // ShellLabels, so match the start).
+        let back = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Back'")).firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 20), "the detail should show the in-body Back button")
         XCTAssertTrue(app.buttons["Book this"].exists, "the detail's Book this button should show")
 

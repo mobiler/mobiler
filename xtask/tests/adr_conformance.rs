@@ -1028,19 +1028,24 @@ fn app_owned(rel: &str) -> bool {
 /// `mobiler.toml` switches (so a hand edit fails). `res/` and `.gitignore` may carry the demo's own edits.
 #[test]
 fn adr_0063_every_demo_but_barbershop_is_cli_managed() {
-    // (dir, package, {{NAME}}, iOS display name the CLI wrote, `[ios] local_network`)
+    // (dir, package, {{NAME}}, iOS display name the CLI wrote)
     let demos = [
-        ("demos/saldo", "rs.mobiler.saldo", "Saldo", Some("Saldo"), false),
-        ("demos/coffee", "dev.mobiler.coffee", "Coffee", None, false),
-        ("demos/todo", "dev.mobiler.todo", "Todo", None, false),
-        ("demos/fullstack-todo/mobile", "dev.mobiler.mobile", "Mobile", Some("FullstackTodo"), true),
+        ("demos/saldo", "rs.mobiler.saldo", "Saldo", Some("Saldo")),
+        ("demos/coffee", "dev.mobiler.coffee", "Coffee", None),
+        ("demos/todo", "dev.mobiler.todo", "Todo", None),
+        ("demos/fullstack-todo/mobile", "dev.mobiler.mobile", "Mobile", Some("FullstackTodo")),
     ];
-    for (dir, pkg, name, display, local_network) in demos {
+    for (dir, pkg, name, display) in demos {
+        // What the demo's own mobiler.toml switches (ADR-0064's block), read the way the CLI reads it.
+        let toml: toml::Value = std::fs::read_to_string(root().join(dir).join("mobiler.toml")).map_or(toml::Value::Table(Default::default()), |t| toml::from_str(&t).expect("mobiler.toml parses"));
+        let local_network = toml.get("ios").and_then(|i| i.get("local_network")).and_then(toml::Value::as_bool).unwrap_or(false);
         assert_cli_managed(dir, pkg, name, display, local_network);
     }
-    // The demo's own mobiler.toml is what switches the block: keep the table above in step with it.
-    let toml = std::fs::read_to_string(root().join("demos/fullstack-todo/mobile/mobiler.toml")).unwrap_or_default();
-    assert!(toml.contains("local_network = true"), "ADR-0063: fullstack-todo's mobiler.toml must ask for local networking");
+    // fullstack-todo talks to its own server over plain HTTP: the option must stay on there.
+    assert!(
+        std::fs::read_to_string(root().join("demos/fullstack-todo/mobile/mobiler.toml")).unwrap_or_default().contains("local_network = true"),
+        "ADR-0063: fullstack-todo's mobiler.toml must ask for local networking"
+    );
 }
 
 /// `text` with the `# off: ` lines between `begin` and `end` switched on, as `mobiler … sync` writes them.
@@ -1070,7 +1075,7 @@ fn assert_cli_managed(dir: &str, pkg: &str, name: &str, display: Option<&str>, l
         .unwrap()
         .lines()
         .find_map(|l| l.split("ndkVersion = \"").nth(1)?.split('"').next().map(str::to_string))
-        .expect("ADR-0063: no ndkVersion in {dir}'s Android/shared/build.gradle.kts");
+        .unwrap_or_else(|| panic!("ADR-0063: no ndkVersion in {dir}'s Android/shared/build.gradle.kts"));
     let render = |raw: &str| {
         raw.replace("{{PACKAGE_SHARED_TYPES}}", &format!("{pkg}.shared.types"))
             .replace("{{PACKAGE_SHARED}}", &format!("{pkg}.shared"))

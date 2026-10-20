@@ -3,7 +3,9 @@ name: Android APK (shareable)
 # On-demand "cloud Android build": click "Run workflow" (or `gh workflow run
 # android-apk.yml`) and download the APK from the run's artifacts — no local
 # Android toolchain needed. Builds the coffee demo's release APK (slim: release
-# Rust + stripped, signed with the debug key so it sideloads onto any device).
+# Rust + stripped), signed with a key made fresh for each run so it sideloads onto any
+# device. A new key per run means an APK can't update one from an earlier run: uninstall
+# first. Coffee's shell is the template's (ADR-0063), whose release build is unsigned.
 on:
   workflow_dispatch:
 
@@ -49,9 +51,20 @@ jobs:
       - name: Build the release APK (release Rust via -PrustRelease)
         run: ./Android/gradlew -p Android --no-daemon :app:assembleRelease -PrustRelease
 
+      - name: Sign the release APK with a throwaway key
+        run: |
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | grep -v -- '-rc' | sort -V | tail -1)"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/debug.keystore" -storepass android -keypass android \
+            -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -validity 10000
+          OUT=Android/app/build/outputs/apk/release
+          "$BT/zipalign" -f -p 4 "$OUT/app-release-unsigned.apk" "$OUT/app-release-aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/debug.keystore" --ks-pass pass:android \
+            --out "$OUT/coffee-release.apk" "$OUT/app-release-aligned.apk"
+          "$BT/apksigner" verify "$OUT/coffee-release.apk"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: coffee-apk-${{ github.sha }}
-          path: demos/coffee/Android/app/build/outputs/apk/release/app-release.apk
+          path: demos/coffee/Android/app/build/outputs/apk/release/coffee-release.apk
           if-no-files-found: error

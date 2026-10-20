@@ -251,7 +251,8 @@ local_network = true
 
 `mobiler build`, `mobiler dev` and `mobiler local-network sync` switch on `NSAppTransportSecurity` → `NSAllowsLocalNetworking` in
 `iOS/project.yml`, between its `mobiler:local-network` markers (ADR-0064). It allows local addresses only
-(`localhost`, `.local` names, LAN IPs), never plain HTTP to the internet. Android needs nothing: its debug
+(`localhost`, `.local` names; a LAN IP on a device also needs iOS's Local Network permission), never plain HTTP to
+the internet. Android needs nothing: its debug
 build already allows the dev hosts. Commit the synced `project.yml` with `mobiler.toml`; an app made before
 CLI 0.73 runs `mobiler upgrade --apply` first to get the markers.
 
