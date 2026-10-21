@@ -1251,7 +1251,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val kids = widget.children
             if (widget.scrim && kids.size > 1) {
                 Render(kids.first(), send)
-                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.40f)))
+                // Clipped to the background's own shape, so the dim never shows past a rounded photo's corners.
+                Box(Modifier.matchParentSize().clip(scrimShape(kids.first())).background(Color.Black.copy(alpha = 0.40f)))
                 CompositionLocalProvider(LocalContentColor provides Color.White, LocalTextOn provides TextOn(Color.White, Color.White.copy(alpha = 0.8f))) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { KeyedChildren(kids.drop(1)) { _, child -> Render(child, send) } }
                 }
@@ -2092,6 +2093,13 @@ private fun shapeFor(shape: ImageShape): Shape = when (shape) {
     ImageShape.SQUARE -> RectangleShape
     ImageShape.ROUNDED -> RoundedCornerShape(imageCornerDp.dp)
     ImageShape.CIRCLE -> CircleShape
+}
+
+// The shape a scrim box's background is drawn in: an image's own shape (through an a11y wrapper), else square.
+private fun scrimShape(w: Widget): Shape = when (w) {
+    is Widget.Image -> shapeFor(w.shape)
+    is Widget.A11y -> scrimShape(w.child)
+    else -> RectangleShape
 }
 
 private fun ratioFor(ratio: ImageRatio): Float = when (ratio) {
