@@ -34,7 +34,7 @@ authenticate:
 ```rust
 fn view(&self, model: &Model) -> Widget {
     if model.locked {
-        let lock = column(vec![ /* title, hint, */ button(tr(model, "lock.unlock"), Filled, Msg::Unlock) ]);
+        let lock = column(vec![ /* title, hint, */ button(tr(model, "lock.unlock"), ButtonStyle::Filled, Msg::Unlock) ]);
         return with_theme(scaffold("Saldo", model.dark, vec![], lock), saldo_theme());
     }
     // …the normal app…
@@ -84,15 +84,19 @@ Msg::SetDark(on) => { model.dark = on; save_setting(cx, "dark", if on { "1" } el
 let mut root = scaffold(heading, model.dark, tabs, body);
 ```
 
-An **Appearance** card in Settings flips Light/Dark. (Mobiler leaves "follow the system" to the app —
-there's no OS-appearance signal in the core — so Saldo makes it an explicit choice that sticks.)
+An **Appearance** card in Settings flips Light/Dark. Saldo makes it an explicit choice that sticks. (An
+app that wants a "System" option can follow the OS instead: since `mobiler-core` 0.40,
+`cx.system_appearance` reads the OS light/dark setting and `cx.subscribe_appearance` reports each
+change.)
 
 ## 4. A real icon
 
-The scaffold gave us a placeholder diamond; Saldo ships a teal **"S" monogram**. iOS takes a single
+The scaffold gave us a placeholder icon; Saldo ships a teal **"S" monogram**. iOS takes a single
 1024² source (`Assets.xcassets/AppIcon.appiconset/icon-1024.png`) and `actool` derives the rest; Android
 uses an **adaptive icon** — a teal background vector plus the white "S" as the foreground layer — with the
-legacy `mipmap` rasters regenerated to match for pre-adaptive devices.
+legacy `mipmap` rasters regenerated to match for pre-adaptive devices. The icon files are the app's own
+resources, so `mobiler upgrade` keeps them. Give the foreground PNG its own name (Saldo's is
+`saldo_launcher_foreground`) so it never collides with the template's vector `ic_launcher_foreground`.
 
 ## What we built — and the whole app
 

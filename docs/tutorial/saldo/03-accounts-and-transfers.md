@@ -47,7 +47,7 @@ Capability calls resolve asynchronously and independently, so to run migrations 
 small queue one statement at a time — each `exec` completion triggers the next:
 
 ```rust
-fn init(&self, _model, cx) {
+fn init(&self, _model: &mut Model, cx: &mut Cx<Msg>) {
     cx.plugin("sqlite", "query", "PRAGMA user_version", |r| {
         Msg::Schema(if r.ok { r.as_text().unwrap_or_default().to_string() } else { "[]".to_string() })
     });
@@ -60,7 +60,7 @@ Msg::Schema(json) => {                                 // json = [{"user_version
 }
 Msg::Migrated => { if !model.pending_sql.is_empty() { model.pending_sql.remove(0); } run_migration(model, cx); }
 
-fn run_migration(model, cx) {
+fn run_migration(model: &mut Model, cx: &mut Cx<Msg>) {
     match model.pending_sql.first() {
         Some(sql) => cx.plugin("sqlite", "exec", sql.clone(), |_| Msg::Migrated),
         None => load_all(cx),                          // queue drained → load accounts + txns
@@ -90,6 +90,10 @@ platform — an empty string on iOS, an absent key on Android — so we parse de
 ```rust
 to_account_id: r.get("to_account_id").and_then(Value::as_str).and_then(|s| s.parse().ok()),
 ```
+
+The Chapter-2 helpers follow the rename: `group_by_day` now groups `&Txn`s, and `in_period` takes
+the timestamp instead of the row (`in_period(ts: &str, period: Period, today: &str)`), so any dated
+row can use it.
 
 ## 3. Balances and net worth are *derived*, not stored
 
@@ -124,7 +128,8 @@ The add sheet now leads with a kind selector and shows account **chips**; for a 
 category field for a second "to account" picker:
 
 ```rust
-fn txn_sheet(model) -> Widget {
+fn txn_sheet(model: &Model) -> Widget {
+    let transfer = model.draft_kind == TxnKind::Transfer;
     let mut items = vec![
         segmented(vec![ /* Expense | Income | Transfer */ ]),
         text_field("amount", "Amount", model.draft_amount.clone()),
@@ -144,7 +149,7 @@ fn txn_sheet(model) -> Widget {
 Validation lives in the core and returns a friendly reason, surfaced as a toast:
 
 ```rust
-fn validate_txn(model) -> Result<(), &'static str> {
+fn validate_txn(model: &Model) -> Result<(), &'static str> {
     if parse_amount(&model.draft_amount).is_none() { return Err("Enter an amount greater than zero."); }
     if model.draft_account.is_none()               { return Err("Pick an account."); }
     if model.draft_kind == TxnKind::Transfer {

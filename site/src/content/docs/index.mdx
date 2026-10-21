@@ -1,0 +1,63 @@
+---
+title: Mobiler
+description: Build Android, iOS and web apps from one Rust core, rendered to real native widgets.
+template: splash
+hero:
+  tagline: One Rust core. A native Android app, a native iOS app and a web app. Your state, logic and UI are written once; each platform draws them with its own widgets.
+  actions:
+    - text: What's shared
+      link: /why/shared/
+      icon: right-arrow
+    - text: Get started
+      link: /start/get-started/
+      variant: minimal
+    - text: Build a real app
+      link: /tutorial/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Shots from '../../components/Shots.astro';
+
+<Shots
+	row
+	items={[
+		{ src: '/demos/coffee/storefront.png', alt: 'The coffee demo on Android', caption: 'Android · Jetpack Compose' },
+		{ src: '/demos/coffee/ios.png', alt: 'The same coffee demo on iOS', caption: 'iOS · SwiftUI' },
+		{ src: '/demos/coffee/web.png', alt: 'The same coffee demo in a browser', caption: 'Web · WebAssembly' },
+	]}
+/>
+
+The three screens above are one Rust crate. The coffee demo has no Kotlin, Swift or JavaScript of its own: the same
+`view` function returns the same widget tree, and each platform's shell renders it natively.
+
+:::caution[Experimental]
+Mobiler is young and its APIs still change between releases. Every change is listed in the
+[upgrade notes](/guides/upgrading/), and `mobiler upgrade` carries an app forward.
+:::
+
+<CardGrid>
+	<Card title="Write it once" icon="seti:rust">
+		State, business rules, validation, navigation, translations, number and date formatting, network calls and the
+		screens themselves live in one Rust core. Tests run on your machine with `cargo test`, no emulator needed.
+	</Card>
+	<Card title="Native on every platform" icon="laptop">
+		The core describes the screen as data. A generic shell turns it into Jetpack Compose on Android, SwiftUI on iOS and
+		the DOM on the web, so each app looks and behaves like its platform.
+	</Card>
+	<Card title="Device features from Rust" icon="puzzle">
+		HTTP, storage, camera, photos, the clipboard, haptics and more are built in. Over thirty plugins, some still
+		experimental, add SQLite, biometrics, payments, Bluetooth and more, one command each.
+	</Card>
+	<Card title="Share code with your server" icon="random">
+		Put your types and rules in a plain Rust crate, then use it from the mobile core, the web client and an Axum
+		server. They agree by construction, because they compile the same code.
+	</Card>
+</CardGrid>
+
+## See it in real code
+
+<CardGrid>
+	<LinkCard title="Saldo: a step-by-step tutorial" description="A 5-language money manager with SQLite, charts, recurring entries, backup and a biometric lock, built chapter by chapter." href="/tutorial/" />
+	<LinkCard title="Demo apps" description="A barbershop booking app, a coffee shop, a todo app and two full-stack apps with servers, all open source." href="/examples/" />
+</CardGrid>

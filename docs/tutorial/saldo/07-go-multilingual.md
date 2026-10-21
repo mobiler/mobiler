@@ -2,7 +2,8 @@
 
 Chapter 6 made *numbers and dates* locale-aware, but every **label** is still English. This chapter makes
 Saldo speak five languages — English, German, French, Italian and Ukrainian — by adding a small
-translation primitive to the framework, `mobiler_core::i18n`, building a catalog of every UI string, and
+translation primitive to the framework, `mobiler_core::i18n` (it shipped in `mobiler-core` 0.31, so on
+today's framework you just import it), building a catalog of every UI string, and
 picking the language from the device (with a manual override in Settings).
 
 ## 1. The `i18n` primitive
@@ -151,7 +152,7 @@ and overridable in Settings — covered by tests in the framework (`i18n::tests`
 path, plus a guard that *every* catalog key has all five languages).
 
 `mobiler_core::i18n` and the Chapter-6 Ukrainian `format` support are the new framework surface this app
-justified; they ship to other apps in the next `mobiler-core` release.
+justified; they shipped to every app in `mobiler-core` 0.31.
 
 **Next:** Chapter 8 — Recurring transactions: schedule rules and post the due ones on launch.
 
