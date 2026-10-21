@@ -127,6 +127,28 @@ jobs:
       - name: Build (trunk)
         run: trunk build
 
+  # The mobiler.rs site (site/, Astro + Starlight). The build regenerates the tutorial, the
+  # capability and plugin reference and the demo screenshots from the repo, fails on a broken
+  # internal link (starlight-links-validator) or a crate version the pages quote that is behind
+  # the repo, so a docs change that breaks the site fails here.
+  site:
+    name: Site build (mobiler.rs)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
   # The iOS shell only builds on macOS (uniffi Swift FFI + xcodebuild). Build each
   # demo for the simulator — no signing, no booted sim — so a shell or build-ios.sh
   # regression is caught for free, without the rented Mac. (macOS runners are arm64,

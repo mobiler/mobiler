@@ -1,0 +1,21 @@
+{
+  "name": "mobiler-site",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "sync": "node scripts/sync.mjs",
+    "dev": "npm run sync && astro dev",
+    "build": "npm run sync && astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.42.6",
+    "astro": "^7.4.1",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "starlight-links-validator": "^0.27.0"
+  },
+  "private": true
+}

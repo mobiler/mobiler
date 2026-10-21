@@ -62,8 +62,8 @@ fn category_breakdown(model: &Model, kind: TxnKind) -> Vec<(String, f64)> {
 }
 ```
 
-A donut takes one `ChartSeries` per slice. We give each slice an explicit colour from a small palette so
-the chart and the ranked list below it line up, and add a percentage to each row:
+A donut takes one `ChartSeries` per slice. We give each slice an explicit colour (an `Rgb`) from a small
+`palette(i)` helper so the chart and the ranked list below it line up, and add a percentage to each row:
 
 ```rust
 let donut = donut_chart(

@@ -32,7 +32,8 @@ The contract is tiny:
 ## 2. A capability for "now"
 
 A finance app stamps each entry with the date it happened — but the pure core has no clock. Saldo needs
-"today" without making the user open a date picker, so the framework grows a small capability:
+"today" without making the user open a date picker, so the framework grew a small capability for it
+(Saldo added it; it ships in `mobiler-core` 0.31 and later, so on today's framework it's already there):
 
 ```rust
 // in mobiler_core: a built-in `datetime` op with no UI
@@ -77,6 +78,7 @@ Msg::Save => {
     cx.now(|r| Msg::Stamped(if r.ok { r.as_text().unwrap_or_default().to_string() } else { String::new() }));
 }
 Msg::Stamped(ts) => {
+    let (amount, category) = (parse_amount(&model.draft_amount).unwrap_or(0.0), model.draft_category.trim());
     // bound parameters — never concatenate user text into SQL
     let sql = serde_json::json!({
         "sql": "INSERT INTO expense(ts, amount, category, note) VALUES (?, ?, ?, ?)",
@@ -180,7 +182,8 @@ fn period_filter() {
 ## What we built
 
 Expenses now survive a restart, carry a real date, group under day headers with subtotals, and filter
-by Day / Month / All — and we grew the framework a `cx.now()` capability along the way. The data lives
+by Day / Month / All — and we grew the framework a `cx.now()` capability along the way (shipped in
+`mobiler-core` 0.31). The data lives
 in SQLite; the `Model` is just a cache we rebuild on launch.
 
 **Next:** Chapter 3 — Accounts & transfers: the Assets tab, balances, net worth, and moving money

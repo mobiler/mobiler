@@ -31,17 +31,20 @@ saldo/
 │       ├── app.rs        # ← you live here: Model / Msg / update / view
 │       ├── lib.rs        # re-exports + uniffi scaffolding (generated, leave it)
 │       ├── ffi.rs        # the FFI bridge (generated, leave it)
-│       └── bin/codegen.rs# emits the Swift/Kotlin ABI types at build time
+│       └── bin/codegen.rs# emits the Swift/Kotlin ABI types + UniFFI bindings at build time
 ├── iOS/                  # SwiftUI shell (XcodeGen project + Render.swift)
-└── Android/              # Jetpack Compose shell (Gradle + MainActivity.kt)
+├── Android/              # Jetpack Compose shell (Gradle + MainActivity.kt)
+└── .mobiler/             # the template snapshot `mobiler upgrade` merges against (leave it)
 ```
 
 Everything you write for Saldo is in **`shared/src/app.rs`**. The native shells are generic — they
-render whatever `Widget` tree your `view` returns — so you almost never touch Swift or Kotlin.
+render whatever `Widget` tree your `view` returns — so you almost never touch Swift or Kotlin. They come
+from the CLI's template, and `mobiler upgrade` brings them up to date on each CLI release, so leave
+them as generated.
 
 > In this repo Saldo is a workspace demo, so `shared/Cargo.toml` points `mobiler-core` at the in-repo
 > crate (`path = "../../../mobiler-core"`); a standalone `mobiler new` app pins the published version
-> instead (`mobiler-core = "0.30"`).
+> instead (`mobiler-core = "0.48"`).
 
 ## 2. The shape of a Mobiler app
 
@@ -52,6 +55,26 @@ A Mobiler app is a tiny state machine (it's [Crux](https://redbadger.github.io/c
 - **`update`** — applies a `Msg` to the `Model` (and asks the shell to do side-effects via `cx`),
 - **`input`** — receives text-field / toggle changes from the shell,
 - **`view`** — turns the `Model` into a `Widget` tree.
+
+`mobiler new saldo` already wrote the frame in `app.rs`: a unit struct that implements the
+`MobilerApp` trait, plus the `App` alias the generated FFI and codegen build on. We replace its
+starter `Msg` / `Model` and method bodies, and keep the frame:
+
+```rust
+use mobiler_core::*; // the builders, Widget, Cx, MobilerApp, …
+use serde::{Deserialize, Serialize};
+
+#[derive(Default)]
+pub struct SaldoApp;
+
+impl MobilerApp for SaldoApp {
+    type Event = Msg;
+    type Model = Model;
+    // fn update / fn input / fn view — below
+}
+
+pub type App = MobilerShell<SaldoApp>; // keep: the native bridge is built on this
+```
 
 ### State
 
@@ -162,6 +185,20 @@ fn view(&self, model: &Model) -> Widget {
 }
 ```
 
+`tab` here is a small helper of ours: the framework's `tab_icon(label, icon, selected, on_select)`
+builds an icon tab, and the helper fills in "selected" and the `Switch` event. It reuses the name of
+the framework's label-only `tab`; a local function shadows the glob import, so that's fine. `money` and
+`soon` are two more one-liners:
+
+```rust
+fn tab(current: Screen, screen: Screen, label: &str, icon: Icon) -> Tab {
+    tab_icon(label, icon, current == screen, Msg::Switch(screen))
+}
+
+fn money(v: f64) -> String { format!("€{v:.2}") } // locale-aware in Chapter 6
+fn soon(what: &str) -> Widget { caption(what) }   // placeholder body for the tabs we haven't built
+```
+
 `with_fab` and `with_sheet` are the framework's "set-a-field-or-no-op" combinators: they only attach to
 a `Scaffold`, so you compose them by feeding the scaffold through them. Drive them from the model —
 the sheet is open precisely when `model.adding` is true, and tapping outside it sends `Msg::CancelAdd`.
@@ -202,8 +239,9 @@ string is the whole contract between a field and your state.
 
 ```sh
 cargo test                 # the core is plain Rust — unit-test the logic with no device
-mobiler build android      # → an installable APK
-# iOS: open iOS/ in Xcode (or the CI 'iOS build' lane) and run
+mobiler dev                # build, install and launch on the connected Android device/emulator
+mobiler build android      # → an installable APK only
+mobiler build ios          # macOS only: runs iOS/build-ios.sh (or open iOS/ in Xcode and run)
 ```
 
 Because the core is pure Rust, the logic is unit-testable without a simulator:

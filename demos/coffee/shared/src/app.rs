@@ -76,12 +76,12 @@ impl Default for Model {
     fn default() -> Self {
         Self {
             products: vec![
-                Product { name: "Caffè Mocha", price: "$4.53", rating: "4.8", category: "Latte", image: "https://loremflickr.com/400/400/coffee?lock=1", description: "Espresso with steamed milk and a touch of chocolate." },
-                Product { name: "Flat White", price: "$3.53", rating: "4.6", category: "Latte", image: "https://loremflickr.com/400/400/coffee?lock=2", description: "Velvety microfoam over a double shot of espresso." },
-                Product { name: "Espresso", price: "$2.20", rating: "4.9", category: "Espresso", image: "https://loremflickr.com/400/400/espresso?lock=3", description: "A concentrated, full-bodied single origin shot." },
-                Product { name: "Cappuccino", price: "$3.80", rating: "4.5", category: "Espresso", image: "https://loremflickr.com/400/400/cappuccino?lock=4", description: "Equal parts espresso, steamed milk and airy foam." },
-                Product { name: "Cold Brew", price: "$4.10", rating: "4.7", category: "Cold", image: "https://loremflickr.com/400/400/coldbrew?lock=5", description: "Steeped 18 hours for a smooth, low-acidity cup." },
-                Product { name: "Iced Latte", price: "$4.20", rating: "4.4", category: "Cold", image: "https://loremflickr.com/400/400/icedcoffee?lock=6", description: "Chilled espresso and milk over ice." },
+                Product { name: "Caffè Mocha", price: "$4.53", rating: "4.8", category: "Latte", image: "https://images.unsplash.com/photo-1534778101976-62847782c213?w=400&h=400&fit=crop&q=70", description: "Espresso with steamed milk and a touch of chocolate." },
+                Product { name: "Flat White", price: "$3.53", rating: "4.6", category: "Latte", image: "https://images.unsplash.com/photo-1570968915860-54d5c301fa9f?w=400&h=400&fit=crop&q=70", description: "Velvety microfoam over a double shot of espresso." },
+                Product { name: "Espresso", price: "$2.20", rating: "4.9", category: "Espresso", image: "https://images.unsplash.com/photo-1510707577719-ae7c14805e3a?w=400&h=400&fit=crop&q=70", description: "A concentrated, full-bodied single origin shot." },
+                Product { name: "Cappuccino", price: "$3.80", rating: "4.5", category: "Espresso", image: "https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=400&h=400&fit=crop&q=70", description: "Equal parts espresso, steamed milk and airy foam." },
+                Product { name: "Cold Brew", price: "$4.10", rating: "4.7", category: "Cold", image: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=400&h=400&fit=crop&q=70", description: "Steeped 18 hours for a smooth, low-acidity cup." },
+                Product { name: "Iced Latte", price: "$4.20", rating: "4.4", category: "Cold", image: "https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=400&h=400&fit=crop&q=70", description: "Chilled espresso and milk over ice." },
             ],
             categories: vec!["All", "Latte", "Espresso", "Cold"],
             selected_category: "All".to_string(),

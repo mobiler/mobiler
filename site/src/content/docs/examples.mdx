@@ -1,0 +1,94 @@
+---
+title: Demo apps
+description: Open-source Mobiler apps to read and run, from a single-screen storefront to full-stack products with a server.
+---
+
+import Shots from '../../components/Shots.astro';
+
+Every demo lives in the [repository's `demos/` folder](https://github.com/mobiler/mobiler/tree/main/demos).
+Apart from barbershop, which is the reference the shells are developed in, their Android and iOS shells
+are exactly what `mobiler new` and `mobiler plugin add` produce. All the app code is Rust.
+
+## Saldo
+
+A complete money manager: income, expenses and transfers across accounts, categories, charts, recurring
+entries, CSV export, backup and restore, five languages and a biometric lock. Built step by step in the
+[tutorial](/tutorial/). See [Try Saldo](/try-saldo/).
+
+[Code](https://github.com/mobiler/mobiler/tree/main/demos/saldo) · Android, iOS · plugins: `sqlite`,
+`files`, `filepicker`, `biometric`, `picker`
+
+## Barbershop (Fade House)
+
+A booking app that shows off most of the widget set: an icon tab bar and action button, a brand gradient,
+an avatar rail with ratings, a date, time and confirm booking sheet, charts, an inline calendar with busy
+dots, swipe actions, large controls, a localized calendar and rich form fields. One `app-core` crate runs
+the mobile app and the web client.
+
+<Shots
+	items={[
+		{ src: '/demos/barbershop/ios-home.png', alt: 'Fade House home on iOS', caption: 'iOS' },
+		{ src: '/demos/barbershop/home.png', alt: 'Fade House home on the web', caption: 'Web' },
+		{ src: '/demos/barbershop/bookings.png', alt: 'Bookings with charts, a calendar and swipe rows', caption: 'Bookings' },
+		{ src: '/demos/barbershop/booking-sheet.png', alt: 'The booking sheet', caption: 'Booking sheet' },
+	]}
+/>
+
+[Code](https://github.com/mobiler/mobiler/tree/main/demos/barbershop) · Android, iOS, web
+
+## Coffee
+
+A storefront: a hero image with an overlay, category chips over a product grid, a detail screen with a
+slider and a quantity stepper, and buttons that try the scanner, biometric, secure-store, WebSocket and
+notification plugins. One core, three platforms.
+
+<Shots
+	items={[
+		{ src: '/demos/coffee/storefront.png', alt: 'Coffee on Android', caption: 'Android' },
+		{ src: '/demos/coffee/ios.png', alt: 'Coffee on iOS', caption: 'iOS' },
+		{ src: '/demos/coffee/web.png', alt: 'Coffee on the web', caption: 'Web' },
+		{ src: '/demos/coffee/detail.png', alt: 'A product detail screen', caption: 'Detail' },
+	]}
+/>
+
+[Code](https://github.com/mobiler/mobiler/tree/main/demos/coffee) · Android, iOS, web
+
+## Todo
+
+Today, projects and settings tabs, a pushed project screen, colour dots and a colour picker, a dark-mode
+switch, and state that survives a restart with `cx.save`.
+
+<Shots
+	items={[
+		{ src: '/demos/todo/today.png', alt: 'Today on Android', caption: 'Android' },
+		{ src: '/demos/todo/ios.png', alt: 'Today on iOS', caption: 'iOS' },
+		{ src: '/demos/todo/projects.png', alt: 'Projects with the colour picker', caption: 'Projects' },
+	]}
+/>
+
+[Code](https://github.com/mobiler/mobiler/tree/main/demos/todo) · Android, iOS, web
+
+## Full-stack todo
+
+The shape of a real product: a `domain` crate shared by an Axum server and every client, one core
+running natively on Android and iOS and in the browser, and a second web app with its own Leptos UI that
+shares only `domain`. See [One core for mobile, web and server](/guides/full-stack/).
+
+<Shots
+	items={[
+		{ src: '/demos/fullstack-todo/mobile.png', alt: 'The native app on Android', caption: 'Android' },
+		{ src: '/demos/fullstack-todo/ios.png', alt: 'The native app on iOS', caption: 'iOS' },
+		{ src: '/demos/fullstack-todo/web.png', alt: 'The same core on the web', caption: 'Web, same core' },
+		{ src: '/demos/fullstack-todo/web-json.png', alt: 'A separate Leptos web app', caption: 'Web, own UI' },
+	]}
+/>
+
+[Code](https://github.com/mobiler/mobiler/tree/main/demos/fullstack-todo) · Android, iOS, web, server
+
+## Full-stack notes (SQLx)
+
+The same shape with a real database: an Axum and SQLx server on SQLite (movable to PostgreSQL), a shared
+`domain`, and one core for the web and mobile clients.
+
+[Code](https://github.com/mobiler/mobiler/tree/main/demos/fullstack-sqlx) · web, server (mobile by
+re-exporting the core from a `mobiler new` app)
