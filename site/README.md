@@ -1,49 +1,23 @@
-# Starlight Starter Kit: Basics
+# mobiler.rs
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+The documentation site, built with [Astro](https://astro.build) and [Starlight](https://starlight.astro.build).
 
-```
-npm create astro@latest -- --template starlight
-```
-
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro + Starlight project, you'll see the following folders and files:
-
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+```sh
+npm ci
+npm run dev     # http://localhost:4321
+npm run build   # site/dist, with link validation
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+Both run `scripts/sync.mjs` first. It generates, from the repository (these files are gitignored):
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+- `src/content/docs/tutorial/`, the Saldo tutorial, from `docs/tutorial/saldo/`;
+- `src/content/docs/reference/capabilities.md`, from `capabilities.json`;
+- `src/content/docs/reference/plugins.md`, from `mobiler/plugins/*/mobiler-plugin.toml`;
+- `public/demos/`, the screenshots from `demos/*/screenshots/`.
 
-Static assets, like favicons, can be placed in the `public/` directory.
+It then fails the build when a page quotes a `mobiler-core`, `mobiler-web` or `crux_core` version behind
+the repository's.
 
-## 🧞 Commands
+Everything else in `src/content/docs/` is hand-written and moves with the code (see `CLAUDE.md`).
 
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+Deploy: run the **Deploy site** workflow (`.github/workflows/site-deploy.yml`) from main.

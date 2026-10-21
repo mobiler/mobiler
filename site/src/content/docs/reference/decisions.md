@@ -15,5 +15,5 @@ A few that explain what an app can rely on:
 
 - **ADR-0001:** the shells are generic, so an app has no native code of its own.
 - **ADR-0057, ADR-0058, ADR-0062:** a tab keeps its screen (Android, iOS) or its scroll position (web).
-- **ADR-0055, ADR-0056:** what `mobiler upgrade` changes in your dependencies, and what it only reports.
+- **ADR-0066, ADR-0056:** what `mobiler upgrade` changes in your dependencies, and what it only reports.
 - **ADR-0061:** app data stays in the platform's backups, and what that exposes.

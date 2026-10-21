@@ -17,6 +17,7 @@ A Mobiler app has two parts that move with the framework:
 cargo install mobiler            # the newer CLI first
 cd myapp
 mobiler upgrade                  # look first: changes are offered as *.mobiler-new files
+                                 # (Android resources under .mobiler/new/)
 mobiler upgrade --apply          # write them in place (old versions go to .mobiler/backup/)
 ```
 

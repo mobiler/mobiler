@@ -7,9 +7,6 @@ name: iOS screenshots
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/ios-screenshots.yml
 
 permissions:
   contents: read

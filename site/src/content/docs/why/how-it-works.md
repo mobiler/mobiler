@@ -87,12 +87,12 @@ release's improvements in with a three-way merge, keeping your edits. Your app's
 Device features are **capabilities**: a call on `cx` that becomes a request to the shell.
 
 - **Built in** to every app: HTTP, storage, clipboard, share, the browser, toasts and snackbars, device
-  and app info, the system light/dark setting, haptics, confirm dialogs, the photo picker, the camera, and
+  info, the system light/dark setting, haptics, confirm dialogs, the photo picker, the camera, and
   date and time pickers. See [Built-in capabilities](/reference/capabilities/).
 - **Plugins** add more: `mobiler plugin add sqlite` copies the plugin's Kotlin and Swift into your shells
   and registers it. See [Plugins](/reference/plugins/).
 
-Adding a capability never changes the wire format, and a shell that doesn't know a plugin answers "not
+Adding a plugin never changes the wire format, and a shell that doesn't know a plugin answers "not
 available" instead of crashing, so an app degrades gracefully.
 
 ## Navigation, theme and state

@@ -5,7 +5,7 @@
 // - demo screenshots (demos/*/screenshots) -> public/demos/
 // Everything written here is gitignored. Runs before `astro dev` and `astro build`.
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -145,24 +145,22 @@ function syncScreenshots() {
 	for (const demo of readdirSync(join(REPO, 'demos'))) {
 		const shots = join(REPO, 'demos', demo, 'screenshots');
 		if (!existsSync(shots)) continue;
-		cpSync(shots, join(out, demo), { recursive: true });
+		// Never follow a symlink: only real image files may reach the published site.
+		cpSync(shots, join(out, demo), { recursive: true, filter: (src) => !lstatSync(src).isSymbolicLink() });
 		n += readdirSync(shots).length;
 	}
 	return n;
 }
 
 /** Hand-written pages quote crate versions (`mobiler-core = "0.48"`); fail the build when one is behind the repo. */
-// The latest mobiler-web on crates.io. The template has no web client to read it from; bump it with
-// each mobiler-web publish (the web guide quotes it).
-const PUBLISHED_WEB = '0.49';
-
 function checkVersions() {
 	// The template's pins are what `mobiler new` writes today, so they are published versions.
 	const tmpl = (f, re) => readFileSync(join(REPO, f), 'utf8').match(re)[1];
 	const want = {
 		'mobiler-core': tmpl('mobiler/templates/shared/Cargo.toml.tmpl', /^mobiler-core = "([^"]+)"/m),
 		crux_core: tmpl('mobiler/templates/Cargo.toml.tmpl', /^crux_core = "([^"]+)"/m),
-		'mobiler-web': PUBLISHED_WEB,
+		// The template has no web client; the CLI's upgrade target is the published mobiler-web (ADR-0066).
+		'mobiler-web': tmpl('mobiler/src/upgrade.rs', /^const MOBILER_WEB_PIN: &str = "([^"]+)";/m),
 	};
 	const stale = [];
 	const walk = (dir) => {
@@ -170,7 +168,7 @@ function checkVersions() {
 			const p = join(dir, e.name);
 			if (e.isDirectory()) walk(p);
 			else if (/\.mdx?$/.test(e.name)) {
-				for (const m of readFileSync(p, 'utf8').matchAll(/\b(mobiler-core|mobiler-web|crux_core) = "([^"]+)"/g)) {
+				for (const m of readFileSync(p, 'utf8').matchAll(/\b(mobiler-core|mobiler-web|crux_core) = (?:\{[^}\n]*?\bversion = )?"([^"]+)"/g)) {
 					if (m[2] !== want[m[1]]) stale.push(`${relative(SITE, p)}: ${m[1]} = "${m[2]}", the repo is at "${want[m[1]]}"`);
 				}
 			}

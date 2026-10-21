@@ -41,7 +41,7 @@ The mobile app builds as before: `shared` still provides the bindings, now over 
 `app-core`'s `mobiler-core` version equal to `shared`'s; `mobiler upgrade` moves the one in `shared` and
 lists the other for you to change.
 
-The [barbershop demo](/examples/#barbershop-fade-house) is laid out exactly like this.
+The [barbershop demo](/examples/#barbershop-fade-house) is laid out like this.
 
 ## The web crate
 
