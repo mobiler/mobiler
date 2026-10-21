@@ -1,10 +1,20 @@
-# Publishes site/ (mobiler.rs) to GitHub Pages. Manual only: run it when the site should go live
-# or change. Needs Settings → Pages → Source: GitHub Actions, and the mobiler.rs DNS pointed at Pages
-# (site/public/CNAME carries the custom domain).
+# Publishes site/ (mobiler.rs) to GitHub Pages: on every push to main that changes what the site is
+# built from, or by hand (Run workflow). One-time setup (Pages source, custom domain, DNS, HTTPS) is in
+# site/DEPLOY.md. The custom domain lives in Settings → Pages; an Actions deploy ignores a CNAME file.
 name: Deploy site
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    # Everything scripts/sync.mjs reads, plus the site itself.
+    paths:
+      - site/**
+      - docs/tutorial/saldo/**
+      - capabilities.json
+      - mobiler/plugins/*/mobiler-plugin.toml
+      - demos/*/screenshots/**
+      - .github/workflows/site-deploy.yml
 
 permissions:
   contents: read

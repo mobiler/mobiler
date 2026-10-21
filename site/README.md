@@ -20,4 +20,6 @@ the repository's.
 
 Everything else in `src/content/docs/` is hand-written and moves with the code (see `CLAUDE.md`).
 
-Deploy: run the **Deploy site** workflow (`.github/workflows/site-deploy.yml`) from main.
+Deploy: `.github/workflows/site-deploy.yml` publishes on every push to main that changes the site or
+what it is generated from, and can be run by hand. The one-time GitHub Pages and DNS setup is in
+[DEPLOY.md](DEPLOY.md).
