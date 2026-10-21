@@ -108,12 +108,15 @@ Without `--apply`, nothing your build reads changes, apart from creating missing
 merges, new files and conflicts are offered as `<file>.mobiler-new`, and the dependency edits are reported, not
 made. `--apply` writes clean merges and new files
 in place, after saving the old file under `.mobiler/backup/`, and moves the framework's own dependency lines
-(ADR-0055): `crux_core` in `Cargo.toml`; `mobiler-core`, the `codegen` feature and its `cargo_metadata` / `camino`
+(ADR-0055, ADR-0066): `crux_core` in `Cargo.toml`; `mobiler-core`, the `codegen` feature and its `cargo_metadata` / `camino`
 dependencies in `shared/Cargo.toml`. A line in a form it doesn't recognise, a framework pin in another crate of your
-app, or a `facet` dependency of your own is left alone and listed as a hand edit. That includes crates outside the
+app (a web client's `mobiler-web` is checked against mobiler-web's own current version), or a `facet` dependency of
+your own is left alone and listed as a hand edit. That includes crates outside the
 app folder that it builds through `path` dependencies (an app core kept in your repository's main workspace, and that
 workspace's `[workspace.dependencies]`): upgrade reads them and lists their pins, but never edits outside the app
-(ADR-0056), so bump those by hand. It never applies a conflict. If a build still fails with trait errors after an
+(ADR-0056), so bump those by hand. Upgrade never moves a pin down: a `mobiler-core` or `mobiler-web` pin already at or
+above its target is left alone, and a `crux_core` ahead of the version mobiler-core builds with is listed as a hand
+edit (ADR-0066). It never applies a conflict. If a build still fails with trait errors after an
 upgrade, `mobiler doctor` (and the failed `mobiler dev` / `build` itself) says when `Cargo.lock` holds two versions of
 `crux_core` or `mobiler-core`, and which crate pulls the old one.
 
@@ -254,7 +257,9 @@ local_network = true
 (`localhost`, `.local` names; a LAN IP on a device also needs iOS's Local Network permission), never plain HTTP to
 the internet. Android needs nothing: its debug
 build already allows the dev hosts. Commit the synced `project.yml` with `mobiler.toml`; an app made before
-CLI 0.73 runs `mobiler upgrade --apply` first to get the markers.
+CLI 0.73 runs `mobiler upgrade --apply` first to get the markers. If `project.yml` already has its own
+`NSAppTransportSecurity` outside the markers (in any target: the check reads the whole file), the sync refuses
+rather than write a second one: add `NSAllowsLocalNetworking: true` to your key by hand instead.
 
 ## Debugging a text field on Android
 

@@ -901,17 +901,47 @@ fn adr_0055_template_crux_pin_matches_the_workspace() {
     assert_eq!(told, core_facet, "ADR-0055: upgrade tells apps facet {told}, mobiler-core builds with {core_facet}");
 }
 
+/// ADR-0066: the mobiler-web version `mobiler upgrade` points a web client at is the one this repo's
+/// mobiler-web is (its major.minor), so a release-libs publish that forgets to move it fails here.
+#[test]
+fn adr_0066_upgrade_points_mobiler_web_at_its_own_version() {
+    let read = |p: &str| std::fs::read_to_string(root().join(p)).unwrap_or_else(|e| panic!("read {p}: {e}"));
+    let web: toml::Value = toml::from_str(&read("mobiler-web/Cargo.toml")).expect("mobiler-web/Cargo.toml parses");
+    let version = web["package"]["version"].as_str().expect("mobiler-web has a version");
+    let minor = version.splitn(3, '.').take(2).collect::<Vec<_>>().join(".");
+    let told = read("mobiler/src/upgrade.rs")
+        .lines()
+        .find_map(|l| l.strip_prefix("const MOBILER_WEB_PIN: &str = \"")?.split('"').next().map(str::to_string))
+        .expect("ADR-0066: upgrade.rs has no MOBILER_WEB_PIN");
+    assert_eq!(told, minor, "ADR-0066: upgrade tells web clients mobiler-web {told}, mobiler-web is {version}: move MOBILER_WEB_PIN");
+}
+
 /// A plugin-insertion anchor: a comment line naming `mobiler:` (not a line that merely mentions it).
 fn is_anchor(line: &str) -> bool {
     let t = line.trim_start();
     ["// mobiler:", "# mobiler:", "<!-- mobiler:"].iter().any(|a| t.starts_with(a))
 }
 
+/// Whether `line` holds `marker` at a token boundary (not followed by `-`, `_` or an alphanumeric), as
+/// plugin.rs's `line_has_marker` finds an anchor: `mobiler:plugins` is not `mobiler:plugins-stream`.
+fn has_marker(line: &str, marker: &str) -> bool {
+    let mut from = 0;
+    while let Some(pos) = line[from..].find(marker) {
+        let end = from + pos + marker.len();
+        if !matches!(line[end..].chars().next(), Some(c) if c == '-' || c == '_' || c.is_alphanumeric()) {
+            return true;
+        }
+        from = end;
+    }
+    false
+}
+
 /// Whether `app` is `template` plus only what `mobiler plugin add` inserts: blocks of extra lines, each
 /// ending directly above an anchor comment both files have, and each line exactly one of `allowed` (a
 /// used bundled plugin's rendered insertions: its registration, dependency, manifest and plist lines;
-/// a trailing comma is the registration list's). `Err` names the first line that isn't.
-fn plugin_insertions_only(template: &str, app: &str, allowed: &[String]) -> Result<(), String> {
+/// a trailing comma is the registration list's) whose own anchor marker is that comment. `Err` names the
+/// first line that isn't.
+fn plugin_insertions_only(template: &str, app: &str, allowed: &[(String, &str)]) -> Result<(), String> {
     let (t, a): (Vec<&str>, Vec<&str>) = (template.lines().collect(), app.lines().collect());
     let (mut i, mut j) = (0, 0);
     while j < a.len() {
@@ -926,12 +956,18 @@ fn plugin_insertions_only(template: &str, app: &str, allowed: &[String]) -> Resu
         if i >= t.len() || !is_anchor(t[i]) {
             return Err(format!("line {}: {}", start + 1, a[start]));
         }
-        let inserted = |line: &str| {
+        let anchor = t[i];
+        let inserted = |line: &str, here: bool| {
             let line = line.trim();
-            allowed.iter().any(|ok| line == ok.as_str() || line.strip_suffix(',') == Some(ok.as_str()))
+            allowed.iter().any(|(ok, marker)| {
+                (line == ok.as_str() || line.strip_suffix(',') == Some(ok.as_str())) && (!here || has_marker(anchor, marker))
+            })
         };
-        if let Some(k) = (start..j).find(|&k| !inserted(a[k])) {
+        if let Some(k) = (start..j).find(|&k| !inserted(a[k], false)) {
             return Err(format!("line {}: {} (no bundled plugin inserts it)", k + 1, a[k]));
+        }
+        if let Some(k) = (start..j).find(|&k| !inserted(a[k], true)) {
+            return Err(format!("line {}: {} (a bundled plugin inserts it at another anchor than `{}`)", k + 1, a[k], anchor.trim()));
         }
     }
     match t.get(i) {
@@ -943,7 +979,7 @@ fn plugin_insertions_only(template: &str, app: &str, allowed: &[String]) -> Resu
 #[test]
 fn plugin_insertions_only_accepts_anchor_blocks_only() {
     let t = "a\nb\n// mobiler:plugins — insert above\nc";
-    let ok = vec!["\"x\" to XPlugin()".to_string()];
+    let ok = vec![("\"x\" to XPlugin()".to_string(), "// mobiler:plugins")];
     assert_eq!(plugin_insertions_only(t, t, &ok), Ok(()));
     assert_eq!(plugin_insertions_only(t, "a\nb\n    \"x\" to XPlugin(),\n// mobiler:plugins — insert above\nc", &ok), Ok(()));
     assert!(plugin_insertions_only(t, "a\nb\n    \"foo\" to FooPlugin(),\n// mobiler:plugins — insert above\nc", &ok).is_err(), "a hand-written registration above an anchor");
@@ -951,11 +987,17 @@ fn plugin_insertions_only_accepts_anchor_blocks_only() {
     assert!(plugin_insertions_only(t, "a\nB\n// mobiler:plugins — insert above\nc", &ok).is_err(), "a changed template line");
     assert!(plugin_insertions_only(t, "a\nb\n// mobiler:plugins — insert above", &ok).is_err(), "a missing template line");
     // A line merely containing an allowed word (here `false`, from `exported="false"`) is not an insertion.
-    let manifest = vec!["<activity android:name=\".X\" android:exported=\"false\" />".to_string()];
+    let manifest = vec![("<activity android:name=\".X\" android:exported=\"false\" />".to_string(), "mobiler:manifest-application")];
     assert!(plugin_insertions_only(t, "a\nb\n    case \"x\": return PluginResponse(ok: false, output: \"\")\n// mobiler:plugins — insert above\nc", &manifest).is_err(), "a line sharing a word with a manifest value");
     // Only a comment anchor takes insertions, not a line that merely mentions `mobiler:`.
     let printed = "a\n    print(\"mobiler: font family\")\nc";
     assert!(plugin_insertions_only(printed, "a\n    \"x\" to XPlugin(),\n    print(\"mobiler: font family\")\nc", &ok).is_err(), "a block above a non-anchor line");
+    // A plugin line sits above the anchor `mobiler plugin add` puts it at, never another one: a registration
+    // above the streaming anchor (whose marker starts with the registration's) is a hand edit.
+    let two = "a\n// mobiler:plugins-stream\n// mobiler:app-launch\n// mobiler:plugins\nc";
+    assert_eq!(plugin_insertions_only(two, "a\n// mobiler:plugins-stream\n// mobiler:app-launch\n\"x\" to XPlugin(),\n// mobiler:plugins\nc", &ok), Ok(()));
+    assert!(plugin_insertions_only(two, "a\n\"x\" to XPlugin(),\n// mobiler:plugins-stream\n// mobiler:app-launch\n// mobiler:plugins\nc", &ok).is_err(), "a registration above the stream anchor");
+    assert!(plugin_insertions_only(two, "a\n// mobiler:plugins-stream\n\"x\" to XPlugin(),\n// mobiler:app-launch\n// mobiler:plugins\nc", &ok).is_err(), "a registration above the app-launch anchor");
 }
 
 /// The exact lines `mobiler plugin add` inserts for a plugin manifest, as plugin.rs renders them: the Android
@@ -963,7 +1005,7 @@ fn plugin_insertions_only_accepts_anchor_blocks_only() {
 /// dependency, both forms of a gradle plugin, manifest entries, `<uses-permission>` lines (with a ceiling when
 /// the entry carries one), and `KEY: value` per `[ios.info_plist]` entry. SwiftPM packages are not listed: no
 /// CLI-managed demo uses one, so a line for one fails the check until it is added here.
-fn manifest_insertions(toml_text: &str) -> Vec<String> {
+fn manifest_insertions(toml_text: &str) -> Vec<(String, &'static str)> {
     let v: toml::Value = toml::from_str(toml_text).expect("a bundled plugin manifest parses");
     let strings = |table: &str, key: &str| -> Vec<String> {
         match v.get(table).and_then(|t| t.get(key)) {
@@ -982,26 +1024,30 @@ fn manifest_insertions(toml_text: &str) -> Vec<String> {
         }
         one(x)
     };
-    let mut out = Vec::new();
-    out.extend(strings("android", "register"));
-    out.extend(strings("android", "manifest_application").iter().map(|m| m.trim().to_string()));
-    out.extend(strings("android", "gradle_deps").iter().map(|d| format!("implementation(\"{d}\")")));
+    // Each line with the anchor plugin.rs inserts it above.
+    let mut out: Vec<(String, &'static str)> = Vec::new();
+    let at = |lines: Vec<String>, marker: &'static str| lines.into_iter().map(move |l| (l, marker));
+    out.extend(at(strings("android", "register"), "// mobiler:plugins"));
+    out.extend(at(strings("android", "manifest_application").iter().map(|m| m.trim().to_string()).collect(), "mobiler:manifest-application"));
+    out.extend(at(strings("android", "gradle_deps").iter().map(|d| format!("implementation(\"{d}\")")).collect(), "mobiler:gradle-deps"));
     for gp in strings("android", "gradle_plugins") {
         let (id, ver) = gp.split_once(':').unwrap_or((gp.as_str(), ""));
-        out.push(format!("id(\"{id}\")"));
-        out.push(if ver.is_empty() { format!("id(\"{id}\") apply false") } else { format!("id(\"{id}\") version \"{ver}\" apply false") });
+        out.push((format!("id(\"{id}\")"), "mobiler:gradle-plugins"));
+        let classpath = if ver.is_empty() { format!("id(\"{id}\") apply false") } else { format!("id(\"{id}\") version \"{ver}\" apply false") };
+        out.push((classpath, "mobiler:gradle-plugins-classpath"));
     }
     for p in strings("android", "permissions") {
-        out.push(match p.split_once(";maxSdkVersion=") {
+        let line = match p.split_once(";maxSdkVersion=") {
             Some((name, max)) => format!("<uses-permission android:name=\"{name}\" android:maxSdkVersion=\"{max}\" />"),
             None => format!("<uses-permission android:name=\"{p}\" />"),
-        });
+        };
+        out.push((line, "mobiler:permissions"));
     }
-    out.extend(strings("ios", "register"));
-    out.extend(strings("ios", "register_stream"));
-    out.extend(strings("ios", "app_launch"));
+    out.extend(at(strings("ios", "register"), "// mobiler:plugins"));
+    out.extend(at(strings("ios", "register_stream"), "// mobiler:plugins-stream"));
+    out.extend(at(strings("ios", "app_launch"), "// mobiler:app-launch"));
     if let Some(toml::Value::Table(plist)) = v.get("ios").and_then(|i| i.get("info_plist")) {
-        out.extend(plist.iter().map(|(k, val)| format!("{k}: {}", yaml(val))));
+        out.extend(plist.iter().map(|(k, val)| (format!("{k}: {}", yaml(val)), "# mobiler:info-plist")));
     }
     out
 }
@@ -1039,7 +1085,9 @@ fn adr_0063_every_demo_but_barbershop_is_cli_managed() {
         // What the demo's own mobiler.toml switches (ADR-0064's block), read the way the CLI reads it.
         let toml: toml::Value = std::fs::read_to_string(root().join(dir).join("mobiler.toml")).map_or(toml::Value::Table(Default::default()), |t| toml::from_str(&t).expect("mobiler.toml parses"));
         let local_network = toml.get("ios").and_then(|i| i.get("local_network")).and_then(toml::Value::as_bool).unwrap_or(false);
-        assert_cli_managed(dir, pkg, name, display, local_network);
+        // `[deep_links] enabled = false` (ADR-0051) switches the registration off; no section or `true` keeps it.
+        let deep_links_off = toml.get("deep_links").and_then(|d| d.get("enabled")).and_then(toml::Value::as_bool) == Some(false);
+        assert_cli_managed(dir, pkg, name, display, local_network, deep_links_off);
     }
     // fullstack-todo talks to its own server over plain HTTP: the option must stay on there.
     assert!(
@@ -1048,22 +1096,38 @@ fn adr_0063_every_demo_but_barbershop_is_cli_managed() {
     );
 }
 
-/// `text` with the `# off: ` lines between `begin` and `end` switched on, as `mobiler … sync` writes them.
-fn switch_on_block(text: &str, begin: &str, end: &str) -> String {
+/// `text` with the lines between `begin` and `end` switched on or off, as `mobiler … sync` writes them
+/// (deep_links.rs `toggle`): an off line is its indent, `off.0`, the rest, `off.1`; blank lines and comments
+/// stay as they are.
+fn switch_block(text: &str, begin: &str, end: &str, off: (&str, &str), on: bool) -> String {
+    let comment = if off.1.is_empty() { "#" } else { "<!--" };
     let mut inside = false;
     text.lines()
         .map(|l| {
-            if l.trim() == begin { inside = true } else if l.trim() == end { inside = false }
+            if l.trim() == begin { inside = true; return format!("{l}\n") }
+            if l.trim() == end { inside = false }
             let t = l.trim_start();
-            match t.strip_prefix("# off: ") {
-                Some(rest) if inside => format!("{}{rest}\n", &l[..l.len() - t.len()]),
+            let indent = &l[..l.len() - t.len()];
+            match (inside, on, t.strip_prefix(off.0).and_then(|r| r.strip_suffix(off.1))) {
+                (true, true, Some(rest)) => format!("{indent}{rest}\n"),
+                (true, false, None) if !t.is_empty() && !t.starts_with(comment) => format!("{indent}{}{t}{}\n", off.0, off.1),
                 _ => format!("{l}\n"),
             }
         })
         .collect()
 }
 
-fn assert_cli_managed(dir: &str, pkg: &str, name: &str, display: Option<&str>, local_network: bool) {
+#[test]
+fn switch_block_writes_what_the_cli_writes() {
+    let xml = "a\n  <!-- mobiler:deep-links-begin -->\n    <x/>\n\n    <!-- own -->\n  <!-- mobiler:deep-links-end -->\n<x/>\n";
+    let off = switch_block(xml, "<!-- mobiler:deep-links-begin -->", "<!-- mobiler:deep-links-end -->", ("<!-- off: ", " -->"), false);
+    assert_eq!(off, "a\n  <!-- mobiler:deep-links-begin -->\n    <!-- off: <x/> -->\n\n    <!-- own -->\n  <!-- mobiler:deep-links-end -->\n<x/>\n");
+    assert_eq!(switch_block(&off, "<!-- mobiler:deep-links-begin -->", "<!-- mobiler:deep-links-end -->", ("<!-- off: ", " -->"), true), xml);
+    let yml = "# m-begin\n  # off: K:\n    # off: V: true\n# m-end\n# off: Z\n";
+    assert_eq!(switch_block(yml, "# m-begin", "# m-end", ("# off: ", ""), true), "# m-begin\n  K:\n    V: true\n# m-end\n# off: Z\n");
+}
+
+fn assert_cli_managed(dir: &str, pkg: &str, name: &str, display: Option<&str>, local_network: bool, deep_links_off: bool) {
     let pkg_path = pkg.replace('.', "/");
     let app = root().join(dir);
     let version = std::fs::read_to_string(app.join(".mobiler/version")).unwrap_or_else(|_| panic!("ADR-0063: {dir}/.mobiler/version is missing"));
@@ -1159,8 +1223,18 @@ fn assert_cli_managed(dir: &str, pkg: &str, name: &str, display: Option<&str>, l
             .or_else(|_| std::fs::read_to_string(format!("{}.tmpl", tpl.display())))
             .unwrap_or_else(|_| panic!("ADR-0063: {dir}'s base has {rel}, the template doesn't: run mobiler upgrade --apply in {dir}"));
         let rendered = render(&raw);
-        // `[ios] local_network = true` (ADR-0064) switches the template's block on; the base keeps it as shipped.
-        let expected = if rel == "iOS/project.yml" && local_network { switch_on_block(&rendered, "# mobiler:local-network-begin", "# mobiler:local-network-end") } else { rendered.clone() };
+        // The blocks the demo's mobiler.toml switches, as its sync writes them; the base keeps them as shipped.
+        let mut expected = rendered.clone();
+        if deep_links_off && rel == "iOS/project.yml" {
+            expected = switch_block(&expected, "# mobiler:deep-links-begin", "# mobiler:deep-links-end", ("# off: ", ""), false);
+        }
+        if deep_links_off && rel == "Android/app/src/main/AndroidManifest.xml" {
+            expected = switch_block(&expected, "<!-- mobiler:deep-links-begin -->", "<!-- mobiler:deep-links-end -->", ("<!-- off: ", " -->"), false);
+        }
+        // `[ios] local_network = true` (ADR-0064) switches the template's block on.
+        if local_network && rel == "iOS/project.yml" {
+            expected = switch_block(&expected, "# mobiler:local-network-begin", "# mobiler:local-network-end", ("# off: ", ""), true);
+        }
         assert_eq!(std::fs::read_to_string(path).unwrap(), rendered, "ADR-0063: {dir}'s base is behind the template ({rel}): run mobiler upgrade --apply in {dir}");
         if rel.contains("/res/") || rel.ends_with(".gitignore") {
             continue;

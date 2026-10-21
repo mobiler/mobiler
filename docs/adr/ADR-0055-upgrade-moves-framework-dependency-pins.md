@@ -1,6 +1,6 @@
 # ADR-0055: `mobiler upgrade` edits an app's manifests only to move or add the dependency lines the framework owns — each a single line in a known form, anchored to a line the template wrote, with its target read from the CLI's templates — and reports any framework pin it cannot place instead of guessing
 
-Status:        Accepted
+Status:        Superseded by ADR-0066
 Date decided:  2026-10-18
 Deciding PRs:  #299
 Supersedes:    none

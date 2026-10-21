@@ -605,6 +605,12 @@ private val LocalFillList = compositionLocalOf { false }
 /** The colour behind a swipe row: the page's, unless the row sits on another surface (a sheet sets its own). */
 private val LocalSwipeCover = compositionLocalOf<Color?> { null }
 
+/** Text and caption colours on a surface the theme's onSurface doesn't fit: a scrim `Box`'s darkened image
+ *  (white, captions at 80%) and a Brand card's gradient (onPrimary, captions at 85%), the colours the iOS and
+ *  web shells use there. Any other card and a swipe row reset it, so their own surface keeps the theme's. */
+private data class TextOn(val text: Color, val caption: Color)
+private val LocalTextOn = compositionLocalOf<TextOn?> { null }
+
 /** The scaffold body's fill list, per the shared rule: the body itself, or the first direct child of
  *  the body's column, that is a `LazyList { fill: true }`. `-1` ⇒ the body itself; `i >= 0` ⇒ child
  *  `i` of the body's column; `null` ⇒ no fill mode (the body scrolls as a page, as today). */
@@ -1154,7 +1160,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                             orientation = Orientation.Horizontal,
                             state = rememberDraggableState { delta -> offsetX = (offsetX + delta).coerceIn(-revealPx, 0f) },
                         ),
-                ) { Render(widget.child, send) }
+                ) { CompositionLocalProvider(LocalTextOn provides null) { Render(widget.child, send) } }
             }
         }
         is Widget.Spacer -> Spacer(modifier = Modifier.height(spacingFor(widget.size)))
@@ -1234,7 +1240,8 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
                         .background(grad)
                         .then(clickMod)
                     Box(modifier = brandMod) {
-                        CompositionLocalProvider(LocalContentColor provides (LocalPalette.current?.onPrimary?.color() ?: Color.White)) { CardBody(widget.child, send) }
+                        val onBrand = LocalPalette.current?.onPrimary?.color() ?: Color.White
+                        CompositionLocalProvider(LocalContentColor provides onBrand) { CardBody(widget.child, send, TextOn(onBrand, onBrand.copy(alpha = 0.85f))) }
                     }
                 }
             }
@@ -1245,7 +1252,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             if (widget.scrim && kids.size > 1) {
                 Render(kids.first(), send)
                 Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.40f)))
-                CompositionLocalProvider(LocalContentColor provides Color.White) {
+                CompositionLocalProvider(LocalContentColor provides Color.White, LocalTextOn provides TextOn(Color.White, Color.White.copy(alpha = 0.8f))) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { KeyedChildren(kids.drop(1)) { _, child -> Render(child, send) } }
                 }
             } else {
@@ -1737,9 +1744,13 @@ private fun scaled(spec: dev.mobiler.mobile.shared.types.TypeSpec, base: android
     applySpec(base, spec, tight, activeTheme?.font == dev.mobiler.mobile.shared.types.FontFamily.CUSTOM, androidx.compose.ui.platform.LocalContext.current)
 
 @Composable
-private fun colorFor(style: ModelTextStyle): Color = when (style) {
-    ModelTextStyle.CAPTION -> MaterialTheme.colorScheme.onSurfaceVariant
-    else -> MaterialTheme.colorScheme.onSurface
+private fun colorFor(style: ModelTextStyle): Color {
+    val on = LocalTextOn.current
+    return when {
+        on != null -> if (style == ModelTextStyle.CAPTION) on.caption else on.text
+        style == ModelTextStyle.CAPTION -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
+    }
 }
 
 // Active app theme (set by App() when a Scaffold renders), read by the non-composable mapper
@@ -2293,8 +2304,8 @@ private fun boxAlignFor(align: BoxAlign): Alignment = when (align) {
 }
 
 @Composable
-private fun CardBody(child: Widget, send: (Action) -> Unit) {
-    Box(modifier = Modifier.padding(16.dp)) { Render(child, send) }
+private fun CardBody(child: Widget, send: (Action) -> Unit, textOn: TextOn? = null) {
+    CompositionLocalProvider(LocalTextOn provides textOn) { Box(modifier = Modifier.padding(16.dp)) { Render(child, send) } }
 }
 
 // `Widget::Map` on Android — MapLibre Native (no API key) via Compose AndroidView interop. Markers are a

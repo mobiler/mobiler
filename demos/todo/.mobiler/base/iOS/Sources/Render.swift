@@ -174,6 +174,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
                         Color.black.opacity(0.4)
                         VStack(alignment: .leading) { childViews(Array(children.dropFirst()), send) }
                             .padding().foregroundColor(.white)
+                            .environment(\.textOn, TextOn(text: .white, caption: .white.opacity(0.8)))
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                 )
@@ -1177,6 +1178,16 @@ private struct FillListKey: EnvironmentKey {
 private struct SwipeCoverKey: EnvironmentKey {
     static let defaultValue: Color? = nil
 }
+/// Text and caption colours on a surface the theme's text doesn't fit: a scrim box's darkened image (white,
+/// captions at 80%) and a Brand card's gradient (onPrimary, captions at 85%). A caption's own colour would
+/// otherwise beat the white the surface sets. Other cards and a swipe row reset it.
+struct TextOn {
+    let text: Color
+    let caption: Color
+}
+private struct TextOnKey: EnvironmentKey {
+    static let defaultValue: TextOn? = nil
+}
 private extension EnvironmentValues {
     var fillList: Bool {
         get { self[FillListKey.self] }
@@ -1185,6 +1196,10 @@ private extension EnvironmentValues {
     var swipeCover: Color? {
         get { self[SwipeCoverKey.self] }
         set { self[SwipeCoverKey.self] = newValue }
+    }
+    var textOn: TextOn? {
+        get { self[TextOnKey.self] }
+        set { self[TextOnKey.self] = newValue }
     }
 }
 
@@ -1289,6 +1304,7 @@ private struct SwipeActionView: View {
             // The cover hiding the actions is the page's colour: a row sits on the page, so a rounded card's
             // corners blend in (a surface-coloured rectangle showed as square corners on a tinted page).
             render(content, send)
+                .environment(\.textOn, nil)
                 .background(swipeCover ?? role(pal?.background, else: Color(.systemBackground)))
                 .offset(x: offset)
                 .gesture(
@@ -1994,13 +2010,16 @@ private struct TextStyleMod: ViewModifier {
     @Environment(\.paletteRoles) private var paletteRoles
     // Re-render on a text-size change (system sizes are scaled by hand for the type scale / new styles).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.textOn) private var textOn
+    /// A caption's colour: the surface's (scrim, brand) when it sets one, else the theme's muted text.
+    private var captionColor: Color { textOn?.caption ?? role(pal?.onSurfaceVariant, else: .secondary) }
     func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
         let _ = dynamicTypeSize
         // A type-scale spec for this style wins; otherwise the look below, as before.
         if let spec = specFor(style) {
             let f = TypeScaleFonts.font(spec.0, relativeTo: spec.1, uiStyle: spec.2, design: design)
-            if case .caption = style { return AnyView(content.font(f).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary))) }
+            if case .caption = style { return AnyView(content.font(f).foregroundColor(captionColor)) }
             return AnyView(content.font(f))
         }
         switch style {
@@ -2010,7 +2029,7 @@ private struct TextStyleMod: ViewModifier {
         case .headline: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 24, relativeTo: .title2)?.weight(.semibold) ?? .system(size: UIFontMetrics(forTextStyle: .title2).scaledValue(for: 24), weight: .semibold, design: design)))
         case .title: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 34, relativeTo: .largeTitle)?.bold() ?? .system(.largeTitle, design: design).bold()))
         case .subtitle: return AnyView(content.font(CustomFonts.font(CustomFonts.display, size: 20, relativeTo: .title3)?.weight(.semibold) ?? .system(.title3, design: design).weight(.semibold)))
-        case .caption: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 13, relativeTo: .footnote) ?? .system(.footnote, design: design)).foregroundColor(role(pal?.onSurfaceVariant, else: .secondary)))
+        case .caption: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 13, relativeTo: .footnote) ?? .system(.footnote, design: design)).foregroundColor(captionColor))
         case .emphasis: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body)?.weight(.semibold) ?? .system(.body, design: design).weight(.semibold)))
         case .body: return AnyView(content.font(CustomFonts.font(CustomFonts.body, size: 17, relativeTo: .body) ?? .system(.body, design: design)))
         }
@@ -2221,17 +2240,21 @@ private struct CardMod: ViewModifier {
     func body(content: Content) -> some View {
         let _ = paletteRoles // re-render on a light/dark palette flip
         let shape = ShapeTokens.shape(ShapeTokens.shapes?.card) ?? AnyShape(RoundedRectangle(cornerRadius: ActiveTheme.current?.cardRadius ?? 14))
+        let onBrand = role(pal?.onPrimary, else: .white)
+        // The card's own surface sets its text: the brand's on-colour, or (any other style) the theme's again.
+        let textOn: TextOn? = { if case .brand = style { return TextOn(text: onBrand, caption: onBrand.opacity(0.85)) } else { return nil } }()
+        let inner = content.environment(\.textOn, textOn)
         switch style {
         case .elevated:
-            return AnyView(content.background(shape.fill(role(pal?.surface, else: Color(.secondarySystemBackground))))
+            return AnyView(inner.background(shape.fill(role(pal?.surface, else: Color(.secondarySystemBackground))))
                 .shadow(color: .black.opacity(0.08), radius: 4, y: 2))
         case .filled:
-            return AnyView(content.background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemBackground)))))
+            return AnyView(inner.background(shape.fill(role(pal?.surfaceMuted, else: Color(.tertiarySystemBackground)))))
         case .outlined:
-            return AnyView(content.overlay(shape.stroke(role(pal?.outlineVariant, else: Color.gray.opacity(0.3)))))
+            return AnyView(inner.overlay(shape.stroke(role(pal?.outlineVariant, else: Color.gray.opacity(0.3)))))
         case .dashed:
             // No fill; a 1.5pt dashed outline (dash 6 / gap 4) in the palette's outline.
-            return AnyView(content.overlay(shape.stroke(role(pal?.outline, else: Color.gray.opacity(0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))))
+            return AnyView(inner.overlay(shape.stroke(role(pal?.outline, else: Color.gray.opacity(0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))))
         case .brand:
             let t = ActiveTheme.current
             let grad = LinearGradient(
@@ -2239,7 +2262,7 @@ private struct CardMod: ViewModifier {
                 colors: [role(pal?.primary, else: t?.brandColor ?? .accentColor), (t?.accent == nil ? pal?.primary?.color : nil) ?? t?.accentColor ?? .accentColor],
                 startPoint: .topLeading, endPoint: .bottomTrailing,
             )
-            return AnyView(content.background(shape.fill(grad)).foregroundColor(role(pal?.onPrimary, else: .white)))
+            return AnyView(inner.background(shape.fill(grad)).foregroundColor(onBrand))
         }
     }
 }
