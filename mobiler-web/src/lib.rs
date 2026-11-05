@@ -831,6 +831,70 @@ fn copy_with_text(input: &str) -> Result<String, String> {
     v.get("text").and_then(serde_json::Value::as_str).map(str::to_string).ok_or_else(|| "missing text".to_string())
 }
 
+/// A `sharefile/file` or `saveimage/save` request (ADR-0067, ADR-0068): a bare handle, or a JSON object.
+#[derive(Debug, Default)]
+struct ShareAsk {
+    source: String,
+    mime: Option<String>,
+    text: Option<String>,
+    name: Option<String>,
+    headers: Vec<(String, String)>,
+}
+
+/// Read a share/save input. Errors are the plugins' reply codes. On the web a source is `https:`, `blob:`, or a
+/// same-origin path starting with one `/`; `http:` is refused as insecure (ADR-0038).
+fn parse_share_ask(input: &str) -> Result<ShareAsk, &'static str> {
+    let trimmed = input.trim();
+    let ask = if trimmed.starts_with('{') {
+        let v: serde_json::Value = serde_json::from_str(trimmed).map_err(|_| "bad_input")?;
+        let field = |k: &str| v.get(k).and_then(serde_json::Value::as_str).map(str::to_string);
+        let headers = v
+            .get("headers")
+            .and_then(serde_json::Value::as_object)
+            .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+            .unwrap_or_default();
+        ShareAsk { source: field("source").unwrap_or_default(), mime: field("mime"), text: field("text"), name: field("name"), headers }
+    } else {
+        ShareAsk { source: trimmed.to_string(), ..ShareAsk::default() }
+    };
+    let src = ask.source.trim();
+    if src.is_empty() {
+        return Err("bad_input");
+    }
+    let lower = src.to_ascii_lowercase();
+    if lower.starts_with("http://") {
+        return Err("insecure_source");
+    }
+    let same_origin_path = src.starts_with('/') && !src.starts_with("//");
+    if !(lower.starts_with("https://") || lower.starts_with("blob:") || same_origin_path) {
+        return Err("unsupported_source");
+    }
+    Ok(ask)
+}
+
+/// The file name a receiver sees: `name`, else the source's last path segment, with any folder part dropped, and an
+/// extension from `mime` added when the name has none.
+fn share_file_name(source: &str, name: Option<&str>, mime: Option<&str>) -> String {
+    let path = source.split(['?', '#']).next().unwrap_or("");
+    let picked = name.filter(|n| !n.trim().is_empty()).unwrap_or(path);
+    let base = picked.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let base = if base.is_empty() || base == "." || base == ".." { "shared" } else { base };
+    let ext = match mime.map(|m| m.split(';').next().unwrap_or("").trim().to_ascii_lowercase()).as_deref() {
+        Some("image/png") => ".png",
+        Some("image/jpeg") => ".jpg",
+        Some("image/webp") => ".webp",
+        Some("image/gif") => ".gif",
+        Some("application/pdf") => ".pdf",
+        _ => "",
+    };
+    if base.contains('.') { base.to_string() } else { format!("{base}{ext}") }
+}
+
+/// Whether a failed `navigator.share` falls back to a download: only the user dismissing the sheet does not.
+fn share_error_falls_back(js_error_name: &str) -> bool {
+    js_error_name != "AbortError"
+}
+
 /// What the web applied to a `clipboard_with` copy (ADR-0053): a browser can't mark, scope or expire one.
 const WEB_COPY_REPORT: &str = r#"{"sensitive":false,"expires":"none","local_only":false}"#;
 
@@ -4228,5 +4292,64 @@ mod datetime_now {
         // Android and iOS answer "now" as local "yyyy-MM-dd HH:mm:ss", zero-padded (sortable).
         assert_eq!(local_stamp(2026, 1, 5, 7, 3, 9), "2026-01-05 07:03:09");
         assert_eq!(local_stamp(2026, 12, 31, 23, 59, 59), "2026-12-31 23:59:59");
+    }
+}
+
+#[cfg(test)]
+mod share_tests {
+    use super::*;
+
+    #[test]
+    fn parse_bare_handle() {
+        assert_eq!(parse_share_ask("blob:https://a/1").unwrap().source, "blob:https://a/1");
+    }
+
+    #[test]
+    fn parse_json_fields() {
+        let a = parse_share_ask(r#"{"source":"https://x.rs/q?s=1","mime":"image/png","text":"Hi","name":"qr","headers":{"Authorization":"B t"}}"#).unwrap();
+        assert_eq!(a.source, "https://x.rs/q?s=1");
+        assert_eq!((a.mime.as_deref(), a.text.as_deref(), a.name.as_deref()), (Some("image/png"), Some("Hi"), Some("qr")));
+        assert_eq!(a.headers, vec![("Authorization".to_string(), "B t".to_string())]);
+    }
+
+    #[test]
+    fn parse_rejects() {
+        assert_eq!(parse_share_ask("").err(), Some("bad_input"));
+        assert_eq!(parse_share_ask("  ").err(), Some("bad_input"));
+        assert_eq!(parse_share_ask(r#"{"mime":"x"}"#).err(), Some("bad_input"));
+        assert_eq!(parse_share_ask("{not json").err(), Some("bad_input"));
+        assert_eq!(parse_share_ask("http://x.rs/a.png").err(), Some("insecure_source"));
+        assert_eq!(parse_share_ask(r#"{"source":"HTTP://x.rs/a.png"}"#).err(), Some("insecure_source"));
+        assert_eq!(parse_share_ask("ftp://x/a.png").err(), Some("unsupported_source"));
+        assert_eq!(parse_share_ask("javascript:alert(1)").err(), Some("unsupported_source"));
+        assert_eq!(parse_share_ask("relative/a.png").err(), Some("unsupported_source"));
+    }
+
+    #[test]
+    fn parse_accepts_web_sources() {
+        assert!(parse_share_ask("https://x.rs/a.png").is_ok());
+        assert!(parse_share_ask("/assets/a.png").is_ok());
+        assert!(parse_share_ask(r#"{"source":"blob:https://x.rs/1"}"#).is_ok());
+        // A protocol-relative URL is another origin, not a same-origin path.
+        assert_eq!(parse_share_ask("//evil.example/a.png").err(), Some("unsupported_source"));
+    }
+
+    #[test]
+    fn file_name_rules() {
+        assert_eq!(share_file_name("https://x.rs/page/qr?v=2", None, Some("image/png")), "qr.png");
+        assert_eq!(share_file_name("https://x.rs/a.jpg", None, Some("image/png")), "a.jpg");
+        assert_eq!(share_file_name("https://x.rs/", None, Some("image/png")), "shared.png");
+        assert_eq!(share_file_name("https://x.rs/a", Some("moj-termin-qr"), Some("image/jpeg")), "moj-termin-qr.jpg");
+        assert_eq!(share_file_name("https://x.rs/a", None, None), "a");
+        assert_eq!(share_file_name("https://x.rs/a#frag", None, Some("application/pdf")), "a.pdf");
+        // A name can't climb out of a folder or carry a separator.
+        assert_eq!(share_file_name("https://x.rs/a", Some("../../etc/x.png"), None), "x.png");
+    }
+
+    #[test]
+    fn abort_does_not_fall_back() {
+        assert!(!share_error_falls_back("AbortError"));
+        assert!(share_error_falls_back("NotAllowedError"));
+        assert!(share_error_falls_back("TypeError"));
     }
 }
