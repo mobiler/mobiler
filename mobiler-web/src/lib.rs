@@ -895,6 +895,129 @@ fn share_error_falls_back(js_error_name: &str) -> bool {
     js_error_name != "AbortError"
 }
 
+/// Largest file the web shell shares or saves, as on Android and iOS.
+const SHARE_MAX_BYTES: f64 = 50.0 * 1024.0 * 1024.0;
+
+/// Fetch a share/save source into a `Blob`, sending the ask's headers. A failure is `fetch_failed` (network error,
+/// a cross-origin URL without CORS, or a non-2xx status) or `too_large`.
+async fn fetch_share_blob(ask: &ShareAsk) -> Result<web_sys::Blob, String> {
+    use wasm_bindgen::JsCast;
+    let win = web_sys::window().ok_or("unavailable")?;
+    let init = web_sys::RequestInit::new();
+    if !ask.headers.is_empty() {
+        let headers = web_sys::Headers::new().map_err(|_| "unavailable")?;
+        for (k, v) in &ask.headers {
+            headers.set(k, v).map_err(|_| "bad_input: header")?;
+        }
+        init.set_headers(&headers);
+    }
+    let resp = wasm_bindgen_futures::JsFuture::from(win.fetch_with_str_and_init(&ask.source, &init))
+        .await
+        .map_err(|e| format!("fetch_failed: {}", js_err(&e)))?;
+    let resp: web_sys::Response = resp.dyn_into().map_err(|_| "fetch_failed")?;
+    if !resp.ok() {
+        return Err(format!("fetch_failed: HTTP {}", resp.status()));
+    }
+    let blob = wasm_bindgen_futures::JsFuture::from(resp.blob().map_err(|_| "fetch_failed")?)
+        .await
+        .map_err(|e| format!("fetch_failed: {}", js_err(&e)))?;
+    let blob: web_sys::Blob = blob.dyn_into().map_err(|_| "fetch_failed")?;
+    if blob.size() > SHARE_MAX_BYTES {
+        return Err("too_large".into());
+    }
+    Ok(blob)
+}
+
+/// The type a fetched file has: the response's, else the ask's.
+fn share_mime(blob: &web_sys::Blob, ask: &ShareAsk) -> String {
+    let t = blob.type_();
+    if t.is_empty() { ask.mime.clone().unwrap_or_default() } else { t }
+}
+
+/// Save a blob through the browser's download: an object URL on a clicked `<a download>`, released a minute later.
+/// A click on an anchor is a download, not a pop-up, so it works after the fetch's `await`.
+fn download_blob(blob: &web_sys::Blob, name: &str) -> Result<(), String> {
+    use wasm_bindgen::JsCast;
+    let doc = web_sys::window().and_then(|w| w.document()).ok_or("unavailable")?;
+    let body = doc.body().ok_or("unavailable")?;
+    let url = web_sys::Url::create_object_url_with_blob(blob).map_err(|_| "unavailable")?;
+    let a: web_sys::HtmlElement = doc.create_element("a").map_err(|_| "unavailable")?.unchecked_into();
+    let _ = a.set_attribute("href", &url);
+    let _ = a.set_attribute("download", name);
+    let _ = a.style().set_property("display", "none");
+    let _ = body.append_child(&a);
+    a.click();
+    a.remove();
+    gloo_timers::callback::Timeout::new(60_000, move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    })
+    .forget();
+    Ok(())
+}
+
+/// `sharefile/file` on the web (ADR-0067): the Web Share API with the file where the browser can share files, else
+/// a download. Dismissing the sheet is `cancelled`; any other share error (e.g. `NotAllowedError` once the tap's
+/// activation ran out during the fetch) falls back to the download.
+async fn web_share_file(ask: ShareAsk) -> PluginResponse {
+    use wasm_bindgen::JsCast;
+    let blob = match fetch_share_blob(&ask).await {
+        Ok(b) => b,
+        Err(e) => return PluginResponse::text(false, e),
+    };
+    let mime = share_mime(&blob, &ask);
+    let name = share_file_name(&ask.source, ask.name.as_deref(), Some(&mime));
+    let Some(nav) = web_sys::window().map(|w| w.navigator()) else {
+        return PluginResponse::text(false, "unavailable");
+    };
+    let get = |k: &str| js_sys::Reflect::get(&nav, &k.into()).ok().and_then(|f| f.dyn_into::<js_sys::Function>().ok());
+    if let (Some(can_share), Some(share)) = (get("canShare"), get("share")) {
+        let bag = web_sys::FilePropertyBag::new();
+        bag.set_type(&mime);
+        let parts = js_sys::Array::of1(&blob);
+        if let Ok(file) = web_sys::File::new_with_blob_sequence_and_options(&parts, &name, &bag) {
+            let data = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(&data, &"files".into(), &js_sys::Array::of1(&file));
+            if let Some(text) = ask.text.as_deref().filter(|t| !t.is_empty()) {
+                let _ = js_sys::Reflect::set(&data, &"text".into(), &text.into());
+            }
+            if can_share.call1(&nav, &data).ok().and_then(|v| v.as_bool()) == Some(true) {
+                if let Ok(Ok(promise)) = share.call1(&nav, &data).map(|p| p.dyn_into::<js_sys::Promise>()) {
+                    match wasm_bindgen_futures::JsFuture::from(promise).await {
+                        Ok(_) => return PluginResponse::text(true, "shared"),
+                        Err(e) => {
+                            let err_name = js_sys::Reflect::get(&e, &"name".into()).ok().and_then(|n| n.as_string()).unwrap_or_default();
+                            if !share_error_falls_back(&err_name) {
+                                return PluginResponse::text(false, "cancelled");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    match download_blob(&blob, &name) {
+        Ok(()) => PluginResponse::text(true, "downloaded"),
+        Err(e) => PluginResponse::text(false, e),
+    }
+}
+
+/// `saveimage/save` on the web (ADR-0067): a browser has no photo library, so an image is downloaded.
+async fn web_save_image(ask: ShareAsk) -> PluginResponse {
+    let blob = match fetch_share_blob(&ask).await {
+        Ok(b) => b,
+        Err(e) => return PluginResponse::text(false, e),
+    };
+    let mime = share_mime(&blob, &ask);
+    if !mime.to_ascii_lowercase().starts_with("image/") {
+        return PluginResponse::text(false, "not_an_image");
+    }
+    let name = share_file_name(&ask.source, ask.name.as_deref(), Some(&mime));
+    match download_blob(&blob, &name) {
+        Ok(()) => PluginResponse::text(true, "downloaded"),
+        Err(e) => PluginResponse::text(false, e),
+    }
+}
+
 /// What the web applied to a `clipboard_with` copy (ADR-0053): a browser can't mark, scope or expire one.
 const WEB_COPY_REPORT: &str = r#"{"sensitive":false,"expires":"none","local_only":false}"#;
 
@@ -1145,6 +1268,18 @@ async fn perform(call: &PluginCall) -> PluginResponse {
     if call.plugin == "dialog" && call.op == "confirm" {
         let ok = confirm_modal(ConfirmAsk::parse(&call.input)).await;
         return PluginResponse::text(ok, if ok { "ok" } else { "cancel" });
+    }
+    // Installable plugins a browser can serve (ADR-0067): answered here, nothing to install on the web.
+    if call.plugin == "sharefile" || call.plugin == "saveimage" {
+        let expected = if call.plugin == "sharefile" { "file" } else { "save" };
+        if call.op != expected {
+            return PluginResponse::text(false, format!("unavailable: unknown op '{}'", call.op));
+        }
+        let ask = match parse_share_ask(&call.input) {
+            Ok(a) => a,
+            Err(code) => return PluginResponse::text(false, code),
+        };
+        return if call.plugin == "sharefile" { web_share_file(ask).await } else { web_save_image(ask).await };
     }
     if call.plugin != "http" {
         return PluginResponse::text(false, format!("plugin '{}' not available", call.plugin));
