@@ -307,7 +307,8 @@ ABI change. Bundled free plugins:
 | 🗣️ `tts` | text-to-speech (speak a string aloud) |
 | ⭐ `review` | in-app App Store / Play review prompt |
 | ☑️ `picker` | native single-choice picker (a list of options, one chosen) |
-| 📤 `sharefile` | share a file / image via the share sheet |
+| 📤 `sharefile` | share a file / image (also straight from an https URL, with a text) via the share sheet |
+| 🖼️ `saveimage` | save an image to Photos / the gallery |
 | 📁 `files` | read/write/list app files, download a URL, export to Files/Downloads |
 | 🎬 `video` | record a video → local URI |
 | 🎤 `speech` | speech-to-text (dictation) |
@@ -329,6 +330,28 @@ mobiler plugin add scanner
 `mobiler plugin add` also takes a local package directory (`mobiler-plugin.toml` + native sources),
 which is how commercial/licensed plugins ship. Call one from Rust via `cx.plugin("<name>", "<op>",
 input, then)`.
+
+**Sharing and saving an image.** `sharefile` and `saveimage` take a URL the shell fetches itself, so an app
+needn't download first:
+
+```rust
+let qr = r#"{"source":"https://example.com/qr.png","name":"qr.png","text":"Book with us"}"#;
+cx.plugin("sharefile", "file", qr, |r| Msg::Shared(r.ok, r.as_text().unwrap_or_default().to_string()));
+cx.plugin("saveimage", "save", r#"{"source":"https://example.com/qr.png","name":"qr.png"}"#,
+          |r| Msg::Saved(r.ok, r.as_text().unwrap_or_default().to_string()));
+```
+
+`source` is an https URL (up to 50 MB, optional `"headers": {"Authorization": "…"}`), a `file://` URI, an
+absolute path, a path relative to the app's files folder (the `files` plugin's paths), or, for `sharefile`,
+a `content://` URI. `sharefile` still takes a bare URI as before. On success the reply is `shared`, `saved`
+or (on the web) `downloaded`; on failure it is a code, optionally followed by `: <detail>`: `denied`,
+`cancelled`, `not_an_image`, `fetch_failed`, `too_large`, `not_found`, `insecure_source` (`http://`),
+`unsupported_source`, `bad_input`, `no_activity`, `provider_missing`, `unavailable` or `failed` (ADR-0068).
+Match the part before the first `:`, and treat an unknown code as `failed`. `saveimage` saves PNG, JPEG,
+GIF and WebP unchanged; iOS asks for add-only Photos access, Android 8–9 asks for storage access, Android
+10+ needs no permission. On the web both fetch the source first, so a cross-origin URL needs CORS
+(ADR-0067). **Existing apps:** run `mobiler upgrade` (it adds the `share/` path the Android share needs)
+and `mobiler plugin add sharefile` again to refresh the plugin.
 
 ### Agent-ready scaffolds: `--agentic`
 
