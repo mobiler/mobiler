@@ -2,12 +2,13 @@
 #   cx.plugin("saveimage", "save", r#"{"source":"https://example.com/qr.png","name":"qr.png"}"#,
 #             |r| Msg::Saved(r.ok))   // ok "saved", or ok:false "<code>" / "<code>: <detail>" (ADR-0068)
 #
-# source: an https URL (fetched natively, up to 50 MB; optional "headers": {"Authorization": "…"}),
-# a file:// URI, an absolute path, or a path relative to the app's files dir (the `files` plugin's paths).
+# source: an https URL (fetched natively, up to 50 MB; optional "headers": {"Authorization": "…"}, sent only to
+# that host; a redirect to http is refused), or one of the app's own files: a file:// URI, an absolute path, or a
+# path relative to the app's files dir (the `files` plugin's paths).
 # The bytes must be a PNG, JPEG, GIF or WebP image ("not_an_image" otherwise); they are saved unchanged.
 # name: the file name in the gallery (default: the source's last path segment).
 # Codes: bad_input, insecure_source, unsupported_source, fetch_failed, too_large, not_found,
-# not_an_image, denied, no_activity, failed. On the web the image is downloaded ("downloaded", ADR-0067).
+# not_an_image, denied, no_activity, unavailable, failed. On the web the image is downloaded ("downloaded", ADR-0067).
 # Install: mobiler plugin add saveimage
 name = "saveimage"
 summary = "Save an image to the photo library — Photos / gallery (free; asks for add-only photo access on iOS)"

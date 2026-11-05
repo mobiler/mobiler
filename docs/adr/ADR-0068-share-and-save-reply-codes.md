@@ -71,7 +71,8 @@ Device checks (barbershop "Share poster" / "Save poster", Android emulators):
 - API 26: the first save asks for storage access and, allowed, saves in the same call (`saved`); refused →
   `denied`, no crash; share → chooser with image targets.
 - Web: see ADR-0067 §4.
-- iOS: compiled by CI's barbershop lane; the Photos save and the denied path are checked on an iPhone.
+- iOS: compiled by CI's barbershop lane only; no Mac was available. The Photos save, the denied path and the
+  messengers' handling are left to the maintainer's iPhone check after release.
 
 **Mutation proof:** the cited web tests were seen to fail before their code existed and under the mutations
 recorded in ADR-0067 §4 ((c) `share_error_falls_back` always true failed `abort_does_not_fall_back`; (d) accepting

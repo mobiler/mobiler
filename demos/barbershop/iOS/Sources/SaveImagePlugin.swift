@@ -1,37 +1,44 @@
+import ImageIO
 import Photos
 import SharedTypes
 import UIKit
+import UniformTypeIdentifiers
 
 /// Free bundled plugin: save an image to Photos. Op "save", input {source, name?, headers?}: an https URL (fetched
-/// here, up to 50 MB), a file URL, an absolute path, or a path relative to Documents. The bytes must be a PNG, JPEG,
-/// GIF or WebP and are saved unchanged. Asks for add-only photo access (NSPhotoLibraryAddUsageDescription).
+/// here, up to 50 MB), a file URL, an absolute path, or a path relative to Documents (a local file must be the app's
+/// own). The bytes must be a PNG, JPEG, GIF or WebP and are saved unchanged. Asks for add-only photo access
+/// (NSPhotoLibraryAddUsageDescription).
 /// Replies: ok "saved" once Photos has it, else ok:false "<code>" or "<code>: <detail>" (ADR-0068).
 @MainActor
 enum SaveImagePlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
         guard op == "save" else { return PluginResponse(ok: false, output: "unavailable: unknown op '\(op)'") }
+        var fetched: URL?
+        defer { if let fetched { try? FileManager.default.removeItem(at: fetched) } }
         do {
             let ask = try Source.parse(input, bareAllowed: false)
-            var file: URL
-            var fetched = false
+            let file: URL
             if ask.source.lowercased().hasPrefix("https://") {
-                (file, _) = try await Source.fetch(ask)
-                fetched = true
+                file = try await Source.fetch(ask).0
+                fetched = file
             } else {
                 file = try Source.localFile(ask.source)
             }
-            defer { if fetched { try? FileManager.default.removeItem(at: file) } }
             guard let mime = Source.sniffImage(file),
-                  let image = CGImageSourceCreateWithURL(file as CFURL, nil), CGImageSourceGetCount(image) > 0 else {
+                  let image = CGImageSourceCreateWithURL(file as CFURL, nil),
+                  CGImageSourceGetCount(image) > 0, CGImageSourceGetStatus(image) == .statusComplete else {
                 throw Refused("not_an_image")
             }
             let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
             guard status == .authorized || status == .limited else { throw Refused("denied") }
             let name = Source.fileName(ask.source, ask.name, mime, fallback: "image")
-            // Photos reads the file during performChanges; a fetched file is removed only after that returns.
+            let type = UTType(mimeType: mime)?.identifier
+            // Photos reads the file during performChanges; a fetched file is removed only after that returns (defer).
+            // The type is given explicitly: a fetched file's name ends in .part.
             try await PHPhotoLibrary.shared().performChanges {
                 let options = PHAssetResourceCreationOptions()
                 options.originalFilename = name
+                options.uniformTypeIdentifier = type
                 PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: file, options: options)
             }
             return PluginResponse(ok: true, output: "saved")
@@ -48,6 +55,31 @@ private struct Refused: Error {
     let reply: String
     init(_ code: String, _ detail: String? = nil) {
         reply = (detail?.isEmpty ?? true) ? code : "\(code): \(detail!)"
+    }
+}
+
+/// Follows a redirect only to https, and carries the caller's headers only to the original host.
+private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
+    let origin: URL
+    let headerNames: [String]
+    var refusedInsecure = false
+
+    init(origin: URL, headerNames: [String]) {
+        self.origin = origin
+        self.headerNames = headerNames
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        guard let next = request.url, next.scheme?.lowercased() == "https" else {
+            refusedInsecure = true
+            return nil
+        }
+        var r = request
+        if next.host?.lowercased() != origin.host?.lowercased() || next.port != origin.port {
+            for name in headerNames { r.setValue(nil, forHTTPHeaderField: name) }
+        }
+        return r
     }
 }
 
@@ -80,6 +112,7 @@ private enum Source {
         }
         let lower = ask.source.lowercased()
         if ask.source.isEmpty { throw Refused("bad_input") }
+        if ask.source.contains(where: { $0 == "\t" || $0 == "\n" || $0 == "\r" }) { throw Refused("unsupported_source") }
         if lower.hasPrefix("http://") { throw Refused("insecure_source") }
         if !(lower.hasPrefix("https://") || lower.hasPrefix("file://")),
            lower.range(of: "^[a-z][a-z0-9+.-]*:", options: .regularExpression) != nil {
@@ -102,46 +135,84 @@ private enum Source {
         return dir
     }
 
-    /// A file:// URL, an absolute path, or a path relative to Documents (never climbing out of it).
+    /// The app's own file: a file:// URL, an absolute path, or a path relative to Documents, which must lie in
+    /// Documents, Library/Caches, Library/Application Support or tmp (never Library/Preferences).
     static func localFile(_ src: String) throws -> URL {
-        let url: URL
+        let fm = FileManager.default
+        let docs = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let raw: URL
         if src.lowercased().hasPrefix("file://") {
-            guard let u = URL(string: src) else { throw Refused("bad_input") }
-            url = u
+            guard let u = URL(string: src), u.isFileURL else { throw Refused("bad_input") }
+            raw = u
         } else if src.hasPrefix("/") {
-            url = URL(fileURLWithPath: src)
+            raw = URL(fileURLWithPath: src)
         } else {
-            let docs = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                .standardizedFileURL
-            url = docs.appendingPathComponent(src).standardizedFileURL
-            guard url.path.hasPrefix(docs.path + "/") else { throw Refused("bad_input", "path leaves Documents") }
+            raw = docs.appendingPathComponent(src)
         }
+        let url = raw.standardizedFileURL.resolvingSymlinksInPath()
+        let roots = [docs,
+                     try? fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false),
+                     try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false),
+                     fm.temporaryDirectory]
+            .compactMap { $0?.standardizedFileURL.resolvingSymlinksInPath().path }
+            .map { $0.hasSuffix("/") ? $0 : $0 + "/" }
+        guard roots.contains(where: { url.path.hasPrefix($0) }) else { throw Refused("unsupported_source", "not one of the app's files") }
         var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { throw Refused("not_found") }
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { throw Refused("not_found") }
         return url
     }
 
-    /// Fetch an https source into the share folder: a non-2xx status or a network error is fetch_failed, more than
-    /// 50 MB is too_large. Returns the file and the response's declared type.
+    /// GET an https source into the share folder, stopping at 50 MB: a non-2xx status or a network error is
+    /// fetch_failed, a redirect to http is insecure_source, more than 50 MB is too_large. The caller's headers go
+    /// only to the original host. Returns the file and the response's declared type.
     static func fetch(_ ask: Ask) async throws -> (URL, String) {
         guard let url = URL(string: ask.source) else { throw Refused("bad_input") }
         var req = URLRequest(url: url, timeoutInterval: 60)
         for (k, v) in ask.headers { req.setValue(v, forHTTPHeaderField: k) }
-        let downloaded: URL
+        let guardian = RedirectGuard(origin: url, headerNames: Array(ask.headers.keys))
+        let bytes: URLSession.AsyncBytes
         let response: URLResponse
         do {
-            (downloaded, response) = try await URLSession.shared.download(for: req)
+            (bytes, response) = try await URLSession.shared.bytes(for: req, delegate: guardian)
         } catch {
             throw Refused("fetch_failed", error.localizedDescription)
         }
-        defer { try? FileManager.default.removeItem(at: downloaded) }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            bytes.task.cancel()
+            if guardian.refusedInsecure { throw Refused("insecure_source", "redirected to http") }
             throw Refused("fetch_failed", "HTTP \(http.statusCode)")
         }
-        let size = (try? FileManager.default.attributesOfItem(atPath: downloaded.path)[.size] as? Int64) ?? 0
-        if size > maxBytes { throw Refused("too_large") }
+        if response.expectedContentLength > maxBytes {
+            bytes.task.cancel()
+            throw Refused("too_large")
+        }
         let out = try shareDir().appendingPathComponent("in-\(UUID().uuidString).part")
-        try FileManager.default.moveItem(at: downloaded, to: out)
+        guard FileManager.default.createFile(atPath: out.path, contents: nil),
+              let handle = try? FileHandle(forWritingTo: out) else { throw Refused("failed", "can't write the file") }
+        do {
+            defer { try? handle.close() }
+            var buffer = Data()
+            buffer.reserveCapacity(64 * 1024)
+            var total: Int64 = 0
+            for try await byte in bytes {
+                buffer.append(byte)
+                if buffer.count == 64 * 1024 {
+                    total += Int64(buffer.count)
+                    if total > maxBytes { bytes.task.cancel(); throw Refused("too_large") }
+                    try handle.write(contentsOf: buffer)
+                    buffer.removeAll(keepingCapacity: true)
+                }
+            }
+            total += Int64(buffer.count)
+            if total > maxBytes { throw Refused("too_large") }
+            try handle.write(contentsOf: buffer)
+        } catch let r as Refused {
+            try? FileManager.default.removeItem(at: out)
+            throw r
+        } catch {
+            try? FileManager.default.removeItem(at: out)
+            throw Refused("fetch_failed", error.localizedDescription)
+        }
         return (out, bareMime(response.mimeType ?? ""))
     }
 
@@ -161,17 +232,19 @@ private enum Source {
         (m.split(separator: ";", maxSplits: 1).first.map(String.init) ?? "").trimmingCharacters(in: .whitespaces).lowercased()
     }
 
-    /// The name a receiver sees: `name`, else the source's last segment; folder parts, control and bidi-override
-    /// characters dropped; for a known type its extension is added when missing or different.
+    /// Characters a name loses: controls, and the invisible and bidi-override ones that can disguise an extension.
+    static func hidden(_ s: Unicode.Scalar) -> Bool {
+        CharacterSet.controlCharacters.contains(s) || (0x200B...0x200F).contains(s.value) || (0x202A...0x202E).contains(s.value)
+            || (0x2066...0x2069).contains(s.value) || s.value == 0x061C || s.value == 0xFEFF
+    }
+
+    /// The name a receiver sees: `name`, else the source's last segment; folder parts and hidden characters
+    /// dropped; for a known type its extension is added when missing or different.
     static func fileName(_ source: String, _ name: String?, _ mime: String, fallback: String) -> String {
-        let path = String(source.split(whereSeparator: { $0 == "?" || $0 == "#" }).first ?? "")
+        let path = source.components(separatedBy: CharacterSet(charactersIn: "?#")).first ?? ""
         let picked = (name?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) ? path : name!
-        let last = String(picked.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last ?? "")
-        let bidi: Set<Unicode.Scalar> = ["\u{200E}", "\u{200F}", "\u{202A}", "\u{202B}", "\u{202C}", "\u{202D}", "\u{202E}",
-                                         "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}"]
-        var base = String(String.UnicodeScalarView(last.unicodeScalars.filter {
-            !CharacterSet.controlCharacters.contains($0) && !bidi.contains($0)
-        })).trimmingCharacters(in: .whitespaces)
+        let last = picked.components(separatedBy: CharacterSet(charactersIn: "/\\")).last ?? ""
+        var base = String(String.UnicodeScalarView(last.unicodeScalars.filter { !hidden($0) })).trimmingCharacters(in: .whitespaces)
         if base.isEmpty || base == "." || base == ".." { base = fallback }
         let allowed: [String]
         switch bareMime(mime) {
@@ -182,7 +255,7 @@ private enum Source {
         case "application/pdf": allowed = ["pdf"]
         default: return base
         }
-        let ext = base.contains(".") ? String(base.split(separator: ".").last ?? "").lowercased() : nil
+        let ext = base.contains(".") ? (base.components(separatedBy: ".").last ?? "").lowercased() : nil
         if let ext, allowed.contains(ext) { return base }
         return "\(base).\(allowed[0])"
     }
@@ -198,7 +271,11 @@ private enum Source {
             out = dir.appendingPathComponent(ext.isEmpty ? "\(stem)-\(i)" : "\(stem)-\(i).\(ext)")
             i += 1
         }
-        if move { try FileManager.default.moveItem(at: file, to: out) } else { try FileManager.default.copyItem(at: file, to: out) }
+        do {
+            if move { try FileManager.default.moveItem(at: file, to: out) } else { try FileManager.default.copyItem(at: file, to: out) }
+        } catch {
+            throw Refused("failed", "could not stage the file")
+        }
         return out
     }
 }

@@ -234,3 +234,22 @@ drifted. Re-running `mobiler plugin add sharefile` refreshes it (ADR-0011).
 - Optional `headers` on an https source; no cookie/credential mode on the web.
 - The reply codes get their own ADR in the CLI PR; the web shell's routing of installable plugins gets one in the libs PR.
 - Libs PR then CLI PR, minor bumps on both.
+
+## Amendments
+
+**2026-11-05 (during the build, after the Fable reviews):**
+- The 50 MB cap applies to https fetches only. A local file is shared where it is when the FileProvider covers it,
+  else copied into `share/` with no cap: capping local files would stop sharing a long clip from the `video` plugin.
+- A local source (file://, an absolute path, a relative path) must be one of the app's own files: Android `filesDir`,
+  `cacheDir`, external files/cache folders; iOS Documents, Caches, Application Support, tmp. Anything else (its
+  databases, preferences, another app's path) is `unsupported_source`, so a source taken from server data can't
+  share a private file under a harmless name.
+- Redirects: followed only to https (an http target is `insecure_source`), and the caller's `headers` go only to the
+  original host.
+- A source holding a tab or newline is `unsupported_source` on every shell (the web found `/\t/host` reaching
+  `host`).
+- iOS shares a typed file URL, not the item provider of §3.2: the proven pattern of the old plugin, with a preview
+  and "Save Image". Whether messengers receive it as an image is the iPhone check.
+- iOS `saveimage` passes the sniffed type to Photos (a fetched file's name ends in `.part`).
+- Android 8–9: the permission helper answers only the request that opened it, re-checks the grant once it holds
+  the lock, and gives up after five minutes, so a crashed or never-shown window can't hold later saves.
