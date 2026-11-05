@@ -42,7 +42,8 @@ and the same reply codes as the native plugin, then:
 - **Condition 2 — the web reads the same input and refuses what the native plugins refuse.** A bare handle or a
   `{source, …}` object; `http:` is `insecure_source` (also `http://localhost`: the web has no debug build to tell
   apart, unlike ADR-0038's native rule); an unknown scheme, a protocol-relative `//host` or a `/\host` URL (a
-  browser reads `\` as `/`) is `unsupported_source`; no source is `bad_input`. The trimmed source is the one
+  browser reads `\` as `/`), and any source holding a tab or newline (a URL parser drops them first, so `/\t/host`
+would reach `host`), is `unsupported_source`; no source is `bad_input`. The trimmed source is the one
   fetched.
   - **Validation Metric:** `parse_rejects` and `parse_refuses_backslash_host_and_fetches_trimmed` (and
     `parse_json_fields`, `parse_accepts_web_sources`) in `mobiler-web/src/lib.rs`.
@@ -56,7 +57,8 @@ and the same reply codes as the native plugin, then:
 - **Condition 5 — the bytes decide, as on the phones.** `saveimage` saves only what its first bytes show to be a
   PNG, JPEG, GIF or WebP (an SVG, an HTML error page or a mislabelled file is `not_an_image`), and a shared file's
   type comes from its bytes first, then the app's `mime`, then the server's.
-  - **Validation Metric:** `sniffs_raster_images_only` in `mobiler-web/src/lib.rs`.
+  - **Validation Metric:** `sniffs_raster_images_only` in `mobiler-web/src/lib.rs` for the sniffing; the order
+    of precedence in `web_share_file` is checked by review.
 - **Condition 6 — the 50 MB cap stops the download.** A declared `Content-Length` over the cap is `too_large`
   before the body is read; otherwise the body is read in chunks and the read is cancelled once it passes the cap.
   - **Validation Metric:** `declared_length_over_cap` in `mobiler-web/src/lib.rs` for the header; the chunked stop

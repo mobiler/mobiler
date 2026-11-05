@@ -863,6 +863,10 @@ fn parse_share_ask(input: &str) -> Result<ShareAsk, &'static str> {
     if src.is_empty() {
         return Err("bad_input");
     }
+    // A URL parser drops tabs and newlines before reading a URL, so `/\t/host` would reach `host`.
+    if src.bytes().any(|b| matches!(b, b'\t' | b'\n' | b'\r')) {
+        return Err("unsupported_source");
+    }
     let lower = src.to_ascii_lowercase();
     if lower.starts_with("http://") {
         return Err("insecure_source");
@@ -886,7 +890,7 @@ fn share_file_name(source: &str, name: Option<&str>, mime: Option<&str>) -> Stri
         .next()
         .unwrap_or("")
         .chars()
-        .filter(|c| !c.is_control() && !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}'))
+        .filter(|c| !c.is_control() && !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200B}'..='\u{200F}' | '\u{061C}' | '\u{FEFF}'))
         .collect();
     let base = base.trim();
     let base = if base.is_empty() || base == "." || base == ".." { "shared" } else { base };
@@ -1142,7 +1146,11 @@ impl Reader {
     /// Stop the stream (the rest of the body is not downloaded).
     fn cancel(&self) {
         if let Some(reader) = &self.0 {
-            let _ = reader.cancel();
+            // Nothing to do if the stream already failed; catch it so the browser logs no unhandled rejection.
+            // (one small closure per cancelled read, which happens only for an oversized file).
+            let ignore = wasm_bindgen::closure::Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(|_| {});
+            let _ = reader.cancel().catch(&ignore);
+            ignore.forget();
         }
     }
     async fn next(&mut self) -> Result<Option<Vec<u8>>, String> {
@@ -4567,7 +4575,7 @@ mod share_tests {
         assert_eq!(share_file_name("https://x.rs/a", None, Some("image/png; charset=binary")), "a.png");
         assert_eq!(share_file_name("https://x.rs/a", Some("..\\..\\x.png"), Some("image/png")), "x.png");
         assert_eq!(share_file_name("https://x.rs/path/qr", Some("  "), Some("image/png")), "qr.png");
-        // A dot inside a name is not an extension unless it ends in a short alphanumeric one.
+        // A dot inside a name doesn't count when what follows isn't the type's extension.
         assert_eq!(share_file_name("https://x.rs/a", Some("v1.2-qr"), Some("image/png")), "v1.2-qr.png");
         // Control and bidi-override characters are dropped.
         assert_eq!(share_file_name("https://x.rs/a", Some("gnp\u{202E}.exe"), Some("image/png")), "gnp.exe.png");
@@ -4581,6 +4589,10 @@ mod share_tests {
         assert_eq!(parse_share_ask("/\\evil.example/a.png").err(), Some("unsupported_source"));
         assert_eq!(parse_share_ask(r#"{"source":"/\\evil.example/a.png"}"#).err(), Some("unsupported_source"));
         assert_eq!(parse_share_ask(r#"{"source":"  https://x.rs/a.png "}"#).unwrap().source, "https://x.rs/a.png");
+        // A URL parser drops tabs and newlines first, so these are `//host` / `/\host` in disguise.
+        assert_eq!(parse_share_ask("/\t/evil.example/x").err(), Some("unsupported_source"));
+        assert_eq!(parse_share_ask("/\n\\evil.example/x").err(), Some("unsupported_source"));
+        assert_eq!(parse_share_ask(r#"{"source":"/\r/evil.example/x"}"#).err(), Some("unsupported_source"));
     }
 
     #[test]
