@@ -99,6 +99,7 @@ targets:
         MobilerFontDisplay: "Space Grotesk"
         MobilerFontBody: "Roboto"
         # mobiler:fonts-end
+        NSPhotoLibraryAddUsageDescription: "Save images to your photo library."
         # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:

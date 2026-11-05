@@ -695,6 +695,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "geofence" to GeofencePlugin(application),
         "background-fetch" to BackgroundFetchPlugin(application),
         "transfer" to TransferPlugin(application),
+        "saveimage" to SaveImagePlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 
