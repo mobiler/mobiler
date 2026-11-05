@@ -1,3 +1,15 @@
+# Free, bundled Mobiler plugin: share a file or image through the system share sheet.
+#   cx.plugin("sharefile", "file", uri, |r| Msg::Shared(r.ok))   // a bare content:// / file:// URI, as before
+#   cx.plugin("sharefile", "file", r#"{"source":"https://example.com/qr.png","name":"qr.png","text":"Book with us"}"#,
+#             |r| Msg::Shared(r.ok))   // ok "shared", or ok:false "<code>" / "<code>: <detail>" (ADR-0068)
+#
+# source: an https URL (fetched natively, up to 50 MB; optional "headers", sent only to that host; a redirect to
+# http is refused), a content:// URI, or one of the app's own files (file://, an absolute path, or a path relative
+# to the app's files dir). mime/name: what the receiver sees (the bytes decide for a known image type).
+# Codes: bad_input, insecure_source, unsupported_source, fetch_failed, too_large, not_found, cancelled (iOS),
+# no_activity, provider_missing (Android: run `mobiler upgrade`), unavailable, failed.
+# On the web: the browser's share sheet, else a download ("downloaded", ADR-0067).
+# Install: mobiler plugin add sharefile
 name = "sharefile"
 summary = "Share a file/image via the system share sheet (free, no permission)"
 

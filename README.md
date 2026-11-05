@@ -14,7 +14,7 @@ still change.
 
 > **Built in:** HTTP · storage · clipboard · share · browser · toast · device · haptics · confirm · photo · camera
 >
-> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · ⇅ transfer (streaming upload/download) · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 🛰️ geolocation-fused (Play Services) · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing) · 🗺️ geofence (background geofencing, experimental) · ⏰ background-fetch (periodic wake, experimental) · 📊 analytics (Firebase Analytics + Crashlytics, experimental)
+> **Plugins** (`mobiler plugin add`): 🔎 scanner (barcode/QR) · 🔐 biometric (Face ID/fingerprint) · 🗝️ securestore · 🔌 websocket · ⇅ transfer (streaming upload/download) · 🔔 notifications · 🔋 battery · 📶 connectivity · 📄 filepicker · 📁 files (read/write/download/export) · 📍 geolocation · 🛰️ geolocation-fused (Play Services) · 📇 contacts · 📅 calendar · 🎙️ audio · 📐 sensors · ✉️ composer · 🗣️ tts · ⭐ review · 📤 sharefile · 🖼️ saveimage (save to Photos) · 🎬 video · 🎤 speech · 🗃️ sqlite · 🔵 bluetooth · 🔑 oauth (OAuth/OIDC login) · 📲 push (APNs/FCM, experimental) · 🔥 push-firebase-only (FCM everywhere) · 💳 iap (StoreKit/Play Billing) · 🗺️ geofence (background geofencing, experimental) · ⏰ background-fetch (periodic wake, experimental) · 📊 analytics (Firebase Analytics + Crashlytics, experimental)
 
 → [Built-in capabilities](#built-in-capabilities) · [Plugins](#plugins--mobiler-plugin-add)
 
@@ -199,7 +199,8 @@ free plugins:
 | 🗣️ **tts** | text-to-speech (speak a string aloud) | `mobiler plugin add tts` |
 | ⭐ **review** | in-app App Store / Play review prompt | `mobiler plugin add review` |
 | ☑️ **picker** | native single-choice picker (a list of options, one chosen) | `mobiler plugin add picker` |
-| 📤 **sharefile** | share a file / image via the share sheet | `mobiler plugin add sharefile` |
+| 📤 **sharefile** | share a file / image (also straight from an https URL, with a text) via the share sheet; web: the browser's share sheet or a download | `mobiler plugin add sharefile` |
+| 🖼️ **saveimage** | save an image to Photos / the gallery (add-only access on iOS, no permission on Android 10+); web: a download | `mobiler plugin add saveimage` |
 | 📁 **files** | app-sandbox read/write/list, download a URL to disk, export to Files/Downloads | `mobiler plugin add files` |
 | 🎬 **video** | record a video → local URI | `mobiler plugin add video` |
 | 🎤 **speech** | speech-to-text (dictation) | `mobiler plugin add speech` |

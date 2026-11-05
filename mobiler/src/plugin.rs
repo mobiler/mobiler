@@ -1051,6 +1051,51 @@ mod test {
     }
 
     #[test]
+    fn add_bundled_sharefile_copies_and_registers() {
+        let root = skeleton();
+        add_at(&root, "sharefile").unwrap();
+
+        let kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/SharefilePlugin.kt");
+        assert!(kt.contains("package dev.mobiler.demo"));
+        // Files are staged in the cache's share/ folder, which the template's FileProvider covers.
+        assert!(kt.contains("\"share\""), "stages files in cacheDir/share");
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"sharefile\" to SharefilePlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"sharefile\": return await SharefilePlugin.handle"));
+        let swift = read(&root, "iOS/Sources/SharefilePlugin.swift");
+        assert!(swift.contains("enum SharefilePlugin"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn add_bundled_saveimage_registers_activity_permission_and_plist_key() {
+        // A scaffold that never adds saveimage asks for no photo access (ADR-0035).
+        let bare = skeleton();
+        assert!(!read(&bare, "iOS/project.yml").contains("NSPhotoLibraryAddUsageDescription"));
+        assert!(!read(&bare, "Android/app/src/main/AndroidManifest.xml").contains("WRITE_EXTERNAL_STORAGE"));
+        let _ = fs::remove_dir_all(&bare);
+
+        let root = skeleton();
+        add_at(&root, "saveimage").unwrap();
+        let kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/SaveImagePlugin.kt");
+        assert!(kt.contains("package dev.mobiler.demo") && kt.contains("class SaveImagePlugin"));
+        let activity = read(&root, "Android/app/src/main/java/dev/mobiler/demo/SaveImagePermissionActivity.kt");
+        assert!(activity.contains("class SaveImagePermissionActivity"));
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"saveimage\" to SaveImagePlugin(application),"));
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"saveimage\": return await SaveImagePlugin.handle"));
+        assert!(read(&root, "iOS/Sources/SaveImagePlugin.swift").contains("enum SaveImagePlugin"));
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android:name=\".SaveImagePermissionActivity\""), "permission helper activity declared");
+        assert!(manifest.contains("android.permission.WRITE_EXTERNAL_STORAGE") && manifest.contains("android:maxSdkVersion=\"28\""),
+            "storage permission only up to Android 9: {manifest}");
+        assert!(read(&root, "iOS/project.yml").contains("NSPhotoLibraryAddUsageDescription"), "iOS usage string injected");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn add_bundled_geolocation_adds_permissions_and_plist_key() {
         let root = skeleton();
         add_at(&root, "geolocation").unwrap();
@@ -1227,16 +1272,6 @@ mod test {
         assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"review\" to ReviewPlugin(application),"));
         assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"review\": return await ReviewPlugin.handle"));
         assert!(read(&root, "Android/app/build.gradle.kts").contains("com.google.android.play:review"), "gradle dep injected");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn add_bundled_sharefile_copies_and_registers() {
-        let root = skeleton();
-        add_at(&root, "sharefile").unwrap();
-        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/SharefilePlugin.kt").contains("package dev.mobiler.demo"));
-        assert!(read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt").contains("\"sharefile\" to SharefilePlugin(application),"));
-        assert!(read(&root, "iOS/Sources/Core.swift").contains("case \"sharefile\": return await SharefilePlugin.handle"));
         let _ = fs::remove_dir_all(&root);
     }
 

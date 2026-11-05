@@ -50,6 +50,10 @@ pub enum Audience {
     Kids,
 }
 
+/// The shop's poster: a PNG at a public https URL, shared and saved without downloading it first.
+const POSTER_URL: &str = "https://raw.githubusercontent.com/mobiler/mobiler/main/demos/barbershop/screenshots/bookings.png";
+const POSTER_NAME: &str = "fadehouse.png";
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
     SelectTab(Tab),
@@ -129,6 +133,12 @@ pub enum Msg {
     /// Share the last recorded clip via the system share sheet (`sharefile` plugin).
     ShareClip,
     Shared(String),
+    /// Share the shop's poster image straight from its https URL, with a line of text (`sharefile` plugin).
+    SharePoster,
+    /// Save the shop's poster image to Photos / the gallery (`saveimage` plugin).
+    SavePoster,
+    /// What a share or save of the poster did: `ok`, then the reply (a word or a code, ADR-0068).
+    PosterDone(bool, String),
     /// Show a transient toast (feedback for the fire-and-forget capability demos above).
     Notify(String),
 
@@ -801,6 +811,22 @@ impl MobilerApp for FadeHouse {
                     cx.toast("Record a video or audio clip first");
                 }
             }
+            Msg::SharePoster => {
+                let input = serde_json::json!({ "source": POSTER_URL, "mime": "image/png", "name": POSTER_NAME, "text": "Book at Fade House" });
+                cx.plugin("sharefile", "file", input.to_string(), |r| Msg::PosterDone(r.ok, r.as_text().unwrap_or_default().to_string()));
+            }
+            Msg::SavePoster => {
+                let input = serde_json::json!({ "source": POSTER_URL, "name": POSTER_NAME });
+                cx.plugin("saveimage", "save", input.to_string(), |r| Msg::PosterDone(r.ok, r.as_text().unwrap_or_default().to_string()));
+            }
+            Msg::PosterDone(ok, reply) => cx.toast(match (ok, reply.as_str()) {
+                (true, "saved") => "Saved to Photos ✓".to_string(),
+                (true, "downloaded") => "Downloaded ✓".to_string(),
+                (true, _) => "Shared ✓".to_string(),
+                (false, "cancelled") => "Share cancelled".to_string(),
+                (false, r) if r.starts_with("denied") => "Allow photo access in Settings to save".to_string(),
+                (false, r) => format!("Couldn't do that ({})", r.split(':').next().unwrap_or(r)),
+            }),
             Msg::Shared(s) => cx.toast(match s.as_str() {
                 "shared" => "Shared ✓".to_string(),
                 _ => "Share cancelled".to_string(),
@@ -2248,6 +2274,10 @@ fn profile_screen(model: &Model) -> Widget {
                     button("Record a clip", ButtonStyle::Outlined, Msg::RecordVideo),
                     button("Share clip", ButtonStyle::Text, Msg::ShareClip),
                 ]),
+                row(vec![
+                    button("Share poster", ButtonStyle::Outlined, Msg::SharePoster),
+                    button("Save poster", ButtonStyle::Text, Msg::SavePoster),
+                ]),
                 button("Rate Fade House", ButtonStyle::Text, Msg::RequestReview),
             ]),
             CardStyle::Outlined,
@@ -2643,6 +2673,27 @@ mod test {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn share_poster_sends_sharefile_json() {
+        let calls = dialog_inputs(Msg::SharePoster);
+        assert_eq!(calls.len(), 1);
+        let (plugin, op, v) = &calls[0];
+        assert_eq!((plugin.as_str(), op.as_str()), ("sharefile", "file"));
+        assert_eq!(v["source"], POSTER_URL);
+        assert_eq!(v["text"], "Book at Fade House");
+        assert_eq!(v["name"], "fadehouse.png");
+    }
+
+    #[test]
+    fn save_poster_sends_saveimage() {
+        let calls = dialog_inputs(Msg::SavePoster);
+        assert_eq!(calls.len(), 1);
+        let (plugin, op, v) = &calls[0];
+        assert_eq!((plugin.as_str(), op.as_str()), ("saveimage", "save"));
+        assert_eq!(v["source"], POSTER_URL);
+        assert_eq!(v["name"], "fadehouse.png");
     }
 
     #[test]

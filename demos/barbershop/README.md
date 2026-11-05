@@ -55,7 +55,7 @@ and weekly-goal **rings** — plus an inline month **`Calendar`** (tap a day), *
 The **Profile** tab showcases the newer widgets + free bundled plugins (native only): a
 determinate **`Progress`** bar ("profile completeness"), **`Skeleton`** shimmer placeholders,
 "Get in touch" capability demos — email/call (`composer`), speak a booking (`tts`), record →
-share a clip (`video` → `sharefile`), an App Store review prompt (`review`) — and "Notes & devices":
+share a clip (`video` → `sharefile`), share or save the shop poster straight from its URL (`sharefile`, `saveimage`), an App Store review prompt (`review`) — and "Notes & devices":
 a note saved/loaded via on-device **`sqlite`**, dictated via **`speech`**, plus a **`bluetooth`**
 BLE scan, alongside the earlier `sensors`/`audio`/`contacts`/`calendar`/`geolocation`/`connectivity` demos.
 It also hosts a **`RegionChart`** ("Coverage") — a variable-width stacked-region / coverage-gap chart

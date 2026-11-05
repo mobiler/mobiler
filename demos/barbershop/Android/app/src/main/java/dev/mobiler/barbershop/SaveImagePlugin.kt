@@ -1,0 +1,305 @@
+package dev.mobiler.barbershop
+
+import dev.mobiler.barbershop.shared.types.PluginResponse
+
+import android.Manifest
+import android.app.Application
+import android.content.ContentValues
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.media.MediaScannerConnection
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+
+/** Free bundled plugin: save an image to the gallery. Op "save", input {source, name?, headers?}: an https URL
+ *  (fetched here, up to 50 MB), a file:// URI, an absolute path, or a path relative to the app's files dir (a local
+ *  file must be the app's own). The bytes must be a PNG, JPEG, GIF or WebP and are saved unchanged under
+ *  Pictures/<app name>/. Android 10+ needs no permission; Android 8–9 asks for storage access and waits for the
+ *  answer. Replies: ok "saved" once MediaStore has the file, else ok:false "<code>" or "<code>: <detail>" (ADR-0068). */
+class SaveImagePlugin(private val application: Application) : MobilerPlugin {
+    override suspend fun handle(op: String, input: String): PluginResponse {
+        if (op != "save") return PluginResponse(false, "unavailable: unknown op '$op'")
+        var image: Image? = null
+        return try {
+            val ask = Source.parse(input)
+            val found = withContext(Dispatchers.IO) { Source.resolve(application, ask) }
+            image = found
+            if (Build.VERSION.SDK_INT < 29 && !storageGranted()) {
+                val activity = MobilerActivity.current?.get() ?: return PluginResponse(false, "no_activity")
+                when (SaveImagePermissionActivity.request(activity) { storageGranted() }) {
+                    SaveImagePermissionActivity.Answer.GRANTED -> {}
+                    SaveImagePermissionActivity.Answer.DENIED -> return PluginResponse(false, "denied")
+                    SaveImagePermissionActivity.Answer.NO_ACTIVITY -> return PluginResponse(false, "no_activity")
+                }
+            }
+            withContext(Dispatchers.IO) { save(found) }
+            PluginResponse(true, "saved")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Refused) {
+            PluginResponse(false, e.reply)
+        } catch (e: Exception) {
+            PluginResponse(false, "failed: ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            image?.takeIf { it.fetched }?.file?.delete()
+        }
+    }
+
+    private fun storageGranted() = ContextCompat.checkSelfPermission(
+        application, Manifest.permission.WRITE_EXTERNAL_STORAGE,
+    ) == PackageManager.PERMISSION_GRANTED
+
+    /** The folder under Pictures/: the app's name, without characters a path can't hold. */
+    private fun folder(): String =
+        application.applicationInfo.loadLabel(application.packageManager).toString()
+            .replace(Regex("[/\\\\:*?\"<>|\\p{Cntrl}]"), "").trim().ifEmpty { "Images" }
+
+    private suspend fun save(image: Image) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val resolver = application.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, image.name)
+                put(MediaStore.Images.Media.MIME_TYPE, image.mime)
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/${folder()}")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
+                ?: throw Refused("failed", "MediaStore refused the insert")
+            try {
+                val out = resolver.openOutputStream(uri) ?: throw Refused("failed", "no output stream")
+                out.use { o -> image.file.inputStream().use { it.copyTo(o) } }
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                if (resolver.update(uri, values, null, null) != 1) throw Refused("failed", "MediaStore did not publish the image")
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), folder())
+            if (!dir.isDirectory && !dir.mkdirs()) throw Refused("failed", "can't create the Pictures folder")
+            val out = Source.uniqueIn(dir, image.name)
+            try {
+                image.file.inputStream().use { input -> out.outputStream().use { input.copyTo(it) } }
+            } catch (e: IOException) {
+                out.delete()
+                throw Refused("failed", "could not write the image")
+            }
+            // "saved" means the gallery has it: wait (briefly) for the media scan to index the file.
+            val indexed = withTimeoutOrNull(10_000) {
+                suspendCancellableCoroutine { cont ->
+                    MediaScannerConnection.scanFile(application, arrayOf(out.path), arrayOf(image.mime)) { _, uri ->
+                        if (cont.isActive) cont.resume(uri != null)
+                    }
+                }
+            }
+            if (indexed != true) {
+                // Not in the gallery: remove it, so a retry doesn't leave a duplicate once the scanner catches up.
+                out.delete()
+                throw Refused("failed", "the gallery did not index the image")
+            }
+        }
+    }
+
+    /** A refusal with its reply code (ADR-0068). */
+    private class Refused(code: String, detail: String? = null) : Exception(code) {
+        val reply: String = if (detail.isNullOrEmpty()) code else "$code: $detail"
+    }
+
+    private class Ask(val source: String, val name: String?, val headers: Map<String, String>)
+
+    /** A checked image file: fetched into cacheDir/share/ by this call, or the app's own file. */
+    private class Image(val file: File, val name: String, val mime: String, val fetched: Boolean)
+
+    /** Source rules, the same as the sharefile plugin's (each plugin is copied into an app on its own, so neither
+     *  can depend on the other). Keep the two in step. */
+    private object Source {
+        const val MAX_BYTES = 50L * 1024 * 1024
+        private const val KEEP_MS = 24L * 60 * 60 * 1000
+        private const val MAX_REDIRECTS = 5
+        // Redirects are followed by hand (fetch below): never to http, and the caller's headers only to the same host.
+        private val http by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).callTimeout(180, TimeUnit.SECONDS)
+                .followRedirects(false).followSslRedirects(false)
+                .build()
+        }
+
+        fun parse(input: String): Ask {
+            val trimmed = input.trim()
+            if (!trimmed.startsWith("{")) throw Refused("bad_input", "expected {\"source\": …}")
+            val o = try { JSONObject(trimmed) } catch (e: Exception) { throw Refused("bad_input") }
+            fun str(k: String) = if (o.has(k) && !o.isNull(k)) o.optString(k) else null
+            val headers = mutableMapOf<String, String>()
+            o.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> (h.opt(k) as? String)?.let { headers[k] = it } } }
+            val ask = Ask((str("source") ?: "").trim(), str("name"), headers)
+            val lower = ask.source.lowercase()
+            when {
+                ask.source.isEmpty() -> throw Refused("bad_input")
+                ask.source.any { it == '\t' || it == '\n' || it == '\r' } -> throw Refused("unsupported_source")
+                lower.startsWith("http://") -> throw Refused("insecure_source")
+                lower.startsWith("https://") || lower.startsWith("file://") -> {}
+                Regex("^[a-z][a-z0-9+.-]*:").containsMatchIn(lower) -> throw Refused("unsupported_source")
+            }
+            return ask
+        }
+
+        /** Fetch (https) or find (local) the image and check that its bytes are a raster image. */
+        fun resolve(app: Context, ask: Ask): Image {
+            val src = ask.source
+            val fetched = src.lowercase().startsWith("https://")
+            val file = if (fetched) {
+                val dir = File(app.cacheDir, "share").apply { mkdirs() }
+                prune(dir)
+                File.createTempFile("img-", ".part", dir).also { tmp ->
+                    try { fetch(ask, tmp) } catch (e: Exception) { tmp.delete(); throw e }
+                }
+            } else {
+                localFile(app, src)
+            }
+            try {
+                val head = try { file.inputStream().use { s -> val b = ByteArray(16); b.copyOf(s.read(b).coerceAtLeast(0)) } }
+                    catch (e: IOException) { throw Refused("failed", "can't read the file") }
+                val mime = sniffImage(head) ?: throw Refused("not_an_image")
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.path, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw Refused("not_an_image")
+                return Image(file, fileName(src, ask.name, mime), mime, fetched)
+            } catch (e: Exception) {
+                if (fetched) file.delete()
+                throw e
+            }
+        }
+
+        /** GET an https URL into `to`, following up to 5 redirects by hand: an http target is insecure_source, and
+         *  the caller's headers go only to the original host. */
+        private fun fetch(ask: Ask, to: File) {
+            val origin = ask.source.toHttpUrlOrNull() ?: throw Refused("bad_input")
+            var url = origin
+            repeat(MAX_REDIRECTS + 1) {
+                val req = Request.Builder().url(url).apply {
+                    if (url.host == origin.host && url.port == origin.port) ask.headers.forEach { (k, v) -> header(k, v) }
+                }.build()
+                val resp: Response = try {
+                    http.newCall(req).execute()
+                } catch (e: IOException) {
+                    throw Refused("fetch_failed", e.message)
+                }
+                resp.use { r ->
+                    if (r.isRedirect) {
+                        val next = r.header("Location")?.let { url.resolve(it) } ?: throw Refused("fetch_failed", "redirect without a target")
+                        if (!next.isHttps) throw Refused("insecure_source", "redirected to http")
+                        url = next
+                        return@repeat
+                    }
+                    if (!r.isSuccessful) throw Refused("fetch_failed", "HTTP ${r.code}")
+                    val body = r.body ?: throw Refused("fetch_failed", "no body")
+                    if (body.contentLength() > MAX_BYTES) throw Refused("too_large")
+                    try {
+                        copyCapped(body.byteStream(), to)
+                    } catch (e: IOException) {
+                        throw Refused("fetch_failed", e.message)
+                    }
+                    return
+                }
+            }
+            throw Refused("fetch_failed", "too many redirects")
+        }
+
+        /** The app's own file: file://, an absolute path, or a path relative to the files dir, which must lie in the
+         *  app's files, cache or external files/cache folders (never its databases or preferences). */
+        private fun localFile(app: Context, src: String): File {
+            val f = when {
+                src.lowercase().startsWith("file://") -> File(Uri.parse(src).path ?: throw Refused("bad_input"))
+                src.startsWith("/") -> File(src)
+                else -> File(app.filesDir, src)
+            }.canonicalFile
+            val roots = listOfNotNull(app.filesDir, app.cacheDir, app.getExternalFilesDir(null), app.externalCacheDir)
+                .map { it.canonicalFile.path + File.separator }
+            if (roots.none { f.path.startsWith(it) }) throw Refused("unsupported_source", "not one of the app's files")
+            if (!f.isFile) throw Refused("not_found")
+            return f
+        }
+
+        private fun copyCapped(input: InputStream, to: File) {
+            to.outputStream().use { out ->
+                val buf = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > MAX_BYTES) throw Refused("too_large")
+                    out.write(buf, 0, n)
+                }
+            }
+        }
+
+        /** Delete fetched files older than a day. */
+        private fun prune(dir: File) {
+            val cutoff = System.currentTimeMillis() - KEEP_MS
+            dir.listFiles()?.forEach { if (it.lastModified() < cutoff) it.delete() }
+        }
+
+        fun uniqueIn(dir: File, name: String): File {
+            val stem = name.substringBeforeLast('.', name)
+            val ext = if (name.contains('.')) "." + name.substringAfterLast('.') else ""
+            var f = File(dir, name)
+            var i = 1
+            while (f.exists()) f = File(dir, "$stem-${i++}$ext")
+            return f
+        }
+
+        private val PNG = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+
+        /** The raster image type a file's first bytes show (PNG, JPEG, GIF, WebP), else null. */
+        fun sniffImage(b: ByteArray): String? = when {
+            b.size >= 8 && b.copyOf(8).contentEquals(PNG) -> "image/png"
+            b.size >= 3 && b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte() && b[2] == 0xFF.toByte() -> "image/jpeg"
+            b.size >= 6 && String(b, 0, 6, Charsets.US_ASCII).let { it == "GIF87a" || it == "GIF89a" } -> "image/gif"
+            b.size >= 12 && String(b, 0, 4, Charsets.US_ASCII) == "RIFF" && String(b, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
+            else -> null
+        }
+
+        /** Characters a name loses: controls, and the invisible and bidi-override ones that can disguise an extension. */
+        private fun hidden(c: Char): Boolean = Character.isISOControl(c) ||
+            c in '\u200B'..'\u200F' || c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069' || c == '\u061C' || c == '\uFEFF'
+
+        /** The gallery name: `name`, else the source's last segment; folder parts and hidden characters dropped; the
+         *  image type's extension added when missing or different. */
+        fun fileName(source: String, name: String?, mime: String): String {
+            val path = source.substringBefore('?').substringBefore('#')
+            val picked = name?.takeIf { it.isNotBlank() } ?: path
+            var base = picked.substringAfterLast('/').substringAfterLast('\\').filterNot(::hidden).trim()
+            if (base.isEmpty() || base == "." || base == "..") base = "image"
+            val allowed = when (mime) {
+                "image/png" -> listOf("png")
+                "image/jpeg" -> listOf("jpg", "jpeg")
+                "image/webp" -> listOf("webp")
+                else -> listOf("gif")
+            }
+            val ext = if (base.contains('.')) base.substringAfterLast('.').lowercase() else null
+            return if (ext in allowed) base else "$base.${allowed.first()}"
+        }
+    }
+}
