@@ -1,0 +1,29 @@
+# Free, bundled Mobiler plugin: save an image to the photo library (Photos on iOS, the gallery on Android).
+#   cx.plugin("saveimage", "save", r#"{"source":"https://example.com/qr.png","name":"qr.png"}"#,
+#             |r| Msg::Saved(r.ok))   // ok "saved", or ok:false "<code>" / "<code>: <detail>" (ADR-0068)
+#
+# source: an https URL (fetched natively, up to 50 MB; optional "headers": {"Authorization": "…"}),
+# a file:// URI, an absolute path, or a path relative to the app's files dir (the `files` plugin's paths).
+# The bytes must be a PNG, JPEG, GIF or WebP image ("not_an_image" otherwise); they are saved unchanged.
+# name: the file name in the gallery (default: the source's last path segment).
+# Codes: bad_input, insecure_source, unsupported_source, fetch_failed, too_large, not_found,
+# not_an_image, denied, no_activity, failed. On the web the image is downloaded ("downloaded", ADR-0067).
+# Install: mobiler plugin add saveimage
+name = "saveimage"
+summary = "Save an image to the photo library — Photos / gallery (free; asks for add-only photo access on iOS)"
+
+[android]
+# Android 10+ (API 29+) writes through MediaStore with no permission. Android 8–9 (API 26–28) needs
+# WRITE_EXTERNAL_STORAGE: a transparent helper Activity asks for it and waits for the answer, so the
+# first tap saves (or answers "denied") — no edit to the app's MainActivity.
+sources = ["android/SaveImagePlugin.kt", "android/SaveImagePermissionActivity.kt"]
+register = '"saveimage" to SaveImagePlugin(application)'
+manifest_application = ['<activity android:name=".SaveImagePermissionActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />']
+permissions = ["android.permission.WRITE_EXTERNAL_STORAGE;maxSdkVersion=28"]
+
+[ios]
+sources = ["ios/SaveImagePlugin.swift"]
+register = 'case "saveimage": return await SaveImagePlugin.handle(op: op, input: input)'
+
+[ios.info_plist]
+NSPhotoLibraryAddUsageDescription = "Save images to your photo library."
