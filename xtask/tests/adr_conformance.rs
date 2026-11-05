@@ -710,6 +710,19 @@ fn adr_0052_every_shell_answers_clipboard_with() {
     assert!(core.contains("self.notify(\"clipboard\", \"copy\", text)"), "ADR-0007: cx.copy must stay a plain notification");
 }
 
+/// ADR-0067: the web shell answers the installable `sharefile` and `saveimage` plugins itself, ahead of its
+/// "plugin '…' not available" fallback, and routes each to its handler.
+#[test]
+fn adr_0067_web_answers_sharefile_and_saveimage() {
+    let web = live_code(&read("mobiler-web/src/lib.rs"));
+    let perform = web.find("async fn perform(").expect("ADR-0067: mobiler-web has no perform()");
+    let fallback = perform + web[perform..].find("not available\", call.plugin").expect("ADR-0067: perform() lost its not-available fallback");
+    let body = &web[perform..fallback];
+    for needle in ["call.plugin == \"sharefile\"", "call.plugin == \"saveimage\"", "web_share_file(ask).await", "web_save_image(ask).await"] {
+        assert!(body.contains(needle), "ADR-0067: mobiler-web's perform() doesn't route `{needle}` before its not-available fallback");
+    }
+}
+
 /// The live code in `src`: whole-line `//` comments, `/* … */` blocks (also across lines) and the dead branch of a
 /// Swift `#if false` (up to its `#else` or `#endif`, nested `#if`s included) are dropped, as are the `#if` / `#else` /
 /// `#endif` lines themselves, and so is any line starting with `*` (a doc-comment body; a live `*x = …` line would be

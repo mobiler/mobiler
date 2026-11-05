@@ -45,6 +45,12 @@ fn main() {
   (plain `http://` other than localhost), where browsers have no clipboard API. The reply's report says
   so (`sensitive: false, expires: none, local_only: false`); a plain `cx.copy` on such a page logs a
   console warning.
+- **Plugins a browser can serve.** Plugins are copied into the Android and iOS apps, and the web
+  has nothing to copy into, so a plugin request answers `ok: false` ("plugin '…' not available").
+  The exceptions are answered here, with no install step: `websocket`'s message stream, `transfer`, `sharefile`
+  (the browser's share sheet when it can share files, else a download: `ok: true, "downloaded"`)
+  and `saveimage` (a download, since a browser has no photo library). Both fetch the `source`
+  first, so a cross-origin URL needs CORS headers, or the reply is `fetch_failed`.
 
 Build and serve with [Trunk](https://trunkrs.dev): `trunk serve`. See the
 [`fullstack-todo`](https://github.com/mobiler/mobiler/tree/main/demos/fullstack-todo)

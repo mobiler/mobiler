@@ -1,6 +1,6 @@
 [package]
 name = "mobiler-web"
-version = "0.49.1"
+version = "0.50.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Mobiler's web shell — renders any Mobiler app's Widget tree to the DOM (Leptos/WASM)."
@@ -32,7 +32,7 @@ web-sys = { version = "0.3", features = [
     "KeyboardEvent", "DomTokenList", "DomRect",
     "Document", "HtmlHeadElement", "HtmlElement", "Element", "Node",
     "Window", "Storage", "Navigator", "Clipboard", "console", "EventTarget", "MediaQueryList", "MediaQueryListEvent",
-    "HtmlInputElement", "FileList", "File", "Blob", "Url",
+    "HtmlInputElement", "FileList", "File", "Blob", "Url", "FilePropertyBag", "BlobPropertyBag",
     # Photo options (pick_photo_with): decode with createImageBitmap, re-encode on a canvas.
     "HtmlCanvasElement", "CanvasRenderingContext2d", "ImageBitmap",
     "WebSocket", "MessageEvent", "CloseEvent", "BinaryType",
