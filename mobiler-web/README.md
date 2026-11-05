@@ -47,7 +47,7 @@ fn main() {
   console warning.
 - **Plugins a browser can serve.** Plugins are copied into the Android and iOS apps, and the web
   has nothing to copy into, so a plugin request answers `ok: false` ("plugin '…' not available").
-  The exceptions are answered here, with no install step: `websocket`, `transfer`, `sharefile`
+  The exceptions are answered here, with no install step: `websocket`'s message stream, `transfer`, `sharefile`
   (the browser's share sheet when it can share files, else a download: `ok: true, "downloaded"`)
   and `saveimage` (a download, since a browser has no photo library). Both fetch the `source`
   first, so a cross-origin URL needs CORS headers, or the reply is `fetch_failed`.

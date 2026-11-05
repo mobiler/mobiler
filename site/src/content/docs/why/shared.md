@@ -36,7 +36,7 @@ These parts exist once per platform, are the same for every app, and are maintai
 |---|---|---|---|
 | The shell that draws the widget tree | Jetpack Compose, Material 3 | SwiftUI | The DOM, via Leptos and WebAssembly |
 | Built-in capabilities (HTTP, storage, camera…) | Kotlin | Swift | Browser APIs |
-| Plugins you add | Kotlin, copied into your app | Swift, copied into your app | Only `websocket`, `transfer`, `sharefile` and `saveimage`, built into the web shell |
+| Plugins you add | Kotlin, copied into your app | Swift, copied into your app | Only `websocket`'s stream, `transfer`, `sharefile` and `saveimage`, built into the web shell |
 | Where it comes from | `mobiler new`, updated by `mobiler upgrade` | `mobiler new`, updated by `mobiler upgrade` | The `mobiler-web` crate |
 
 What stays yours on each platform is configuration, not code: the app icon, the name users see, the
@@ -76,7 +76,7 @@ The [full-stack guide](/guides/full-stack/) shows how to set this up.
 - **Platform-only options.** A few options exist on one platform only and are ignored elsewhere, for
   example iOS's floating glass tab bar.
 - **Most plugins are mobile-only.** SQLite, biometrics, push and the rest run on Android and iOS; on the
-  web only `websocket`, `transfer`, `sharefile` and `saveimage` work. A request to a plugin the platform lacks answers `ok: false`
+  web only `websocket`'s stream, `transfer`, `sharefile` and `saveimage` work. A request to a plugin the platform lacks answers `ok: false`
   ("not available"), so the core can show something else; a stream from one never sends an event. A web
   client that needs those features usually gets them from your server.
 - **Some built-ins are weaker in a browser.** See [Add a web client](/guides/web/#what-to-know).

@@ -207,7 +207,7 @@ const FACET_PIN: &str = "=0.46.5";
 /// The `mobiler-web` an app's web client should pin (ADR-0066). It publishes on its own, not in lockstep with
 /// `mobiler-core`, and no template pins it, so the CLI carries it; release-libs moves it with each publish, and
 /// a conformance test holds it to `mobiler-web/Cargo.toml`.
-const MOBILER_WEB_PIN: &str = "0.49";
+const MOBILER_WEB_PIN: &str = "0.50";
 
 /// One manifest edit: the new text and what changed, nothing to do, or a hand edit to report.
 #[derive(Debug, PartialEq, Eq)]

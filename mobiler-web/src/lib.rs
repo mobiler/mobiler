@@ -831,7 +831,7 @@ fn copy_with_text(input: &str) -> Result<String, String> {
     v.get("text").and_then(serde_json::Value::as_str).map(str::to_string).ok_or_else(|| "missing text".to_string())
 }
 
-/// A `sharefile/file` or `saveimage/save` request (ADR-0067, ADR-0068): a bare handle, or a JSON object.
+/// A `sharefile/file` or `saveimage/save` request (ADR-0067): a bare handle, or a JSON object.
 #[derive(Debug, Default)]
 struct ShareAsk {
     source: String,
@@ -857,7 +857,9 @@ fn parse_share_ask(input: &str) -> Result<ShareAsk, &'static str> {
     } else {
         ShareAsk { source: trimmed.to_string(), ..ShareAsk::default() }
     };
-    let src = ask.source.trim();
+    let mut ask = ask;
+    ask.source = ask.source.trim().to_string();
+    let src = ask.source.as_str();
     if src.is_empty() {
         return Err("bad_input");
     }
@@ -865,29 +867,66 @@ fn parse_share_ask(input: &str) -> Result<ShareAsk, &'static str> {
     if lower.starts_with("http://") {
         return Err("insecure_source");
     }
-    let same_origin_path = src.starts_with('/') && !src.starts_with("//");
+    // A browser reads `\` as `/` in a URL, so `/\host` is another origin, like `//host`.
+    let same_origin_path = src.starts_with('/') && !matches!(src.as_bytes().get(1), Some(b'/' | b'\\'));
     if !(lower.starts_with("https://") || lower.starts_with("blob:") || same_origin_path) {
         return Err("unsupported_source");
     }
     Ok(ask)
 }
 
-/// The file name a receiver sees: `name`, else the source's last path segment, with any folder part dropped, and an
-/// extension from `mime` added when the name has none.
+/// The file name a receiver sees: `name`, else the source's last path segment, with any folder part, control and
+/// bidi-override characters dropped. For a known type the name ends in that type's extension: one is added when the
+/// name has none or another (a PNG can't arrive named `.html`). An unknown type keeps the name as it is.
 fn share_file_name(source: &str, name: Option<&str>, mime: Option<&str>) -> String {
     let path = source.split(['?', '#']).next().unwrap_or("");
     let picked = name.filter(|n| !n.trim().is_empty()).unwrap_or(path);
-    let base = picked.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let base: String = picked
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}'))
+        .collect();
+    let base = base.trim();
     let base = if base.is_empty() || base == "." || base == ".." { "shared" } else { base };
-    let ext = match mime.map(|m| m.split(';').next().unwrap_or("").trim().to_ascii_lowercase()).as_deref() {
-        Some("image/png") => ".png",
-        Some("image/jpeg") => ".jpg",
-        Some("image/webp") => ".webp",
-        Some("image/gif") => ".gif",
-        Some("application/pdf") => ".pdf",
-        _ => "",
+    let allowed: &[&str] = match mime.map(bare_mime).as_deref() {
+        Some("image/png") => &["png"],
+        Some("image/jpeg") => &["jpg", "jpeg"],
+        Some("image/webp") => &["webp"],
+        Some("image/gif") => &["gif"],
+        Some("application/pdf") => &["pdf"],
+        _ => &[],
     };
-    if base.contains('.') { base.to_string() } else { format!("{base}{ext}") }
+    let Some(first) = allowed.first() else { return base.to_string() };
+    let ext = base.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    if ext.is_some_and(|e| allowed.contains(&e.as_str())) { base.to_string() } else { format!("{base}.{first}") }
+}
+
+/// The raster image type a file's first bytes show (PNG, JPEG, GIF, WebP), as the native shells' decoders would
+/// tell. Anything else, an SVG included, is `None`: `saveimage` only saves images a photo library can hold.
+fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+/// A MIME type without its parameters, lower-cased (`image/svg+xml; charset=utf-8` → `image/svg+xml`).
+fn bare_mime(mime: &str) -> String {
+    mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase()
+}
+
+/// Whether a response's declared `Content-Length` is over the 50 MB cap (an absent or unreadable one is not).
+fn length_over_cap(content_length: Option<&str>) -> bool {
+    content_length.and_then(|l| l.trim().parse::<f64>().ok()).is_some_and(|n| n > SHARE_MAX_BYTES)
 }
 
 /// Whether a failed `navigator.share` falls back to a download: only the user dismissing the sheet does not.
@@ -898,9 +937,17 @@ fn share_error_falls_back(js_error_name: &str) -> bool {
 /// Largest file the web shell shares or saves, as on Android and iOS.
 const SHARE_MAX_BYTES: f64 = 50.0 * 1024.0 * 1024.0;
 
-/// Fetch a share/save source into a `Blob`, sending the ask's headers. A failure is `fetch_failed` (network error,
-/// a cross-origin URL without CORS, or a non-2xx status) or `too_large`.
-async fn fetch_share_blob(ask: &ShareAsk) -> Result<web_sys::Blob, String> {
+/// A fetched share/save source: its bytes and the response's declared type (parameters dropped).
+struct Fetched {
+    bytes: Vec<u8>,
+    declared: String,
+}
+
+/// Fetch a share/save source, sending the ask's headers. The body is read in chunks and the read stops once it passes
+/// the 50 MB cap (or at once when `Content-Length` says so), so an oversized source is `too_large`, never buffered.
+/// Any other failure is `fetch_failed` (network error, a cross-origin URL without CORS, a non-2xx status, a revoked
+/// `blob:` handle).
+async fn fetch_share(ask: &ShareAsk) -> Result<Fetched, String> {
     use wasm_bindgen::JsCast;
     let win = web_sys::window().ok_or("unavailable")?;
     let init = web_sys::RequestInit::new();
@@ -918,20 +965,32 @@ async fn fetch_share_blob(ask: &ShareAsk) -> Result<web_sys::Blob, String> {
     if !resp.ok() {
         return Err(format!("fetch_failed: HTTP {}", resp.status()));
     }
-    let blob = wasm_bindgen_futures::JsFuture::from(resp.blob().map_err(|_| "fetch_failed")?)
-        .await
-        .map_err(|e| format!("fetch_failed: {}", js_err(&e)))?;
-    let blob: web_sys::Blob = blob.dyn_into().map_err(|_| "fetch_failed")?;
-    if blob.size() > SHARE_MAX_BYTES {
+    let header = |k: &str| resp.headers().get(k).ok().flatten();
+    if length_over_cap(header("content-length").as_deref()) {
         return Err("too_large".into());
     }
-    Ok(blob)
+    let declared = header("content-type").map(|t| bare_mime(&t)).unwrap_or_default();
+    let mut reader = match resp.body() {
+        Some(stream) => Reader::new(web_sys::ReadableStreamDefaultReader::new(&stream).map_err(|_| "fetch_failed")?),
+        None => Reader::empty(),
+    };
+    let mut bytes = Vec::new();
+    while let Some(chunk) = reader.next().await.map_err(|e| format!("fetch_failed: {e}"))? {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() as f64 > SHARE_MAX_BYTES {
+            reader.cancel();
+            return Err("too_large".into());
+        }
+    }
+    Ok(Fetched { bytes, declared })
 }
 
-/// The type a fetched file has: the response's, else the ask's.
-fn share_mime(blob: &web_sys::Blob, ask: &ShareAsk) -> String {
-    let t = blob.type_();
-    if t.is_empty() { ask.mime.clone().unwrap_or_default() } else { t }
+/// A `Blob` of `bytes` with the given type.
+fn bytes_blob(bytes: &[u8], mime: &str) -> Result<web_sys::Blob, String> {
+    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+    let bag = web_sys::BlobPropertyBag::new();
+    bag.set_type(mime);
+    web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &bag).map_err(|_| "unavailable".to_string())
 }
 
 /// Save a blob through the browser's download: an object URL on a clicked `<a download>`, released a minute later.
@@ -960,12 +1019,20 @@ fn download_blob(blob: &web_sys::Blob, name: &str) -> Result<(), String> {
 /// activation ran out during the fetch) falls back to the download.
 async fn web_share_file(ask: ShareAsk) -> PluginResponse {
     use wasm_bindgen::JsCast;
-    let blob = match fetch_share_blob(&ask).await {
+    let fetched = match fetch_share(&ask).await {
+        Ok(f) => f,
+        Err(e) => return PluginResponse::text(false, e),
+    };
+    // The bytes decide the type when they are a known image, then the app's `mime`, then the server's.
+    let mime = sniff_image(&fetched.bytes)
+        .map(str::to_string)
+        .or_else(|| ask.mime.as_deref().map(bare_mime).filter(|m| !m.is_empty()))
+        .unwrap_or(fetched.declared);
+    let name = share_file_name(&ask.source, ask.name.as_deref(), Some(&mime));
+    let blob = match bytes_blob(&fetched.bytes, &mime) {
         Ok(b) => b,
         Err(e) => return PluginResponse::text(false, e),
     };
-    let mime = share_mime(&blob, &ask);
-    let name = share_file_name(&ask.source, ask.name.as_deref(), Some(&mime));
     let Some(nav) = web_sys::window().map(|w| w.navigator()) else {
         return PluginResponse::text(false, "unavailable");
     };
@@ -1003,15 +1070,19 @@ async fn web_share_file(ask: ShareAsk) -> PluginResponse {
 
 /// `saveimage/save` on the web (ADR-0067): a browser has no photo library, so an image is downloaded.
 async fn web_save_image(ask: ShareAsk) -> PluginResponse {
-    let blob = match fetch_share_blob(&ask).await {
+    let fetched = match fetch_share(&ask).await {
+        Ok(f) => f,
+        Err(e) => return PluginResponse::text(false, e),
+    };
+    // Like the native shells' decoders: the bytes must be a raster image, whatever the server calls them.
+    let Some(mime) = sniff_image(&fetched.bytes) else {
+        return PluginResponse::text(false, "not_an_image");
+    };
+    let name = share_file_name(&ask.source, ask.name.as_deref(), Some(mime));
+    let blob = match bytes_blob(&fetched.bytes, mime) {
         Ok(b) => b,
         Err(e) => return PluginResponse::text(false, e),
     };
-    let mime = share_mime(&blob, &ask);
-    if !mime.to_ascii_lowercase().starts_with("image/") {
-        return PluginResponse::text(false, "not_an_image");
-    }
-    let name = share_file_name(&ask.source, ask.name.as_deref(), Some(&mime));
     match download_blob(&blob, &name) {
         Ok(()) => PluginResponse::text(true, "downloaded"),
         Err(e) => PluginResponse::text(false, e),
@@ -1067,6 +1138,12 @@ impl Reader {
     /// A reader over no stream at all (e.g. a bodiless response) — always "done".
     fn empty() -> Self {
         Self(None)
+    }
+    /// Stop the stream (the rest of the body is not downloaded).
+    fn cancel(&self) {
+        if let Some(reader) = &self.0 {
+            let _ = reader.cancel();
+        }
     }
     async fn next(&mut self) -> Result<Option<Vec<u8>>, String> {
         use wasm_bindgen::JsCast;
@@ -4472,13 +4549,64 @@ mod share_tests {
     #[test]
     fn file_name_rules() {
         assert_eq!(share_file_name("https://x.rs/page/qr?v=2", None, Some("image/png")), "qr.png");
-        assert_eq!(share_file_name("https://x.rs/a.jpg", None, Some("image/png")), "a.jpg");
+        assert_eq!(share_file_name("https://x.rs/a.jpg", None, Some("image/jpeg")), "a.jpg");
+        assert_eq!(share_file_name("https://x.rs/a.jpeg", None, Some("image/jpeg")), "a.jpeg");
+        // An extension that doesn't match the bytes gets the right one added (a PNG can't arrive as .html).
+        assert_eq!(share_file_name("https://x.rs/a.jpg", None, Some("image/png")), "a.jpg.png");
+        assert_eq!(share_file_name("https://x.rs/a", Some("qr.html"), Some("image/png")), "qr.html.png");
         assert_eq!(share_file_name("https://x.rs/", None, Some("image/png")), "shared.png");
         assert_eq!(share_file_name("https://x.rs/a", Some("moj-termin-qr"), Some("image/jpeg")), "moj-termin-qr.jpg");
         assert_eq!(share_file_name("https://x.rs/a", None, None), "a");
         assert_eq!(share_file_name("https://x.rs/a#frag", None, Some("application/pdf")), "a.pdf");
         // A name can't climb out of a folder or carry a separator.
         assert_eq!(share_file_name("https://x.rs/a", Some("../../etc/x.png"), None), "x.png");
+    }
+
+    #[test]
+    fn file_name_edge_cases() {
+        assert_eq!(share_file_name("https://x.rs/a", None, Some("image/png; charset=binary")), "a.png");
+        assert_eq!(share_file_name("https://x.rs/a", Some("..\\..\\x.png"), Some("image/png")), "x.png");
+        assert_eq!(share_file_name("https://x.rs/path/qr", Some("  "), Some("image/png")), "qr.png");
+        // A dot inside a name is not an extension unless it ends in a short alphanumeric one.
+        assert_eq!(share_file_name("https://x.rs/a", Some("v1.2-qr"), Some("image/png")), "v1.2-qr.png");
+        // Control and bidi-override characters are dropped.
+        assert_eq!(share_file_name("https://x.rs/a", Some("gnp\u{202E}.exe"), Some("image/png")), "gnp.exe.png");
+        assert_eq!(share_file_name("https://x.rs/a", Some("a\u{0007}b\u{2066}c"), None), "abc");
+        // An unknown type keeps the name as given.
+        assert_eq!(share_file_name("https://x.rs/a", Some("notes.txt"), Some("text/plain")), "notes.txt");
+    }
+
+    #[test]
+    fn parse_refuses_backslash_host_and_fetches_trimmed() {
+        assert_eq!(parse_share_ask("/\\evil.example/a.png").err(), Some("unsupported_source"));
+        assert_eq!(parse_share_ask(r#"{"source":"/\\evil.example/a.png"}"#).err(), Some("unsupported_source"));
+        assert_eq!(parse_share_ask(r#"{"source":"  https://x.rs/a.png "}"#).unwrap().source, "https://x.rs/a.png");
+    }
+
+    #[test]
+    fn sniffs_raster_images_only() {
+        assert_eq!(sniff_image(b"\x89PNG\r\n\x1a\n...."), Some("image/png"));
+        assert_eq!(sniff_image(b"\xff\xd8\xff\xe0"), Some("image/jpeg"));
+        assert_eq!(sniff_image(b"GIF89a.."), Some("image/gif"));
+        assert_eq!(sniff_image(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(sniff_image(b"<svg xmlns='http://www.w3.org/2000/svg'>"), None);
+        assert_eq!(sniff_image(b"<!DOCTYPE html>"), None);
+        assert_eq!(sniff_image(b""), None);
+    }
+
+    #[test]
+    fn bare_mime_drops_parameters() {
+        assert_eq!(bare_mime("image/svg+xml; charset=utf-8"), "image/svg+xml");
+        assert_eq!(bare_mime(" Image/PNG "), "image/png");
+    }
+
+    #[test]
+    fn declared_length_over_cap() {
+        assert!(!length_over_cap(None));
+        assert!(!length_over_cap(Some("1024")));
+        assert!(!length_over_cap(Some("52428800")));
+        assert!(length_over_cap(Some("52428801")));
+        assert!(!length_over_cap(Some("garbage")));
     }
 
     #[test]

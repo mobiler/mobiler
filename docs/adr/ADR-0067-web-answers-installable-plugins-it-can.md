@@ -1,19 +1,20 @@
-# ADR-0067: The web shell answers an installable plugin's op itself when a browser can do the job (`transfer`, `sharefile`, `saveimage`), and answers `ok: false, "plugin '…' not available"` for every other installable plugin; nothing is installed on the web
+# ADR-0067: The web shell answers an installable plugin's op itself when a browser can do the job (`websocket`'s stream, `transfer`, `sharefile`, `saveimage`), and answers `ok: false, "plugin '…' not available"` for every other installable plugin; nothing is installed on the web
 
 Status:        Accepted
 Date decided:  2026-11-05
 Deciding PRs:  #315 (`sharefile` and `saveimage` on the web, mobiler-web 0.50.0); #195 (2026-07-20, the first instance: `transfer`)
 Supersedes:    none
 Code anchor:   mobiler-web/src/lib.rs (`perform`, the `sharefile` / `saveimage` branch; `parse_share_ask`, `web_share_file`, `web_save_image`; the `("transfer", …)` stream source)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0067_web_answers_sharefile_and_saveimage, mobiler-web/src/lib.rs::parse_rejects, mobiler-web/src/lib.rs::abort_does_not_fall_back, mobiler-web/src/lib.rs::file_name_rules
+Conformance:   xtask/tests/adr_conformance.rs::adr_0067_web_answers_sharefile_and_saveimage, mobiler-web/src/lib.rs::parse_rejects, mobiler-web/src/lib.rs::parse_refuses_backslash_host_and_fetches_trimmed, mobiler-web/src/lib.rs::abort_does_not_fall_back, mobiler-web/src/lib.rs::file_name_rules, mobiler-web/src/lib.rs::file_name_edge_cases, mobiler-web/src/lib.rs::sniffs_raster_images_only, mobiler-web/src/lib.rs::declared_length_over_cap
 
 ## 1. Context (The Problem)
 
 A mobiler plugin is installed with `mobiler plugin add`. That command copies Kotlin and Swift sources into the
 app's Android and iOS shells (ADR-0011). The web shell is a published crate, never copied into the app
 (ADR-0023), so there is nothing for `plugin add` to copy into on the web. Until now `perform` answered every
-installable plugin with `ok: false, "plugin '…' not available"`. The one exception was `transfer`, whose
-upload/download stream the web shell has carried since #195 (ADR-0027).
+installable plugin with `ok: false, "plugin '…' not available"`. The exceptions were two streams: `transfer`'s
+upload/download, carried since #195 (ADR-0027), and `websocket`'s message stream (its `send` op still answers
+"not available" on the web).
 
 The appointments app (Moj Termin admin, issue #711, 2026-11-04) asked to share its booking-page QR code as an image
 and to save it to the phone's photos, and asked for both on the web too ("On the web: `share_file` uses the Web
@@ -39,15 +40,27 @@ and the same reply codes as the native plugin, then:
   `saveimage` ahead of `"plugin '…' not available"`, and sends each to its handler.
   - **Validation Metric:** `adr_0067_web_answers_sharefile_and_saveimage` in `xtask/tests/adr_conformance.rs`.
 - **Condition 2 — the web reads the same input and refuses what the native plugins refuse.** A bare handle or a
-  `{source, …}` object; `http:` is `insecure_source`; an unknown scheme or a protocol-relative `//host` URL is
-  `unsupported_source`; no source is `bad_input`.
-  - **Validation Metric:** `parse_rejects` (and `parse_json_fields`, `parse_accepts_web_sources`) in
-    `mobiler-web/src/lib.rs`.
+  `{source, …}` object; `http:` is `insecure_source` (also `http://localhost`: the web has no debug build to tell
+  apart, unlike ADR-0038's native rule); an unknown scheme, a protocol-relative `//host` or a `/\host` URL (a
+  browser reads `\` as `/`) is `unsupported_source`; no source is `bad_input`. The trimmed source is the one
+  fetched.
+  - **Validation Metric:** `parse_rejects` and `parse_refuses_backslash_host_and_fetches_trimmed` (and
+    `parse_json_fields`, `parse_accepts_web_sources`) in `mobiler-web/src/lib.rs`.
 - **Condition 3 — only a dismissed share sheet stops the fallback.** `AbortError` answers `cancelled`; any other
   share error (`NotAllowedError` when the tap's activation ran out during the fetch) falls back to a download.
   - **Validation Metric:** `abort_does_not_fall_back` in `mobiler-web/src/lib.rs`.
-- **Condition 4 — a file name cannot carry a path.** The downloaded or shared file's name is its last segment.
-  - **Validation Metric:** `file_name_rules` in `mobiler-web/src/lib.rs`.
+- **Condition 4 — a file name cannot carry a path or lie about its type.** The name is its last segment, with
+  control and bidi-override characters dropped; for a known type it ends in that type's extension (`qr.html` holding
+  a PNG becomes `qr.html.png`).
+  - **Validation Metric:** `file_name_rules` and `file_name_edge_cases` in `mobiler-web/src/lib.rs`.
+- **Condition 5 — the bytes decide, as on the phones.** `saveimage` saves only what its first bytes show to be a
+  PNG, JPEG, GIF or WebP (an SVG, an HTML error page or a mislabelled file is `not_an_image`), and a shared file's
+  type comes from its bytes first, then the app's `mime`, then the server's.
+  - **Validation Metric:** `sniffs_raster_images_only` in `mobiler-web/src/lib.rs`.
+- **Condition 6 — the 50 MB cap stops the download.** A declared `Content-Length` over the cap is `too_large`
+  before the body is read; otherwise the body is read in chunks and the read is cancelled once it passes the cap.
+  - **Validation Metric:** `declared_length_over_cap` in `mobiler-web/src/lib.rs` for the header; the chunked stop
+    is checked by review.
 
 ## 3. Considered Options & Rationale for Refutation
 
@@ -67,7 +80,9 @@ and the same reply codes as the native plugin, then:
 Option D. The web shell's `perform` answers `sharefile/file` (Web Share API with the file where
 `navigator.canShare({files})` allows it, else a download) and `saveimage/save` (a download; a browser has no photo
 library). Both run after a `fetch`, so neither uses `window.open`, which a pop-up blocker treats as unrequested after
-an `await` (the `browser/open` rule). A cross-origin source without CORS headers is `fetch_failed`. The reply words
+an `await` (the `browser/open` rule). A cross-origin source without CORS headers is `fetch_failed`, and so is a
+`blob:` handle the web photo pipeline has already released (ADR-0049); the native plugins' `not_found` is for a
+missing local file, which the web has none of. The reply words
 are the native plugins' reply codes (spec §5), plus `downloaded` for the web's fallback.
 
 Verified in headless Chrome over CDP on the barbershop web client: a same-origin share → `ok: true, "downloaded"`
@@ -83,7 +98,11 @@ resolve → `shared` (the file arrived with its name, `image/png` type and text)
 - (b) moving the whole branch below the `if call.plugin != "http"` fallback failed it ("… doesn't route
   `call.plugin == "sharefile"` before its not-available fallback");
 - (c) making `share_error_falls_back` return `true` for every name failed `abort_does_not_fall_back`;
-- (d) skipping the `http://` refusal failed `parse_rejects`.
+- (d) skipping the `http://` refusal failed `parse_rejects`;
+- (e) dropping `b'\\'` from the same-origin check failed `parse_refuses_backslash_host_and_fetches_trimmed`;
+- (f) before their code existed, `file_name_rules`, `file_name_edge_cases`, `parse_refuses_backslash_host_and_fetches_trimmed`,
+  `sniffs_raster_images_only`, `bare_mime_drops_parameters` and `declared_length_over_cap` each failed against stubs
+  (`sniff_image` → `None`, `bare_mime` → identity, `length_over_cap` → `false`, the old name and parse rules).
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
@@ -98,7 +117,7 @@ resolve → `shared` (the file arrived with its name, `image/png` type and text)
   Safari may refuse `navigator.share` once the fetch has used up the tap's activation. Both become a download.
 - **Negative:** a cross-origin `source` needs CORS headers on its server; without them the web answers
   `fetch_failed`, and the app must fall back itself (e.g. `cx.open_url`).
-- **Negative:** the fetched file is held in memory as a `Blob` (up to the 50 MB cap) — fine for an image, not for
-  large media.
+- **Negative:** the fetched file is held in memory (up to the 50 MB cap) — fine for an image, not for large
+  media.
 - **Negative:** the list of web-served plugins is a judgement per plugin. A future plugin a browser can partly
   serve needs the same call recorded here.
