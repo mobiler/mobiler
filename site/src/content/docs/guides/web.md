@@ -57,7 +57,7 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-mobiler-web = "0.49"
+mobiler-web = "0.50"
 app-core = { path = "../app-core" }
 ```
 
