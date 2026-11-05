@@ -23,6 +23,7 @@ enum SaveImagePlugin {
                 fetched = file
             } else {
                 file = try Source.localFile(ask.source)
+                guard FileManager.default.isReadableFile(atPath: file.path) else { throw Refused("failed", "can't read the file") }
             }
             guard let mime = Source.sniffImage(file),
                   let image = CGImageSourceCreateWithURL(file as CFURL, nil),
@@ -76,7 +77,7 @@ private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
             return nil
         }
         var r = request
-        if next.host?.lowercased() != origin.host?.lowercased() || next.port != origin.port {
+        if next.host?.lowercased() != origin.host?.lowercased() || (next.port ?? 443) != (origin.port ?? 443) {
             for name in headerNames { r.setValue(nil, forHTTPHeaderField: name) }
         }
         return r

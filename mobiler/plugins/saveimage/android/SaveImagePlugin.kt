@@ -113,7 +113,11 @@ class SaveImagePlugin(private val application: Application) : MobilerPlugin {
                     }
                 }
             }
-            if (indexed != true) throw Refused("failed", "the gallery did not index the image")
+            if (indexed != true) {
+                // Not in the gallery: remove it, so a retry doesn't leave a duplicate once the scanner catches up.
+                out.delete()
+                throw Refused("failed", "the gallery did not index the image")
+            }
         }
     }
 
@@ -279,7 +283,7 @@ class SaveImagePlugin(private val application: Application) : MobilerPlugin {
 
         /** Characters a name loses: controls, and the invisible and bidi-override ones that can disguise an extension. */
         private fun hidden(c: Char): Boolean = Character.isISOControl(c) ||
-            c in '​'..'‏' || c in '‪'..'‮' || c in '⁦'..'⁩' || c == '؜' || c == '﻿'
+            c in '\u200B'..'\u200F' || c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069' || c == '\u061C' || c == '\uFEFF'
 
         /** The gallery name: `name`, else the source's last segment; folder parts and hidden characters dropped; the
          *  image type's extension added when missing or different. */

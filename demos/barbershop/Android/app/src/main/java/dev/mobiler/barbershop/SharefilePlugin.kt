@@ -277,7 +277,7 @@ class SharefilePlugin(private val application: Application) : MobilerPlugin {
 
         /** Characters a name loses: controls, and the invisible and bidi-override ones that can disguise an extension. */
         private fun hidden(c: Char): Boolean = Character.isISOControl(c) ||
-            c in '​'..'‏' || c in '‪'..'‮' || c in '⁦'..'⁩' || c == '؜' || c == '﻿'
+            c in '\u200B'..'\u200F' || c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069' || c == '\u061C' || c == '\uFEFF'
 
         /** The name a receiver sees: `name`, else the source's last segment; folder parts and hidden characters
          *  dropped; for a known type its extension is added when missing or different. */

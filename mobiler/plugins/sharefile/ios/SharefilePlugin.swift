@@ -103,7 +103,7 @@ private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
             return nil
         }
         var r = request
-        if next.host?.lowercased() != origin.host?.lowercased() || next.port != origin.port {
+        if next.host?.lowercased() != origin.host?.lowercased() || (next.port ?? 443) != (origin.port ?? 443) {
             for name in headerNames { r.setValue(nil, forHTTPHeaderField: name) }
         }
         return r
