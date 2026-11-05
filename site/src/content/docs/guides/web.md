@@ -57,7 +57,7 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-mobiler-web = "0.49"
+mobiler-web = "0.50"
 app-core = { path = "../app-core" }
 ```
 
@@ -95,8 +95,11 @@ moving the app, run `mobiler dev` again after a change, or keep `trunk serve` op
 - **Built-in capabilities work through browser APIs, with limits a page can't get past:** a copied text
   can't be marked sensitive or expire, and the clipboard needs a secure context (HTTPS or localhost);
   `cx.device_info` answers `None`; and haptics do nothing where the browser has no vibration (iOS Safari).
-- **Plugins:** `websocket` and `transfer` work on the web. Any other plugin request answers `ok: false`
-  ("not available"), and a stream from one never sends an event; handle that in `update`.
+- **Plugins:** `websocket`, `transfer`, `sharefile` and `saveimage` work on the web. `sharefile` uses the
+  browser's share sheet where it can share files and otherwise downloads the file (`ok: true, "downloaded"`);
+  `saveimage` always downloads, since a browser has no photo library. Both fetch the `source` first, so a
+  cross-origin URL needs CORS headers on its server, or the reply is `fetch_failed`. Any other plugin request
+  answers `ok: false` ("not available"), and a stream from one never sends an event; handle that in `update`.
 - **Fonts and the launch screen:** when the app has `web/index.html`, `mobiler build` and `dev` also write
   the `[fonts]` and `[splash]` options there. A web-only workflow runs `mobiler fonts sync` and
   `mobiler splash sync` itself.

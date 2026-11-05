@@ -57,8 +57,8 @@ README where it has one, otherwise at the top of its Kotlin and Swift sources.
 `cx.subscribe(key, plugin, op, input, on_event)`, which calls `on_event` for every event until
 `cx.unsubscribe(key)`.
 
-**Where plugins run.** Plugins run in the Android and iOS apps. On the web only `websocket` and `transfer`
-work. Elsewhere a request answers `ok: false` with "not available", and a stream never sends an event, so
+**Where plugins run.** Plugins run in the Android and iOS apps. On the web only `websocket`, `transfer`,
+`sharefile` and `saveimage` work (the last two download the file when the browser can't share it). Elsewhere a request answers `ok: false` with "not available", and a stream never sends an event, so
 handle that if your core also runs in a browser. The same happens on a phone where the plugin wasn't
 added: `cx.upload` and `cx.download`, for example, need `mobiler plugin add transfer` on Android and iOS.
 
