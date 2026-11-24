@@ -3,6 +3,7 @@
 // - built-in capabilities (capabilities.json) -> src/content/docs/reference/capabilities.md
 // - bundled plugins (mobiler/plugins/*/mobiler-plugin.toml) -> src/content/docs/reference/plugins.md
 // - demo screenshots (demos/*/screenshots) -> public/demos/
+// - the home page's feature overview (capabilities + plugins) -> src/generated/features.json
 // Everything written here is gitignored. Runs before `astro dev` and `astro build`.
 
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -93,7 +94,7 @@ function syncCapabilities() {
 		(planned.length ? `\n**Planned:** ${planned.map((c) => c.name).join(', ')}.\n` : '') +
 		`\nMore device features come as [plugins](/reference/plugins/).\n`;
 	writeFileSync(join(DOCS, 'reference/capabilities.md'), md);
-	return shown.length;
+	return shown;
 }
 
 /** The two keys we need from a plugin manifest, without a TOML dependency: `name` and `summary` are top-level strings. */
@@ -135,7 +136,46 @@ function syncPlugins() {
 		`The plugin's native half is part of your app from then on. When a new CLI release updates a plugin, \`mobiler upgrade\` tells you, and running \`mobiler plugin add <name>\` again brings the new version in.\n\n` +
 		`| Plugin | What it does |\n|---|---|\n${rows.join('\n')}\n`;
 	writeFileSync(join(DOCS, 'reference/plugins.md'), md);
-	return plugins.length;
+	return plugins;
+}
+
+/**
+ * The home page lists every built-in capability and every plugin, grouped. A plugin with no group fails the build,
+ * so a new plugin can't go missing from the home page.
+ */
+export const PLUGIN_GROUPS = [
+	{ title: 'Data and networking', plugins: ['sqlite', 'securestore', 'files', 'filepicker', 'transfer', 'websocket', 'connectivity'] },
+	{ title: 'Sign-in and payments', plugins: ['biometric', 'oauth', 'iap'] },
+	{ title: 'Media', plugins: ['audio', 'video', 'scanner', 'speech', 'tts', 'saveimage', 'sharefile'] },
+	{ title: 'Location and sensors', plugins: ['geolocation', 'geolocation-fused', 'geofence', 'sensors', 'bluetooth', 'battery'] },
+	{ title: 'Notifications and growth', plugins: ['notifications', 'push', 'push-firebase-only', 'review', 'analytics'] },
+	{ title: 'System apps and background', plugins: ['calendar', 'composer', 'contacts', 'picker', 'background-fetch'] },
+];
+
+function syncFeatures(capabilities, plugins) {
+	const byName = new Map(plugins.map((p) => [p.name, p]));
+	const grouped = PLUGIN_GROUPS.flatMap((g) => g.plugins);
+	const missing = plugins.filter((p) => !grouped.includes(p.name)).map((p) => p.name);
+	const unknown = grouped.filter((n) => !byName.has(n));
+	const twice = grouped.filter((n, i) => grouped.indexOf(n) !== i);
+	if (twice.length) throw new Error(`PLUGIN_GROUPS in scripts/sync.mjs lists a plugin more than once: ${twice.join(', ')}`);
+	if (missing.length) throw new Error(`plugins missing from PLUGIN_GROUPS in scripts/sync.mjs (the home page lists them): ${missing.join(', ')}`);
+	if (unknown.length) throw new Error(`PLUGIN_GROUPS in scripts/sync.mjs names plugins that don't exist: ${unknown.join(', ')}`);
+	const features = {
+		capabilities: capabilities.map((c) => ({ name: c.name, api: c.api })),
+		pluginCount: plugins.length,
+		groups: PLUGIN_GROUPS.map((g) => ({
+			title: g.title,
+			plugins: g.plugins.map((n) => {
+				const summary = publicSummary(byName.get(n).summary);
+				return { name: n, summary, experimental: /experimental/i.test(summary) };
+			}),
+		})),
+	};
+	const out = join(SITE, 'src/generated');
+	mkdirSync(out, { recursive: true });
+	writeFileSync(join(out, 'features.json'), JSON.stringify(features, null, '\t') + '\n');
+	return capabilities.length + plugins.length;
 }
 
 function syncScreenshots() {
@@ -179,6 +219,14 @@ function checkVersions() {
 }
 
 mkdirSync(join(DOCS, 'reference'), { recursive: true });
-const counts = { tutorial: syncTutorial(), capabilities: syncCapabilities(), plugins: syncPlugins(), screenshots: syncScreenshots() };
+const capabilities = syncCapabilities();
+const plugins = syncPlugins();
+const counts = {
+	tutorial: syncTutorial(),
+	capabilities: capabilities.length,
+	plugins: plugins.length,
+	'home features': syncFeatures(capabilities, plugins),
+	screenshots: syncScreenshots(),
+};
 checkVersions();
 console.log(`sync: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ')} (from ${relative(process.cwd(), REPO) || '.'})`);

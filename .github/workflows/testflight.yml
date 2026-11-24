@@ -12,6 +12,10 @@ name: TestFlight (coffee)
 on:
   workflow_dispatch:
 
+# Read-only token by default; a job that needs more asks for it itself.
+permissions:
+  contents: read
+
 jobs:
   testflight:
     name: coffee → TestFlight

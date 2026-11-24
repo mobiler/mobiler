@@ -1,0 +1,22 @@
+# Dependabot version updates. Security updates for every manifest (Cargo, npm) are switched on
+# in the repository settings and need no entry here; this file adds routine bumps for the two
+# places where staying current is cheap and safe.
+version: 2
+updates:
+  # Keeps the SHA-pinned third-party actions (and the tagged actions/*) current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The mobiler.rs site (Astro + Starlight). One grouped PR a month.
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: monthly
+    groups:
+      site:
+        patterns: ["*"]
