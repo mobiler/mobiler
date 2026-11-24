@@ -21,7 +21,7 @@ jobs:
     name: coffee → TestFlight
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # App Store Connect requires the app be built with the iOS 26 SDK (Xcode 26+);
       # select the newest Xcode installed on the runner.
@@ -57,7 +57,7 @@ jobs:
       # (Transporter.app) while we debug.
       - name: Upload .ipa artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coffee-ipa
           path: demos/coffee/iOS/build/ipa/*.ipa
