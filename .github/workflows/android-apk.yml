@@ -9,6 +9,10 @@ name: Android APK (shareable)
 on:
   workflow_dispatch:
 
+# Read-only token by default; a job that needs more asks for it itself.
+permissions:
+  contents: read
+
 jobs:
   apk:
     name: coffee release APK
@@ -23,7 +27,7 @@ jobs:
         run: rustup target add aarch64-linux-android x86_64-linux-android
 
       - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: demos/coffee
 

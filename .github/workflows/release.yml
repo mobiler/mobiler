@@ -19,6 +19,10 @@ on:
     tags:
       - "v*"
 
+# Read-only token by default; a job that needs more asks for it itself.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -45,7 +49,7 @@ jobs:
         # Pin v1.0.4, not the floating @v1: @v1 still ships a Node 20 runtime,
         # which GitHub runners stop defaulting to on 2026-06-16 and remove in
         # Sept 2026. v1.0.4 (Mar 2026) runs on Node 24.
-        uses: rust-lang/crates-io-auth-action@v1.0.4
+        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
         id: auth
 
       - name: Publish

@@ -6,3 +6,4 @@ src/content/docs/tutorial/
 src/content/docs/reference/capabilities.md
 src/content/docs/reference/plugins.md
 public/demos/
+src/generated/

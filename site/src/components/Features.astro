@@ -1,0 +1,123 @@
+---
+// The home page's "what's in the box": every built-in capability and every bundled plugin, grouped.
+// The data is src/generated/features.json, written by scripts/sync.mjs from capabilities.json and the plugin
+// manifests, so this list can't drift from what the CLI ships.
+import features from '../generated/features.json';
+
+const { capabilities, groups } = features;
+---
+
+<div class="features not-content">
+	<section>
+		<h3>Built into every app <span class="count">{capabilities.length}</span></h3>
+		<p class="lede">No plugin to add. Your core calls them through <code>cx</code>.</p>
+		<ul class="chips">
+			{capabilities.map((c) => <li title={c.api}>{c.name}</li>)}
+		</ul>
+		<a class="more" href="/reference/capabilities/">All built-in capabilities →</a>
+	</section>
+
+	<section>
+		<h3>Plugins <span class="count">{features.pluginCount}</span></h3>
+		<p class="lede">One command each: <code>mobiler plugin add sqlite</code>.</p>
+		<div class="groups">
+			{
+				groups.map((g) => (
+					<div class="group">
+						<h4>{g.title}</h4>
+						<ul class="chips">
+							{g.plugins.map((p) => (
+								<li class:list={['plugin', { experimental: p.experimental }]} title={p.summary}>
+									<code>{p.name}</code>
+									{p.experimental && <span class="tag">experimental</span>}
+								</li>
+							))}
+						</ul>
+					</div>
+				))
+			}
+		</div>
+		<a class="more" href="/reference/plugins/">What each plugin does →</a>
+	</section>
+</div>
+
+<style>
+	.features {
+		display: grid;
+		gap: 2rem;
+		margin-top: 1.5rem;
+	}
+	h3 {
+		font-size: var(--sl-text-xl);
+		margin: 0 0 0.25rem;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.count {
+		font-size: var(--sl-text-sm);
+		font-weight: 600;
+		color: var(--sl-color-accent-high);
+		background: var(--sl-color-accent-low);
+		border-radius: 999px;
+		padding: 0.05rem 0.55rem;
+	}
+	.lede {
+		margin: 0 0 0.85rem;
+		color: var(--sl-color-gray-2);
+	}
+	.lede code {
+		font-size: 0.9em;
+		background: var(--sl-color-gray-6);
+		border-radius: 0.25rem;
+		padding: 0.1rem 0.3rem;
+	}
+	.groups {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+		gap: 1.25rem 1.5rem;
+	}
+	h4 {
+		font-size: var(--sl-text-sm);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--sl-color-gray-3);
+		margin: 0 0 0.5rem;
+	}
+	.chips {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+	.chips li {
+		border: 1px solid var(--sl-color-gray-5);
+		background: var(--sl-color-gray-7, var(--sl-color-black));
+		border-radius: 0.5rem;
+		padding: 0.2rem 0.6rem;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-white);
+		margin: 0;
+	}
+	.chips li.plugin code {
+		background: none;
+		padding: 0;
+		font-size: inherit;
+	}
+	.tag {
+		margin-left: 0.35rem;
+		font-size: 0.7rem;
+		color: var(--sl-color-gray-3);
+	}
+	.experimental {
+		border-style: dashed !important;
+	}
+	.more {
+		display: inline-block;
+		margin-top: 0.9rem;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-text-accent);
+	}
+</style>
