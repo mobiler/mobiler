@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: ${{ matrix.app }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust + iOS simulator target
         run: rustup target add aarch64-apple-ios-sim
@@ -56,7 +56,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/shots"
           xcrun simctl io "$UDID" screenshot "$GITHUB_WORKSPACE/shots/${{ matrix.name }}-ios.png"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios-screenshot-${{ matrix.name }}
           path: shots/
