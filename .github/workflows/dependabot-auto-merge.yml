@@ -1,0 +1,65 @@
+name: Dependabot auto-merge
+
+# Arms GitHub auto-merge on the Dependabot PRs we are sure are safe. The PR still merges only
+# after every required check on main passes; anything outside the list below stays manual.
+#
+# Auto-merged (squash):
+#   - github-actions: patch or minor bumps where EVERY updated action is GitHub's own (actions/*).
+#   - npm in /site:   patch bumps only (pre-1.0 packages such as Starlight break in minors).
+# Always manual: any major; npm minors; any third-party action (rust-cache, install-action,
+# crates-io-auth-action, which handles the crates.io publish token); any Cargo update.
+#
+# Note: a merge made with GITHUB_TOKEN does not trigger other workflows, so an auto-merged site
+# update is deployed by the next push to main (or run "Deploy site" by hand).
+
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    # Only PRs that Dependabot itself opened, from a branch in this repository (never a fork).
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Read Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Decide whether this update is safe to auto-merge
+        id: decide
+        env:
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          DIRECTORY: ${{ steps.meta.outputs.directory }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEPS_JSON: ${{ steps.meta.outputs.updated-dependencies-json }}
+        run: |
+          safe=false
+          case "$ECOSYSTEM" in
+            github_actions)
+              all_first_party=$(jq -r 'length > 0 and all(.dependencyName | startswith("actions/"))' <<<"$DEPS_JSON")
+              if [[ "$all_first_party" == true && ( "$UPDATE_TYPE" == version-update:semver-patch || "$UPDATE_TYPE" == version-update:semver-minor ) ]]; then
+                safe=true
+              fi
+              ;;
+            npm_and_yarn)
+              if [[ "$DIRECTORY" == /site && "$UPDATE_TYPE" == version-update:semver-patch ]]; then
+                safe=true
+              fi
+              ;;
+          esac
+          echo "ecosystem=$ECOSYSTEM directory=$DIRECTORY update=$UPDATE_TYPE -> auto-merge: $safe"
+          echo "safe=$safe" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge (squash)
+        if: steps.decide.outputs.safe == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
