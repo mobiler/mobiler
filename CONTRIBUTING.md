@@ -13,7 +13,9 @@ Thanks for your interest. Issues and pull requests are welcome.
   request.
 
 Pull requests from forks need the maintainer's approval before CI runs, and only the maintainer
-merges. Releases to crates.io are made by the maintainer.
+merges. The one exception is Dependabot's narrowest updates (patch/minor bumps of GitHub's own
+actions, patch bumps of the site's npm packages), which merge automatically once every required
+check passes; see `.github/workflows/dependabot-auto-merge.yml`. Releases to crates.io are made by the maintainer.
 
 By contributing, you agree that your contribution is dual-licensed under the MIT and Apache-2.0
 licenses, like the rest of the project.
