@@ -1383,3 +1383,61 @@ fn adr_0065_sqlite_calls_run_in_issue_order() {
     }
 }
 
+
+/// ADR-0069: every shell's `asset:` resolver applies the one rule (non-empty, no leading `/`, no `\`, no empty, `.`
+/// or `..` segment) and resolves under the one prefix (`mobiler-assets`; iOS: the folder `MobilerAssetsFolder`
+/// names). The Swift resolver tests the prefix and splits on Unicode scalars, never on String's grapheme clusters
+/// (which let `../\u{0301}x` through as one segment). Live code only: a commented-out check doesn't count. The
+/// template's copies join these lists in the CLI PR that ports them (ADR-0015).
+#[test]
+fn adr_0069_asset_resolvers_follow_one_rule() {
+    // Web (mobiler-web): `image_src`. Its behaviour is unit-tested by `asset_tests`; this pins the prefix.
+    let web = live_code(&read("mobiler-web/src/lib.rs"));
+    let src = fn_body(&web, "pub(crate) fn image_src(").expect("ADR-0069: mobiler-web has no image_src");
+    for needle in [r#"strip_prefix("asset:")"#, "path.is_empty()", "path.starts_with('/')", r"path.contains('\\')", r#"matches!(seg, "" | "." | "..")"#, r#"String::from("mobiler-assets")"#] {
+        assert!(src.contains(needle), "ADR-0069: mobiler-web's image_src lost `{needle}`");
+    }
+
+    // Android: `assetPath` validates; `assetModel` (Coil) and the poster loader resolve under `mobiler-assets/`.
+    for path in ["demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt"] {
+        let code: String = read(path).lines().map(kotlin_code).collect::<Vec<_>>().join("\n");
+        let check = fn_body(&code, "private fun assetPath(").unwrap_or_else(|| panic!("ADR-0069: {path} has no assetPath"));
+        for needle in [r#"startsWith("asset:")"#, "path.isEmpty()", r#"path.startsWith("/")"#, r"path.contains('\\')", "path.split('/')", r#"it == """#, r#"it == ".""#, r#"it == "..""#] {
+            assert!(check.contains(needle), "ADR-0069: {path} assetPath lost `{needle}`");
+        }
+        let model = fn_body(&code, "fun assetModel(").unwrap_or_else(|| panic!("ADR-0069: {path} has no assetModel"));
+        assert!(
+            model.contains("assetPath(source)") && model.contains("\"file:///android_asset/mobiler-assets/$encoded\""),
+            "ADR-0069: {path} assetModel must resolve a checked path under mobiler-assets/"
+        );
+        assert!(
+            code.contains("assetPath(poster)?.let { context.assets.open(\"mobiler-assets/$it\") }"),
+            "ADR-0069: {path} the poster must open a checked path under mobiler-assets/"
+        );
+    }
+
+    // iOS: `assetURL` validates per Unicode scalar and resolves under the `MobilerAssetsFolder` folder.
+    for path in ["demos/barbershop/iOS/Sources/Render.swift"] {
+        let code = live_code(&read(path));
+        let check = fn_body(&code, "fileprivate func assetURL(").unwrap_or_else(|| panic!("ADR-0069: {path} has no assetURL"));
+        for needle in [
+            "guard isAssetSource(source)",
+            r#"source.unicodeScalars.dropFirst("asset:".unicodeScalars.count)"#,
+            r#"let slash: Unicode.Scalar = "/""#,
+            r#"let backslash: Unicode.Scalar = "\\""#,
+            "scalars.isEmpty || scalars.first == slash || scalars.contains(backslash)",
+            "scalars.split(separator: slash, omittingEmptySubsequences: false)",
+            r#"$0.isEmpty || $0 == "." || $0 == "..""#,
+            r#"infoDictionary?["MobilerAssetsFolder"]"#,
+        ] {
+            assert!(check.contains(needle), "ADR-0069: {path} assetURL lost `{needle}`");
+        }
+        // A grapheme-cluster split or prefix test anywhere in the resolver reopens `../\u{0301}x`.
+        for banned in ["split(separator: \"/\"", "hasPrefix("] {
+            assert!(!check.contains(banned), "ADR-0069: {path} assetURL must work on Unicode scalars, found `{banned}`");
+        }
+        let is_asset = fn_body(&code, "fileprivate func isAssetSource(").unwrap_or_else(|| panic!("ADR-0069: {path} has no isAssetSource"));
+        assert!(is_asset.contains(r#"source.unicodeScalars.starts(with: "asset:".unicodeScalars)"#), "ADR-0069: {path} isAssetSource must test the prefix per scalar");
+        assert!(!code.contains(r#"hasPrefix("asset:")"#), "ADR-0069: {path} tests `asset:` with hasPrefix (grapheme clusters); use isAssetSource");
+    }
+}

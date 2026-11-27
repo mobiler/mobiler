@@ -25,6 +25,11 @@ targets:
     sources:
       - Sources                       # App.swift, Core.swift, Render.swift
       - generated/shared.swift         # uniffi Swift wrapper (generated)
+      # mobiler:assets-sources-begin
+      - path: ../assets/bundled
+        type: folder
+        buildPhase: resources
+      # mobiler:assets-sources-end
     dependencies:
       - package: SharedTypes
       # mobiler:spm-dependencies — `mobiler plugin add` inserts SwiftPM product deps above this line
@@ -100,6 +105,9 @@ targets:
         MobilerFontBody: "Roboto"
         # mobiler:fonts-end
         NSPhotoLibraryAddUsageDescription: "Save images to your photo library."
+        # mobiler:assets-info-begin
+        MobilerAssetsFolder: bundled
+        # mobiler:assets-info-end
         # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:
       base:
