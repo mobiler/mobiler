@@ -2,36 +2,42 @@ package {{PACKAGE}}
 
 import {{PACKAGE_SHARED_TYPES}}.PluginResponse
 
-import android.app.AlarmManager
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
 import android.os.Build
-import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import java.time.ZoneId
+import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
-// Local scheduled notifications (paid plugin). Fires even when the app is closed via AlarmManager
-// → a manifest-declared BroadcastReceiver → the system notification tray. Ops (input is JSON):
-//   requestPermission: ""                                       → ok = notifications allowed
-//   schedule: {"id":1,"title":"...","body":"...","after_seconds":10} → ok:true (fires later)
-//   cancel:   {"id":1}                                          → ok:true
+// Local scheduled notifications. Fires even when the app is closed via AlarmManager → a
+// manifest-declared BroadcastReceiver → the system notification tray. Ops (input is JSON; a failure
+// is ok:false "<code>" or "<code>: <detail>", codes invalid_input | past | unsupported | failed):
+//   requestPermission: ""                                   → ok = notifications allowed
+//   schedule: {"id":7,"title":"…","body":"…", "at":"YYYY-MM-DD HH:MM" | "after_seconds":N,
+//              "payload"?:"…","actions"?:[…],"late_minutes"?:1440}   → ok:true ""
+//   cancel:   {"id":7}                                      → ok:true (pending, registry and tray)
+//   cancelAll: ""                                           → ok:true (every reminder of this plugin)
+//   listPending: ""     → [{"id":7,"fire_at":"YYYY-MM-DD HH:MM:SS","snoozed":false}] by fire_at
+//   removeDelivered: {"ids":[1,2]} or "" for all           → ok:true (this plugin's tray entries)
 //
-// Needs POST_NOTIFICATIONS (API 33+) and a <receiver android:name=".NotificationReceiver"> — both
-// added by the plugin manifest (uses-permission + manifest_application). The reminder timing is
-// inexact (setAndAllowWhileIdle) to avoid the restricted exact-alarm permission; fine for
-// appointment reminders. Use exact alarms only if you need to-the-minute precision.
-private const val CHANNEL_ID = "mobiler_reminders"
-
+// Every reminder is kept in a persisted registry (ReminderRegistry.kt), so it survives a reboot, an
+// app update and a time or time-zone change (NotificationRearmReceiver), and plugin init re-arms it
+// after a force-stop. The timing is inexact (setAndAllowWhileIdle), which needs no exact-alarm
+// permission; fine for reminders.
 class NotificationsPlugin(private val application: android.app.Application) : MobilerPlugin {
+    init {
+        // Alarms are gone after a force-stop (and a reboot the app missed): re-arm on every launch.
+        runCatching { rearmAll(application, System.currentTimeMillis()) }
+    }
+
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "requestPermission" -> requestPermission()
         "schedule" -> schedule(input)
         "cancel" -> cancel(input)
-        else -> PluginResponse(false, "unknown op '$op'")
+        "cancelAll" -> cancelAll()
+        "listPending" -> listPending()
+        "removeDelivered" -> removeDelivered(input)
+        else -> PluginResponse(false, "unsupported: unknown op '$op'")
     }
 
     private fun requestPermission(): PluginResponse {
@@ -49,65 +55,88 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
         return PluginResponse(enabled, if (enabled) "granted" else "requested")
     }
 
+    // Every op runs to completion on the caller's thread without suspending, so calls keep the order
+    // the core issued them in (a cancelAll then 40 schedules leaves exactly those 40). The registry
+    // lock also orders them against the receivers.
     private fun schedule(input: String): PluginResponse {
-        val obj = runCatching { JSONObject(input) }.getOrNull()
-            ?: return PluginResponse(false, "invalid input JSON")
-        val id = obj.optInt("id", 1)
-        val title = obj.optString("title")
-        val body = obj.optString("body")
-        val after = obj.optLong("after_seconds", 0)
-
-        ensureChannel(application)
-        val intent = Intent(application, NotificationReceiver::class.java).apply {
-            putExtra("id", id); putExtra("title", title); putExtra("body", body)
+        val r = parseSchedule(input, System.currentTimeMillis(), ZoneId.systemDefault())
+            .getOrElse { return PluginResponse(false, it.message ?: "invalid_input") }
+        ensureReminderChannel(application)
+        return try {
+            synchronized(ReminderRegistry) {
+                // Written before the alarm; a re-schedule of an id replaces it (and any snooze of it).
+                ReminderRegistry.put(application, r)
+                armAlarm(application, r)
+            }
+            PluginResponse(true, "")
+        } catch (e: Exception) {
+            ReminderRegistry.remove(application, r.id)
+            PluginResponse(false, "failed: ${e.message ?: e.javaClass.simpleName}")
         }
-        val pi = PendingIntent.getBroadcast(
-            application, id, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val alarm = application.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val at = System.currentTimeMillis() + after * 1000
-        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
-        return PluginResponse(true, "")
     }
 
     private fun cancel(input: String): PluginResponse {
-        val id = runCatching { JSONObject(input).optInt("id", 1) }.getOrDefault(1)
-        val intent = Intent(application, NotificationReceiver::class.java)
-        val pi = PendingIntent.getBroadcast(
-            application, id, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        (application.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pi)
-        NotificationManagerCompat.from(application).cancel(id)
+        // A missing id (or empty input) keeps the old default of 1.
+        val id = if (input.isBlank()) 1 else {
+            val o = try { JSONObject(input) } catch (e: JSONException) {
+                return PluginResponse(false, "invalid_input: not a JSON object")
+            }
+            if (o.isNull("id")) 1 else validId(o.get("id"))
+                ?: return PluginResponse(false, "invalid_input: `id` must be an integer in 1..=2147483647")
+        }
+        synchronized(ReminderRegistry) {
+            ReminderRegistry.remove(application, id)
+            cancelAlarm(application, id)
+        }
+        val nm = NotificationManagerCompat.from(application)
+        nm.cancel(LocalNotif.TAG, id)
+        nm.cancel(id) // a reminder posted by the pre-registry plugin (untagged), as before
         return PluginResponse(true, "")
     }
-}
 
-// Posts the notification when the alarm fires — runs even if the app process is dead, which is
-// why it must be a statically-registered <receiver> (added to the manifest by the plugin).
-class NotificationReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        ensureChannel(context)
-        val id = intent.getIntExtra("id", 1)
-        val notif = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(intent.getStringExtra("title") ?: "Reminder")
-            .setContentText(intent.getStringExtra("body") ?: "")
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
-        runCatching { NotificationManagerCompat.from(context).notify(id, notif) } // no-op if not permitted
+    private fun cancelAll(): PluginResponse {
+        synchronized(ReminderRegistry) {
+            for (r in ReminderRegistry.all(application)) cancelAlarm(application, r.id)
+            ReminderRegistry.clear(application)
+        }
+        removeDeliveredReminders(application, null)
+        return PluginResponse(true, "")
     }
-}
 
-private fun ensureChannel(context: Context) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
-            mgr.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Reminders", NotificationManager.IMPORTANCE_HIGH)
+    private fun listPending(): PluginResponse {
+        val zone = ZoneId.systemDefault()
+        val out = JSONArray()
+        ReminderRegistry.all(application).sortedWith(compareBy({ it.fireAtMs }, { it.id })).forEach {
+            out.put(
+                JSONObject()
+                    .put("id", it.id)
+                    .put("fire_at", reminderLocalTime(it.fireAtMs, zone))
+                    .put("snoozed", it.snoozed)
             )
         }
+        return PluginResponse(true, out.toString())
+    }
+
+    private fun removeDelivered(input: String): PluginResponse {
+        if (input.isBlank()) {
+            removeDeliveredReminders(application, null)
+            return PluginResponse(true, "")
+        }
+        val arr = try { JSONObject(input).getJSONArray("ids") } catch (e: JSONException) {
+            return PluginResponse(false, "invalid_input: expected {\"ids\":[…]} or \"\"")
+        }
+        val ids = HashSet<Int>()
+        for (i in 0 until arr.length()) {
+            ids.add(validId(arr.get(i)) ?: return PluginResponse(false, "invalid_input: ids must be integers in 1..=2147483647"))
+        }
+        removeDeliveredReminders(application, ids)
+        return PluginResponse(true, "")
+    }
+
+    private fun validId(v: Any?): Int? {
+        val n = v as? Number ?: return null
+        val d = n.toDouble()
+        if (d != Math.floor(d) || d < 1.0 || d > Int.MAX_VALUE.toDouble()) return null
+        return n.toInt()
     }
 }

@@ -696,6 +696,7 @@ class Core(application: Application) : AndroidViewModel(application) {
         "background-fetch" to BackgroundFetchPlugin(application),
         "transfer" to TransferPlugin(application),
         "saveimage" to SaveImagePlugin(application),
+        "notifications" to NotificationsPlugin(application),
         // mobiler:plugins — `mobiler plugin add` inserts plugin registrations above this line
     )
 

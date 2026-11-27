@@ -3,20 +3,30 @@
 #   cx.plugin("notifications", "requestPermission", "", |r| Msg::NotifAllowed(r.ok))
 #   cx.plugin("notifications", "schedule",
 #             r#"{"id":1,"title":"Appointment","body":"in 1 hour","after_seconds":3600}"#, |_| Msg::Noop)
+#   cx.plugin("notifications", "schedule",
+#             r#"{"id":2,"title":"Stand up","body":"45 min","at":"2026-12-01 09:45","late_minutes":30}"#, |_| Msg::Noop)
 #   cx.plugin("notifications", "cancel", r#"{"id":1}"#, |_| Msg::Noop)
+#   cx.plugin("notifications", "cancelAll", "", |_| Msg::Noop)
+#   cx.plugin("notifications", "listPending", "", |r| Msg::Pending(r.output))
 #
 # Install:  mobiler plugin add notifications
 name = "notifications"
 summary = "Local scheduled notifications — appointment/reminder alerts (free)"
 
 [android]
-sources = ["android/NotificationsPlugin.kt"]
+sources = ["android/NotificationsPlugin.kt", "android/ReminderRegistry.kt", "android/NotificationReceivers.kt"]
 register = '"notifications" to NotificationsPlugin(application)'
 # POST_NOTIFICATIONS is the Android 13+ runtime permission for posting notifications.
-permissions = ["android.permission.POST_NOTIFICATIONS"]
-# AlarmManager fires this receiver to post the notification while the app is closed; it must be
-# statically declared so it runs without a live process.
-manifest_application = ['<receiver android:name=".NotificationReceiver" android:exported="false"/>']
+# RECEIVE_BOOT_COMPLETED lets NotificationRearmReceiver re-arm the reminders after a reboot.
+permissions = ["android.permission.POST_NOTIFICATIONS", "android.permission.RECEIVE_BOOT_COMPLETED"]
+# AlarmManager fires NotificationReceiver to post the notification while the app is closed; it must be
+# statically declared so it runs without a live process. NotificationRearmReceiver re-arms the
+# persisted reminders after a reboot, an app update and a time or time-zone change; it is exported
+# only for those system broadcasts.
+manifest_application = [
+  '<receiver android:name=".NotificationReceiver" android:exported="false"/>',
+  '<receiver android:name=".NotificationRearmReceiver" android:exported="true"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/><action android:name="android.intent.action.TIMEZONE_CHANGED"/><action android:name="android.intent.action.TIME_SET"/></intent-filter></receiver>',
+]
 
 [ios]
 sources = ["ios/NotificationsPlugin.swift"]

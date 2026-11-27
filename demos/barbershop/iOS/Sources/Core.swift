@@ -343,6 +343,7 @@ enum Plugins {
         case "background-fetch": return await BackgroundFetchPlugin.handle(op: op, input: input)
         case "transfer": return await TransferPlugin.handle(op: op, input: input)
         case "saveimage": return await SaveImagePlugin.handle(op: op, input: input)
+        case "notifications": return await NotificationsPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
