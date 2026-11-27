@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "files": {
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher.xml": "8d39f5c27739af50",
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml": "8d39f5c27739af50",
+    "Android/app/src/main/res/mipmap-hdpi/ic_launcher.webp": "9b2f607ea1ab80e4",
+    "Android/app/src/main/res/mipmap-hdpi/ic_launcher_round.webp": "ad56766b058c5749",
+    "Android/app/src/main/res/mipmap-hdpi/mobiler_icon_foreground.png": "e96620053e6a89fd",
+    "Android/app/src/main/res/mipmap-mdpi/ic_launcher.webp": "f42ccf48d8d8249b",
+    "Android/app/src/main/res/mipmap-mdpi/ic_launcher_round.webp": "3e8285000ab1dede",
+    "Android/app/src/main/res/mipmap-mdpi/mobiler_icon_foreground.png": "c86beca2262ed9bd",
+    "Android/app/src/main/res/mipmap-xhdpi/ic_launcher.webp": "0cdc5e197b03f2c1",
+    "Android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.webp": "ee94648aaded1479",
+    "Android/app/src/main/res/mipmap-xhdpi/mobiler_icon_foreground.png": "5bbeeb9ee700617f",
+    "Android/app/src/main/res/mipmap-xxhdpi/ic_launcher.webp": "450ecf8a4d67dea1",
+    "Android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.webp": "c66422704365b32d",
+    "Android/app/src/main/res/mipmap-xxhdpi/mobiler_icon_foreground.png": "72a5e8bbe032c0df",
+    "Android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp": "0ffdae29fef644eb",
+    "Android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.webp": "043826dfe7ad27bf",
+    "Android/app/src/main/res/mipmap-xxxhdpi/mobiler_icon_foreground.png": "fa2ea1e614b93c39",
+    "Android/app/src/main/res/values/mobiler_icon.xml": "e4b393fd56187da6",
+    "iOS/Sources/Assets.xcassets/AppIcon.appiconset/icon-1024.png": "d0381258a0991dab"
+  },
+  "input": "51c8bab7da08eb5e"
+}
