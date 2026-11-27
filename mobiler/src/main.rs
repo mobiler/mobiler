@@ -88,6 +88,11 @@ enum Command {
         #[command(subcommand)]
         cmd: SplashCmd,
     },
+    /// The launcher icon from `mobiler.toml` `[icon]` (synced automatically by build/dev/watch).
+    Icon {
+        #[command(subcommand)]
+        cmd: IconCmd,
+    },
     /// Bundled files from `mobiler.toml` `[assets]`, shown with `asset:<path>` (synced automatically by build/dev/watch).
     Assets {
         #[command(subcommand)]
@@ -130,6 +135,13 @@ enum Command {
         #[arg(long, value_name = "FILE")]
         resolved: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum IconCmd {
+    /// Write `[icon]` (launcher icon from one foreground PNG and a background colour) into the Android, iOS and
+    /// web shells (idempotent).
+    Sync,
 }
 
 #[derive(Subcommand)]
@@ -195,6 +207,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Splash { cmd: SplashCmd::Sync } => match splash::run_sync_cli() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::Icon { cmd: IconCmd::Sync } => match icon::run_sync_cli() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

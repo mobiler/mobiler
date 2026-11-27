@@ -152,6 +152,12 @@ struct SplashOnly {
     splash: Option<crate::splash::SplashSpec>,
 }
 
+/// `[icon]` only, read with the icon sync's own spec.
+#[derive(Deserialize, Default)]
+struct IconOnly {
+    icon: Option<crate::icon::IconSpec>,
+}
+
 /// `Ok(None)`: no mobiler.toml or no `[assets]`.
 fn read_spec(root: &Path) -> Result<Option<AssetsSpec>, String> {
     let path = root.join("mobiler.toml");
@@ -296,8 +302,8 @@ fn under(file: &str, dir: &str) -> bool {
     !d.is_empty() && f.len() > d.len() && f.starts_with(&d)
 }
 
-/// A `[fonts]` or `[splash]` source inside `dir` would ship inside the app a second time: warn, naming
-/// the file and its section (the sync still runs). `[icon]` joins this list with the icon sync.
+/// A `[fonts]`, `[splash]` or `[icon]` source inside `dir` would ship inside the app a second time: warn,
+/// naming the file and its section (the sync still runs).
 fn source_overlap_warnings(root: &Path, dir: &str, report: &mut SyncReport) {
     let Ok(text) = fs::read_to_string(root.join("mobiler.toml")) else { return };
     let mut sources: Vec<(&str, String)> = Vec::new();
@@ -308,6 +314,9 @@ fn source_overlap_warnings(root: &Path, dir: &str, report: &mut SyncReport) {
     }
     if let Some(splash) = toml::from_str::<SplashOnly>(&text).ok().and_then(|m| m.splash) {
         sources.extend(splash.logo.into_iter().chain(splash.logo_dark).map(|f| ("[splash]", f)));
+    }
+    if let Some(icon) = toml::from_str::<IconOnly>(&text).ok().and_then(|m| m.icon) {
+        sources.extend(std::iter::once(icon.foreground).chain(icon.monochrome).map(|f| ("[icon]", f)));
     }
     for (section, file) in sources {
         if under(&file, dir) {
@@ -687,6 +696,22 @@ mod tests {
         // Barbershop's layout: sources in assets/, bundled images in assets/bundled — no warning.
         put(&root, "mobiler.toml", toml.replace("[assets]\n", "[assets]\ndir = \"assets/bundled\"\n").as_bytes());
         fs::create_dir_all(root.join("assets/bundled")).unwrap();
+        assert!(sync(&root).unwrap().warnings.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn icon_source_inside_assets_dir_warns() {
+        let toml = "[icon]\nforeground = \"assets/icon/fg.png\"\nbackground = \"#0E9F8E\"\nmonochrome = \"./assets/icon/mono.png\"\n[assets]\n";
+        let root = app(toml);
+        fs::create_dir_all(root.join("assets")).unwrap();
+        let r = sync(&root).unwrap();
+        for file in ["assets/icon/fg.png", "assets/icon/mono.png"] {
+            assert!(r.warnings.iter().any(|w| w.contains(file) && w.contains("[icon]")), "{file}: {:?}", r.warnings);
+        }
+        assert!(read(&root, GRADLE).contains("../assets"), "it still syncs");
+        // Sources kept outside dir (the README's brand/): no warning.
+        put(&root, "mobiler.toml", toml.replace("assets/icon/", "brand/").as_bytes());
         assert!(sync(&root).unwrap().warnings.is_empty());
         let _ = fs::remove_dir_all(&root);
     }

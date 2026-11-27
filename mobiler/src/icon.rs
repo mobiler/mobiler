@@ -1,9 +1,7 @@
 //! `mobiler.toml` `[icon]`: the app's launcher icon, generated for the Android, iOS and web shells
 //! from one square foreground PNG and a background colour. This module validates the section and holds
-//! the pure image/XML generators; the sync that writes them into an app sits on top.
-
-// Task 8's sync uses these; until it lands only the tests do.
-#![allow(dead_code)]
+//! the pure image/XML generators, and the sync that writes them into an app's shells (owning only the
+//! files it wrote, undoing itself when the section is removed).
 
 use std::path::Path;
 
@@ -38,16 +36,24 @@ pub struct IconSpec {
 }
 
 /// A validated `[icon]`: the sources as premultiplied RGBA8 working copies (at most `WORK_PX` per
-/// side; see [`working_copy`]) and the settings.
+/// side; see [`working_copy`]) and the settings. Built only through [`Icon::new`], so the generators
+/// always get premultiplied copies.
 #[derive(Debug, Clone)]
 pub struct Icon {
     /// Premultiplied working copy of the foreground.
-    pub fg: RgbaImage,
+    fg: RgbaImage,
     /// Premultiplied working copy of the monochrome image.
-    pub mono: Option<RgbaImage>,
-    pub bg: [u8; 3],
+    mono: Option<RgbaImage>,
+    bg: [u8; 3],
     /// % of the visible icon's side left clear on each side, 0..=40.
-    pub padding: u32,
+    padding: u32,
+}
+
+impl Icon {
+    /// From straight-alpha RGBA8 sources: each becomes its premultiplied working copy.
+    pub fn new(fg: RgbaImage, mono: Option<RgbaImage>, bg: [u8; 3], padding: u32) -> Icon {
+        Icon { fg: working_copy(fg), mono: mono.map(working_copy), bg, padding }
+    }
 }
 
 /// Check `[icon]` and decode its images. Every failure names the field and the reason; nothing is
@@ -64,18 +70,33 @@ pub fn validate(root: &Path, spec: &IconSpec) -> Result<Icon, String> {
     let c = crate::splash::Rgba::parse(&spec.background).map_err(|_| bad_bg())?;
     let fg = load(root, "foreground", &spec.foreground)?;
     let mono = spec.monochrome.as_deref().map(|rel| load(root, "monochrome", rel)).transpose()?;
-    Ok(Icon { fg, mono, bg: [c.r, c.g, c.b], padding })
+    Ok(Icon::new(fg, mono, [c.r, c.g, c.b], padding))
 }
 
-/// A square PNG, 1024..=16384 px, decoded once to RGBA8 (palette, grayscale and 16-bit inputs
-/// included) and turned into its working copy. The size is checked from the header first, so an
-/// oversized file is never decoded.
+/// A square PNG, 1024..=16384 px, decoded once to straight-alpha RGBA8 (palette, grayscale and 16-bit
+/// inputs included). The size is checked from the header first, so an oversized file is never decoded.
 fn load(root: &Path, field: &str, rel: &str) -> Result<RgbaImage, String> {
+    #[cfg(test)]
+    tests::DECODES.with(|n| n.set(n.get() + 1));
+    check_header(root, field, rel)?;
+    let err = |why: String| format!("[icon] {field} {rel:?}: {why}");
+    let mut reader = image::ImageReader::open(root.join(rel)).map_err(|e| err(format!("can't read it ({e})")))?;
+    reader.set_format(image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_PX);
+    limits.max_image_height = Some(MAX_PX);
+    limits.max_alloc = None; // a 16384 px RGBA source is 1 GiB; the side limit bounds it
+    reader.limits(limits);
+    let img = reader.decode().map_err(|e| err(format!("not a readable PNG ({e})")))?;
+    Ok(img.into_rgba8())
+}
+
+/// A square PNG, 1024..=16384 px, judged from its first 24 bytes (signature and IHDR) only: its side.
+fn check_header(root: &Path, field: &str, rel: &str) -> Result<u32, String> {
     use std::io::Read;
-    let path = root.join(rel);
     let err = |why: String| format!("[icon] {field} {rel:?}: {why}");
     let mut head = [0u8; 24];
-    let mut f = std::fs::File::open(&path).map_err(|e| err(format!("can't read it ({e})")))?;
+    let mut f = std::fs::File::open(root.join(rel)).map_err(|e| err(format!("can't read it ({e})")))?;
     match f.read_exact(&mut head) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Err(err("not a PNG".into())),
@@ -98,20 +119,12 @@ fn load(root: &Path, field: &str, rel: &str) -> Result<RgbaImage, String> {
     if w < MIN_PX {
         return Err(err(format!("{w}×{h} px; at least {MIN_PX}×{MIN_PX} px")));
     }
-    let mut reader = image::ImageReader::open(&path).map_err(|e| err(format!("can't read it ({e})")))?;
-    reader.set_format(image::ImageFormat::Png);
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(MAX_PX);
-    limits.max_image_height = Some(MAX_PX);
-    limits.max_alloc = None; // a 16384 px RGBA source is 1 GiB; the side limit bounds it
-    reader.limits(limits);
-    let img = reader.decode().map_err(|e| err(format!("not a readable PNG ({e})")))?;
-    Ok(working_copy(img.into_rgba8()))
+    Ok(w)
 }
 
 /// `img` premultiplied (so transparent pixels never bleed their colour into an edge when resampled)
 /// and, when larger than `WORK_PX`, downsized once (Lanczos3) to `WORK_PX`. Never upscaled.
-pub fn working_copy(mut img: RgbaImage) -> RgbaImage {
+fn working_copy(mut img: RgbaImage) -> RgbaImage {
     for p in img.pixels_mut() {
         let a = u16::from(p.0[3]);
         for c in &mut p.0[..3] {
@@ -123,7 +136,7 @@ pub fn working_copy(mut img: RgbaImage) -> RgbaImage {
         return img;
     }
     let (nw, nh) = crate::splash::fit(w, h, WORK_PX);
-    image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3)
+    lanczos(img, nw, nh)
 }
 
 /// The content box's side: `px * visible * (1 - 2 * padding / 100)`, at least 1.
@@ -135,7 +148,14 @@ fn content_side(px: u32, visible: f64, padding: u32) -> u32 {
 
 /// A premultiplied working copy resized (Lanczos3) to `side`²; still premultiplied.
 fn resized(work: &RgbaImage, side: u32) -> RgbaImage {
-    image::imageops::resize(work, side, side, image::imageops::FilterType::Lanczos3)
+    lanczos(work.clone(), side, side)
+}
+
+/// Lanczos3 resize, through `DynamicImage` so the resampler is the one compiled inside `image` (the
+/// workspace optimises that crate even in dev and test builds; a generic `imageops::resize` call would
+/// be compiled here, unoptimised, and take ~1 s per icon in tests).
+fn lanczos(img: RgbaImage, w: u32, h: u32) -> RgbaImage {
+    image::DynamicImage::ImageRgba8(img).resize_exact(w, h, image::imageops::FilterType::Lanczos3).into_rgba8()
 }
 
 #[allow(clippy::cast_possible_truncation)] // ≤ 255
@@ -257,12 +277,525 @@ pub fn web_lines(on: bool) -> Vec<String> {
 
 /// FNV-1a 64 of the exact bytes (no CRLF folding: these are binaries), for `.mobiler/icon.json`.
 pub fn fnv1a64_hex(bytes: &[u8]) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in bytes {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    let mut h = Fnv::default();
+    h.write(bytes);
+    h.hex()
+}
+
+/// FNV-1a 64, fed in pieces.
+struct Fnv(u64);
+
+impl Default for Fnv {
+    fn default() -> Fnv {
+        Fnv(0xcbf2_9ce4_8422_2325)
     }
-    format!("{h:016x}")
+}
+
+impl Fnv {
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 ^= u64::from(*b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    /// A length-prefixed piece, so two inputs can't run into each other.
+    fn piece(&mut self, bytes: &[u8]) {
+        self.write(&(bytes.len() as u64).to_le_bytes());
+        self.write(bytes);
+    }
+
+    fn hex(&self) -> String {
+        format!("{:016x}", self.0)
+    }
+}
+
+// ---------------- sync ----------------
+
+use std::collections::BTreeMap;
+use std::fs;
+
+use anyhow::Context;
+
+const RES: &str = "Android/app/src/main/res";
+/// The adaptive launcher icons: upgrade seeds (ADR-0042), so `mobiler upgrade` never merges them.
+pub(crate) const ANYDPI: [&str; 2] = [
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher.xml",
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml",
+];
+const COLORS: &str = "Android/app/src/main/res/values/mobiler_icon.xml";
+const IOS_PNG: &str = "iOS/Sources/Assets.xcassets/AppIcon.appiconset/icon-1024.png";
+const WEB_INDEX: &str = "web/index.html";
+const WEB_DIR: &str = "web/icon";
+/// What the sync last wrote to each file (FNV-1a 64 of its bytes) and the inputs it wrote them from.
+pub(crate) const LEDGER: &str = ".mobiler/icon.json";
+const WEB_BEGIN: &str = "<!-- mobiler:icon-begin -->";
+const WEB_END: &str = "<!-- mobiler:icon-end -->";
+/// Bump whenever the generated files change for the same inputs: the unchanged-input skip then
+/// regenerates them once.
+const GENERATOR_VERSION: u32 = 1;
+
+fn mipmap(density: &str, file: &str) -> String {
+    format!("{RES}/mipmap-{density}/{file}")
+}
+
+fn web_png(px: u32) -> String {
+    format!("{WEB_DIR}/mobiler-icon-{px}.png")
+}
+
+#[derive(Debug, Default)]
+pub struct SyncReport {
+    pub written: Vec<String>,
+    pub removed: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct Manifest {
+    icon: Option<IconSpec>,
+}
+
+/// The ledger: whether `[icon]` was active at the last sync, the inputs it synced from, and what it
+/// last wrote to each file. Kept (inactive) when the section is removed.
+#[derive(Default)]
+struct Ledger {
+    active: bool,
+    input: Option<String>,
+    files: BTreeMap<String, String>,
+}
+
+fn read_ledger(root: &Path) -> Option<Ledger> {
+    let text = fs::read_to_string(root.join(LEDGER)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let files = v["files"]
+        .as_object()
+        .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+        .unwrap_or_default();
+    Some(Ledger { active: v["active"].as_bool().unwrap_or(true), input: v["input"].as_str().map(str::to_string), files })
+}
+
+fn ledger_json(l: &Ledger) -> anyhow::Result<Vec<u8>> {
+    let mut v = serde_json::json!({ "active": l.active, "files": l.files });
+    if let Some(input) = &l.input {
+        v["input"] = serde_json::Value::String(input.clone());
+    }
+    Ok((serde_json::to_string_pretty(&v)? + "\n").into_bytes())
+}
+
+/// One change to the app, computed before anything is written (so a bad input writes nothing).
+enum Change {
+    Write(String, Vec<u8>),
+    Remove(String),
+    /// A directory the sync shares with the app (`web/icon`): removed only once it is empty.
+    RemoveDirIfEmpty(String),
+}
+
+/// The template's bytes at `rel` (these paths carry no placeholders).
+fn stock(rel: &str) -> Option<&'static [u8]> {
+    crate::upgrade::TEMPLATES.get_file(rel).map(include_dir::File::contents)
+}
+
+/// XML can carry the sync's header; the images can't.
+fn is_xml(rel: &str) -> bool {
+    Path::new(rel).extension().is_some_and(|e| e.eq_ignore_ascii_case("xml"))
+}
+
+/// The sync may write (or remove) `rel`: it is missing, the template's stock content (a text file read
+/// CRLF-tolerant), an XML file carrying the sync's header, or exactly what the ledger recorded.
+fn owned(root: &Path, rel: &str, ledger: &BTreeMap<String, String>) -> bool {
+    let path = root.join(rel);
+    if path.symlink_metadata().is_err() {
+        return true;
+    }
+    let Ok(bytes) = fs::read(&path) else { return false };
+    let is_stock = stock(rel).is_some_and(|s| {
+        if crate::templating::is_binary(Path::new(rel)) {
+            s == bytes.as_slice()
+        } else {
+            crate::upgrade::fingerprint(s) == crate::upgrade::fingerprint(&bytes)
+        }
+    });
+    is_stock
+        || (is_xml(rel) && String::from_utf8_lossy(&bytes).contains(HEADER))
+        || ledger.get(rel).is_some_and(|h| *h == fnv1a64_hex(&bytes))
+}
+
+/// One platform's share of the sync: one ownership unit.
+struct Unit {
+    name: &'static str,
+    /// Path prefix of its files (for the ledger entries kept when it is skipped).
+    prefix: &'static str,
+    /// Images, written first.
+    assets: Vec<(String, Vec<u8>)>,
+    /// Files that refer to the images, written after them.
+    refs: Vec<(String, Vec<u8>)>,
+    /// The sync's own files this config no longer has, removed after the references.
+    removes: Vec<String>,
+}
+
+/// The paths `[icon]` writes in this app (no image decoded), per platform present.
+fn targets(root: &Path, has_mono: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    if root.join("Android").is_dir() {
+        for (d, _) in LAYER_SIZES {
+            out.push(mipmap(d, "mobiler_icon_foreground.png"));
+            if has_mono {
+                out.push(mipmap(d, "mobiler_icon_monochrome.png"));
+            }
+        }
+        for (d, _) in LEGACY_SIZES {
+            out.push(mipmap(d, "ic_launcher.webp"));
+            out.push(mipmap(d, "ic_launcher_round.webp"));
+        }
+        out.push(COLORS.into());
+        out.extend(ANYDPI.map(String::from));
+    }
+    if root.join("iOS").is_dir() {
+        out.push(IOS_PNG.into());
+    }
+    if root.join(WEB_INDEX).is_file() {
+        out.extend(WEB_SIZES.map(web_png));
+    }
+    out
+}
+
+/// The inputs' fingerprint: the source images' bytes, the settings and the generator's version. `None`
+/// when a source can't be read (validation then names it).
+fn input_fingerprint(root: &Path, spec: &IconSpec) -> Option<String> {
+    let mut h = Fnv::default();
+    h.piece(&GENERATOR_VERSION.to_le_bytes());
+    h.piece(&fs::read(root.join(&spec.foreground)).ok()?);
+    match &spec.monochrome {
+        Some(m) => h.piece(&fs::read(root.join(m)).ok()?),
+        None => h.piece(b"no monochrome"),
+    }
+    h.piece(spec.background.to_ascii_uppercase().as_bytes());
+    h.piece(&spec.padding.unwrap_or(DEFAULT_PADDING).to_le_bytes());
+    Some(h.hex())
+}
+
+/// The web page with the icon block filled (`on`) or emptied; `Err` names why it can't be.
+fn web_page(html: &str, on: bool) -> Result<String, &'static str> {
+    let lines = web_lines(on);
+    crate::fonts::replace_block(html, WEB_BEGIN, WEB_END, "</head>", |indent| {
+        lines.iter().map(|l| format!("{indent}{l}")).collect()
+    })
+}
+
+/// Nothing to do: the same inputs as last time, and every file still what the sync wrote.
+fn up_to_date(root: &Path, ledger: &Ledger, input: &str, has_mono: bool) -> bool {
+    ledger.active
+        && ledger.input.as_deref() == Some(input)
+        && targets(root, has_mono).iter().all(|rel| {
+            ledger.files.get(rel).is_some_and(|h| fs::read(root.join(rel)).is_ok_and(|b| fnv1a64_hex(&b) == *h))
+        })
+        && fs::read_to_string(root.join(WEB_INDEX)).map_or(true, |html| web_page(&html, true).is_ok_and(|t| t == html))
+}
+
+/// Sync `mobiler.toml` `[icon]` into the shells. No section and nothing synced before: touches nothing.
+/// A bad config or image: a warning, nothing written. A platform with a file the sync doesn't own: a
+/// warning naming it, and that platform is left alone (a half-branded icon is worse than none).
+pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
+    let mut report = SyncReport::default();
+    let spec = match read_spec(root) {
+        Ok(s) => s,
+        Err(e) => {
+            report.warnings.push(format!("mobiler.toml [icon] doesn't parse: {e}"));
+            return Ok(report);
+        }
+    };
+    let ledger = read_ledger(root);
+    let Some(spec) = spec else {
+        if let Some(ledger) = ledger.filter(|l| l.active) {
+            undo(root, &ledger, &mut report)?;
+        }
+        return Ok(report);
+    };
+    let ledger = ledger.unwrap_or_default();
+    let input = input_fingerprint(root, &spec);
+    if input.as_deref().is_some_and(|i| up_to_date(root, &ledger, i, spec.monochrome.is_some())) {
+        return Ok(report);
+    }
+    let icon = match validate(root, &spec) {
+        Ok(i) => i,
+        Err(e) => {
+            report.warnings.push(format!("{e} — icon not synced"));
+            return Ok(report);
+        }
+    };
+
+    let mut units = Vec::new();
+    if root.join("Android").is_dir() {
+        units.push(android_unit(&icon));
+    }
+    if root.join("iOS").is_dir() {
+        units.push(Unit {
+            name: "iOS",
+            prefix: "iOS/",
+            assets: vec![(IOS_PNG.into(), ios_png(&icon))],
+            refs: Vec::new(),
+            removes: Vec::new(),
+        });
+    }
+    if let Ok(html) = fs::read_to_string(root.join(WEB_INDEX)) {
+        match web_page(&html, true) {
+            Ok(page) => units.push(Unit {
+                name: "web",
+                prefix: "web/",
+                assets: WEB_SIZES.iter().map(|&px| (web_png(px), png(&composite(&icon, px, false)))).collect(),
+                refs: vec![(WEB_INDEX.into(), page.into_bytes())],
+                removes: Vec::new(),
+            }),
+            Err(e) => report.warnings.push(format!("{WEB_INDEX}: {e} — web icon not synced")),
+        }
+    }
+
+    // Order matters if a write fails part-way: images before the files that refer to them, those
+    // before the removals, the ledger last.
+    let mut files = BTreeMap::new();
+    let (mut assets, mut refs, mut removes) = (Vec::new(), Vec::new(), Vec::new());
+    for unit in units {
+        let foreign: Vec<&str> = unit
+            .assets
+            .iter()
+            .chain(&unit.refs)
+            .map(|(rel, _)| rel.as_str())
+            .filter(|rel| *rel != WEB_INDEX)
+            .chain(unit.removes.iter().map(String::as_str))
+            .filter(|rel| !owned(root, rel, &ledger.files))
+            .collect();
+        if !foreign.is_empty() {
+            report.warnings.push(format!(
+                "{} {} edited by hand (not the template's and not [icon]'s) — the {} icon is not synced; delete or restore {} to let [icon] manage it",
+                foreign.join(", "),
+                if foreign.len() == 1 { "was" } else { "were" },
+                unit.name,
+                if foreign.len() == 1 { "it" } else { "them" },
+            ));
+            files.extend(ledger.files.iter().filter(|(k, _)| k.starts_with(unit.prefix)).map(|(k, v)| (k.clone(), v.clone())));
+            continue;
+        }
+        for (rel, bytes) in unit.assets.iter().chain(&unit.refs) {
+            if rel != WEB_INDEX {
+                files.insert(rel.clone(), fnv1a64_hex(bytes));
+            }
+        }
+        assets.extend(unit.assets.into_iter().map(|(r, b)| Change::Write(r, b)));
+        refs.extend(unit.refs.into_iter().map(|(r, b)| Change::Write(r, b)));
+        removes.extend(unit.removes.into_iter().map(Change::Remove));
+    }
+    let mut changes = assets;
+    changes.extend(refs);
+    changes.extend(removes);
+    changes.push(Change::Write(LEDGER.into(), ledger_json(&Ledger { active: true, input, files })?));
+    apply(root, changes, &mut report)?;
+    Ok(report)
+}
+
+/// Android: the adaptive layers and the legacy rasters, then the colour and the adaptive icon XML that
+/// refer to them. Without a monochrome image its layers go (after the XML stops naming them).
+fn android_unit(icon: &Icon) -> Unit {
+    let mut assets = Vec::new();
+    let mut removes = Vec::new();
+    for (d, px) in LAYER_SIZES {
+        assets.push((mipmap(d, "mobiler_icon_foreground.png"), png(&layer(icon, &icon.fg, px))));
+        match &icon.mono {
+            Some(m) => assets.push((mipmap(d, "mobiler_icon_monochrome.png"), png(&layer(icon, m, px)))),
+            None => removes.push(mipmap(d, "mobiler_icon_monochrome.png")),
+        }
+    }
+    for (d, px) in LEGACY_SIZES {
+        let square = composite(icon, px, false);
+        let mut round = square.clone();
+        mask_circle(&mut round);
+        assets.push((mipmap(d, "ic_launcher.webp"), webp(&square)));
+        assets.push((mipmap(d, "ic_launcher_round.webp"), webp(&round)));
+    }
+    let mut refs = vec![(COLORS.to_string(), colors_xml(icon.bg).into_bytes())];
+    let xml = android_adaptive_xml(icon.mono.is_some());
+    refs.extend(ANYDPI.map(|rel| (rel.to_string(), xml.clone().into_bytes())));
+    Unit { name: "Android", prefix: "Android/", assets, refs, removes }
+}
+
+/// `[icon]` removed after a sync: each file still as the sync wrote it goes back to the template's (the
+/// adaptive icon XML first, so nothing refers to the sync's layers), the sync's own files are removed,
+/// the web block is emptied. The ledger stays, inactive.
+fn undo(root: &Path, ledger: &Ledger, report: &mut SyncReport) -> anyhow::Result<()> {
+    let mut files = ledger.files.clone();
+    let as_written = |rel: &str| {
+        fs::read(root.join(rel)).is_ok_and(|b| {
+            ledger.files.get(rel).is_some_and(|h| *h == fnv1a64_hex(&b))
+                || (is_xml(rel) && String::from_utf8_lossy(&b).contains(HEADER))
+        })
+    };
+    let mut changes = Vec::new();
+    let mut android_still_used = None;
+    for rel in ANYDPI {
+        if as_written(rel) {
+            if let Some(s) = stock(rel) {
+                changes.push(Change::Write(rel.into(), s.to_vec()));
+                files.remove(rel);
+            }
+        } else if fs::read_to_string(root.join(rel)).is_ok_and(|t| t.contains("mobiler_icon_")) {
+            android_still_used = Some(rel);
+        }
+    }
+    if let Ok(html) = fs::read_to_string(root.join(WEB_INDEX))
+        && html.contains(WEB_BEGIN)
+    {
+        match web_page(&html, false) {
+            Ok(page) => changes.push(Change::Write(WEB_INDEX.into(), page.into_bytes())),
+            Err(e) => report.warnings.push(format!("{WEB_INDEX}: {e} — its icon block is left as it is")),
+        }
+    }
+    let rasters = LEGACY_SIZES
+        .iter()
+        .flat_map(|(d, _)| [mipmap(d, "ic_launcher.webp"), mipmap(d, "ic_launcher_round.webp")])
+        .chain([IOS_PNG.to_string()]);
+    for rel in rasters {
+        if as_written(&rel)
+            && let Some(s) = stock(&rel)
+        {
+            changes.push(Change::Write(rel.clone(), s.to_vec()));
+            files.remove(&rel);
+        }
+    }
+    let mut own: Vec<String> = WEB_SIZES.map(web_png).to_vec();
+    if let Some(rel) = android_still_used {
+        report.warnings.push(format!(
+            "{rel} (edited by hand) still uses the mobiler_icon_* resources [icon] no longer provides — change it, then delete the mipmap-*/mobiler_icon_*.png files and {COLORS}"
+        ));
+    } else {
+        own.push(COLORS.into());
+        for (d, _) in LAYER_SIZES {
+            own.push(mipmap(d, "mobiler_icon_foreground.png"));
+            own.push(mipmap(d, "mobiler_icon_monochrome.png"));
+        }
+    }
+    for rel in own {
+        files.remove(&rel);
+        changes.push(Change::Remove(rel));
+    }
+    changes.push(Change::RemoveDirIfEmpty(WEB_DIR.into()));
+    changes.push(Change::Write(LEDGER.into(), ledger_json(&Ledger { active: false, input: None, files })?));
+    apply(root, changes, report)
+}
+
+fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::Result<()> {
+    // All or nothing: a symlink on the way to any target (written or removed) stops the sync before it
+    // touches anything.
+    for change in &changes {
+        let (Change::Write(rel, _) | Change::Remove(rel) | Change::RemoveDirIfEmpty(rel)) = change;
+        crate::fsguard::check(root, &root.join(rel))?;
+    }
+    for change in changes {
+        match change {
+            Change::Write(rel, bytes) => {
+                let path = root.join(&rel);
+                if fs::read(&path).is_ok_and(|old| old == bytes) {
+                    continue;
+                }
+                crate::fsguard::write(root, &path, bytes)?;
+                if rel != LEDGER {
+                    report.written.push(rel);
+                }
+            }
+            Change::Remove(rel) => {
+                if fs::remove_file(root.join(&rel)).is_ok() {
+                    report.removed.push(rel);
+                }
+            }
+            Change::RemoveDirIfEmpty(rel) => {
+                if fs::remove_dir(root.join(&rel)).is_ok() {
+                    report.removed.push(rel);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---------------- CLI ----------------
+
+/// `Ok(None)`: no mobiler.toml or no `[icon]`.
+fn read_spec(root: &Path) -> Result<Option<IconSpec>, String> {
+    let Ok(text) = fs::read_to_string(root.join("mobiler.toml")) else { return Ok(None) };
+    toml::from_str::<Manifest>(&text).map(|m| m.icon).map_err(|e| e.message().to_string())
+}
+
+/// `mobiler icon sync` — run the sync from the app root and print what happened.
+pub fn run_sync_cli() -> anyhow::Result<()> {
+    let root = std::env::current_dir().context("reading current directory")?;
+    let report = sync(&root)?;
+    for w in &report.warnings {
+        eprintln!("warning: icon: {w}");
+    }
+    for p in &report.written {
+        println!("  wrote   {p}");
+    }
+    for p in &report.removed {
+        println!("  removed {p}");
+    }
+    if report.written.is_empty() && report.removed.is_empty() {
+        match read_spec(&root) {
+            Ok(Some(_)) => println!("Icon up to date."),
+            _ => println!("No [icon] in mobiler.toml — the launcher icon files are the app's own to edit."),
+        }
+    }
+    Ok(())
+}
+
+/// Called at the start of `mobiler build` / `dev` / `watch`: sync and print warnings, never fail.
+pub fn sync_for_build(root: &Path) {
+    match sync(root) {
+        Ok(r) => {
+            for w in r.warnings {
+                eprintln!("warning: icon: {w}");
+            }
+        }
+        Err(e) => eprintln!("warning: icon: {e:#} — icon not synced"),
+    }
+}
+
+/// What `mobiler watch` should also watch for the icon: the source images' directories, and
+/// `mobiler.toml`.
+pub fn watch_paths(root: &Path) -> (Vec<std::path::PathBuf>, Vec<std::path::PathBuf>) {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(Some(spec)) = read_spec(root) {
+        for src in std::iter::once(&spec.foreground).chain(spec.monochrome.as_ref()) {
+            if let Some(parent) = root.join(src).parent().map(Path::to_path_buf).filter(|p| !dirs.contains(p)) {
+                dirs.push(parent);
+            }
+        }
+    }
+    (dirs, vec![root.join("mobiler.toml")])
+}
+
+/// One `mobiler doctor` line about `[icon]`. Checks the settings and the images' headers; decodes nothing.
+pub fn doctor_line(root: &Path) -> String {
+    let checked = read_spec(root).and_then(|spec| {
+        let Some(spec) = spec else { return Ok(None) };
+        let padding = spec.padding.unwrap_or(DEFAULT_PADDING);
+        if padding > 40 {
+            return Err(format!("padding {padding}: must be in 0..=40"));
+        }
+        if spec.background.len() != 7 || crate::splash::Rgba::parse(&spec.background).is_err() {
+            return Err(format!("background {:?}: a colour is #RRGGBB", spec.background));
+        }
+        let side = check_header(root, "foreground", &spec.foreground)?;
+        if let Some(m) = &spec.monochrome {
+            check_header(root, "monochrome", m)?;
+        }
+        Ok(Some((spec, side, padding)))
+    });
+    match checked {
+        Ok(None) => "icon: not set (template launcher icon)".into(),
+        Ok(Some((spec, side, padding))) => {
+            let mono = if spec.monochrome.is_some() { ", monochrome" } else { "" };
+            format!("icon: {} ({side} px) on {}, padding {padding}%{mono}", spec.foreground, spec.background.to_ascii_uppercase())
+        }
+        Err(e) => format!("icon: mobiler.toml [icon] invalid: {e}"),
+    }
 }
 
 #[cfg(test)]
@@ -292,7 +825,7 @@ mod tests {
     }
 
     fn icon(fg: RgbaImage, padding: u32) -> Icon {
-        Icon { fg: working_copy(fg), mono: None, bg: [10, 20, 30], padding }
+        Icon::new(fg, None, [10, 20, 30], padding)
     }
 
     /// A PNG whose header claims `w`×`h` but holds no image data: only the header is ever read.
@@ -450,21 +983,22 @@ mod tests {
     #[test]
     fn composite_matches_padding() {
         let fg = RgbaImage::from_pixel(1024, 1024, Rgba([250, 250, 250, 255]));
-        let icon = icon(fg, 18);
+        let icon = icon(fg.clone(), 18);
         let out = composite(&icon, 1024, false);
         assert_eq!(out.dimensions(), (1024, 1024));
         assert_eq!(out.get_pixel(0, 0).0, [10, 20, 30, 255], "background fills the square");
         assert!(out.pixels().all(|p| p.0[3] == 255), "a square composite is opaque");
         assert_box(bbox(&out, |p| p.0 == [250, 250, 250, 255]), 184, 655);
         // Padding 0: the foreground fills the whole square.
-        let full = composite(&Icon { padding: 0, ..icon.clone() }, 192, false);
+        let full = composite(&Icon::new(fg, None, [10, 20, 30], 0), 192, false);
         assert_box(bbox(&full, |p| p.0 == [250, 250, 250, 255]), 0, 192);
     }
 
     #[test]
     fn large_source_gives_the_same_composite_box() {
         let root = tmp();
-        RgbaImage::from_pixel(4096, 4096, Rgba([250, 250, 250, 255])).save(root.join("big.png")).unwrap();
+        // Just over WORK_PX: the same downscale branch as a 4096 px source, at a fraction of the cost.
+        RgbaImage::from_pixel(2050, 2050, Rgba([250, 250, 250, 255])).save(root.join("big.png")).unwrap();
         RgbaImage::from_pixel(1024, 1024, Rgba([250, 250, 250, 255])).save(root.join("small.png")).unwrap();
         let big = validate(&root, &spec("big.png")).unwrap();
         let small = validate(&root, &spec("small.png")).unwrap();
@@ -557,5 +1091,357 @@ mod tests {
         assert_eq!(fnv1a64_hex(b""), "cbf29ce484222325");
         assert_eq!(fnv1a64_hex(b"a"), "af63dc4c8601ec8c");
         assert_ne!(fnv1a64_hex(b"a\r\n"), fnv1a64_hex(b"a\n"), "binary: CRLF is not folded");
+    }
+
+    // ---------------- sync ----------------
+
+    thread_local! {
+        /// How many source images this thread decoded (the unchanged-input skip must decode none).
+        pub(super) static DECODES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+
+    const ICON_TOML: &str = "[icon]\nforeground = \"brand/fg.png\"\nbackground = \"#0E9F8E\"\n";
+    const PAGE: &str = "<html>\n<head>\n  <title>x</title>\n</head>\n<body></body>\n</html>\n";
+
+    fn put(root: &Path, rel: &str, bytes: &[u8]) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, bytes).unwrap();
+    }
+
+    fn read(root: &Path, rel: &str) -> Vec<u8> {
+        std::fs::read(root.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
+    }
+
+    fn text(root: &Path, rel: &str) -> String {
+        String::from_utf8(read(root, rel)).unwrap()
+    }
+
+    /// A white square on transparency, `side`² px.
+    fn glyph_png(root: &Path, rel: &str, side: u32) {
+        let mut img = RgbaImage::new(side, side);
+        for y in side / 4..side * 3 / 4 {
+            for x in side / 4..side * 3 / 4 {
+                img.put_pixel(x, y, Rgba([255, 255, 255, 255]));
+            }
+        }
+        std::fs::create_dir_all(root.join(rel).parent().unwrap()).unwrap();
+        img.save(root.join(rel)).unwrap();
+    }
+
+    /// A scaffolded app (every template file, as `mobiler new` writes them) with a web page, a 1024 px
+    /// foreground in `brand/` and `toml` as its mobiler.toml.
+    fn app(toml: &str) -> std::path::PathBuf {
+        let root = tmp();
+        crate::upgrade::test_support::scaffold(&root);
+        // The scaffold leaves out binaries (upgrade never touches them); `mobiler new` writes them.
+        for (d, _) in LEGACY_SIZES {
+            for name in ["ic_launcher.webp", "ic_launcher_round.webp"] {
+                put(&root, &mipmap(d, name), template(&mipmap(d, name)));
+            }
+        }
+        put(&root, IOS_PNG, template(IOS_PNG));
+        put(&root, WEB_INDEX, PAGE.as_bytes());
+        glyph_png(&root, "brand/fg.png", 1024);
+        put(&root, "mobiler.toml", toml.as_bytes());
+        root
+    }
+
+    /// Every file under `root` (bytes and modification time), except the ones in `skip`.
+    fn snapshot(root: &Path) -> BTreeMap<std::path::PathBuf, (Vec<u8>, std::time::SystemTime)> {
+        fn walk(d: &Path, out: &mut BTreeMap<std::path::PathBuf, (Vec<u8>, std::time::SystemTime)>) {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else {
+                    let m = std::fs::metadata(&p).unwrap().modified().unwrap();
+                    out.insert(p.clone(), (std::fs::read(&p).unwrap(), m));
+                }
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(root, &mut out);
+        out
+    }
+
+    fn template(rel: &str) -> &'static [u8] {
+        stock(rel).unwrap_or_else(|| panic!("{rel} is not in the template"))
+    }
+
+    fn android_icon_files(mono: bool) -> Vec<String> {
+        let mut v: Vec<String> = Vec::new();
+        for (d, _) in LAYER_SIZES {
+            v.push(mipmap(d, "mobiler_icon_foreground.png"));
+            if mono {
+                v.push(mipmap(d, "mobiler_icon_monochrome.png"));
+            }
+        }
+        v.push(COLORS.into());
+        v
+    }
+
+    #[test]
+    fn writes_every_platform() {
+        let root = app(ICON_TOML);
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        for (d, px) in LAYER_SIZES {
+            assert_eq!(image::image_dimensions(root.join(mipmap(d, "mobiler_icon_foreground.png"))).unwrap(), (px, px));
+            assert!(!root.join(mipmap(d, "mobiler_icon_monochrome.png")).exists());
+        }
+        for (d, px) in LEGACY_SIZES {
+            for name in ["ic_launcher.webp", "ic_launcher_round.webp"] {
+                let rel = mipmap(d, name);
+                let bytes = read(&root, &rel);
+                assert_ne!(bytes, template(&rel), "{rel} rewritten");
+                let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::WebP).unwrap();
+                assert_eq!((img.width(), img.height()), (px, px), "{rel}");
+            }
+        }
+        assert!(text(&root, COLORS).contains("#0E9F8E"));
+        for rel in ANYDPI {
+            assert_eq!(text(&root, rel), android_adaptive_xml(false), "{rel}");
+        }
+        let ios = image::load_from_memory_with_format(&read(&root, IOS_PNG), image::ImageFormat::Png).unwrap();
+        assert_eq!((ios.color(), ios.width()), (image::ColorType::Rgb8, 1024));
+        for px in WEB_SIZES {
+            assert_eq!(image::image_dimensions(root.join(web_png(px))).unwrap(), (px, px));
+        }
+        let html = text(&root, WEB_INDEX);
+        let (b, e, head) = (html.find(WEB_BEGIN).unwrap(), html.find(WEB_END).unwrap(), html.find("</head>").unwrap());
+        assert!(b < e && e < head, "{html}");
+        for line in web_lines(true) {
+            assert!(html[b..e].contains(&line), "{html}");
+        }
+        let ledger = read_ledger(&root).unwrap();
+        assert!(ledger.active && ledger.input.is_some());
+        for rel in targets(&root, false) {
+            assert_eq!(ledger.files.get(&rel), Some(&fnv1a64_hex(&read(&root, &rel))), "{rel} in the ledger");
+        }
+        // A monochrome image adds its layers and the XML names them; dropping it removes them again.
+        glyph_png(&root, "brand/mono.png", 1024);
+        put(&root, "mobiler.toml", format!("{ICON_TOML}monochrome = \"brand/mono.png\"\n").as_bytes());
+        assert!(sync(&root).unwrap().warnings.is_empty());
+        for f in android_icon_files(true) {
+            assert!(root.join(&f).exists(), "{f}");
+        }
+        assert_eq!(text(&root, ANYDPI[0]), android_adaptive_xml(true));
+        put(&root, "mobiler.toml", ICON_TOML.as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        assert!(!root.join(mipmap("mdpi", "mobiler_icon_monochrome.png")).exists(), "{r:?}");
+        assert_eq!(text(&root, ANYDPI[1]), android_adaptive_xml(false));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn second_sync_is_a_no_op() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let r = sync(&root).unwrap();
+        assert!(r.written.is_empty() && r.removed.is_empty() && r.warnings.is_empty(), "{r:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unchanged_inputs_skip_decoding() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let before = snapshot(&root);
+        DECODES.with(|n| n.set(0));
+        let r = sync(&root).unwrap();
+        assert!(r.written.is_empty() && r.warnings.is_empty(), "{r:?}");
+        assert_eq!(DECODES.with(std::cell::Cell::get), 0, "the same inputs decode nothing");
+        assert_eq!(snapshot(&root), before, "no file touched (bytes and mtimes)");
+        // A file the sync wrote, changed (or gone): regenerated.
+        std::fs::remove_file(root.join(IOS_PNG)).unwrap();
+        let r = sync(&root).unwrap();
+        assert_eq!(DECODES.with(std::cell::Cell::get), 1);
+        assert_eq!(r.written, [IOS_PNG], "only what differs is rewritten");
+        // A changed setting: decoded again.
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#112233").as_bytes());
+        sync(&root).unwrap();
+        assert_eq!(DECODES.with(std::cell::Cell::get), 2);
+        assert!(text(&root, COLORS).contains("#112233"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hand_edited_launcher_xml_skips_android_only() {
+        let root = app(ICON_TOML);
+        // Saldo's own adaptive icon, before its reset.
+        let mine = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <background android:drawable=\"@drawable/ic_launcher_background\" />\n    <foreground android:drawable=\"@drawable/saldo_launcher_foreground\" />\n</adaptive-icon>\n";
+        put(&root, ANYDPI[0], mine.as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(ANYDPI[0]) && w.contains("Android")), "{:?}", r.warnings);
+        assert!(!r.warnings.iter().any(|w| w.contains(ANYDPI[1])), "the stock round icon isn't named: {:?}", r.warnings);
+        assert_eq!(text(&root, ANYDPI[0]), mine);
+        assert_eq!(read(&root, ANYDPI[1]), template(ANYDPI[1]), "nothing of Android's written");
+        assert_eq!(read(&root, &mipmap("mdpi", "ic_launcher.webp")), template(&mipmap("mdpi", "ic_launcher.webp")));
+        for f in android_icon_files(false) {
+            assert!(!root.join(&f).exists(), "{f}");
+        }
+        assert_ne!(read(&root, IOS_PNG), template(IOS_PNG), "iOS still written");
+        assert!(root.join(web_png(180)).exists() && text(&root, WEB_INDEX).contains(WEB_BEGIN), "web still written");
+        assert!(!read_ledger(&root).unwrap().files.keys().any(|k| k.starts_with("Android/")), "nothing of Android's recorded");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn broken_foreground_writes_nothing() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let before = snapshot(&root);
+        put(&root, "brand/fg.png", b"not a png");
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#000000").as_bytes());
+        let mut before = before;
+        for rel in ["brand/fg.png", "mobiler.toml"] {
+            before.remove(&root.join(rel));
+        }
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains("brand/fg.png")), "{:?}", r.warnings);
+        assert!(r.written.is_empty() && r.removed.is_empty(), "{r:?}");
+        let mut after = snapshot(&root);
+        for rel in ["brand/fg.png", "mobiler.toml"] {
+            after.remove(&root.join(rel));
+        }
+        assert_eq!(after, before, "the tree is byte-identical");
+        // A bad image on a first sync writes nothing either.
+        let fresh = app(ICON_TOML);
+        put(&fresh, "brand/fg.png", b"not a png");
+        let before = snapshot(&fresh);
+        sync(&fresh).unwrap();
+        assert_eq!(snapshot(&fresh), before);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&fresh);
+    }
+
+    #[test]
+    fn removing_icon_restores_stock() {
+        let root = app(&format!("{ICON_TOML}monochrome = \"brand/fg.png\"\n"));
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", b"");
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        let mut stocked: Vec<String> = ANYDPI.map(String::from).to_vec();
+        for (d, _) in LEGACY_SIZES {
+            stocked.push(mipmap(d, "ic_launcher.webp"));
+            stocked.push(mipmap(d, "ic_launcher_round.webp"));
+        }
+        stocked.push(IOS_PNG.into());
+        for rel in &stocked {
+            assert_eq!(read(&root, rel), template(rel), "{rel} back to the template");
+        }
+        for rel in android_icon_files(true).into_iter().chain(WEB_SIZES.map(web_png)) {
+            assert!(!root.join(&rel).exists(), "{rel} removed");
+        }
+        assert!(!root.join(WEB_DIR).exists(), "the emptied web/icon goes");
+        let html = text(&root, WEB_INDEX);
+        assert!(html.contains(WEB_BEGIN) && !html.contains("mobiler-icon-"), "web block emptied: {html}");
+        assert!(!read_ledger(&root).unwrap().active, "the ledger stays, inactive");
+        let r = sync(&root).unwrap();
+        assert!(r.written.is_empty() && r.removed.is_empty(), "undo happens once: {r:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn removed_and_added_back_still_owns_its_files() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#123456").as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        assert!(text(&root, COLORS).contains("#123456"));
+        assert_eq!(text(&root, ANYDPI[0]), android_adaptive_xml(false));
+        assert_ne!(read(&root, IOS_PNG), template(IOS_PNG));
+        // A file the sync wrote, then the section changed: still the sync's by the ledger (a binary has
+        // no header).
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#654321").as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty() && r.written.contains(&IOS_PNG.to_string()), "{r:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn no_png_beside_webp() {
+        let root = app(&format!("{ICON_TOML}monochrome = \"brand/fg.png\"\n"));
+        sync(&root).unwrap();
+        for e in std::fs::read_dir(root.join(RES)).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !name.starts_with("mipmap-") {
+                continue;
+            }
+            let files: Vec<String> =
+                std::fs::read_dir(e.path()).unwrap().flatten().map(|f| f.file_name().to_string_lossy().to_string()).collect();
+            for f in &files {
+                if let Some(stem) = f.strip_suffix(".webp") {
+                    assert!(!files.contains(&format!("{stem}.png")), "{name}: {stem} is both .png and .webp");
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn foreign_file_in_web_icon_survives() {
+        let root = app(ICON_TOML);
+        put(&root, "web/icon/mine.svg", b"<svg/>");
+        sync(&root).unwrap();
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        assert_eq!(read(&root, "web/icon/mine.svg"), b"<svg/>");
+        assert!(!root.join(web_png(32)).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn upgrade_reports_nothing_for_icon_files() {
+        let root = app(&format!("{ICON_TOML}monochrome = \"brand/fg.png\"\n"));
+        assert!(sync(&root).unwrap().warnings.is_empty());
+        let ours: Vec<String> = targets(&root, true).into_iter().chain([LEDGER.to_string()]).collect();
+        for rel in ANYDPI {
+            assert!(crate::upgrade::SEED_PATHS.contains(&rel), "{rel} is an upgrade seed");
+        }
+        let before: Vec<Vec<u8>> = ours.iter().map(|r| read(&root, r)).collect();
+        for apply in [false, true] {
+            let touched = crate::upgrade::test_support::touched(&root, apply);
+            assert!(!touched.iter().any(|p| ours.contains(&p.replace('\\', "/"))), "apply={apply}: {touched:?}");
+            let now: Vec<Vec<u8>> = ours.iter().map(|r| read(&root, r)).collect();
+            assert!(now == before, "apply={apply}: an icon file changed");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn no_section_touches_nothing() {
+        let root = app("[splash]\nbackground = \"#FFFFFF\"\n");
+        let before = snapshot(&root);
+        let r = sync(&root).unwrap();
+        assert!(r.written.is_empty() && r.removed.is_empty() && r.warnings.is_empty(), "{r:?}");
+        std::fs::remove_file(root.join("mobiler.toml")).unwrap();
+        assert!(sync(&root).unwrap().written.is_empty());
+        put(&root, "mobiler.toml", b"[splash]\nbackground = \"#FFFFFF\"\n");
+        assert_eq!(snapshot(&root).len(), before.len(), "no ledger either");
+        assert!(!root.join(LEDGER).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn watch_paths_and_doctor_line() {
+        let root = app(&format!("{ICON_TOML}monochrome = \"art/mono.png\"\n"));
+        glyph_png(&root, "art/mono.png", 1024);
+        let (dirs, files) = watch_paths(&root);
+        assert_eq!(dirs, [root.join("brand"), root.join("art")]);
+        assert_eq!(files, [root.join("mobiler.toml")]);
+        assert_eq!(doctor_line(&root), "icon: brand/fg.png (1024 px) on #0E9F8E, padding 18%, monochrome");
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "teal").as_bytes());
+        assert!(doctor_line(&root).starts_with("icon: mobiler.toml [icon] invalid: "), "{}", doctor_line(&root));
+        put(&root, "mobiler.toml", b"");
+        assert_eq!(doctor_line(&root), "icon: not set (template launcher icon)");
+        assert!(watch_paths(&root).0.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

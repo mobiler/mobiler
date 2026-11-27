@@ -11,3 +11,12 @@ license = "MIT OR Apache-2.0"
 anyhow = "1.0.102"
 crux_core = "0.20.0"
 serde = "1.0.228"
+
+# The `[icon]` sync resamples and encodes through `image` (mobiler/src/icon.rs `lanczos`): optimise it and its PNG
+# encoder in dev and test builds too, or each resize takes ~1 s and the icon tests take minutes.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3

@@ -62,12 +62,15 @@ enum Class {
     Seed,
 }
 
-/// Seed files (ADR-0042): the launch-window values a later `[splash]` sync writes, app-owned meanwhile.
+/// Seed files (ADR-0042): the launch-window values a later `[splash]` sync writes, and the adaptive
+/// launcher icons the `[icon]` sync writes; app-owned meanwhile (an app's own icon XML is never merged).
 pub(crate) const SEED_PATHS: &[&str] = &[
     "Android/app/src/main/res/values/mobiler_splash.xml",
     "Android/app/src/main/res/values-night/mobiler_splash.xml",
     "Android/app/src/main/res/drawable/mobiler_launch.xml",
     "iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset/Contents.json",
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher.xml",
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml",
 ];
 
 /// Classify a template file by its app-relative path + final (substituted) contents.

@@ -1078,6 +1078,7 @@ fn app_owned(rel: &str) -> bool {
         || name == "gradlew.bat"
         || rel.ends_with("mobiler_splash.xml")
         || rel == "Android/app/src/main/res/drawable/mobiler_launch.xml"
+        || rel.starts_with("Android/app/src/main/res/mipmap-anydpi/ic_launcher")
 }
 
 /// ADR-0063 (superseding ADR-0060): every demo but barbershop is CLI-managed and equals the current template.
