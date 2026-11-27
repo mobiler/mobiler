@@ -95,17 +95,16 @@ fn basename(dir: &str) -> &str {
     dir.rsplit('/').next().unwrap_or(dir)
 }
 
-/// A YAML scalar for `name`: plain unless YAML would read it as something other than a string (a number,
-/// a boolean, null) or it has a space. `clean_dir` already kept `"` and `\` out.
+/// A YAML scalar for `name`: plain only when it is an identifier (`[A-Za-z_][A-Za-z0-9_-]*`) that isn't
+/// a YAML keyword, so no YAML version can read it as a number (`0x1F`, `1e5`, `.5`, …), a boolean or
+/// null; quoted otherwise. `clean_dir` already kept `"` and `\` out.
 fn yaml_string(name: &str) -> String {
+    let mut chars = name.chars();
+    let identifier = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     let lower = name.to_ascii_lowercase();
     let keyword = ["true", "false", "yes", "no", "on", "off", "y", "n", "null", "~"].contains(&lower.as_str());
-    let numeric = name.chars().all(|c| c.is_ascii_digit() || "._+-".contains(c));
-    if keyword || numeric || name.contains(' ') || name.starts_with(['-', '.']) {
-        format!("\"{name}\"")
-    } else {
-        name.to_string()
-    }
+    if identifier && !keyword { name.to_string() } else { format!("\"{name}\"") }
 }
 
 /// The lines between the `mobiler:assets` markers in `Android/app/build.gradle.kts`: copy the folder into
@@ -187,6 +186,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
                     ));
                 }
                 source_overlap_warnings(root, &spec.dir, &mut report);
+                report.warnings.extend(symlink_warnings(root, &path));
                 Some(clean_dir(&spec.dir).expect("validated").to_string())
             }
             Err(e) => {
@@ -318,6 +318,31 @@ fn source_overlap_warnings(root: &Path, dir: &str, report: &mut SyncReport) {
     }
 }
 
+/// One warning per symlink (file or folder) inside the assets folder: Gradle's `Sync` and trunk's
+/// `copy-dir` follow it, so its target would ship inside the app. Linked folders aren't walked into.
+fn symlink_warnings(root: &Path, dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, d: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(d) else { return };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for e in entries {
+            let Ok(t) = e.file_type() else { continue };
+            let p = e.path();
+            if t.is_symlink() {
+                let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
+                out.push(format!(
+                    "{rel} is a symlink — the build copies its target into the app; replace it with a real file or folder (or move it out of [assets] dir)"
+                ));
+            } else if t.is_dir() {
+                walk(root, &p, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, dir, &mut out);
+    out
+}
+
 // ---------------- CLI ----------------
 
 /// `mobiler assets sync` — run the sync from the app root and print what happened. Fails (non-zero exit)
@@ -383,7 +408,10 @@ pub fn doctor_line(root: &Path) -> String {
     match read_spec(root) {
         Ok(None) => "assets: not set (no bundled files)".into(),
         Ok(Some(spec)) => match validate(root, &spec) {
-            Ok(path) if path.is_dir() => format!("assets: {} ({} files)", spec.dir, count_files(&path)),
+            Ok(path) if path.is_dir() => {
+                let line = format!("assets: {} ({} files)", spec.dir, count_files(&path));
+                symlink_warnings(root, &path).iter().fold(line, |l, w| l + "\n  assets: warning: " + w)
+            }
             Ok(_) => format!("assets: {} (folder missing)", spec.dir),
             Err(e) => format!("assets: invalid: {e}"),
         },
@@ -469,7 +497,38 @@ mod tests {
         assert_eq!(yml_info_lines(Some("img/2024")), ["MobilerAssetsFolder: \"2024\""]);
         assert_eq!(yml_info_lines(Some("yes")), ["MobilerAssetsFolder: \"yes\""]);
         assert_eq!(yml_info_lines(Some("my images")), ["MobilerAssetsFolder: \"my images\""]);
-        assert_eq!(yml_info_lines(Some("slike-č")), ["MobilerAssetsFolder: slike-č"]);
+        // YAML number forms beyond plain digits: hex, octal, binary, exponent, leading dot.
+        for n in ["0x1F", "0o17", "0b101", "1e5", ".5", "1_000", "-1", "+1", ".inf", "Yes", "NULL", "On", "slike-č"] {
+            assert_eq!(yml_info_lines(Some(n)), [format!("MobilerAssetsFolder: \"{n}\"")], "{n}");
+        }
+        for n in ["bundled", "assets", "my_images", "img-2024", "_x"] {
+            assert_eq!(yml_info_lines(Some(n)), [format!("MobilerAssetsFolder: {n}")], "{n}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_inside_dir_warns() {
+        let root = app("[assets]\n");
+        let outside = tmp();
+        put(&outside, "secret.txt", b"s");
+        put(&outside, "deep/inner.png", b"i");
+        put(&root, "assets/ok.png", b"ok");
+        fs::create_dir_all(root.join("assets/sub")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("assets/sub/linked.txt")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("assets/linkdir")).unwrap();
+        let r = sync(&root).unwrap();
+        assert!(!r.failed, "{r:?}");
+        let links: Vec<&String> = r.warnings.iter().filter(|w| w.contains("symlink")).collect();
+        assert_eq!(links.len(), 2, "one per link, a linked folder isn't followed: {:?}", r.warnings);
+        for rel in ["assets/sub/linked.txt", "assets/linkdir"] {
+            assert!(links.iter().any(|w| w.contains(rel) && w.contains("copies its target into the app")), "{rel}: {links:?}");
+        }
+        assert!(read(&root, GRADLE).contains("../assets"), "it still syncs");
+        let doc = doctor_line(&root);
+        assert!(doc.contains("assets/sub/linked.txt") && doc.contains("assets/linkdir"), "{doc}");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]
