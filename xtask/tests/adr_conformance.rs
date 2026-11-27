@@ -1400,7 +1400,11 @@ fn adr_0069_asset_resolvers_follow_one_rule() {
     }
 
     // Android: `assetPath` validates; `assetModel` (Coil) and the poster loader resolve under `mobiler-assets/`.
-    for path in ["demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt"] {
+    // Barbershop (the reference shell, ADR-0015) and the template copies every new app gets (ADR-0070).
+    for path in [
+        "demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt",
+        "mobiler/templates/Android/app/src/main/java/__PACKAGE_PATH__/MainActivity.kt",
+    ] {
         let code: String = read(path).lines().map(kotlin_code).collect::<Vec<_>>().join("\n");
         let check = fn_body(&code, "private fun assetPath(").unwrap_or_else(|| panic!("ADR-0069: {path} has no assetPath"));
         for needle in [r#"startsWith("asset:")"#, "path.isEmpty()", r#"path.startsWith("/")"#, r"path.contains('\\')", "path.split('/')", r#"it == """#, r#"it == ".""#, r#"it == "..""#] {
@@ -1418,7 +1422,7 @@ fn adr_0069_asset_resolvers_follow_one_rule() {
     }
 
     // iOS: `assetURL` validates per Unicode scalar and resolves under the `MobilerAssetsFolder` folder.
-    for path in ["demos/barbershop/iOS/Sources/Render.swift"] {
+    for path in ["demos/barbershop/iOS/Sources/Render.swift", "mobiler/templates/iOS/Sources/Render.swift"] {
         let code = live_code(&read(path));
         let check = fn_body(&code, "fileprivate func assetURL(").unwrap_or_else(|| panic!("ADR-0069: {path} has no assetURL"));
         for needle in [
@@ -1440,5 +1444,126 @@ fn adr_0069_asset_resolvers_follow_one_rule() {
         let is_asset = fn_body(&code, "fileprivate func isAssetSource(").unwrap_or_else(|| panic!("ADR-0069: {path} has no isAssetSource"));
         assert!(is_asset.contains(r#"source.unicodeScalars.starts(with: "asset:".unicodeScalars)"#), "ADR-0069: {path} isAssetSource must test the prefix per scalar");
         assert!(!code.contains(r#"hasPrefix("asset:")"#), "ADR-0069: {path} tests `asset:` with hasPrefix (grapheme clusters); use isAssetSource");
+    }
+}
+
+/// The lines of the YAML mapping under the `key:` line at `indent` spaces: from the line after it up to
+/// the next non-blank, non-comment line at `indent` spaces or less.
+fn yaml_section<'a>(yml: &'a str, indent: usize, key: &str) -> Option<&'a str> {
+    let head = format!("\n{}{key}:", " ".repeat(indent));
+    let start = yml.find(&head)? + head.len();
+    let start = start + yml[start..].find('\n')? + 1;
+    let mut end = start;
+    for line in yml[start..].split_inclusive('\n') {
+        let t = line.trim_start();
+        let depth = line.len() - t.len();
+        if !t.trim().is_empty() && !t.starts_with('#') && depth <= indent {
+            break;
+        }
+        end += line.len();
+    }
+    Some(&yml[start..end])
+}
+
+#[test]
+fn yaml_section_stops_at_the_next_sibling() {
+    let yml = "t:\n  a:\n    - x\n    # c\n  # mobiler:m-begin\n  b:\n    k: 1\n";
+    assert_eq!(yaml_section(yml, 2, "a"), Some("    - x\n    # c\n  # mobiler:m-begin\n"));
+    assert_eq!(yaml_section(yml, 2, "b"), Some("    k: 1\n"));
+    assert_eq!(yaml_section(yml, 2, "z"), None);
+}
+
+/// One `begin`/`end` marker pair in `text`, in order, with nothing but whitespace between: the template
+/// ships the blocks empty, and the `[assets]` sync fills them.
+fn one_empty_pair(text: &str, begin: &str, end: &str, what: &str) -> (usize, usize) {
+    assert_eq!(text.matches(begin).count(), 1, "ADR-0070: {what} must have exactly one `{begin}`");
+    assert_eq!(text.matches(end).count(), 1, "ADR-0070: {what} must have exactly one `{end}`");
+    let (b, e) = (text.find(begin).unwrap(), text.find(end).unwrap());
+    assert!(b < e, "ADR-0070: {what}: `{begin}` must come before `{end}`");
+    assert!(text[b + begin.len()..e].trim().is_empty(), "ADR-0070: {what}: the template's block must be empty");
+    (b, e)
+}
+
+/// ADR-0070: the `[assets]` sync fills marker blocks the template ships (it never inserts them): one empty
+/// pair in `app/build.gradle.kts` after the `android {}` block (so `android.sourceSets` exists), and in
+/// `project.yml` the `assets-sources` pair inside the target's `sources` and the `assets-info` pair inside
+/// `info.properties`. The markers are the ones `assets.rs` fills, and the Gradle copy lands in an ignored
+/// build folder, so nothing is committed twice.
+#[test]
+fn adr_0070_asset_markers() {
+    let gradle = read("mobiler/templates/Android/app/build.gradle.kts");
+    let (begin, _) = one_empty_pair(&gradle, "// mobiler:assets-begin", "// mobiler:assets-end", "app/build.gradle.kts");
+    let android = gradle.find("\nandroid {").expect("ADR-0070: build.gradle.kts has no `android {` block") + 1;
+    let block = fn_body(&gradle[android..], "android {").expect("the android block closes");
+    assert!(android + block.len() < begin, "ADR-0070: the mobiler:assets markers must sit after the `android {{}}` block");
+
+    let yml = read("mobiler/templates/iOS/project.yml");
+    let target = yaml_section(&yml, 0, "targets").expect("targets in project.yml");
+    let sources = yaml_section(target, 4, "sources").expect("ADR-0070: the target has no `sources`");
+    one_empty_pair(sources, "# mobiler:assets-sources-begin", "# mobiler:assets-sources-end", "project.yml target sources");
+    let info = yaml_section(target, 4, "info").expect("ADR-0070: the target has no `info`");
+    let properties = yaml_section(info, 6, "properties").expect("ADR-0070: the target has no `info.properties`");
+    one_empty_pair(properties, "# mobiler:assets-info-begin", "# mobiler:assets-info-end", "project.yml info.properties");
+    // Inside `properties`, at its keys' depth (not nested under another key such as UILaunchScreen).
+    let info_begin = properties.lines().find(|l| l.contains("# mobiler:assets-info-begin")).unwrap();
+    assert_eq!(info_begin.len() - info_begin.trim_start().len(), 8, "ADR-0070: assets-info markers must sit at the properties' key depth");
+    for pair in ["assets-sources", "assets-info"] {
+        assert_eq!(yml.matches(&format!("# mobiler:{pair}-begin")).count(), 1, "ADR-0070: project.yml has a second {pair} pair");
+    }
+
+    // The markers are the ones the sync looks for.
+    let sync = read("mobiler/src/assets.rs");
+    for marker in [
+        "\"// mobiler:assets-begin\"",
+        "\"// mobiler:assets-end\"",
+        "\"# mobiler:assets-sources-begin\"",
+        "\"# mobiler:assets-sources-end\"",
+        "\"# mobiler:assets-info-begin\"",
+        "\"# mobiler:assets-info-end\"",
+    ] {
+        assert!(sync.contains(marker), "ADR-0070: assets.rs no longer fills {marker}");
+    }
+    // The Gradle copy goes into app/build/, which the template ignores: no committed copies.
+    assert!(sync.contains(r#"layout.buildDirectory.dir("generated/mobiler-assets/mobiler-assets")"#), "ADR-0070: the Gradle copy must land in build/generated");
+    let ignore = read("mobiler/templates/.gitignore");
+    assert!(ignore.lines().any(|l| l.trim() == "/Android/**/build/"), "ADR-0070: the template must ignore Android build folders");
+}
+
+/// ADR-0071: the two adaptive launcher XMLs the `[icon]` sync writes are upgrade seeds (extending ADR-0042's
+/// list as ADR-0048 did), so `upgrade` never merges them; the template's stock icon keeps a `<monochrome>`
+/// layer (the themed icon is never lost, with or without `[icon]`); the legacy rasters are `.webp` in the
+/// template and the sync writes them under the same names, so no `.png` twin can exist; and the ledger the
+/// sync owns its binaries by isn't ignored by the template.
+#[test]
+fn adr_0071_icon_seeds_and_marker() {
+    let upgrade = read("mobiler/src/upgrade.rs");
+    let seeds = &upgrade[upgrade.find("const SEED_PATHS").expect("SEED_PATHS")..];
+    let seeds = &seeds[..seeds.find("];").expect("end of SEED_PATHS")];
+    let res = "mobiler/templates/Android/app/src/main/res";
+    for name in ["ic_launcher.xml", "ic_launcher_round.xml"] {
+        let rel = format!("Android/app/src/main/res/mipmap-anydpi/{name}");
+        assert!(seeds.contains(&format!("\"{rel}\"")), "ADR-0071: {rel} is written by the [icon] sync but isn't a seed");
+        let xml = read(&format!("{res}/mipmap-anydpi/{name}"));
+        assert!(xml.contains("<monochrome "), "ADR-0071: the template's {name} lost its <monochrome> layer");
+    }
+
+    let icon = live_code(&read("mobiler/src/icon.rs"));
+    let sync = &icon[..icon.find("mod tests").unwrap_or(icon.len())];
+    for name in ["\"ic_launcher.webp\"", "\"ic_launcher_round.webp\""] {
+        assert!(sync.contains(name), "ADR-0071: icon.rs no longer writes {name}");
+    }
+    for twin in ["\"ic_launcher.png\"", "\"ic_launcher_round.png\""] {
+        assert!(!sync.contains(twin), "ADR-0071: icon.rs writes {twin}, a twin of the template's .webp");
+    }
+    for density in ["mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"] {
+        for name in ["ic_launcher", "ic_launcher_round"] {
+            let dir = root().join(format!("{res}/mipmap-{density}"));
+            assert!(dir.join(format!("{name}.webp")).is_file(), "ADR-0071: the template has no mipmap-{density}/{name}.webp");
+            assert!(!dir.join(format!("{name}.png")).exists(), "ADR-0071: the template has mipmap-{density}/{name}.png beside its .webp");
+        }
+    }
+    let ignore = read("mobiler/templates/.gitignore");
+    for pattern in [".mobiler", ".mobiler/", "/.mobiler/", ".mobiler/icon.json", "/.mobiler/icon.json", "*.json"] {
+        assert!(!ignore.lines().any(|l| l.trim() == pattern), "ADR-0071: the template ignores `{pattern}`; .mobiler/icon.json must be committed");
     }
 }
