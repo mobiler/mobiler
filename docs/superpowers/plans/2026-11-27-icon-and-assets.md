@@ -161,7 +161,6 @@ Swift/SwiftUI + XcodeGen.
   after the `android { }` block.
 - Modify: `mobiler/templates/iOS/project.yml` — empty `# mobiler:assets-sources-begin/end` as the last
   entry of the target's `sources`; empty `# mobiler:assets-info-begin/end` inside `info.properties`.
-- Modify: `mobiler/src/upgrade.rs` — `MOBILER_WEB_PIN` → `"0.51"`.
 
 - [ ] **Step 1:** Port; `cargo test -p mobiler` green (template tests, upgrade tests).
 - [ ] **Step 2:** Commit.
@@ -273,15 +272,15 @@ ADR).
   for icon paths; Review Focus 5); `no_section_touches_nothing`.
 - [ ] **Step 2–4:** fail → implement → pass; whole `cargo test --workspace` green. **Step 5:** commit.
 
-### Task 9: ADR-0069, ADR-0070, conformance with mutation proofs
+### Task 9: ADR-0070, ADR-0071, conformance with mutation proofs
 
-**Files:** Create `docs/adr/ADR-0069-icon-sync.md`, `docs/adr/ADR-0070-bundled-assets.md`; modify
+**Files:** Create `docs/adr/ADR-0070-assets-sync.md`, `docs/adr/ADR-0071-icon-sync.md` (ADR-0069, the `asset:` scheme, landed in the libs PR; extend its conformance test to the template copies); modify
 `docs/adr/index.md`, `xtask/tests/adr_conformance.rs`.
 
 - [ ] **Step 1:** Write both ADRs in the README format (provenance `[recorded: the spec]`), Conformance
   naming the tests below plus the Task 6/8 unit tests that carry the invariants.
-- [ ] **Step 2:** Conformance tests: `adr_0069_icon_seeds_and_marker` (both `ic_launcher*.xml` in
-  `SEED_PATHS`; template `ic_launcher.xml` has a `<monochrome>`); `adr_0070_asset_markers_and_resolvers`
+- [ ] **Step 2:** Conformance tests: `adr_0071_icon_seeds_and_marker` (both `ic_launcher*.xml` in
+  `SEED_PATHS`; template `ic_launcher.xml` has a `<monochrome>`); `adr_0070_asset_markers` (resolvers: extend `adr_0069_asset_resolvers_follow_one_rule` to the template files)
   (gradle has one `mobiler:assets` pair after `android {`; project.yml has the `assets-sources` pair inside
   the target `sources` and the `assets-info` pair inside `info.properties`; the template Kotlin and Swift
   and `mobiler-web/src/lib.rs` each contain their resolver and reject `".."`, `"\\"` and a leading `/`).

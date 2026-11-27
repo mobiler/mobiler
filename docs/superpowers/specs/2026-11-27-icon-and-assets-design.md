@@ -6,7 +6,7 @@ Requests: `docs/requests/2026-11-27-app-icon.md`, `docs/requests/2026-11-26-bund
 not committed; their substance is restated here)
 Constrained by: ADR-0001, ADR-0007, ADR-0009, ADR-0013, ADR-0022, ADR-0023, ADR-0035, ADR-0039, ADR-0042,
 ADR-0046, ADR-0048, ADR-0063, ADR-0066
-New ADRs: ADR-0069 (`[icon]` sync), ADR-0070 (`[assets]` and the `asset:` scheme)
+New ADRs: ADR-0069 (the `asset:` scheme), ADR-0070 (`[assets]` sync), ADR-0071 (`[icon]` sync) — see the 2026-11-27 amendment
 
 ## 1. Intent
 
@@ -195,7 +195,7 @@ when `[splash]` has no logo. Nothing to change; worth a line in the README.
    for image, avatar and video poster, plus tests. Publish `mobiler-web`. Barbershop (the reference shell,
    ADR-0015) gets the native Android/iOS renderer changes in this PR too, so the CLI PR ports from its diff.
 2. **CLI PR**: `assets.rs`, `icon.rs`, the template marker blocks and renderer changes, `SEED_PATHS`
-   additions, the hooks, `MOBILER_WEB_PIN` bump (ADR-0066), ADR-0069 + ADR-0070 with conformance tests and
+   additions, the hooks, `MOBILER_WEB_PIN` bump (ADR-0066), ADR-0070 + ADR-0071 with conformance tests (ADR-0069 lands in the libs PR) and
    mutation proofs, `mobiler upgrade --apply` in every CLI-managed demo (ADR-0063), READMEs + site +
    Saldo tutorial.
 3. **Saldo adopts `[icon]`** in the CLI PR (maintainer: yes, 2026-11-27, since we can redraw it). The
@@ -210,10 +210,10 @@ when `[splash]` has no logo. Nothing to change; worth a line in the README.
 
 ## 7. Conformance (ADR tests, each proven by a mutation)
 
-- ADR-0069: the icon markers and seed paths ship in the template; a hand-edited icon file is left alone
+- ADR-0071: the icon markers and seed paths ship in the template; a hand-edited icon file is left alone
   with a warning; a bad PNG writes nothing; removing `[icon]` restores stock; no `.png` and `.webp`
   share a resource name after a sync.
-- ADR-0070: the template's `mobiler:assets` marker pairs ship (one in `build.gradle.kts`, two in
+- ADR-0070 (and ADR-0069 for the resolvers): the template's `mobiler:assets` marker pairs ship (one in `build.gradle.kts`, two in
   `project.yml`); an `asset:` path with `..`, a leading `/` or a
   `\` is rejected by each resolver (web unit test; Kotlin/Swift by a source-level conformance check that
   the validator exists, as earlier ADRs did); `upgrade` never writes under `<dir>`.
@@ -235,3 +235,16 @@ when `[splash]` has no logo. Nothing to change; worth a line in the README.
 - Verify first that trunk's `copy-dir` accepts `../<dir>` with `data-target-path`. If it doesn't, stop and
   ask: every fallback (a symlink, a copy) changes approach A.
 - Wording of warnings and README text.
+
+## Amendment 2026-11-27 (during the libs PR)
+
+- The `asset:` contract (scheme, rule, `mobiler-assets/` prefix, per-shell resolution) is fixed irreversibly by
+  the `mobiler-web` 0.51.0 publish, so its ADR ships in the libs PR as **ADR-0069**. The `[assets]` sync becomes
+  **ADR-0070** and the `[icon]` sync **ADR-0071**, both in the CLI PR.
+- Validators compare per byte, code unit or Unicode scalar, never per grapheme (a Swift `split` on a String
+  let `../` followed by a combining mark through as one segment).
+- Android percent-encodes each path segment for Coil, as the web does, so names with `#`, `?` or `%` load on every shell.
+- Barbershop uses `[assets] dir = "assets/bundled"`: an app's `assets/` often already holds font and splash
+  sources, which the default folder would bundle a second time. The CLI warns when a `[fonts]`, `[splash]` or
+  `[icon]` source lies under `dir` (generalising §5.1's icon-only warning).
+- `MOBILER_WEB_PIN` moves to 0.51 in the libs PR (ADR-0066's conformance test requires it with the bump).
