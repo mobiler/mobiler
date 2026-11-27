@@ -46,7 +46,7 @@ behind), `pending_limit` (iOS only, see below), `unsupported` (an op or stream t
 - **`id`**: an integer in 1..=2147483647. Scheduling an existing id **replaces** it, which also cancels a
   pending snooze of that id. A missing `id` means 1 (as before), on `schedule` and on `cancel`.
 - **`at`** or **`after_seconds`**: exactly one. `at` is a local wall-clock time `"YYYY-MM-DD HH:MM"`
-  (or with `:SS`) in the device's current time zone. `after_seconds` is relative to now (at least 1 s).
+  (or with `:SS`) in the device's current time zone. `after_seconds` is relative to now; values below 1 fire after 1 s on iOS and at once on Android.
   Both or neither is `invalid_input`; an `at` in the past is `past`.
 - **`actions`**: at most 3. `kind` is `open` (opens the app) or `snooze` (needs `snooze_minutes`,
   1..=1440; re-posts the reminder after that long without opening the app). Action ids are unique,
