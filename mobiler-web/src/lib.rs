@@ -4676,7 +4676,7 @@ mod asset_tests {
 
     #[test]
     fn invalid_asset_paths_render_as_failed_load() {
-        for bad in ["asset:", "asset:/a.png", "asset:../a.png", "asset:a/../b.png", "asset:a//b.png", "asset:./a.png", "asset:a\\b.png"] {
+        for bad in ["asset:", "asset:/a.png", "asset:../a.png", "asset:a/../b.png", "asset:a//b.png", "asset:./a.png", "asset:a\\b.png", "asset:../\u{301}x.png"] {
             assert_eq!(image_src(bad), "", "{bad}");
         }
     }

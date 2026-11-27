@@ -282,8 +282,7 @@ ADR).
 - [ ] **Step 2:** Conformance tests: `adr_0071_icon_seeds_and_marker` (both `ic_launcher*.xml` in
   `SEED_PATHS`; template `ic_launcher.xml` has a `<monochrome>`); `adr_0070_asset_markers` (resolvers: extend `adr_0069_asset_resolvers_follow_one_rule` to the template files)
   (gradle has one `mobiler:assets` pair after `android {`; project.yml has the `assets-sources` pair inside
-  the target `sources` and the `assets-info` pair inside `info.properties`; the template Kotlin and Swift
-  and `mobiler-web/src/lib.rs` each contain their resolver and reject `".."`, `"\\"` and a leading `/`).
+  the target `sources` and the `assets-info` pair inside `info.properties`).
 - [ ] **Step 3:** `cargo test -p xtask` green, including `adr_docs.rs`.
 - [ ] **Step 4: Mutation proof** for each test: drop a marker, drop a seed path, remove the `..` check from
   one resolver, make ownership ignore the ledger, skip undo. Each must fail; record them in each ADR's §4

@@ -92,7 +92,7 @@ no-op; the task must tolerate a missing source.
 
 | Shell | How the folder gets into the build | How `asset:x` resolves |
 |---|---|---|
-| Android | `mobiler:assets` marker block in `app/build.gradle.kts`: a `Sync` task copying `<dir>` into `build/generated/mobiler-assets/mobiler-assets/`, that directory added to `sourceSets.main.assets`, and `preBuild` depending on the task. The copy is build output, not committed. | `file:///android_asset/mobiler-assets/x` passed to Coil (image, avatar) and to the poster loader. |
+| Android | `mobiler:assets` marker block in `app/build.gradle.kts`: a `Sync` task copying `<dir>` into `build/generated/mobiler-assets/mobiler-assets/`, that directory added to `sourceSets.main.assets`, and `preBuild` depending on the task. The copy is build output, not committed. | `file:///android_asset/mobiler-assets/x` (each segment percent-encoded) passed to Coil for image and avatar; the poster reads `mobiler-assets/x` through `AssetManager`. |
 | iOS | Two marker pairs in `project.yml`: `mobiler:assets-sources` under the target's `sources` (`- path: ../<dir>`, `type: folder`, `buildPhase: resources`) and `mobiler:assets-info` under `info.properties` (`MobilerAssetsFolder: <basename>`), because the bundle folder takes the directory's basename. (The builder checks first whether XcodeGen can fix the folder's name, which would remove the second pair.) | `Bundle.main.resourceURL/<MobilerAssetsFolder>/x`, loaded through the existing downsampling `FileImageView` (off main thread, cached). |
 | Web | `mobiler:assets` marker block in `web/index.html`: `<link data-trunk rel="copy-dir" href="../<dir>" data-target-path="mobiler-assets"/>`. | `mobiler-web` maps `asset:x` to the relative URL `mobiler-assets/x` for `<img>` in image, avatar and the video poster. |
 
@@ -195,7 +195,7 @@ when `[splash]` has no logo. Nothing to change; worth a line in the README.
    for image, avatar and video poster, plus tests. Publish `mobiler-web`. Barbershop (the reference shell,
    ADR-0015) gets the native Android/iOS renderer changes in this PR too, so the CLI PR ports from its diff.
 2. **CLI PR**: `assets.rs`, `icon.rs`, the template marker blocks and renderer changes, `SEED_PATHS`
-   additions, the hooks, `MOBILER_WEB_PIN` bump (ADR-0066), ADR-0070 + ADR-0071 with conformance tests (ADR-0069 lands in the libs PR) and
+   additions, the hooks, ADR-0070 + ADR-0071 with conformance tests (ADR-0069 lands in the libs PR) and
    mutation proofs, `mobiler upgrade --apply` in every CLI-managed demo (ADR-0063), READMEs + site +
    Saldo tutorial.
 3. **Saldo adopts `[icon]`** in the CLI PR (maintainer: yes, 2026-11-27, since we can redraw it). The

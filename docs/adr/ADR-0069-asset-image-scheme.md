@@ -1,4 +1,4 @@
-# ADR-0069: An image source `asset:<path>` names a file the app bundles; `image`, `avatar` and the video `poster` accept it, every shell checks the path by one rule compared per byte, code unit or scalar (never per grapheme) and resolves it under one `mobiler-assets` prefix, and the core passes the string unchanged
+# ADR-0069: An image source `asset:<path>` names a file the app bundles; `image`, `avatar` and the video `poster` accept it, every shell checks the path by one rule compared per byte, code unit or scalar (never per grapheme) and resolves it under one fixed folder per shell (`mobiler-assets`; on iOS the bundle folder named by `MobilerAssetsFolder`), and the core passes the string unchanged
 
 Status:        Accepted
 Date decided:  2026-11-27
@@ -44,7 +44,7 @@ segment `../́x`, passes, and resolves one folder above the assets.
 - **iOS:** `Bundle.main.resourceURL/<MobilerAssetsFolder>/<path>`, where Info.plist's `MobilerAssetsFolder` names
   the bundled folder (a folder reference keeps its directory's name, so the prefix is read, not fixed).
 
-Every shell keeps the files under that one prefix, so they never collide with a plugin's or a library's own
+Every shell keeps the files under its one folder (`mobiler-assets/` on web and Android, the `MobilerAssetsFolder` folder at the iOS bundle root), so they never collide with a plugin's or a library's own
 assets. How the app's folder reaches each build (`mobiler.toml` `[assets]`) and the `[icon]` sync are separate
 decisions that follow this one (ADR-0070, ADR-0071).
 
