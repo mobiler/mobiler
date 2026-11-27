@@ -47,6 +47,8 @@ The rules:
 - **`dir`** is checked before anything is written; an invalid one is a warning, `failed`, and no write. It must:
   - be non-empty and relative (no leading `/`), a trailing `/` being dropped;
   - have no empty, `.` or `..` segment, and resolve to normal path components inside the app root;
+  - have no hidden segment (one starting with `.`): a hidden folder is never runtime assets, and `dir = ".git"`
+    would bundle the repository into the app;
   - not start with a path the CLI writes: a top-level entry of the template (`Android`, `iOS`, `shared`,
     `Cargo.toml`, `rust-toolchain.toml`, `.gitignore`, read from the embedded template, `.tmpl` dropped), `web`,
     `.mobiler`, `target` or `mobiler.toml`, compared ignoring ASCII case (a case-insensitive file system makes
@@ -117,7 +119,7 @@ The rules:
   file too, and a three-way merge leaves the app's copy alone while the template is unchanged.
   - **Validation Metric:** `rejects_dir_outside_root` (the CLI-path cases), `adr_0070_asset_markers` (no
     `mobiler/templates/assets`), `upgrade_never_touches_dir`.
-- **Condition 7 — no `dir` outside the app, through a symlink, or with a character outside the allow-list.**
+- **Condition 7 — no `dir` outside the app, through a symlink, hidden, or with a character outside the allow-list.**
   - **Validation Metric:** `rejects_dir_outside_root`, `folder_names_yaml_would_retype_are_quoted`.
 - **Condition 8 — the warnings.**
   - **Validation Metric:** `symlink_inside_dir_warns`, `fonts_or_splash_source_under_dir_warns`,
@@ -178,6 +180,7 @@ Follow-up asked; ADR-0069 itself is unchanged.
     ("the gradle block is empty again");
   - dropping the `fsguard` check from `validate` failed `rejects_dir_outside_root` (`"linked" accepted`);
   - dropping the character allow-list failed it (`"a\\b" accepted`);
+  - dropping the hidden-segment check from `clean_dir` failed it (`".git" accepted`);
   - dropping only `clean_dir`'s `..` check did **not** fail it: `validate`'s normal-components check still refused
     `../x` and `a/../b` (two guards, by design); dropping both failed it (`"../x" accepted`);
   - never quoting the YAML value failed `folder_names_yaml_would_retype_are_quoted`;

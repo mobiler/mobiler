@@ -50,7 +50,7 @@ pub struct SyncReport {
 }
 
 /// `dir` as the generated text uses it: trailing `/` dropped, then checked to be a plain relative path
-/// (no empty, `.` or `..` segment) made only of characters every block can carry unquoted (letters,
+/// (no empty, `.` or `..` segment, no hidden segment such as `.git`) made only of characters every block can carry unquoted (letters,
 /// digits, space inside a name, `-`, `_`, `.`, `+`).
 fn clean_dir(dir: &str) -> Result<&str, String> {
     let d = dir.trim_end_matches('/');
@@ -64,6 +64,9 @@ fn clean_dir(dir: &str) -> Result<&str, String> {
     for seg in d.split('/') {
         if seg.is_empty() || seg == "." || seg == ".." {
             return bad("no empty, `.` or `..` segment (the folder must be inside the app)");
+        }
+        if seg.starts_with('.') {
+            return bad("a hidden folder (a name starting with `.`, like `.git`) is never runtime assets — use a folder of your own, e.g. \"assets\"");
         }
         if seg.starts_with(' ') || seg.ends_with(' ') {
             return bad("a folder name can't start or end with a space");
@@ -631,6 +634,8 @@ mod tests {
         let mut bad = vec!["../x", "/abs", "a/../b", "./assets", "a//b", "", "a\\b", "a\"b", "$x", "C:/x", " a"];
         // Paths the CLI writes: a sync or `upgrade` would write inside the folder.
         bad.extend(["web", "web/img", "Android/x", "android", "iOS", "shared", ".mobiler", "target", "mobiler.toml", "Cargo.toml", "rust-toolchain.toml"]);
+        // Hidden folders: `.git` would bundle the repository into the app.
+        bad.extend([".git", ".github/img", ".assets", "assets/.cache"]);
         let root = app("");
         #[cfg(unix)]
         {
@@ -652,6 +657,8 @@ mod tests {
         }
         let e = validate(&root, &AssetsSpec { dir: "web/img".into() }).unwrap_err();
         assert!(e.contains("web is managed by mobiler"), "{e}");
+        let e = validate(&root, &AssetsSpec { dir: ".git".into() }).unwrap_err();
+        assert!(e.contains("hidden"), "{e}");
         // The default, barbershop's `assets/bundled`, and names that only start like a managed one.
         for ok in ["assets", "assets/bundled", "webby", "my/web", "Androids"] {
             assert!(validate(&root, &AssetsSpec { dir: ok.into() }).is_ok(), "{ok:?} rejected");

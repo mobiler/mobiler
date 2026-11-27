@@ -268,8 +268,9 @@ reports problems.
   download and the installed app (mind the store size limits).
 - **`dir` must be a folder of your own.** Any name starting with a path the CLI writes is refused: `Android`,
   `iOS`, `web`, `shared`, `.mobiler`, `target`, `mobiler.toml` and the other top-level template entries
-  (compared ignoring case). It must be relative, inside the app, with no `..`, no symlinked part, and only
-  letters, digits, space (not at the ends), `-`, `_`, `.` and `+` in each segment.
+  (compared ignoring case). It must be relative, inside the app, with no `..`, no hidden folder (a segment
+  starting with `.`, such as `.git`), no symlinked part, and only letters, digits, space (not at the ends),
+  `-`, `_`, `.` and `+` in each segment.
 - **Warnings** (the sync goes on): a `[fonts]`, `[splash]` or `[icon]` source file under `dir` (it would
   ship in the app too), a symlink inside `dir` (the builds follow it and ship its target), a `dir` that
   doesn't exist yet. `mobiler doctor` repeats them.

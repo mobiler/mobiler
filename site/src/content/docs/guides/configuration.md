@@ -72,8 +72,9 @@ Files in `dir` ship inside the app and load offline. Show one with `image("asset
 case-sensitive, and a missing file shows as a failed load. Everything in the folder ends up in the app, so
 keep only files shown at runtime: they add to the download and installed size.
 
-`dir` can't start with a folder the CLI writes (`Android`, `iOS`, `web`, `shared`, `.mobiler`, `target`), and
-each segment may use only letters, digits, space, `-`, `_`, `.` and `+`. The CLI warns about a font, splash
+`dir` can't start with a folder the CLI writes (`Android`, `iOS`, `web`, `shared`, `.mobiler`, `target`) or
+name a hidden folder (`.git`, anything starting with `.`), and each segment may use only letters, digits,
+space, `-`, `_`, `.` and `+`. The CLI warns about a font, splash
 or icon source inside it and about symlinks in it. If the folder doesn't exist yet (git doesn't keep an empty
 one), only Android is set up for it: the web and iOS builds would fail on a missing folder, so they include it
 once it exists. Create it, then build or run `mobiler assets sync`. An app made before CLI 0.75 runs
