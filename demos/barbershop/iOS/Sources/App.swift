@@ -78,22 +78,35 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     // Foreground receipt — show the banner AND forward the payload to the events stream as "received".
+    // A local reminder (marked "mobiler_local" by the notifications plugin) only shows: it is not a push,
+    // so it must never surface as a push "received" event.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        PushBridge.shared.didReceive(userInfo: notification.request.content.userInfo, kind: .received)
+        let userInfo = notification.request.content.userInfo
+        if LocalNotificationBridge.isLocal(userInfo) {
+            completionHandler([.banner, .sound])
+            return
+        }
+        PushBridge.shared.didReceive(userInfo: userInfo, kind: .received)
         completionHandler([.banner, .sound])
     }
 
     // Tap — forward the payload as "opened". Also fires when a tap LAUNCHES the app; PushBridge buffers
     // it until the core subscribes. Only the default action (the tap itself) counts as opening it.
+    // A local reminder goes to LocalNotificationBridge instead, with EVERY response (tap, action button,
+    // dismiss): the plugin owns them all, and it takes over calling the completion handler.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        if LocalNotificationBridge.isLocal(response.notification.request.content.userInfo) {
+            LocalNotificationBridge.shared.didReceive(response, completion: completionHandler)
+            return
+        }
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             PushBridge.shared.didReceive(userInfo: response.notification.request.content.userInfo, kind: .opened)
         }
@@ -203,6 +216,63 @@ final class PushBridge {
             return json
         }
         return "{\"mobiler_push\":\"\(kind.rawValue)\"}"
+    }
+}
+
+// Always-present, plugin-agnostic router target for LOCAL notifications — the reminders the
+// `notifications` plugin schedules, which it marks with userInfo["mobiler_local"] = <id>. The AppDelegate
+// stays the only UNUserNotificationCenterDelegate (a plugin swapping the delegate would silently break
+// push, or be broken by it); it sends every response on a marked notification here. The plugin attaches
+// its handler at launch (its `mobiler:app-launch` bootstrap), so a snooze pressed while the app was dead
+// is handled natively without the core. Responses that arrive before a handler attaches are buffered
+// WITH their completion handlers and replayed in order on attach. Each completion handler is called
+// exactly once: by the handler that receives it, or here when the buffer overflows. App.swift references
+// nothing from the plugin, so this compiles and stays dormant in apps without it.
+@MainActor
+final class LocalNotificationBridge {
+    static let shared = LocalNotificationBridge()
+
+    /// The userInfo key the plugin stamps on every notification it creates.
+    nonisolated static let markerKey = "mobiler_local"
+
+    private var handler: ((UNNotificationResponse, @escaping () -> Void) -> Void)?
+    private var buffer: [(response: UNNotificationResponse, completion: () -> Void)] = []
+    // Responses are user actions, so a handful is plenty; the bound only guards against a runaway backlog.
+    private let maxBuffered = 32
+
+    /// True when the notification was created by the notifications plugin (carries the marker).
+    nonisolated static func isLocal(_ userInfo: [AnyHashable: Any]) -> Bool {
+        userInfo[markerKey] != nil
+    }
+
+    // --- called by the notifications plugin ---
+
+    /// Installs the handler (a later attach replaces it) and replays the buffered responses in arrival
+    /// order. The handler owns each completion and must call it exactly once.
+    func attach(_ handler: @escaping (UNNotificationResponse, @escaping () -> Void) -> Void) {
+        self.handler = handler
+        // Take the buffer before replaying, so a re-entrant didReceive can't be replayed twice.
+        let pending = buffer
+        buffer.removeAll()
+        for item in pending { handler(item.response, item.completion) }
+    }
+
+    /// Back to dormant: later responses buffer until the next attach.
+    func detach() { handler = nil }
+
+    // --- called by the AppDelegate ---
+
+    func didReceive(_ response: UNNotificationResponse, completion: @escaping () -> Void) {
+        if let handler {
+            handler(response, completion)
+            return
+        }
+        if buffer.count >= maxBuffered {
+            // Dropped: release iOS's wait on it now, since no handler will ever see it.
+            let dropped = buffer.removeFirst()
+            dropped.completion()
+        }
+        buffer.append((response: response, completion: completion))
     }
 }
 
