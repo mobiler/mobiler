@@ -198,21 +198,32 @@ fun reminderLocalTime(ms: Long, zone: ZoneId): String =
 enum class RearmDecision { ARM, POST, DROP }
 
 /**
- * What a re-arm (boot, app update, time or zone change, plugin init) does with one entry: a wall-clock
- * reminder (not a snooze) is re-computed in `zone` first; then a future one is armed, one late by at
- * most `late_minutes` is posted now, and an older one is dropped.
+ * What a re-arm (boot, app update, time or zone change, plugin init) does with one entry. A wall-clock
+ * reminder (not a snooze) is re-computed in `zone` first. Then:
+ * - a future one is armed;
+ * - an overdue one whose alarm is still alive (no reboot or force-stop cleared it) is merely late, as
+ *   an inexact alarm may be: it is re-armed and fires at once, and `late_minutes` never applies to it;
+ * - an overdue one whose alarm is gone is posted now if late by at most `late_minutes`, else dropped.
  */
-fun rearmDecision(r: Reminder, nowMs: Long, zone: ZoneId): Pair<RearmDecision, Reminder> {
+fun rearmDecision(r: Reminder, nowMs: Long, zone: ZoneId, alarmAlive: Boolean): Pair<RearmDecision, Reminder> {
     val updated = if (r.wall != null && !r.snoozed) {
         wallToEpochMs(r.wall, zone)?.let { r.copy(fireAtMs = it) } ?: r
     } else r
     val decision = when {
         updated.fireAtMs > nowMs -> RearmDecision.ARM
+        alarmAlive -> RearmDecision.ARM
         nowMs - updated.fireAtMs <= updated.lateMinutes * 60_000L -> RearmDecision.POST
         else -> RearmDecision.DROP
     }
     return decision to updated
 }
+
+/**
+ * Whether the firing receiver posts entry `r` now. An inexact alarm never fires early, so an entry not
+ * yet due belongs to a replacement scheduled after this (older) alarm was already in flight: it is left
+ * for its own alarm.
+ */
+fun receiverShouldPost(r: Reminder, nowMs: Long): Boolean = r.fireAtMs <= nowMs
 
 /** The persisted reminders. Every write is `commit()`ed (on disk before the alarm is set). */
 object ReminderRegistry {

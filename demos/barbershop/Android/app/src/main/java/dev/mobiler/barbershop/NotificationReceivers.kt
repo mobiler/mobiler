@@ -21,6 +21,8 @@ object LocalNotif {
     const val CHANNEL_ID = "mobiler_reminders"
     /** Every tray entry this plugin posts uses this tag, so management ops touch only ours. */
     const val TAG = "mobiler.local"
+    /** The category on every launch intent this plugin's notifications open (see reminderLaunchIntent). */
+    const val CATEGORY = "mobiler.local"
     const val EXTRA_ID = "mobiler_local_id"
     const val EXTRA_ACTION = "mobiler_local_action"
     const val EXTRA_PAYLOAD = "mobiler_local_payload"
@@ -39,19 +41,34 @@ internal fun ensureReminderChannel(context: Context) {
     }
 }
 
-// The alarm PendingIntent for reminder `id`. Intent extras don't take part in PendingIntent identity,
-// so (request code `id`, NotificationReceiver) is the same PendingIntent a legacy alarm used: arming or
+// The alarm intent for reminder `id`. Intent extras don't take part in PendingIntent identity, so
+// (request code `id`, NotificationReceiver) is the same PendingIntent a legacy alarm used: arming or
 // cancelling an id also replaces / cancels a pre-registry alarm of that id.
-private fun alarmPendingIntent(ctx: Context, id: Int): PendingIntent {
-    val intent = Intent(ctx, NotificationReceiver::class.java).apply {
-        putExtra(LocalNotif.EXTRA_V2, true)
-        putExtra(LocalNotif.EXTRA_ID, id)
-        putExtra(LocalNotif.EXTRA_ACTION, "")
-    }
-    return PendingIntent.getBroadcast(
-        ctx, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+private fun alarmIntent(ctx: Context, id: Int) = Intent(ctx, NotificationReceiver::class.java).apply {
+    putExtra(LocalNotif.EXTRA_V2, true)
+    putExtra(LocalNotif.EXTRA_ID, id)
+    putExtra(LocalNotif.EXTRA_ACTION, "")
 }
+
+private fun alarmPendingIntent(ctx: Context, id: Int): PendingIntent = PendingIntent.getBroadcast(
+    ctx, id, alarmIntent(ctx, id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
+
+/** Whether reminder `id`'s alarm PendingIntent still exists: a reboot or a force-stop clears it,
+ *  cancelAlarm cancels it. */
+private fun alarmAlive(ctx: Context, id: Int): Boolean = PendingIntent.getBroadcast(
+    ctx, id, alarmIntent(ctx, id), PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+) != null
+
+/**
+ * The launcher intent every tap on a reminder opens (the body now; the action buttons in Task 3).
+ * The `mobiler.local` category takes part in PendingIntent identity (filterEquals) but not in resolving
+ * this explicit intent, so reminder N's tap PendingIntent never collides with another plugin's (e.g.
+ * push notification N), whose extras would otherwise overwrite ours. Not intent data: MainActivity reads
+ * data as a deep link.
+ */
+fun reminderLaunchIntent(ctx: Context): Intent? =
+    ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.addCategory(LocalNotif.CATEGORY)
 
 /** Sets (or replaces) the inexact alarm for `r` at `r.fireAtMs`. The registry entry is written first. */
 fun armAlarm(ctx: Context, r: Reminder) {
@@ -75,7 +92,7 @@ fun postReminder(ctx: Context, r: Reminder) {
         .setStyle(NotificationCompat.BigTextStyle().bigText(r.body))
         .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
-    val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+    val launch = reminderLaunchIntent(ctx)
     if (launch != null) {
         launch.putExtra(LocalNotif.EXTRA_ID, r.id)
         launch.putExtra(LocalNotif.EXTRA_ACTION, "")
@@ -113,7 +130,7 @@ fun rearmAll(ctx: Context, nowMs: Long) {
     val zone = ZoneId.systemDefault()
     synchronized(ReminderRegistry) {
         for (r in ReminderRegistry.all(ctx)) {
-            val (decision, updated) = rearmDecision(r, nowMs, zone)
+            val (decision, updated) = rearmDecision(r, nowMs, zone, alarmAlive(ctx, r.id))
             when (decision) {
                 RearmDecision.ARM -> {
                     if (updated != r) ReminderRegistry.put(ctx, updated)
@@ -144,8 +161,12 @@ class NotificationReceiver : BroadcastReceiver() {
             return
         }
         val id = intent.getIntExtra(LocalNotif.EXTRA_ID, -1)
+        val now = System.currentTimeMillis()
         val r = synchronized(ReminderRegistry) {
-            ReminderRegistry.get(context, id)?.also { ReminderRegistry.remove(context, id) }
+            val entry = ReminderRegistry.get(context, id)
+            // Not yet due: a replacement scheduled while this alarm was in flight; its own alarm posts it.
+            if (entry == null || !receiverShouldPost(entry, now)) null
+            else entry.also { ReminderRegistry.remove(context, id) }
         } ?: return
         postReminder(context, r)
     }

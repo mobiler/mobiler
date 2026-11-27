@@ -171,7 +171,7 @@ class ReminderLogicTest {
     @Test fun rearmRecomputesWallInNewZone() {
         val r = wallReminder("2027-01-02 09:00:00")
         val london = ZoneId.of("Europe/London")
-        val (decision, updated) = rearmDecision(r, now, london)
+        val (decision, updated) = rearmDecision(r, now, london, alarmAlive = false)
         assertEquals(RearmDecision.ARM, decision)
         assertEquals(ZonedDateTime.of(2027, 1, 2, 9, 0, 0, 0, london).toInstant().toEpochMilli(), updated.fireAtMs)
         assertEquals(r.wall, updated.wall)
@@ -179,21 +179,43 @@ class ReminderLogicTest {
 
     @Test fun rearmPostsLateWithinWindowAndDropsTooLate() {
         val r = wallReminder("2027-01-01 11:40:00", late = 30) // 20 minutes late
-        assertEquals(RearmDecision.POST, rearmDecision(r, now, zone).first)
+        assertEquals(RearmDecision.POST, rearmDecision(r, now, zone, alarmAlive = false).first)
         val old = wallReminder("2027-01-01 11:00:00", late = 30) // 60 minutes late
-        assertEquals(RearmDecision.DROP, rearmDecision(old, now, zone).first)
+        assertEquals(RearmDecision.DROP, rearmDecision(old, now, zone, alarmAlive = false).first)
         val zero = wallReminder("2027-01-01 11:59:00", late = 0)
-        assertEquals(RearmDecision.DROP, rearmDecision(zero, now, zone).first)
+        assertEquals(RearmDecision.DROP, rearmDecision(zero, now, zone, alarmAlive = false).first)
     }
 
     @Test fun rearmKeepsSnoozedAndRelativeTimes() {
         val london = ZoneId.of("Europe/London")
         val snoozed = wallReminder("2027-01-01 11:00:00").copy(fireAtMs = now + 600_000, snoozed = true)
-        val (d, u) = rearmDecision(snoozed, now, london)
+        val (d, u) = rearmDecision(snoozed, now, london, alarmAlive = false)
         assertEquals(RearmDecision.ARM, d)
         assertEquals(now + 600_000, u.fireAtMs)
         val relative = Reminder(4, "t", "b", now + 1000, null, null, null, 1440, false)
-        assertEquals(relative, rearmDecision(relative, now, london).second)
+        assertEquals(relative, rearmDecision(relative, now, london, alarmAlive = false).second)
+    }
+
+    @Test fun rearmLeavesALiveOverdueAlarmToFire() {
+        // Merely delayed (Doze, inexact): the alarm survived, so late_minutes doesn't apply; re-armed.
+        val late = wallReminder("2027-01-01 11:00:00", late = 0) // 60 minutes past, window 0
+        assertEquals(RearmDecision.ARM, rearmDecision(late, now, zone, alarmAlive = true).first)
+        assertEquals(RearmDecision.DROP, rearmDecision(late, now, zone, alarmAlive = false).first)
+        val relative = Reminder(4, "t", "b", now - 1000, null, null, null, 0, false)
+        assertEquals(RearmDecision.ARM, rearmDecision(relative, now, zone, alarmAlive = true).first)
+        // A live wall alarm is still re-computed for the new zone and re-armed at the new instant.
+        val london = ZoneId.of("Europe/London")
+        val future = wallReminder("2027-01-02 09:00:00")
+        val (d, u) = rearmDecision(future, now, london, alarmAlive = true)
+        assertEquals(RearmDecision.ARM, d)
+        assertEquals(ZonedDateTime.of(2027, 1, 2, 9, 0, 0, 0, london).toInstant().toEpochMilli(), u.fireAtMs)
+    }
+
+    @Test fun receiverIgnoresAnEntryNotYetDue() {
+        val due = Reminder(4, "t", "b", now, null, null, null, 1440, false)
+        assertTrue(receiverShouldPost(due, now))
+        assertTrue(receiverShouldPost(due.copy(fireAtMs = now - 3_600_000), now)) // Doze-delayed: still posts
+        assertFalse(receiverShouldPost(due.copy(fireAtMs = now + 1), now))       // a replacement, later
     }
 
     @Test fun localTimeFormat() {

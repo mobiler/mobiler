@@ -26,8 +26,9 @@ import org.json.JSONObject
 // permission; fine for reminders.
 class NotificationsPlugin(private val application: android.app.Application) : MobilerPlugin {
     init {
-        // Alarms are gone after a force-stop (and a reboot the app missed): re-arm on every launch.
-        runCatching { rearmAll(application, System.currentTimeMillis()) }
+        // Alarms are gone after a force-stop (and a reboot the app missed): re-arm on every launch, off
+        // the main thread (disk + binder work); rearmAll holds the registry lock, so ops just wait for it.
+        Thread({ runCatching { rearmAll(application, System.currentTimeMillis()) } }, "mobiler-notif-rearm").start()
     }
 
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
@@ -62,17 +63,20 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
         val r = parseSchedule(input, System.currentTimeMillis(), ZoneId.systemDefault())
             .getOrElse { return PluginResponse(false, it.message ?: "invalid_input") }
         ensureReminderChannel(application)
-        return try {
-            synchronized(ReminderRegistry) {
+        synchronized(ReminderRegistry) {
+            val previous = ReminderRegistry.get(application, r.id)
+            try {
                 // Written before the alarm; a re-schedule of an id replaces it (and any snooze of it).
                 ReminderRegistry.put(application, r)
                 armAlarm(application, r)
+            } catch (e: Exception) {
+                // Nothing was scheduled: put back the reminder this one would have replaced.
+                if (previous != null) ReminderRegistry.put(application, previous)
+                else ReminderRegistry.remove(application, r.id)
+                return PluginResponse(false, "failed: ${e.message ?: e.javaClass.simpleName}")
             }
-            PluginResponse(true, "")
-        } catch (e: Exception) {
-            ReminderRegistry.remove(application, r.id)
-            PluginResponse(false, "failed: ${e.message ?: e.javaClass.simpleName}")
         }
+        return PluginResponse(true, "")
     }
 
     private fun cancel(input: String): PluginResponse {
@@ -88,9 +92,8 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
             ReminderRegistry.remove(application, id)
             cancelAlarm(application, id)
         }
-        val nm = NotificationManagerCompat.from(application)
-        nm.cancel(LocalNotif.TAG, id)
-        nm.cancel(id) // a reminder posted by the pre-registry plugin (untagged), as before
+        // Only this plugin's tray entry: the tagged one, or a pre-registry (untagged) one on our channel.
+        removeDeliveredReminders(application, listOf(id))
         return PluginResponse(true, "")
     }
 
