@@ -1097,7 +1097,7 @@ impl MobilerApp for FadeHouse {
                 let now = resp.as_text().unwrap_or_default().to_string();
                 let (id, when) = match (resp.ok, wall_plus_seconds(&now, 120), reminder_id(&now)) {
                     (true, Some(at), Some(id)) => (id, When::At(at)),
-                    // A shell without the `now` op (barbershop's own shells predate it): fall back
+                    // A shell without the `now` op: fall back
                     // to a relative time and a per-launch counter id.
                     _ => {
                         model.reminders_seq += 1;

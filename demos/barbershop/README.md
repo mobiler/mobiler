@@ -68,7 +68,7 @@ via `with_error(..)` (a bad email and a too-short password show errors live).
 
 …and a **"Reminders"** card for local scheduled notifications (`notifications` plugin): ask
 permission and read its status, schedule a reminder 2 minutes out (a wall-clock `at` from `cx.now`, or
-`after_seconds` on a shell without the clock, as barbershop's own shells are today) with *Snooze 1 min* and *Open* buttons and a payload, list or cancel the pending ones, and a
+`after_seconds` on a shell without the clock) with *Snooze 1 min* and *Open* buttons and a payload, list or cancel the pending ones, and a
 log of the last 10 `events` (`opened` / `snoozed` / `dismissed`), subscribed at startup so a tap that
 launched the app still arrives. On the web it shows the shell's "plugin not available".
 
