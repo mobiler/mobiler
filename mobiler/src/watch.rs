@@ -61,7 +61,9 @@ pub fn run(no_install: bool, no_run: bool, device: Option<&str>) -> Result<()> {
     let (font_dirs, font_files) = crate::fonts::watch_paths(&project.root);
     // The splash logos too (mobiler.toml is already watched for fonts).
     let (splash_dirs, _) = crate::splash::watch_paths(&project.root);
-    let watch_dirs: Vec<_> = watch_dirs.into_iter().chain(font_dirs).chain(splash_dirs).collect();
+    // The [assets] folder: a changed file rebuilds, and the build copies it into the shell.
+    let (asset_dirs, _) = crate::assets::watch_paths(&project.root);
+    let watch_dirs: Vec<_> = watch_dirs.into_iter().chain(font_dirs).chain(splash_dirs).chain(asset_dirs).collect();
     let watch_files: Vec<_> = watch_files.into_iter().chain(font_files).collect();
 
     for dir in &watch_dirs {

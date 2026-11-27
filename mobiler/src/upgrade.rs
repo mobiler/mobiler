@@ -162,6 +162,33 @@ fn upgrade_at(root: &Path, apply: bool) -> Result<Report> {
     upgrade_with(root, apply, &[])
 }
 
+/// For other modules' tests: scaffold an app and see what an upgrade run touches.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// The template's shell files and their baseline at `root`, as `mobiler new` writes them.
+    pub(crate) fn scaffold(root: &Path) {
+        let subs = Subs::from_package("dev.mobiler.demo".into(), "Demo".into(), "30.0.14904198".into());
+        // App-owned files upgrade reads the app's name from (`new` writes them; `sync_dir` skips them).
+        fs::create_dir_all(root.join("Android")).unwrap();
+        fs::write(root.join("Android/settings.gradle.kts"), "rootProject.name = \"Demo\"\n").unwrap();
+        sync_dir(&TEMPLATES, root, &subs, true, &mut Report::default()).unwrap();
+        seed_baseline(root, &subs).unwrap();
+    }
+
+    /// Every path an upgrade run (`apply` or a review run) wrote, offered, merged or left pending.
+    pub(crate) fn touched(root: &Path, apply: bool) -> Vec<String> {
+        let r = upgrade_at(root, apply).unwrap();
+        let mut out: Vec<String> = [r.added, r.changed, r.updated, r.merge, r.conflict, r.new_review, r.skipped]
+            .into_iter()
+            .flatten()
+            .collect();
+        out.extend(r.pending.into_iter().map(|(p, _)| p));
+        out
+    }
+}
+
 /// `upgrade`, after settling the files the user named with `--resolved` (ADR-0046).
 fn upgrade_with(root: &Path, apply: bool, resolved: &[&str]) -> Result<Report> {
     if !root.join("Android").is_dir() || !root.join("iOS").is_dir() || !root.join("shared").is_dir() {

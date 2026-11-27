@@ -31,6 +31,7 @@ pub fn run(platform: Platform) -> Result<()> {
         Platform::Ios => {
             crate::fonts::sync_for_build(&project.root);
             crate::splash::sync_for_build(&project.root);
+            crate::assets::sync_for_build(&project.root);
             crate::deep_links::sync_for_build(&project.root);
             crate::local_network::sync_for_build(&project.root);
             // iOS builds run the reproducible script (macOS only). The CLI doesn't

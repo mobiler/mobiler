@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+mod assets;
 mod build;
 mod deep_links;
 mod dev;
@@ -86,6 +87,11 @@ enum Command {
         #[command(subcommand)]
         cmd: SplashCmd,
     },
+    /// Bundled files from `mobiler.toml` `[assets]`, shown with `asset:<path>` (synced automatically by build/dev/watch).
+    Assets {
+        #[command(subcommand)]
+        cmd: AssetsCmd,
+    },
     /// Deep-link registration from `mobiler.toml` `[deep_links]` (synced automatically by build/dev/watch).
     DeepLinks {
         #[command(subcommand)]
@@ -128,6 +134,12 @@ enum Command {
 #[derive(Subcommand)]
 enum SplashCmd {
     /// Write `[splash]` (background colours, logo) into the Android, iOS and web shells (idempotent).
+    Sync,
+}
+
+#[derive(Subcommand)]
+enum AssetsCmd {
+    /// Set the Android, iOS and web shells up to bundle the `[assets] dir` folder (idempotent).
     Sync,
 }
 
@@ -182,6 +194,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Splash { cmd: SplashCmd::Sync } => match splash::run_sync_cli() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Command::Assets { cmd: AssetsCmd::Sync } => match assets::run_sync_cli() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");
