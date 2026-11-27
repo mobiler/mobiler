@@ -24,6 +24,9 @@ const MAX_PX: u32 = 16_384;
 /// The working copy's largest side: well above the largest output content box (655 px at 1024), so the
 /// ~20 resizes per sync start from this, never from a source of up to 16384 px.
 const WORK_PX: u32 = 2048;
+/// The largest source file read: far above any real icon PNG (a 16384 px RGBA source compresses well below
+/// it), so `/dev/zero` or a multi-GB file is refused before a byte is read or hashed.
+const MAX_SOURCE_BYTES: u64 = 256 << 20;
 
 /// `[icon]` as written in mobiler.toml.
 #[derive(Deserialize, Debug, Clone)]
@@ -98,9 +101,18 @@ fn load(root: &Path, field: &str, rel: &str) -> Result<RgbaImage, String> {
 }
 
 /// A square PNG, 1024..=16384 px, judged from its first 24 bytes (signature and IHDR) only: its side.
+/// First, from its metadata alone: a regular file (a FIFO would block the open, a device never ends) of at
+/// most `MAX_SOURCE_BYTES`.
 fn check_header(root: &Path, field: &str, rel: &str) -> Result<u32, String> {
     use std::io::Read;
     let err = |why: String| format!("[icon] {field} {rel:?}: {why}");
+    let meta = fs::metadata(root.join(rel)).map_err(|e| err(format!("can't read it ({e})")))?;
+    if !meta.is_file() {
+        return Err(err("not a regular file".into()));
+    }
+    if meta.len() > MAX_SOURCE_BYTES {
+        return Err(err(format!("{} MB; an icon source is at most {} MB", meta.len() >> 20, MAX_SOURCE_BYTES >> 20)));
+    }
     let mut head = [0u8; 24];
     let mut f = std::fs::File::open(root.join(rel)).map_err(|e| err(format!("can't read it ({e})")))?;
     match f.read_exact(&mut head) {
@@ -560,8 +572,13 @@ fn targets(root: &Path, has_mono: bool) -> Vec<String> {
 }
 
 /// The inputs' fingerprint: the source images' bytes, the settings and the generator's version. `None`
-/// when a source can't be read (validation then names it).
+/// when a source can't be read or fails its header check (validation then names it), so no file is read
+/// before it is known to be a regular PNG of a bounded size.
 fn input_fingerprint(root: &Path, spec: &IconSpec) -> Option<String> {
+    check_header(root, "foreground", &spec.foreground).ok()?;
+    if let Some(m) = &spec.monochrome {
+        check_header(root, "monochrome", m).ok()?;
+    }
     let mut h = Fnv::default();
     h.piece(&GENERATOR_VERSION.to_le_bytes());
     h.piece(&fs::read(root.join(&spec.foreground)).ok()?);
@@ -1807,6 +1824,48 @@ mod tests {
         let r = sync(&root).unwrap();
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
         assert_ne!(read(&root, IOS_PNG), template(IOS_PNG));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_source_is_refused_without_hanging() {
+        let root = app(ICON_TOML);
+        let fifo = root.join("brand/fg.png");
+        std::fs::remove_file(&fifo).unwrap();
+        let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+        if !made.is_ok_and(|s| s.success()) {
+            eprintln!("mkfifo unavailable: skipped");
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let r2 = root.clone();
+        // Opening a FIFO for reading blocks until a writer comes: a hang shows as a timeout, not a stuck test.
+        std::thread::spawn(move || {
+            let s = spec("brand/fg.png");
+            let _ = tx.send((input_fingerprint(&r2, &s), validate(&r2, &s).err(), doctor_line(&r2)));
+        });
+        let (fp, err, doctor) = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("a FIFO source hung the sync");
+        assert!(fp.is_none(), "{fp:?}");
+        let err = err.expect("refused");
+        assert!(err.contains("foreground") && err.contains("not a regular file"), "{err}");
+        assert!(doctor.contains("not a regular file"), "{doctor}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn oversized_source_is_refused_unread() {
+        let root = app(ICON_TOML);
+        // A valid 1024 px header, then a sparse 300 MiB: refused by its size before a byte is hashed.
+        let path = root.join("brand/fg.png");
+        std::fs::write(&path, header_only_png(1024, 1024)).unwrap();
+        std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_len(300 << 20).unwrap();
+        let s = spec("brand/fg.png");
+        assert!(input_fingerprint(&root, &s).is_none(), "an oversized source is never fingerprinted");
+        let e = validate(&root, &s).unwrap_err();
+        assert!(e.contains("foreground") && e.contains("MB"), "{e}");
+        let r = sync(&root).unwrap();
+        assert!(r.written.is_empty() && r.warnings.iter().any(|w| w.contains("MB")), "{r:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
