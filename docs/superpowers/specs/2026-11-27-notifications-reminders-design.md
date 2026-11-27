@@ -271,3 +271,12 @@ cx.subscribe("notif", "notifications", "events", "", |r| Msg::NotifEvent(r));
 - How the Android 13 `requestPermission` waits for the result: an `ActivityResultRegistry` callback via
   `MobilerActivity.current`, or a transparent helper activity. Pick the least invasive one that needs no
   template change. If neither works without one, stop and ask.
+
+## Amendment 2026-11-27 (Task 1)
+
+- `willPresent` for a marked notification is handled inline in the `AppDelegate` (banner + sound, no
+  `PushBridge` call); the bridge has no `willPresent` method.
+- With no handler attached, `LocalNotificationBridge.didReceive` calls the completion at once and buffers only
+  the response (at most 32, oldest dropped); `attach` replays buffered responses in order with a no-op completion.
+  The plugin attaches in `didFinishLaunching` (`app_launch`), before iOS delivers a launch response, so the
+  buffer only covers an app without the plugin or a detach.
