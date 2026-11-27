@@ -756,7 +756,8 @@ fn sync_file(
         // A seed is never baselined (ADR-0042). An app from before this path became a seed (the adaptive
         // icon XMLs before 0.75) still has one: removed, so nothing ever merges against it.
         let base = baseline_path(root, &rel);
-        if base.symlink_metadata().is_ok() {
+        // Only a plain file: never through a linked folder (fsguard), never a directory.
+        if base.symlink_metadata().is_ok_and(|m| m.is_file()) && crate::fsguard::check(root, &base).is_ok() {
             fs::remove_file(&base).with_context(|| format!("removing {}", base.display()))?;
             remove_emptied_dirs(&base, &root.join(BASE_REL));
             report.unbaselined.push(rel.to_string_lossy().to_string());
@@ -2176,6 +2177,25 @@ mod test {
             assert!(upgrade_at(&root, apply).unwrap().unbaselined.is_empty(), "once");
             let _ = fs::remove_dir_all(&root);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_seed_baseline_is_never_removed_through_a_linked_folder() {
+        // A linked folder under .mobiler/base must not let the baseline removal reach outside it (fsguard).
+        let root = skeleton();
+        upgrade_at(&root, true).unwrap();
+        let outside = root.with_extension("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("ic_launcher.xml"), b"keep me").unwrap();
+        let linked = root.join(".mobiler/base/Android/app/src/main/res/mipmap-anydpi");
+        let _ = fs::remove_dir_all(&linked);
+        fs::create_dir_all(linked.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &linked).unwrap();
+        let _ = upgrade_at(&root, false);
+        assert_eq!(fs::read(outside.join("ic_launcher.xml")).unwrap(), b"keep me", "nothing removed through the link");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]

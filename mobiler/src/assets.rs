@@ -660,7 +660,7 @@ mod tests {
         let e = validate(&root, &AssetsSpec { dir: ".git".into() }).unwrap_err();
         assert!(e.contains("hidden"), "{e}");
         // The default, barbershop's `assets/bundled`, and names that only start like a managed one.
-        for ok in ["assets", "assets/bundled", "webby", "my/web", "Androids"] {
+        for ok in ["assets", "assets/bundled", "webby", "my/web", "Androids", "img.v2", "assets/v1.2"] {
             assert!(validate(&root, &AssetsSpec { dir: ok.into() }).is_ok(), "{ok:?} rejected");
         }
         fs::create_dir_all(root.join("real/ok")).unwrap();
