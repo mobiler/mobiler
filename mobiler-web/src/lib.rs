@@ -2227,6 +2227,34 @@ fn body_fill_index(body: &Widget) -> Option<Option<usize>> {
     }
 }
 
+/// Resolves an image source. `asset:<path>` names a file bundled with the app (`[assets]`), served
+/// from `mobiler-assets/` next to the page; every other string is returned unchanged. An invalid
+/// `asset:` path (empty, leading `/`, `\`, or an empty/`.`/`..` segment) becomes `""`, which fires
+/// the image's `error` event like any failed load.
+pub(crate) fn image_src(source: &str) -> String {
+    let Some(path) = source.strip_prefix("asset:") else {
+        return source.to_string();
+    };
+    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+        return String::new();
+    }
+    let mut out = String::from("mobiler-assets");
+    for seg in path.split('/') {
+        if matches!(seg, "" | "." | "..") {
+            return String::new();
+        }
+        out.push('/');
+        for b in seg.bytes() {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+                out.push(b as char);
+            } else {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+    }
+    out
+}
+
 /// `Widget` → DOM. **Exhaustive** by construction — the `match` has no catch-all,
 /// so (like the Compose/SwiftUI shells) it won't compile until every `Widget`
 /// variant is handled. Style *intent* (TextStyle, Tone, …) becomes a CSS class;
@@ -2239,7 +2267,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             view! { <p class=class>{content}</p> }.into_any()
         }
         Widget::Image { source, shape, ratio } => {
-            let (class, source) = (image_class(*shape, *ratio), source.clone());
+            let (class, source) = (image_class(*shape, *ratio), image_src(source));
             view! { <img class=class src=source /> }.into_any()
         }
         Widget::Badge { label, tone, icon } => {
@@ -2261,7 +2289,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             if initials.is_none() && size.is_none() {
                 return view! {
                     <span class="avatar">
-                        <img class="avatar-img" src=source.clone() />
+                        <img class="avatar-img" src=image_src(source) />
                         {dot}
                     </span>
                 }
@@ -2273,7 +2301,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let letters = initials.as_deref().map(|i| view! { <span class="avatar-initials">{initials_text(i)}</span> });
             let img = (!source.is_empty()).then(|| {
                 view! {
-                    <img class="avatar-img" src=source.clone() on:error=|e| {
+                    <img class="avatar-img" src=image_src(source) on:error=|e| {
                         if let Some(img) = e.target().and_then(|t| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(t).ok()) {
                             let _ = img.style().set_property("display", "none");
                         }
@@ -2358,7 +2386,7 @@ fn render(widget: &Widget, send: &Dispatch) -> AnyView {
             let is_hls = effective.to_ascii_lowercase().ends_with(".m3u8");
             let src = (!is_hls).then(|| effective.clone());
             let hls_src = is_hls.then(|| effective.clone());
-            let poster_attr = poster.clone();
+            let poster_attr = poster.as_deref().map(image_src);
             let start_at = *start_at_ms;
             let rate = *rate as f64;
             let volume = (*volume as f64).clamp(0.0, 1.0);
@@ -4626,5 +4654,30 @@ mod share_tests {
         assert!(!share_error_falls_back("AbortError"));
         assert!(share_error_falls_back("NotAllowedError"));
         assert!(share_error_falls_back("TypeError"));
+    }
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::image_src;
+
+    #[test]
+    fn non_asset_sources_pass_through() {
+        assert_eq!(image_src("https://x/y.png"), "https://x/y.png");
+        assert_eq!(image_src("file:///a.png"), "file:///a.png");
+    }
+
+    #[test]
+    fn asset_paths_resolve_under_mobiler_assets() {
+        assert_eq!(image_src("asset:a.png"), "mobiler-assets/a.png");
+        assert_eq!(image_src("asset:guides/step 1.png"), "mobiler-assets/guides/step%201.png");
+        assert_eq!(image_src("asset:čaj.png"), "mobiler-assets/%C4%8Daj.png");
+    }
+
+    #[test]
+    fn invalid_asset_paths_render_as_failed_load() {
+        for bad in ["asset:", "asset:/a.png", "asset:../a.png", "asset:a/../b.png", "asset:a//b.png", "asset:./a.png", "asset:a\\b.png"] {
+            assert_eq!(image_src(bad), "", "{bad}");
+        }
     }
 }

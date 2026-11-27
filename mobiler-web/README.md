@@ -51,6 +51,11 @@ fn main() {
   (the browser's share sheet when it can share files, else a download: `ok: true, "downloaded"`)
   and `saveimage` (a download, since a browser has no photo library). Both fetch the `source`
   first, so a cross-origin URL needs CORS headers, or the reply is `fetch_failed`.
+- **Images bundled with the app (`asset:`).** An `Image`, `Avatar` or `Video` poster whose source is
+  `asset:<path>` loads `<path>` from the app's `[assets]` folder, which Trunk copies to
+  `mobiler-assets/` beside the page. Each path segment is percent-encoded, so names with spaces or
+  non-ASCII letters work. A path that is empty, starts with `/`, contains `\`, or has an empty, `.` or
+  `..` segment renders as a failed load (an avatar falls back to its initials).
 
 Build and serve with [Trunk](https://trunkrs.dev): `trunk serve`. See the
 [`fullstack-todo`](https://github.com/mobiler/mobiler/tree/main/demos/fullstack-todo)
