@@ -529,7 +529,7 @@ fn rivals<'a>(root: &Path, rels: impl IntoIterator<Item = &'a str>) -> Vec<Strin
             }
             for f in fs::read_dir(d.path()).into_iter().flatten().flatten() {
                 let name = f.file_name().to_string_lossy().into_owned();
-                if name.starts_with("ic_launcher") && name.ends_with(".xml") {
+                if name.starts_with("ic_launcher") && is_xml(&name) {
                     out.push(format!("{RES}/{folder}/{name} (it wins over mipmap-anydpi/ on every device)"));
                 }
             }
@@ -1890,7 +1890,7 @@ mod tests {
                 self.acc |= v << self.n;
                 self.n += len;
                 while self.n >= 8 {
-                    self.out.push(self.acc as u8);
+                    self.out.push(self.acc.to_le_bytes()[0]);
                     self.acc >>= 8;
                     self.n -= 8;
                 }
@@ -1911,7 +1911,7 @@ mod tests {
         }
         b.code(0, 7); // end of block
         if b.n > 0 {
-            b.out.push(b.acc as u8);
+            b.out.push(b.acc.to_le_bytes()[0]);
         }
         let n = 1 + 258 * runs;
         // Adler-32 of n zero bytes: a stays 1, b adds 1 per byte.

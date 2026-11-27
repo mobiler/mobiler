@@ -1081,7 +1081,7 @@ fn clear_pending(root: &Path, rel: &Path) {
     remove_emptied_dirs(&path, &root.join(PENDING_REL));
 }
 
-/// Drop the folders a removed `path` emptied, up to (not including) `top` (remove_dir fails on a non-empty one).
+/// Drop the folders a removed `path` emptied, up to (not including) `top` (`remove_dir` fails on a non-empty one).
 fn remove_emptied_dirs(path: &Path, top: &Path) {
     let mut dir = path.parent();
     while let Some(d) = dir.filter(|d| d.starts_with(top) && *d != top) {
