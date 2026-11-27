@@ -190,6 +190,7 @@ fn add_at(root: &Path, source: &str) -> Result<()> {
         .context("parsing mobiler-plugin.toml")?;
 
     check_push_bridge(root, &src, &manifest)?;
+    check_local_bridge(root, &src, &manifest)?;
 
     println!("Installing plugin `{}`{}", manifest.name, fmt_summary(&manifest.summary));
     let mut notes: Vec<String> = Vec::new();
@@ -509,6 +510,24 @@ fn check_push_bridge(root: &Path, src: &Source, manifest: &Manifest) -> Result<(
         if needs_new_bridge && app_swift.contains("final class PushBridge") && !app_swift.contains("func detach(_ id: Int)") {
             bail!(
                 "`{}` needs a newer iOS/Sources/App.swift (PushBridge.detach(_:)). Run `mobiler upgrade --apply` first, then re-run `mobiler plugin add {}`.",
+                manifest.name,
+                manifest.name
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The notifications plugin's iOS sources route through `LocalNotificationBridge`, which lives in the
+/// app's App.swift (the notification-delegate router), not in the plugin. Checked before writing
+/// anything: an App.swift that predates it wouldn't compile.
+fn check_local_bridge(root: &Path, src: &Source, manifest: &Manifest) -> Result<()> {
+    if let Some(i) = &manifest.ios {
+        let needs_bridge = i.sources.iter().any(|rel| src.read_text(rel).is_ok_and(|t| t.contains("LocalNotificationBridge")));
+        let app_swift = fs::read_to_string(root.join("iOS/Sources/App.swift")).unwrap_or_default();
+        if needs_bridge && !app_swift.contains("final class LocalNotificationBridge") {
+            bail!(
+                "`{}` needs a newer iOS/Sources/App.swift (LocalNotificationBridge). Run `mobiler upgrade --apply` first, then re-run `mobiler plugin add {}`.",
                 manifest.name,
                 manifest.name
             );
@@ -894,6 +913,71 @@ mod test {
             assert!(err.contains("mobiler upgrade"), "{name}: {err}");
             assert!(!root.join("iOS/Sources/PushPlugin.swift").exists() && !root.join("iOS/Sources/FirebasePushPlugin.swift").exists());
         }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// An App.swift that carries the local-notification router (Task 7 puts the real one in the template).
+    fn with_local_bridge(root: &Path) {
+        let path = root.join("iOS/Sources/App.swift");
+        let app = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            format!("final class LocalNotificationBridge {{\n    static let markerKey = \"mobiler_local\"\n}}\nfinal class PushBridge {{\n    func detach(_ id: Int) {{}}\n}}\n{app}"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn add_notifications_inserts_receivers_boot_permission_and_app_launch() {
+        let root = skeleton();
+        with_local_bridge(&root);
+        add_at(&root, "notifications").unwrap();
+        let manifest = read(&root, "Android/app/src/main/AndroidManifest.xml");
+        for r in ["NotificationReceiver", "NotificationActionReceiver", "NotificationRearmReceiver"] {
+            assert!(manifest.contains(&format!("android:name=\".{r}\"")), "{r}: {manifest}");
+        }
+        assert!(manifest.contains("android.permission.RECEIVE_BOOT_COMPLETED"), "{manifest}");
+        assert!(manifest.contains("android.permission.POST_NOTIFICATIONS"), "{manifest}");
+        let app = read(&root, "iOS/Sources/App.swift");
+        assert!(app.contains("        NotificationsPlugin.bootstrap()\n        // mobiler:app-launch"), "{app}");
+        for f in ["NotificationsPlugin.swift", "NotificationsEvents.swift", "NotificationsInput.swift"] {
+            assert!(root.join("iOS/Sources").join(f).exists(), "{f}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Written against an explicit old App.swift (a PushBridge but no LocalNotificationBridge), so it
+    /// keeps meaning "an app that predates the router" once the template carries the bridge.
+    #[test]
+    fn add_notifications_refuses_on_old_app_swift() {
+        let root = skeleton();
+        fs::write(
+            root.join("iOS/Sources/App.swift"),
+            "final class PushBridge {\n    func detach(_ id: Int) {}\n}\nfunc application() -> Bool {\n        // mobiler:app-launch\n        return true\n    }\n",
+        )
+        .unwrap();
+        let err = format!("{:#}", add_at(&root, "notifications").expect_err("an old App.swift must stop the install"));
+        assert!(err.contains("LocalNotificationBridge"), "{err}");
+        assert!(err.contains("mobiler upgrade --apply"), "{err}");
+        assert!(err.contains("mobiler plugin add notifications"), "{err}");
+        assert!(!root.join("iOS/Sources/NotificationsPlugin.swift").exists(), "nothing written");
+        assert!(!read(&root, "Android/app/src/main/AndroidManifest.xml").contains("NotificationReceiver"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn add_push_still_works_beside_notifications() {
+        let root = skeleton();
+        with_local_bridge(&root);
+        add_at(&root, "notifications").unwrap();
+        add_at(&root, "push").unwrap();
+        let core_kt = read(&root, "Android/app/src/main/java/dev/mobiler/demo/Core.kt");
+        assert!(core_kt.contains("\"notifications\" to NotificationsPlugin(application)"), "{core_kt}");
+        assert!(core_kt.contains("\"push\" to "), "{core_kt}");
+        let core_swift = read(&root, "iOS/Sources/Core.swift");
+        assert!(core_swift.contains("case \"notifications\": return await NotificationsPlugin.handle"), "{core_swift}");
+        assert!(core_swift.contains("case \"push\":"), "{core_swift}");
+        assert!(root.join("iOS/Sources/PushPlugin.swift").exists());
         let _ = fs::remove_dir_all(&root);
     }
 

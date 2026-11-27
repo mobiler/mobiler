@@ -372,7 +372,7 @@ ABI change. Bundled free plugins:
 | 🗝️ `securestore` | encrypted key/value (Keychain / Keystore) |
 | 🔌 `websocket` | persistent real-time connection (streaming, via `cx.subscribe`) |
 | ⇅ `transfer` | streaming file upload/download — progress + cancel, multipart/form-data (`cx.upload`/`cx.download`) |
-| 🔔 `notifications` | local scheduled notifications (reminders) |
+| 🔔 `notifications` | local scheduled notifications (reminders): wall-clock times, snooze/open actions, payload, events stream |
 | 🔋 `battery` | device battery level (sample) |
 | 📶 `connectivity` | network status (online/wifi/cellular/offline) |
 | 📄 `filepicker` | system document picker → file URI |
