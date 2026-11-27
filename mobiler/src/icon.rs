@@ -462,6 +462,64 @@ fn owned(root: &Path, rel: &str, ledger: &Ledger) -> bool {
         || ledger.holds(rel, &bytes)
 }
 
+/// The app's own launcher icon beside the sync's files, which makes that platform the app's (each with
+/// why): in a `mipmap-*` folder, a file for the same resource under another extension (Gradle refuses
+/// duplicate resources: an icon generator's `ic_launcher.png` beside our `ic_launcher.webp`); any
+/// `mipmap-anydpi-v*/ic_launcher*.xml` (Android Studio's layout, which wins over `mipmap-anydpi/` on
+/// every device at minSdk 26); an `AppIcon.appiconset/Contents.json` that doesn't name `icon-1024.png`.
+/// `rels`: the paths the sync would write or remove.
+fn rivals<'a>(root: &Path, rels: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let resource = |name: &str| name.split('.').next().unwrap_or(name).to_string();
+    let mut out = Vec::new();
+    let mut android = false;
+    for rel in rels {
+        android |= rel.starts_with("Android/");
+        let p = Path::new(rel);
+        let (Some(dir), Some(name)) = (p.parent(), p.file_name().and_then(|n| n.to_str())) else { continue };
+        if rel == IOS_PNG {
+            let contents = format!("{}/Contents.json", dir.to_string_lossy());
+            let names_ours = |t: &str| {
+                serde_json::from_str::<serde_json::Value>(t).ok().is_some_and(|v| {
+                    v["images"].as_array().is_some_and(|a| a.iter().any(|i| i["filename"] == "icon-1024.png"))
+                })
+            };
+            if let Ok(t) = fs::read_to_string(root.join(&contents))
+                && !names_ours(&t)
+            {
+                out.push(format!("{contents} (it doesn't name icon-1024.png)"));
+            }
+            continue;
+        }
+        if !dir.file_name().is_some_and(|d| d.to_string_lossy().starts_with("mipmap-")) {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(root.join(dir)) else { continue };
+        for e in entries.flatten() {
+            let other = e.file_name().to_string_lossy().into_owned();
+            if other != name && resource(&other) == resource(name) {
+                out.push(format!("{}/{other} (the same resource as {name}: Gradle refuses duplicates)", dir.to_string_lossy()));
+            }
+        }
+    }
+    if android && let Ok(entries) = fs::read_dir(root.join(RES)) {
+        for d in entries.flatten() {
+            let folder = d.file_name().to_string_lossy().into_owned();
+            if !folder.starts_with("mipmap-anydpi-v") {
+                continue;
+            }
+            for f in fs::read_dir(d.path()).into_iter().flatten().flatten() {
+                let name = f.file_name().to_string_lossy().into_owned();
+                if name.starts_with("ic_launcher") && name.ends_with(".xml") {
+                    out.push(format!("{RES}/{folder}/{name} (it wins over mipmap-anydpi/ on every device)"));
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// One platform's share of the sync: one ownership unit.
 struct Unit {
     name: &'static str,
@@ -526,11 +584,11 @@ fn web_page(html: &str, on: bool) -> Result<String, &'static str> {
 
 /// Nothing to do: the same inputs as last time, and every file still what the sync wrote.
 fn up_to_date(root: &Path, ledger: &Ledger, input: &str, has_mono: bool) -> bool {
+    let targets = targets(root, has_mono);
     ledger.active
         && ledger.input.as_deref() == Some(input)
-        && targets(root, has_mono).iter().all(|rel| {
-            fs::read(root.join(rel)).is_ok_and(|b| ledger.holds(rel, &b))
-        })
+        && targets.iter().all(|rel| fs::read(root.join(rel)).is_ok_and(|b| ledger.holds(rel, &b)))
+        && rivals(root, targets.iter().map(String::as_str)).is_empty()
         && fs::read_to_string(root.join(WEB_INDEX)).map_or(true, |html| web_page(&html, true).is_ok_and(|t| t == html))
 }
 
@@ -587,6 +645,10 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             .chain(unit.removes.iter().map(String::as_str))
             .filter(|rel| !owned(root, rel, &ledger))
             .collect();
+        let rivals = rivals(
+            root,
+            unit.assets.iter().chain(&unit.refs).map(|(rel, _)| rel.as_str()).chain(unit.removes.iter().map(String::as_str)),
+        );
         if !foreign.is_empty() {
             report.warnings.push(format!(
                 "{} {} edited by hand (not the template's and not [icon]'s) — the {} icon is not synced; delete or restore {} to let [icon] manage it",
@@ -595,6 +657,16 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
                 unit.name,
                 pron(foreign.len()),
             ));
+        }
+        if !rivals.is_empty() {
+            report.warnings.push(format!(
+                "the app has its own launcher icon: {} — the {} icon is not synced; remove {} (or, for Contents.json, list icon-1024.png in it) to let [icon] manage it",
+                rivals.join(", "),
+                unit.name,
+                pron(rivals.len()),
+            ));
+        }
+        if !foreign.is_empty() || !rivals.is_empty() {
             files.extend(ledger.under(unit.prefix));
             skipped = true;
             continue;
@@ -1649,6 +1721,92 @@ mod tests {
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
         assert!(text(&root, COLORS).contains("#123456"), "Android regenerated: {r:?}");
         assert_ne!(read(&root, &webp_rel), generated);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The Android icon is skipped (nothing of it written or recorded), iOS and web still synced.
+    fn assert_android_skipped(root: &Path, r: &SyncReport, naming: &str) {
+        assert!(r.warnings.iter().any(|w| w.contains(naming) && w.contains("Android icon is not synced")), "{:?}", r.warnings);
+        for rel in ANYDPI {
+            assert_eq!(read(root, rel), template(rel), "{rel} not written");
+        }
+        assert_eq!(read(root, &mipmap("mdpi", "ic_launcher.webp")), template(&mipmap("mdpi", "ic_launcher.webp")));
+        for f in android_icon_files(false) {
+            assert!(!root.join(&f).exists(), "{f}");
+        }
+        assert!(!read_ledger(root).unwrap().files.keys().any(|k| k.starts_with("Android/")), "nothing of Android's recorded");
+        assert_ne!(read(root, IOS_PNG), template(IOS_PNG), "iOS still written");
+        assert!(root.join(web_png(180)).exists(), "web still written");
+    }
+
+    #[test]
+    fn png_sibling_makes_android_foreign() {
+        // An icon generator's ic_launcher.png in place of the template's webp: writing the webp beside it
+        // would make Gradle fail with "Duplicate resources".
+        let root = app(ICON_TOML);
+        let webp = mipmap("hdpi", "ic_launcher.webp");
+        let png_rel = mipmap("hdpi", "ic_launcher.png");
+        std::fs::remove_file(root.join(&webp)).unwrap();
+        put(&root, &png_rel, b"their png");
+        let r = sync(&root).unwrap();
+        assert_android_skipped(&root, &r, &png_rel);
+        assert!(!root.join(&webp).exists(), "no webp beside their png");
+        // A second run says it again (a skipped platform is never up to date).
+        assert!(sync(&root).unwrap().warnings.iter().any(|w| w.contains(&png_rel)));
+        // Undo leaves their icon alone.
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        assert_eq!(read(&root, &png_rel), b"their png");
+        assert!(!root.join(&webp).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn anydpi_v26_icon_makes_android_foreign() {
+        // Android Studio's Image Asset layout: mipmap-anydpi-v26 wins over mipmap-anydpi on every device
+        // at minSdk 26, so [icon]'s icon would silently not show.
+        let root = app(ICON_TOML);
+        let v26 = format!("{RES}/mipmap-anydpi-v26/ic_launcher_round.xml");
+        let theirs = "<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\"/>\n";
+        put(&root, &v26, theirs.as_bytes());
+        let r = sync(&root).unwrap();
+        assert_android_skipped(&root, &r, &v26);
+        // Undo leaves it alone.
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        assert_eq!(text(&root, &v26), theirs);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_icon_added_after_a_sync_is_still_seen() {
+        // The unchanged-input skip doesn't hide an app icon added after the last sync.
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let v26 = format!("{RES}/mipmap-anydpi-v26/ic_launcher.xml");
+        put(&root, &v26, b"<adaptive-icon/>\n");
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(&v26)), "{:?}", r.warnings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ios_contents_json_without_our_png_makes_ios_foreign() {
+        // An app's own AppIcon set: our icon-1024.png would sit there unreferenced.
+        let root = app(ICON_TOML);
+        let contents = "iOS/Sources/Assets.xcassets/AppIcon.appiconset/Contents.json";
+        let theirs = "{\n  \"images\" : [ { \"filename\" : \"AppIcon-1024.png\", \"idiom\" : \"universal\", \"platform\" : \"ios\", \"size\" : \"1024x1024\" } ],\n  \"info\" : { \"author\" : \"xcode\", \"version\" : 1 }\n}\n";
+        put(&root, contents, theirs.as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(contents) && w.contains("iOS icon is not synced")), "{:?}", r.warnings);
+        assert_eq!(read(&root, IOS_PNG), template(IOS_PNG), "nothing of iOS's written");
+        assert!(!read_ledger(&root).unwrap().files.keys().any(|k| k.starts_with("iOS/")));
+        assert_eq!(text(&root, ANYDPI[0]), android_adaptive_xml(false), "Android still written");
+        // The template's Contents.json (it names icon-1024.png) is fine.
+        put(&root, contents, template(contents));
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        assert_ne!(read(&root, IOS_PNG), template(IOS_PNG));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

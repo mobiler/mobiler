@@ -56,7 +56,10 @@ app has `web/index.html`, a favicon and an apple-touch-icon. Commit what it writ
 with it. Keep the source PNGs outside your assets folder (for example in `brand/`).
 
 An icon you made by hand is never overwritten: if a launcher file was edited, that platform is skipped with
-a warning naming the file, and you delete or restore it to hand it back. Removing `[icon]` puts the
+a warning naming the file, and you delete or restore it to hand it back. The same goes for an icon of your
+own next to the generated files: an `ic_launcher.png` beside where `ic_launcher.webp` goes, a
+`mipmap-anydpi-v26/ic_launcher.xml` from Android Studio, or an iOS `Contents.json` that doesn't list
+`icon-1024.png`. Removing `[icon]` puts the
 template's icon back. On Android 12+ the system splash shows the launcher icon when `[splash]` has no
 `logo`. iOS 18's dark and tinted icon variants are not generated yet.
 

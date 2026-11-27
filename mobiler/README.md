@@ -242,7 +242,12 @@ bundled into the app, so a source there ships twice, and the CLI warns.
 one it wrote itself (it remembers those in `.mobiler/icon.json`: **commit it**). If a launcher file has
 been edited by hand, that platform's icon is skipped with a warning naming the file ("... edited by hand
 (not the template's and not [icon]'s) — the Android icon is not synced"); delete or restore the file to
-let `[icon]` manage it. **Removing `[icon]`** puts the template's icon back wherever the sync still owns
+let `[icon]` manage it. The same happens when the app has its own icon **beside** the sync's files: an
+`ic_launcher.png` (or other extension) where the sync would write `ic_launcher.webp` (Gradle refuses two
+files for one resource), any `mipmap-anydpi-v26/ic_launcher*.xml` (Android Studio's layout, which wins on
+every device, so `[icon]`'s would never show), or an iOS `AppIcon.appiconset/Contents.json` that doesn't
+list `icon-1024.png`. Remove those (or list `icon-1024.png`) to let `[icon]` manage that platform.
+**Removing `[icon]`** puts the template's icon back wherever the sync still owns
 the file.
 
 ## Bundled files — `mobiler.toml` `[assets]`

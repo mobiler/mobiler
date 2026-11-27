@@ -4,8 +4,8 @@ Status:        Accepted
 Date decided:  2026-11-27
 Deciding PRs:  the CLI PR of the `[icon]` / `[assets]` release (CLI 0.75.0)
 Supersedes:    none
-Code anchor:   mobiler/src/icon.rs (validate, check_header, working_copy, layer, composite, ios_png, webp, the XML and web generators, Ledger, owned, targets, input_fingerprint, up_to_date, sync, units, android_unit, undo, apply), mobiler/src/upgrade.rs (SEED_PATHS), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/mipmap-* (the stock icon)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::foreign_file_in_web_icon_survives, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files
+Code anchor:   mobiler/src/icon.rs (validate, check_header, working_copy, layer, composite, ios_png, webp, the XML and web generators, Ledger, owned, rivals, targets, input_fingerprint, up_to_date, sync, units, android_unit, undo, apply), mobiler/src/upgrade.rs (SEED_PATHS), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/mipmap-* (the stock icon)
+Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::png_sibling_makes_android_foreign, mobiler/src/icon.rs::anydpi_v26_icon_makes_android_foreign, mobiler/src/icon.rs::ios_contents_json_without_our_png_makes_ios_foreign, mobiler/src/icon.rs::an_icon_added_after_a_sync_is_still_seen, mobiler/src/icon.rs::foreign_file_in_web_icon_survives, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files
 
 ## 1. Context (The Problem)
 
@@ -67,8 +67,21 @@ premultiplied pixels so transparent pixels never fringe an edge) and composited 
 
 Each platform is one unit. One file in a unit that the sync doesn't own (`web/index.html` aside, which is only
 ever edited inside its block) skips that **whole platform** with a warning naming the file; a half-branded icon is
-worse than none. A web page whose block can't be filled skips the web unit the same way. A skipped unit keeps its
-ledger entries. Files only the sync creates (`mobiler_icon_*`, `values/mobiler_icon.xml`,
+worse than none. A web page whose block can't be filled skips the web unit the same way.
+
+A missing file is owned, but the app may have its own icon **beside** the sync's paths. These make the platform
+the app's too (skipped with a warning naming the file, and undo leaves them alone):
+- **Android, another file for the same resource:** in a `mipmap-*` folder, a file whose name up to the first `.`
+  matches one the sync writes, with another extension (an icon generator's `ic_launcher.png` where our
+  `ic_launcher.webp` would go). Writing ours beside it makes Gradle fail with "Duplicate resources".
+- **Android, a versioned adaptive icon:** any `res/mipmap-anydpi-v*/ic_launcher*.xml` (Android Studio's Image
+  Asset layout). It wins over the sync's `mipmap-anydpi/` on every device at minSdk 26, so our icon would
+  silently not show.
+- **iOS:** an `AppIcon.appiconset/Contents.json` that doesn't list `icon-1024.png` (or doesn't parse): our PNG
+  would sit there unreferenced.
+
+These are checked on every run, the unchanged-input skip included, so an icon added after a sync is still seen.
+A skipped unit keeps its ledger entries. Files only the sync creates (`mobiler_icon_*`, `values/mobiler_icon.xml`,
 `web/icon/mobiler-icon-*`) are created with the section and removed only while owned.
 
 **Seeds.** `mipmap-anydpi/ic_launcher.xml` and `ic_launcher_round.xml` join `SEED_PATHS`, extending ADR-0042's
@@ -111,6 +124,9 @@ Without `[icon]` and without a ledger the sync touches nothing, and writes no le
   - **Validation Metric:** `writes_every_platform`, `no_png_beside_webp`.
 - **Condition 4 — a hand-edited file is left alone, and its whole platform skipped.**
   - **Validation Metric:** `hand_edited_launcher_xml_skips_android_only`, `hand_edited_webp_is_left_alone`.
+- **Condition 4a — the app's own icon beside the sync's paths skips its platform.**
+  - **Validation Metric:** `png_sibling_makes_android_foreign`, `anydpi_v26_icon_makes_android_foreign`,
+    `ios_contents_json_without_our_png_makes_ios_foreign`, `an_icon_added_after_a_sync_is_still_seen`.
 - **Condition 5 — the ledger owns binaries across a removal, an interruption and a skip.**
   - **Validation Metric:** `removed_and_added_back_still_owns_its_files`,
     `interrupted_sync_is_retried_and_owns_its_files`, `a_skipped_platform_is_not_up_to_date_after_restore`,
@@ -175,6 +191,10 @@ the unchanged-input skip makes a build with an unchanged icon decode nothing.
   byte-identical").
 - Dropping the 1024 px minimum failed `validate_rejects` (the 1000 px source "must be rejected"); so did widening
   the padding bound to 41.
+- Before `rivals` existed (a missing file always owned), `png_sibling_makes_android_foreign`,
+  `anydpi_v26_icon_makes_android_foreign`, `ios_contents_json_without_our_png_makes_ios_foreign` and
+  `an_icon_added_after_a_sync_is_still_seen` all failed (no warning: `[]`). Dropping only the `rivals` check from
+  `up_to_date` failed `an_icon_added_after_a_sync_is_still_seen`.
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
