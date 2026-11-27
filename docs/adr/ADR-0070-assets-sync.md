@@ -2,7 +2,7 @@
 
 Status:        Accepted
 Date decided:  2026-11-27
-Deciding PRs:  the CLI PR of the `[icon]` / `[assets]` release (CLI 0.75.0)
+Deciding PRs:  #323 (CLI 0.75.0)
 Supersedes:    none
 Code anchor:   mobiler/src/assets.rs (clean_dir, validate, yaml_string, the generators, sync, fill, source_overlap_warnings, symlink_warnings, watch_paths, doctor_line), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/build.gradle.kts and mobiler/templates/iOS/project.yml (the marker blocks), the template's MainActivity.kt and Render.swift (the ADR-0069 resolvers)
 Conformance:   xtask/tests/adr_conformance.rs::adr_0070_asset_markers, xtask/tests/adr_conformance.rs::adr_0069_asset_resolvers_follow_one_rule, mobiler/src/assets.rs::generated_blocks_match_barbershop, mobiler/src/assets.rs::fills_template_blocks_and_inserts_web_block, mobiler/src/assets.rs::missing_markers_warn_and_never_edit, mobiler/src/assets.rs::missing_dir_fills_only_the_gradle_block, mobiler/src/assets.rs::removing_section_empties_blocks_and_keeps_dir, mobiler/src/assets.rs::rejects_dir_outside_root, mobiler/src/assets.rs::folder_names_yaml_would_retype_are_quoted, mobiler/src/assets.rs::symlink_inside_dir_warns, mobiler/src/assets.rs::fonts_or_splash_source_under_dir_warns, mobiler/src/assets.rs::icon_source_inside_assets_dir_warns, mobiler/src/assets.rs::upgrade_never_touches_dir
