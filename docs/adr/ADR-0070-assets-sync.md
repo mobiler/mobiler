@@ -1,4 +1,4 @@
-# ADR-0070: `mobiler.toml` `[assets]` ships one app folder inside every shell by pointing each build at it — a Gradle `Sync` into `build/`, an XcodeGen folder reference plus `MobilerAssetsFolder`, a trunk `copy-dir` — filled into marker blocks the CLI never inserts in template files; nothing is copied into the shells' trees, and `dir` may not be a path the CLI writes (a template top-level entry, `web`, `.mobiler`, `target`, `mobiler.toml`), so no sync and no `upgrade` writes under it
+# ADR-0070: `mobiler.toml` `[assets]` ships one app folder inside every shell by pointing each build at it — a Gradle `Sync` into `build/`, an XcodeGen folder reference plus `MobilerAssetsFolder`, a trunk `copy-dir` — filled into marker blocks the CLI never inserts in template files; nothing is copied into the shells' trees, and `dir` may not start with a top-level path the CLI writes into (a template top-level entry, `web`, `.mobiler`, `target`, `mobiler.toml`), so no sync and no `upgrade` writes under it
 
 Status:        Accepted
 Date decided:  2026-11-27
@@ -69,8 +69,9 @@ The rules:
   missing and replaced afterwards. Without the section and without a block, the page is left alone.
 - **Removing `[assets]`** empties every block and never touches the folder. The `[assets]` sync never writes,
   moves or deletes anything under `dir`. Nothing else the CLI writes lies there either: `dir` can't start with a
-  CLI-written top-level path (above), so `new`, `upgrade` and the other syncs (all of which write only under those
-  paths) can't reach it, and the template has no files under `assets/`, the default `dir`.
+  CLI-written top-level path (above), so `new`, `upgrade` and the other syncs can't reach it (each writes only under
+  those paths, plus single files at the app root — `new`'s `CLAUDE.md` and `upgrade`'s `<file>.mobiler-new` review
+  copies — never inside another folder), and the template has no files under `assets/`, the default `dir`.
 - **Warnings that don't stop the sync:**
   - a `[fonts]`, `[splash]` or `[icon]` source file under `dir` (compared by path segment), since it would also
     ship inside the app;
