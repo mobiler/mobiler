@@ -4,8 +4,8 @@ Status:        Accepted
 Date decided:  2026-11-27
 Deciding PRs:  the CLI PR of the `[icon]` / `[assets]` release (CLI 0.75.0)
 Supersedes:    none
-Code anchor:   mobiler/src/icon.rs (validate, check_header, working_copy, layer, composite, ios_png, webp, the XML and web generators, Ledger, owned, rivals, targets, input_fingerprint, up_to_date, sync, units, android_unit, undo, apply), mobiler/src/upgrade.rs (SEED_PATHS), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/mipmap-* (the stock icon)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::fifo_source_is_refused_without_hanging, mobiler/src/icon.rs::oversized_source_is_refused_unread, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::png_sibling_makes_android_foreign, mobiler/src/icon.rs::anydpi_v26_icon_makes_android_foreign, mobiler/src/icon.rs::ios_contents_json_without_our_png_makes_ios_foreign, mobiler/src/icon.rs::an_icon_added_after_a_sync_is_still_seen, mobiler/src/icon.rs::foreign_file_in_web_icon_survives, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files
+Code anchor:   mobiler/src/icon.rs (validate, check_header, decode_limits, working_copy, layer, composite, ios_png, webp, the XML and web generators, Ledger, owned, rivals, targets, input_fingerprint, up_to_date, sync, units, android_unit, undo, apply), mobiler/src/upgrade.rs (SEED_PATHS), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/mipmap-* (the stock icon)
+Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::fifo_source_is_refused_without_hanging, mobiler/src/icon.rs::oversized_source_is_refused_unread, mobiler/src/icon.rs::iccp_bomb_is_bounded, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::png_sibling_makes_android_foreign, mobiler/src/icon.rs::anydpi_v26_icon_makes_android_foreign, mobiler/src/icon.rs::ios_contents_json_without_our_png_makes_ios_foreign, mobiler/src/icon.rs::an_icon_added_after_a_sync_is_still_seen, mobiler/src/icon.rs::foreign_file_in_web_icon_survives, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files
 
 ## 1. Context (The Problem)
 
@@ -31,7 +31,10 @@ bad input never leaves half-written resources.
   The size is read from the IHDR header before any decode, so an oversized file is never decoded. Before even
   that, from the file's metadata: it must be a regular file (a FIFO would block the open, `/dev/zero` never
   ends) of at most 256 MB. The unchanged-input fingerprint runs the same checks before it hashes a byte, so no
-  build, `dev` or `watch` reads an unbounded file. Palette,
+  build, `dev` or `watch` reads an unbounded file. The decoder's allocation is capped at the image at its widest
+  (side² × 8 bytes, 16-bit RGBA) plus 64 MiB, from the checked header, so a crafted iCCP or zTXt chunk can't
+  inflate without bound (image's default 512 MiB cap, which `[splash]` keeps, is too small for a 16384 px
+  source). Palette,
   grayscale and 16-bit PNGs are accepted. A foreground with no transparency is accepted.
 - `background` (required): exactly `#RRGGBB`.
 - `padding` (optional): the % of the visible icon's side kept clear on each side, `0..=40`, default 18 (a square
@@ -123,7 +126,7 @@ Without `[icon]` and without a ledger the sync touches nothing, and writes no le
   - **Validation Metric:** `adr_0071_icon_seeds_and_marker`, `upgrade_reports_nothing_for_icon_files`.
 - **Condition 2 — validation before any write.**
   - **Validation Metric:** `validate_rejects`, `broken_foreground_writes_nothing`,
-    `fifo_source_is_refused_without_hanging`, `oversized_source_is_refused_unread`.
+    `fifo_source_is_refused_without_hanging`, `oversized_source_is_refused_unread`, `iccp_bomb_is_bounded`.
 - **Condition 3 — every platform's files are generated.**
   - **Validation Metric:** `writes_every_platform`, `no_png_beside_webp`.
 - **Condition 4 — a hand-edited file is left alone, and its whole platform skipped.**
@@ -202,6 +205,8 @@ the unchanged-input skip makes a build with an unchanged icon decode nothing.
 - Before the metadata check (the fingerprint read the whole source first), `fifo_source_is_refused_without_hanging`
   failed ("a FIFO source hung the sync: Timeout") and `oversized_source_is_refused_unread` failed ("an oversized
   source is never fingerprinted").
+- With `max_alloc = None` (the first version), `iccp_bomb_is_bounded` failed ("the iCCP chunk inflated past the
+  limit": a 1.7 MB file's iCCP chunk inflated to 283 MB).
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)

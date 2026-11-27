@@ -87,17 +87,25 @@ fn check_settings(spec: &IconSpec) -> Result<([u8; 3], u32), String> {
 fn load(root: &Path, field: &str, rel: &str) -> Result<RgbaImage, String> {
     #[cfg(test)]
     tests::DECODES.with(|n| n.set(n.get() + 1));
-    check_header(root, field, rel)?;
+    let side = check_header(root, field, rel)?;
     let err = |why: String| format!("[icon] {field} {rel:?}: {why}");
     let mut reader = image::ImageReader::open(root.join(rel)).map_err(|e| err(format!("can't read it ({e})")))?;
     reader.set_format(image::ImageFormat::Png);
+    reader.limits(decode_limits(side));
+    let img = reader.decode().map_err(|e| err(format!("not a readable PNG ({e})")))?;
+    Ok(img.into_rgba8())
+}
+
+/// The decoder's limits for a source `side` px square (its checked header): the image at its widest
+/// (16-bit RGBA, 8 bytes a pixel) plus 64 MiB for the decoder's buffers and ancillary chunks. Bounded, so
+/// a crafted iCCP or zTXt chunk can't inflate without end (image's default 512 MiB is too small for a
+/// 16384 px source, 2 GiB at 16-bit RGBA).
+fn decode_limits(side: u32) -> image::Limits {
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(MAX_PX);
     limits.max_image_height = Some(MAX_PX);
-    limits.max_alloc = None; // a 16384 px RGBA source is 1 GiB; the side limit bounds it
-    reader.limits(limits);
-    let img = reader.decode().map_err(|e| err(format!("not a readable PNG ({e})")))?;
-    Ok(img.into_rgba8())
+    limits.max_alloc = Some(u64::from(side) * u64::from(side) * 8 + (64 << 20));
+    limits
 }
 
 /// A square PNG, 1024..=16384 px, judged from its first 24 bytes (signature and IHDR) only: its side.
@@ -1866,6 +1874,79 @@ mod tests {
         assert!(e.contains("foreground") && e.contains("MB"), "{e}");
         let r = sync(&root).unwrap();
         assert!(r.written.is_empty() && r.warnings.iter().any(|w| w.contains("MB")), "{r:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// zlib bytes inflating to `1 + 258 * runs` zero bytes: one literal, then `runs` copies of length 258 at
+    /// distance 1, in one fixed-Huffman block (13 bits per 258 bytes).
+    fn zero_bomb(runs: usize) -> (Vec<u8>, usize) {
+        struct Bits {
+            out: Vec<u8>,
+            acc: u32,
+            n: u32,
+        }
+        impl Bits {
+            fn put(&mut self, v: u32, len: u32) {
+                self.acc |= v << self.n;
+                self.n += len;
+                while self.n >= 8 {
+                    self.out.push(self.acc as u8);
+                    self.acc >>= 8;
+                    self.n -= 8;
+                }
+            }
+            /// A Huffman code: most significant bit first.
+            fn code(&mut self, v: u32, len: u32) {
+                let rev = (0..len).fold(0, |r, i| r | (((v >> i) & 1) << (len - 1 - i)));
+                self.put(rev, len);
+            }
+        }
+        let mut b = Bits { out: vec![0x78, 0x01], acc: 0, n: 0 };
+        b.put(1, 1); // BFINAL
+        b.put(1, 2); // fixed Huffman
+        b.code(0x30, 8); // literal 0
+        for _ in 0..runs {
+            b.code(0b1100_0101, 8); // length 258 (symbol 285)
+            b.code(0, 5); // distance 1
+        }
+        b.code(0, 7); // end of block
+        if b.n > 0 {
+            b.out.push(b.acc as u8);
+        }
+        let n = 1 + 258 * runs;
+        // Adler-32 of n zero bytes: a stays 1, b adds 1 per byte.
+        let adler = (u32::try_from(n % 65_521).unwrap() << 16) | 1;
+        b.out.extend_from_slice(&adler.to_be_bytes());
+        (b.out, n)
+    }
+
+    #[test]
+    fn iccp_bomb_is_bounded() {
+        // A 1024 px PNG whose iCCP chunk inflates to ~256 MiB (1.7 MB on disk): the decoder must stop at
+        // the limit instead of allocating it all, and the image still decodes.
+        let (z, inflated) = zero_bomb(1_100_000);
+        assert!(inflated > 256 << 20);
+        let mut data = b"bomb\0\0".to_vec(); // profile name, compression method 0
+        data.extend_from_slice(&z);
+        let mut chunk = u32::try_from(data.len()).unwrap().to_be_bytes().to_vec();
+        let start = chunk.len();
+        chunk.extend_from_slice(b"iCCP");
+        chunk.extend_from_slice(&data);
+        let crc = crc32(&chunk[start..]);
+        chunk.extend_from_slice(&crc.to_be_bytes());
+        let mut png_bytes = palette_png(1024);
+        png_bytes.splice(33..33, chunk); // after the signature and IHDR
+        let limits = decode_limits(1024);
+        let dec = image::codecs::png::PngDecoder::with_limits(std::io::Cursor::new(&png_bytes), limits).unwrap();
+        let mut dec = dec;
+        let profile = image::ImageDecoder::icc_profile(&mut dec).unwrap_or(None);
+        assert!(profile.is_none_or(|p| p.len() < 128 << 20), "the iCCP chunk inflated past the limit");
+        let root = tmp();
+        std::fs::write(root.join("bomb.png"), &png_bytes).unwrap();
+        validate(&root, &spec("bomb.png")).expect("the image itself still decodes");
+        // The bound: a 16-bit RGBA image (8 bytes a pixel) plus 64 MiB for the decoder's buffers and chunks.
+        assert_eq!(decode_limits(1024).max_alloc, Some(1024 * 1024 * 8 + (64 << 20)));
+        assert_eq!(decode_limits(16_384).max_alloc, Some(16_384 * 16_384 * 8 + (64 << 20)));
         let _ = std::fs::remove_dir_all(&root);
     }
 }
