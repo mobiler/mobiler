@@ -6,6 +6,7 @@ mod deep_links;
 mod dev;
 mod fonts;
 mod fsguard;
+mod icon;
 mod local_network;
 mod lockcheck;
 mod display_name;
