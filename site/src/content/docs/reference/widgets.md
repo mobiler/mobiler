@@ -54,6 +54,9 @@ Inputs report their value to your core's `input(id, value, …)`.
 `web_view`, `video_player` and `video_playlist` (with poster, captions, rate, volume, a playlist and picture-in-picture), and
 `map` with `marker`s (MapKit on iOS, MapLibre on Android and the web, no API key).
 
+`image`, `avatar` and a video poster also take `asset:<path>` for a file bundled with the app (names are
+case-sensitive; a missing file is a failed load). See [Bundled files](/guides/configuration/#bundled-files).
+
 ## Charts
 
 `chart` in eight styles (`bar_chart`, `line_chart`, `stacked_bar_chart`, `pct_stacked_bar_chart`,

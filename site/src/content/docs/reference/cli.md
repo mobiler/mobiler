@@ -19,6 +19,8 @@ Install it with `cargo install mobiler`. Run the app commands from the app root 
 | `mobiler display-name [name]` | Prints or sets the name users see. |
 | `mobiler fonts sync` | Applies `mobiler.toml` `[fonts]`. |
 | `mobiler splash sync` | Applies `[splash]`. |
+| `mobiler icon sync` | Applies `[icon]`: generates the launcher icon. |
+| `mobiler assets sync` | Applies `[assets]`: bundles a folder for `asset:` images. |
 | `mobiler deep-links sync` | Applies `[deep_links]`. |
 | `mobiler local-network sync` | Applies `[ios] local_network`. |
 

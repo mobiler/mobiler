@@ -290,7 +290,8 @@ weight and font role per text style, including the `display(...)` / `headline(..
 `with_appearance(Light | Dark | System)` follows the phone's light/dark setting live. Anything you
 leave unset keeps the stock look. The launch window and Android 12+ splash follow the phone's
 light/dark setting too: describe it once in `mobiler.toml` `[splash]` (background colours and a logo,
-see *Launch screen* in the [CLI README](mobiler/README.md)).
+see *Launch screen* in the [CLI README](mobiler/README.md)). The launcher icon (`[icon]`) and files bundled for
+`image("asset:…")` / `avatar("asset:…")` (`[assets]`) are declared there too (*Launcher icon*, *Bundled files*).
 
 **Fade House** ([`demos/barbershop`](demos/barbershop/)) — a barbershop booking demo: a
 brass-on-dark brand, an icon tab bar + FAB, a brand-gradient promo banner, an avatar
@@ -401,7 +402,8 @@ each copy's path. Apps scaffolded before baselines
 existed fall back to a conservative reconcile and get a baseline written for next time. A few
 app-owned files the template provides defaults for (the launch window colours) are created when
 missing and never changed by `upgrade` after that; `mobiler.toml` `[splash]` writes them while they are
-stock or its own.
+stock or its own. An app made before CLI 0.75 runs `mobiler upgrade --apply` once to get the markers `[assets]`
+fills in `build.gradle.kts` and `project.yml` (and the launcher XMLs `[icon]` writes, which are created when missing too).
 
 ### Breaking changes in your app code
 

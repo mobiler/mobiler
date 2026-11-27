@@ -48,6 +48,8 @@ mobiler plugin add scanner   # install a plugin into the app
 mobiler upgrade         # pull the latest generic shells + mobiler-core into an existing app
 mobiler display-name "Appointments Admin"   # set the name users see (omit the name to print it)
 mobiler fonts sync      # copy mobiler.toml [fonts] into the shells (build/dev/watch do it too)
+mobiler icon sync       # generate the launcher icon from mobiler.toml [icon] (build/dev/watch do it too)
+mobiler assets sync     # point the shells at the mobiler.toml [assets] folder (build/dev/watch do it too)
 mobiler deep-links sync # apply mobiler.toml [deep_links] to the shells (build/dev/watch do it too)
 mobiler local-network sync # apply mobiler.toml [ios] local_network to iOS (build/dev do it too)
 ```
@@ -207,6 +209,74 @@ their files say they are the app's own again.
 Without `[splash]`, the colours are yours to edit directly in the files above. To open in the app's own
 light/dark choice from the first frame, keep that choice in your `cx.save` state. Your own Android theme
 items go in `res/values/themes.xml`; they apply in light and dark mode and on every Android version.
+
+## Launcher icon — `mobiler.toml` `[icon]`
+
+Declare the app's icon once, from one transparent foreground PNG and a background colour; the CLI makes
+every size for Android, iOS and the web:
+
+```toml
+[icon]
+foreground = "brand/icon-foreground.png"   # PNG, square, 1024-16384 px, transparent background
+background = "#0E9F8E"                     # #RRGGBB
+monochrome = "brand/icon-mono.png"         # optional; the Android 13+ themed-icon layer, same size rules
+padding    = 18                            # optional; 0-40, % of the icon kept clear on each side
+```
+
+`mobiler build`, `dev` and `watch` sync it; `mobiler icon sync` does it on demand and prints what it
+wrote. A problem (a bad colour, a PNG that is not square or too small, an unknown key) prints a warning
+and writes nothing, and never fails a build.
+
+- **Android:** an adaptive icon (background colour, foreground layer, and a themed layer for Android 13+:
+  your `monochrome` image, or else the foreground itself) plus the legacy launcher images for older phones.
+- **iOS:** the single 1024 px `AppIcon` image, opaque, as the App Store requires.
+- **The web** (when the app has `web/index.html`): a favicon and an apple-touch-icon, and a marked block
+  in `index.html`.
+- **The Android 12+ splash** shows the launcher icon when `[splash]` has no `logo`.
+- iOS 18's dark and tinted icon variants are not generated yet.
+
+**Keep the icon sources outside the assets folder** (e.g. `brand/`): everything under `[assets] dir` is
+bundled into the app, so a source there ships twice, and the CLI warns.
+
+**A hand-made icon is left alone.** The sync writes a file only while it is missing, the template's own, or
+one it wrote itself (it remembers those in `.mobiler/icon.json`: **commit it**). If a launcher file has
+been edited by hand, that platform's icon is skipped with a warning naming the file ("... edited by hand
+(not the template's and not [icon]'s) — the Android icon is not synced"); delete or restore the file to
+let `[icon]` manage it. **Removing `[icon]`** puts the template's icon back wherever the sync still owns
+the file.
+
+## Bundled files — `mobiler.toml` `[assets]`
+
+Images that ship inside the app and load offline live in one folder, shown with an `asset:` source:
+
+```toml
+[assets]
+dir = "assets"     # optional; this is the default
+```
+
+Put files in `assets/` and show them with `image("asset:logo.png", ...)`, `avatar("asset:people/ann.jpg")`
+or a video `poster`. Those three accept `asset:`; names are **case-sensitive** (`Logo.png` is not
+`logo.png`), the path is relative to `dir`, and `..` or a leading `/` never resolve. A missing file renders
+as a failed load. The core passes the string through unchanged.
+
+The sync points each build at the folder (a Gradle copy task, an XcodeGen folder reference, a trunk
+`copy-dir`); it never copies files into the shells and never writes under `dir`. A file you add or change
+is picked up by the next build, with no sync step. `mobiler assets sync` re-applies the pointers and
+reports problems.
+
+- **The folder ships whole.** Put in it only the files the app shows at runtime: every byte grows the
+  download and the installed app (mind the store size limits).
+- **`dir` must be a folder of your own.** Any name starting with a path the CLI writes is refused: `Android`,
+  `iOS`, `web`, `shared`, `.mobiler`, `target`, `mobiler.toml` and the other top-level template entries
+  (compared ignoring case). It must be relative, inside the app, with no `..`, no symlinked part, and only
+  letters, digits, space (not at the ends), `-`, `_`, `.` and `+` in each segment.
+- **Warnings** (the sync goes on): a `[fonts]`, `[splash]` or `[icon]` source file under `dir` (it would
+  ship in the app too), a symlink inside `dir` (the builds follow it and ship its target), a `dir` that
+  doesn't exist yet. `mobiler doctor` repeats them.
+- **Apps made before CLI 0.75** need `mobiler upgrade --apply` once: it adds the markers in
+  `Android/app/build.gradle.kts` and `iOS/project.yml` that the sync fills. Without them the sync warns
+  and edits nothing.
+- **Removing `[assets]`** empties the blocks and leaves your folder alone.
 
 ## Deep links — `mobiler.toml` `[deep_links]`
 
