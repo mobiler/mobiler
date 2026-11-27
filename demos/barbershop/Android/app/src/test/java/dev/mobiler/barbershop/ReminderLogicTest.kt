@@ -221,4 +221,20 @@ class ReminderLogicTest {
     @Test fun localTimeFormat() {
         assertEquals("2027-01-01 12:00:00", reminderLocalTime(now, zone))
     }
+
+    // A snooze (NotificationActionReceiver) writes a new entry from the reminder its button carries.
+    @Test fun snoozeEntryIsASnoozedCopyDueInMinutes() {
+        val carried = parse("""{"id":9,"title":"T","body":"B","at":"2027-01-02 09:00","payload":"p\n\"q\"","late_minutes":30,""" +
+            """"actions":${actions(snooze("s", 5), open("o"))}}""").getOrThrow()
+        val s = snoozeEntry(null, carried, now, 5)!!
+        assertEquals(carried.copy(snoozed = true, fireAtMs = now + 5 * 60_000L, wall = null), s)
+        // A snooze isn't a wall-clock reminder: a re-arm (zone change) never moves it.
+        assertEquals(RearmDecision.ARM to s, rearmDecision(s, now, ZoneId.of("Europe/London"), alarmAlive = false))
+    }
+
+    @Test fun snoozeLeavesANewerScheduleOfTheIdAlone() {
+        val carried = parse("""{"id":9,"after_seconds":1}""").getOrThrow()
+        val replanned = parse("""{"id":9,"after_seconds":3600}""").getOrThrow()
+        assertNull(snoozeEntry(replanned, carried, now, 5))
+    }
 }

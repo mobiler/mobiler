@@ -225,6 +225,17 @@ fun rearmDecision(r: Reminder, nowMs: Long, zone: ZoneId, alarmAlive: Boolean): 
  */
 fun receiverShouldPost(r: Reminder, nowMs: Long): Boolean = r.fireAtMs <= nowMs
 
+/**
+ * The registry entry a snooze writes (NotificationActionReceiver): the reminder its button carries, now
+ * `snoozed`, due `minutes` from `nowMs`, with no `wall` (a time-zone change never moves a snooze). The
+ * firing receiver removed the entry when it posted, so an `existing` entry is a newer schedule of the id
+ * (the app re-planned it): that one wins and nothing is written (null).
+ */
+fun snoozeEntry(existing: Reminder?, carried: Reminder, nowMs: Long, minutes: Int): Reminder? {
+    if (existing != null) return null
+    return carried.copy(snoozed = true, fireAtMs = nowMs + minutes * 60_000L, wall = null)
+}
+
 /** The persisted reminders. Every write is `commit()`ed (on disk before the alarm is set). */
 object ReminderRegistry {
     private const val PREFS = "mobiler_notifications"

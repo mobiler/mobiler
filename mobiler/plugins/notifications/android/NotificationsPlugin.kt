@@ -2,9 +2,27 @@ package {{PACKAGE}}
 
 import {{PACKAGE_SHARED_TYPES}}.PluginResponse
 
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import java.time.ZoneId
+import kotlin.coroutines.resume
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -12,7 +30,9 @@ import org.json.JSONObject
 // Local scheduled notifications. Fires even when the app is closed via AlarmManager → a
 // manifest-declared BroadcastReceiver → the system notification tray. Ops (input is JSON; a failure
 // is ok:false "<code>" or "<code>: <detail>", codes invalid_input | past | unsupported | failed):
-//   requestPermission: ""                                   → ok = notifications allowed
+//   requestPermission: ""     → ok = allowed, "granted" | "denied" (Android 13+: after the user answers)
+//   permissionStatus: ""      → ok:true, "granted" | "denied" | "notDetermined" (never prompts)
+//   openSettings: ""          → ok:true when the app's notification settings page opened
 //   schedule: {"id":7,"title":"…","body":"…", "at":"YYYY-MM-DD HH:MM" | "after_seconds":N,
 //              "payload"?:"…","actions"?:[…],"late_minutes"?:1440}   → ok:true ""
 //   cancel:   {"id":7}                                      → ok:true (pending, registry and tray)
@@ -24,15 +44,22 @@ import org.json.JSONObject
 // app update and a time or time-zone change (NotificationRearmReceiver), and plugin init re-arms it
 // after a force-stop. The timing is inexact (setAndAllowWhileIdle), which needs no exact-alarm
 // permission; fine for reminders.
+//
+// Stream (cx.subscribe("notifications", "events", "")): {"type":"opened"|"snoozed"|"dismissed",…}, see
+// ReminderEvents.kt. Snooze and dismiss are handled natively (NotificationActionReceiver), taps by
+// LocalOpens; every event is buffered (persisted) until the core subscribes.
 class NotificationsPlugin(private val application: android.app.Application) : MobilerPlugin {
     init {
         // Alarms are gone after a force-stop (and a reboot the app missed): re-arm on every launch, off
         // the main thread (disk + binder work); rearmAll holds the registry lock, so ops just wait for it.
         Thread({ runCatching { rearmAll(application, System.currentTimeMillis()) } }, "mobiler-notif-rearm").start()
+        LocalOpens.install(application)
     }
 
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "requestPermission" -> requestPermission()
+        "permissionStatus" -> PluginResponse(true, permissionStatus())
+        "openSettings" -> openSettings()
         "schedule" -> schedule(input)
         "cancel" -> cancel(input)
         "cancelAll" -> cancelAll()
@@ -41,19 +68,97 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
         else -> PluginResponse(false, "unsupported: unknown op '$op'")
     }
 
-    private fun requestPermission(): PluginResponse {
-        if (Build.VERSION.SDK_INT >= 33) {
-            // Fire the system prompt (best-effort) from the foreground Activity; the result lands
-            // in the OS, and the app re-checks via areNotificationsEnabled() on the next call.
-            val activity = MobilerActivity.current?.get()
+    // The events stream: flushes the persisted buffer in order, then delivers live, until unsubscribed. The
+    // channel is unbounded so a 100-event flush never fails a send; a send that fails (the stream closed)
+    // throws inside the sink, which keeps that event buffered for the next subscriber.
+    override fun subscribe(op: String, input: String): Flow<PluginResponse> = callbackFlow {
+        if (op != "events") {
+            send(PluginResponse(false, "unsupported: unknown stream '$op'"))
+            close()
+            awaitClose {}
+            return@callbackFlow
+        }
+        val id = ReminderEvents.attach(application) { trySend(PluginResponse(true, it)).getOrThrow() }
+        awaitClose { ReminderEvents.detach(id) }
+    }.buffer(Channel.UNLIMITED)
+
+    private fun enabled() = NotificationManagerCompat.from(application).areNotificationsEnabled()
+
+    private fun prefs() = application.getSharedPreferences("mobiler_notifications", android.content.Context.MODE_PRIVATE)
+
+    // "granted" | "denied" | "notDetermined". Before Android 13 there is no runtime prompt: the app is
+    // allowed unless the user turned its notifications off. On 13+ a not-granted permission is "denied"
+    // once this plugin asked (the persisted "asked" flag), or once the user denied it from any prompt
+    // (the system then wants a rationale); otherwise the prompt was never answered: "notDetermined".
+    private fun permissionStatus(): String {
+        if (enabled()) return "granted"
+        if (Build.VERSION.SDK_INT < 33) return "denied"
+        if (prefs().getBoolean(KEY_ASKED, false)) return "denied"
+        val activity = MobilerActivity.current?.get()
+        if (activity != null && ActivityCompat.shouldShowRequestPermissionRationale(activity, POST)) return "denied"
+        return "notDetermined"
+    }
+
+    // Android 13+: shows the system prompt and answers once the user does (≤ 60 s; the current status
+    // after that). The system itself answers at once, with no dialog, when the permission is already
+    // granted or permanently denied. Runs on the main dispatcher and suspends, never blocks; the one-shot
+    // callback is unregistered on every path. Calls are serialised (one registry key).
+    private suspend fun requestPermission(): PluginResponse = permissionLock.withLock {
+        if (Build.VERSION.SDK_INT >= 33 && !enabled() &&
+            ContextCompat.checkSelfPermission(application, POST) != PackageManager.PERMISSION_GRANTED
+        ) {
+            val activity = MobilerActivity.current?.get() as? ComponentActivity
             if (activity != null) {
-                androidx.core.app.ActivityCompat.requestPermissions(
-                    activity, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0
-                )
+                prefs().edit().putBoolean(KEY_ASKED, true).commit()
+                withTimeoutOrNull(PERMISSION_TIMEOUT_MS) { askPermission(activity) }
             }
         }
-        val enabled = NotificationManagerCompat.from(application).areNotificationsEnabled()
-        return PluginResponse(enabled, if (enabled) "granted" else "requested")
+        val ok = enabled()
+        PluginResponse(ok, if (ok) "granted" else "denied")
+    }
+
+    private suspend fun askPermission(activity: ComponentActivity): Boolean =
+        suspendCancellableCoroutine { cont ->
+            var launcher: androidx.activity.result.ActivityResultLauncher<String>? = null
+            val registered = activity.activityResultRegistry.register(
+                PERMISSION_KEY, ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                launcher?.unregister()
+                if (cont.isActive) cont.resume(granted)
+            }
+            launcher = registered
+            // A timeout (or the core going away) cancels the wait: drop the callback with it.
+            cont.invokeOnCancellation { registered.unregister() }
+            if (!cont.isActive) {
+                // An answer to an earlier, timed-out prompt was still pending for the key and was handed
+                // to this callback at once: answer with it (the caller re-reads the real status).
+                registered.unregister()
+                return@suspendCancellableCoroutine
+            }
+            try {
+                registered.launch(POST)
+            } catch (e: Exception) {
+                registered.unregister()
+                if (cont.isActive) cont.resume(false)
+            }
+        }
+
+    // The app's notification settings page (Android 8+), else the app details page.
+    private fun openSettings(): PluginResponse {
+        val ctx = MobilerActivity.current?.get() ?: application
+        val notif = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, application.packageName)
+        val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", application.packageName, null))
+        for (intent in listOf(notif, details)) {
+            if (ctx === application) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                ctx.startActivity(intent)
+                return PluginResponse(true, "")
+            } catch (e: Exception) {
+                // e.g. ActivityNotFoundException on a stripped-down build: try the next page.
+            }
+        }
+        return PluginResponse(false, "failed: no settings page could be opened")
     }
 
     // Every op runs to completion on the caller's thread without suspending, so calls keep the order
@@ -109,7 +214,9 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
     private fun listPending(): PluginResponse {
         val zone = ZoneId.systemDefault()
         val out = JSONArray()
-        ReminderRegistry.all(application).sortedWith(compareBy({ it.fireAtMs }, { it.id })).forEach {
+        // Under the registry lock: the re-arm (plugin init) runs off the main thread.
+        val all = synchronized(ReminderRegistry) { ReminderRegistry.all(application) }
+        all.sortedWith(compareBy({ it.fireAtMs }, { it.id })).forEach {
             out.put(
                 JSONObject()
                     .put("id", it.id)
@@ -134,6 +241,14 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
         }
         removeDeliveredReminders(application, ids)
         return PluginResponse(true, "")
+    }
+
+    private companion object {
+        const val POST = android.Manifest.permission.POST_NOTIFICATIONS
+        const val KEY_ASKED = "asked"
+        const val PERMISSION_KEY = "mobiler_notif_perm"
+        const val PERMISSION_TIMEOUT_MS = 60_000L
+        val permissionLock = Mutex()
     }
 
     private fun validId(v: Any?): Int? {

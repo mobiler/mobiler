@@ -11,6 +11,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.time.ZoneId
+import org.json.JSONArray
 
 // The notifications plugin's alarm side: arming / cancelling the per-reminder alarm, posting a
 // reminder, the firing receiver and the re-arm receiver. Both receivers are statically declared
@@ -28,6 +29,12 @@ object LocalNotif {
     const val EXTRA_PAYLOAD = "mobiler_local_payload"
     /** Set on every alarm the registry plugin arms; an alarm without it is a pre-registry (legacy) one. */
     const val EXTRA_V2 = "mobiler_v2"
+    /** A snooze button's intent carries the whole posted reminder (its registry entry is gone once it fired). */
+    const val EXTRA_REMINDER = "mobiler_local_reminder"
+    const val EXTRA_SNOOZE_MINUTES = "mobiler_local_snooze_minutes"
+    /** NotificationActionReceiver intent actions: the delete intent, and snooze button `i` (prefix + i). */
+    const val ACTION_DISMISS = "mobiler.local.dismiss"
+    const val ACTION_SNOOZE_PREFIX = "mobiler.local.snooze."
 }
 
 internal fun ensureReminderChannel(context: Context) {
@@ -61,7 +68,7 @@ private fun alarmAlive(ctx: Context, id: Int): Boolean = PendingIntent.getBroadc
 ) != null
 
 /**
- * The launcher intent every tap on a reminder opens (the body now; the action buttons in Task 3).
+ * The launcher intent every tap on a reminder opens (its body and its `open` buttons).
  * The `mobiler.local` category takes part in PendingIntent identity (filterEquals) but not in resolving
  * this explicit intent, so reminder N's tap PendingIntent never collides with another plugin's (e.g.
  * push notification N), whose extras would otherwise overwrite ours. Not intent data: MainActivity reads
@@ -82,9 +89,20 @@ fun cancelAlarm(ctx: Context, id: Int) {
     pi.cancel()
 }
 
-/** Posts `r` to the tray now. A body tap opens the app with the `mobiler_local_*` extras. */
+/**
+ * Posts `r` to the tray now:
+ * - a body tap opens the app with the `mobiler_local_*` extras (→ `opened`, see LocalOpens);
+ * - an `open` button does the same with `mobiler_local_action=<action id>`;
+ * - a `snooze` button and the delete intent (swipe away) go to NotificationActionReceiver.
+ *
+ * Every PendingIntent of reminder `id` uses request code `id`; they are told apart by an intent field
+ * that takes part in PendingIntent identity (filterEquals), never by extras: the body intent has
+ * category `mobiler.local`, open button `i` adds category `mobiler.local.a<i>`, snooze button `i` and
+ * the delete intent have their own intent action. So each (id, action index) has its own PendingIntent.
+ */
 fun postReminder(ctx: Context, r: Reminder) {
     ensureReminderChannel(ctx)
+    val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     val builder = NotificationCompat.Builder(ctx, LocalNotif.CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_dialog_info)
         .setContentTitle(r.title.ifEmpty { "Reminder" })
@@ -92,20 +110,46 @@ fun postReminder(ctx: Context, r: Reminder) {
         .setStyle(NotificationCompat.BigTextStyle().bigText(r.body))
         .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
-    val launch = reminderLaunchIntent(ctx)
-    if (launch != null) {
-        launch.putExtra(LocalNotif.EXTRA_ID, r.id)
-        launch.putExtra(LocalNotif.EXTRA_ACTION, "")
-        if (r.payload != null) launch.putExtra(LocalNotif.EXTRA_PAYLOAD, r.payload)
-        // Request code `id` keeps each reminder's tap intent (and its extras) separate.
-        builder.setContentIntent(
-            PendingIntent.getActivity(
-                ctx, r.id, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        )
+    openIntent(ctx, r, "", null)?.let { builder.setContentIntent(PendingIntent.getActivity(ctx, r.id, it, flags)) }
+    // Swipe away / "clear all" → `dismissed`. A programmatic cancel (snooze, an open button, the
+    // management ops) sends no delete intent.
+    val dismiss = Intent(ctx, NotificationActionReceiver::class.java).setAction(LocalNotif.ACTION_DISMISS)
+        .putExtra(LocalNotif.EXTRA_ID, r.id)
+    if (r.payload != null) dismiss.putExtra(LocalNotif.EXTRA_PAYLOAD, r.payload)
+    builder.setDeleteIntent(PendingIntent.getBroadcast(ctx, r.id, dismiss, flags))
+
+    val actions = r.actionsJson?.let { runCatching { JSONArray(it) }.getOrNull() } ?: JSONArray()
+    for (i in 0 until actions.length()) {
+        val a = actions.optJSONObject(i) ?: continue
+        val aid = a.optString("id")
+        val label = a.optString("label")
+        val pi = when (a.optString("kind")) {
+            "open" -> openIntent(ctx, r, aid, i)?.let { PendingIntent.getActivity(ctx, r.id, it, flags) }
+            "snooze" -> {
+                val snooze = Intent(ctx, NotificationActionReceiver::class.java)
+                    .setAction(LocalNotif.ACTION_SNOOZE_PREFIX + i)
+                    .putExtra(LocalNotif.EXTRA_ID, r.id)
+                    .putExtra(LocalNotif.EXTRA_ACTION, aid)
+                    .putExtra(LocalNotif.EXTRA_SNOOZE_MINUTES, a.optInt("snooze_minutes", 10))
+                    .putExtra(LocalNotif.EXTRA_REMINDER, r.toJson())
+                PendingIntent.getBroadcast(ctx, r.id, snooze, flags)
+            }
+            else -> null
+        } ?: continue
+        builder.addAction(0, label, pi)
     }
     // No-op (SecurityException swallowed) when notifications aren't permitted.
     runCatching { NotificationManagerCompat.from(ctx).notify(LocalNotif.TAG, r.id, builder.build()) }
+}
+
+/** The launch intent for a body tap (`actionId` "", `index` null) or open button `index`. */
+private fun openIntent(ctx: Context, r: Reminder, actionId: String, index: Int?): Intent? {
+    val launch = reminderLaunchIntent(ctx) ?: return null
+    if (index != null) launch.addCategory(LocalNotif.CATEGORY + ".a" + index)
+    launch.putExtra(LocalNotif.EXTRA_ID, r.id)
+    launch.putExtra(LocalNotif.EXTRA_ACTION, actionId)
+    if (r.payload != null) launch.putExtra(LocalNotif.EXTRA_PAYLOAD, r.payload)
+    return launch
 }
 
 /** Removes this plugin's tray entries: all of them (`ids == null`) or the given ids. */
@@ -194,6 +238,42 @@ class NotificationRearmReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_TIME_CHANGED -> rearmAll(context, System.currentTimeMillis())
+        }
+    }
+}
+
+// A reminder's snooze button and its delete intent (swiped away). Statically declared and not exported:
+// only this app's own PendingIntents reach it, and it runs with no live app process. Native only: the
+// core never runs while the app is closed (ADR-0036); the core learns of both through the events stream.
+class NotificationActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val id = intent.getIntExtra(LocalNotif.EXTRA_ID, -1)
+        if (id < 1) return
+        val action = intent.action ?: return
+        when {
+            action == LocalNotif.ACTION_DISMISS ->
+                ReminderEvents.emit(context, "dismissed", id, null, intent.getStringExtra(LocalNotif.EXTRA_PAYLOAD))
+            action.startsWith(LocalNotif.ACTION_SNOOZE_PREFIX) -> snooze(context, intent, id)
+        }
+    }
+
+    // The firing receiver removed the entry when it posted, so the snooze writes a new one from the
+    // reminder the button carries: snoozed, due in `snooze_minutes`, no `wall` (a zone change never moves
+    // it). A later cancel / cancelAll / re-schedule of the id removes it like any entry.
+    private fun snooze(context: Context, intent: Intent, id: Int) {
+        val carried = intent.getStringExtra(LocalNotif.EXTRA_REMINDER)?.let { Reminder.fromJson(it) } ?: return
+        if (carried.id != id) return
+        val actionId = intent.getStringExtra(LocalNotif.EXTRA_ACTION)
+        val minutes = intent.getIntExtra(LocalNotif.EXTRA_SNOOZE_MINUTES, 10)
+        synchronized(ReminderRegistry) {
+            val snoozed = snoozeEntry(ReminderRegistry.get(context, id), carried, System.currentTimeMillis(), minutes)
+            if (snoozed != null) {
+                ReminderRegistry.put(context, snoozed)
+                armAlarm(context, snoozed)
+            }
+            // Snoozing cancels the tray entry; a programmatic cancel sends no delete intent (no `dismissed`).
+            runCatching { NotificationManagerCompat.from(context).cancel(LocalNotif.TAG, id) }
+            if (snoozed != null) ReminderEvents.emit(context, "snoozed", id, actionId, carried.payload)
         }
     }
 }
