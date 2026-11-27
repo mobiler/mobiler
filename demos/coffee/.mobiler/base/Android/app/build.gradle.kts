@@ -54,6 +54,9 @@ android {
     }
 }
 
+// mobiler:assets-begin
+// mobiler:assets-end
+
 dependencies {
     implementation(project(":shared"))
     implementation(libs.lifecycle.viewmodel.compose)

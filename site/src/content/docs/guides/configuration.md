@@ -1,15 +1,15 @@
 ---
 title: mobiler.toml options
-description: Fonts, the launch screen, deep links, local network on iOS and the display name, set once and applied to every shell by the CLI.
+description: Fonts, the launch screen, the launcher icon, bundled files, deep links, local network on iOS and the display name, set once and applied to every shell by the CLI.
 ---
 
-Some things an app needs live in the native projects: font files, the launch screen, URL schemes, iOS
+Some things an app needs live in the native projects: font files, the launch screen, the launcher icon, bundled files, URL schemes, iOS
 network rules. You describe them once in `mobiler.toml` at the app root, and `mobiler build`, `dev` and
 `watch` write them into the shells before building. Commit the files they write along with
 `mobiler.toml`, so a plain Gradle, Xcode or CI build sees them too.
 
 A problem in `mobiler.toml` never fails a build: it prints a warning and leaves the last synced files as
-they were. Each section also has its own command (`mobiler fonts sync`, `splash sync`, `deep-links sync`,
+they were. Each section also has its own command (`mobiler fonts sync`, `splash sync`, `icon sync`, `assets sync`, `deep-links sync`,
 `local-network sync`) that applies it on demand and prints what it wrote; `deep-links sync` and
 `local-network sync` exit non-zero when they can't apply the setting, so CI can check them.
 
@@ -40,6 +40,48 @@ logo_size       = 120                            # optional; 24 to 288, default 
 The colours follow the phone's light or dark setting. The CLI resizes the logo for each platform: Android's
 launch window and its 12+ system splash, iOS's launch screen, and the web page before the app's first
 render. Give a logo at least three times `logo_size` in pixels.
+
+## Launcher icon
+
+```toml
+[icon]
+foreground = "brand/icon-foreground.png"  # PNG, square, 1024 to 16384 px, transparent background
+background = "#0E9F8E"                    # #RRGGBB
+monochrome = "brand/icon-mono.png"        # optional; the themed icon on Android 13+
+padding    = 18                           # optional; 0 to 40, default 18
+```
+
+The CLI generates every size: Android's adaptive icon and legacy images, iOS's 1024 px `AppIcon` and, if the
+app has `web/index.html`, a favicon and an apple-touch-icon. Commit what it writes, and `.mobiler/icon.json`
+with it. Keep the source PNGs outside your assets folder (for example in `brand/`).
+
+An icon you made by hand is never overwritten: if a launcher file was edited, that platform is skipped with
+a warning naming the file, and you delete or restore it to hand it back. The same goes for an icon of your
+own next to the generated files: an `ic_launcher.png` beside where `ic_launcher.webp` goes, a
+`mipmap-anydpi-v26/ic_launcher.xml` from Android Studio, or an iOS `Contents.json` that doesn't list
+`icon-1024.png`. Removing `[icon]` puts the
+template's icon back. On Android 12+ the system splash shows the launcher icon when `[splash]` has no
+`logo`. iOS 18's dark and tinted icon variants are not generated yet.
+
+## Bundled files
+
+```toml
+[assets]
+dir = "assets"   # optional; the default
+```
+
+Files in `dir` ship inside the app and load offline. Show one with `image("asset:logo.png", ...)`,
+`avatar("asset:people/ann.jpg")` or a video poster; those are the widgets that accept `asset:`. Names are
+case-sensitive, and a missing file shows as a failed load. Everything in the folder ends up in the app, so
+keep only files shown at runtime: they add to the download and installed size.
+
+`dir` can't start with a folder the CLI writes (`Android`, `iOS`, `web`, `shared`, `.mobiler`, `target`) or
+name a hidden folder (`.git`, anything starting with `.`), and each segment may use only letters, digits,
+space, `-`, `_`, `.` and `+`. The CLI warns about a font, splash
+or icon source inside it and about symlinks in it. If the folder doesn't exist yet (git doesn't keep an empty
+one), only Android is set up for it: the web and iOS builds would fail on a missing folder, so they include it
+once it exists. Create it, then build or run `mobiler assets sync`. An app made before CLI 0.75 runs
+`mobiler upgrade --apply` once to get the markers the sync fills.
 
 ## Deep links
 

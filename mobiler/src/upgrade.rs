@@ -62,12 +62,15 @@ enum Class {
     Seed,
 }
 
-/// Seed files (ADR-0042): the launch-window values a later `[splash]` sync writes, app-owned meanwhile.
+/// Seed files (ADR-0042): the launch-window values a later `[splash]` sync writes, and the adaptive
+/// launcher icons the `[icon]` sync writes; app-owned meanwhile (an app's own icon XML is never merged).
 pub(crate) const SEED_PATHS: &[&str] = &[
     "Android/app/src/main/res/values/mobiler_splash.xml",
     "Android/app/src/main/res/values-night/mobiler_splash.xml",
     "Android/app/src/main/res/drawable/mobiler_launch.xml",
     "iOS/Sources/Assets.xcassets/MobilerSplashBackground.colorset/Contents.json",
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher.xml",
+    "Android/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml",
 ];
 
 /// Classify a template file by its app-relative path + final (substituted) contents.
@@ -138,6 +141,8 @@ struct Report {
     dropped: Vec<String>,
     /// Managed paths holding a symlink (live or dangling): never read or written through, left for the user.
     skipped: Vec<String>,
+    /// Seed paths that still had a baseline from before they became seeds: the baseline was removed.
+    unbaselined: Vec<String>,
     /// Every managed path this run visited (to find records for paths no longer produced).
     managed: std::collections::HashSet<String>,
     /// Installed plugins whose shell sources differ from the ones this CLI ships. Never touched
@@ -160,6 +165,33 @@ pub fn run(apply: bool, resolved: &[String]) -> Result<()> {
 #[cfg(test)]
 fn upgrade_at(root: &Path, apply: bool) -> Result<Report> {
     upgrade_with(root, apply, &[])
+}
+
+/// For other modules' tests: scaffold an app and see what an upgrade run touches.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// The template's shell files and their baseline at `root`, as `mobiler new` writes them.
+    pub(crate) fn scaffold(root: &Path) {
+        let subs = Subs::from_package("dev.mobiler.demo".into(), "Demo".into(), "30.0.14904198".into());
+        // App-owned files upgrade reads the app's name from (`new` writes them; `sync_dir` skips them).
+        fs::create_dir_all(root.join("Android")).unwrap();
+        fs::write(root.join("Android/settings.gradle.kts"), "rootProject.name = \"Demo\"\n").unwrap();
+        sync_dir(&TEMPLATES, root, &subs, true, &mut Report::default()).unwrap();
+        seed_baseline(root, &subs).unwrap();
+    }
+
+    /// Every path an upgrade run (`apply` or a review run) wrote, offered, merged or left pending.
+    pub(crate) fn touched(root: &Path, apply: bool) -> Vec<String> {
+        let r = upgrade_at(root, apply).unwrap();
+        let mut out: Vec<String> = [r.added, r.changed, r.updated, r.merge, r.conflict, r.new_review, r.skipped]
+            .into_iter()
+            .flatten()
+            .collect();
+        out.extend(r.pending.into_iter().map(|(p, _)| p));
+        out
+    }
 }
 
 /// `upgrade`, after settling the files the user named with `--resolved` (ADR-0046).
@@ -721,6 +753,15 @@ fn sync_file(
         return Ok(());
     }
     if class == Class::Seed {
+        // A seed is never baselined (ADR-0042). An app from before this path became a seed (the adaptive
+        // icon XMLs before 0.75) still has one: removed, so nothing ever merges against it.
+        let base = baseline_path(root, &rel);
+        // Only a plain file: never through a linked folder (fsguard), never a directory.
+        if base.symlink_metadata().is_ok_and(|m| m.is_file()) && crate::fsguard::check(root, &base).is_ok() {
+            fs::remove_file(&base).with_context(|| format!("removing {}", base.display()))?;
+            remove_emptied_dirs(&base, &root.join(BASE_REL));
+            report.unbaselined.push(rel.to_string_lossy().to_string());
+        }
         // Missing means nothing at the path at all, not even a (dangling) symlink; `create_new` then
         // refuses to follow one created in between.
         let dst = root.join(&rel);
@@ -1038,10 +1079,13 @@ fn write_pending(root: &Path, rel: &Path, offer: &Offer<'_>) -> Result<()> {
 fn clear_pending(root: &Path, rel: &Path) {
     let path = pending_path(root, rel);
     let _ = fs::remove_file(&path);
-    // Drop the folders the record emptied, up to `.mobiler/pending/` (remove_dir fails on a non-empty one).
-    let top = root.join(PENDING_REL);
+    remove_emptied_dirs(&path, &root.join(PENDING_REL));
+}
+
+/// Drop the folders a removed `path` emptied, up to (not including) `top` (`remove_dir` fails on a non-empty one).
+fn remove_emptied_dirs(path: &Path, top: &Path) {
     let mut dir = path.parent();
-    while let Some(d) = dir.filter(|d| d.starts_with(&top) && *d != top) {
+    while let Some(d) = dir.filter(|d| d.starts_with(top) && *d != top) {
         if fs::remove_dir(d).is_err() {
             break;
         }
@@ -1339,6 +1383,9 @@ impl Report {
         }
         for d in &self.dropped {
             println!("  - dropped  {d}  (no longer part of the template; its pending review was removed)");
+        }
+        for u in &self.unbaselined {
+            println!("  - baseline {u}  (now the app's own file, created only when missing; its old baseline was removed)");
         }
         for p in &self.plugins {
             println!("  ! plugin  {p}  has shell updates in this release");
@@ -2101,6 +2148,54 @@ mod test {
         assert!(!root.join(format!("{}.mobiler-new", SEED_PATHS[0])).exists());
         assert!(!root.join(".mobiler/base").join(SEED_PATHS[0]).exists(), "no baseline for a seed file");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stale_baseline_at_a_seed_path_is_removed() {
+        // An app from before a path became a seed (0.74's mipmap-anydpi/ic_launcher*.xml) keeps its
+        // baseline: upgrade removes it, says so, and keeps the app's file and every other baseline.
+        for apply in [false, true] {
+            let root = skeleton();
+            upgrade_at(&root, true).unwrap();
+            for p in SEED_PATHS {
+                assert!(!baseline_path(&root, Path::new(p)).exists(), "{p}: no baseline");
+            }
+            let icon = SEED_PATHS.iter().find(|p| p.ends_with("mipmap-anydpi/ic_launcher.xml")).unwrap();
+            let round = SEED_PATHS.iter().find(|p| p.ends_with("mipmap-anydpi/ic_launcher_round.xml")).unwrap();
+            for p in [icon, round] {
+                write_baseline(&root, Path::new(p), b"<adaptive-icon/>\n").unwrap();
+            }
+            let app_icon = read(&root, icon);
+            let r = upgrade_at(&root, apply).unwrap();
+            for p in [icon, round] {
+                assert!(!baseline_path(&root, Path::new(p)).exists(), "apply={apply}: {p}'s stale baseline removed");
+                assert!(r.unbaselined.contains(&p.to_string()), "apply={apply}: reported: {:?}", r.unbaselined);
+            }
+            assert!(!root.join(".mobiler/base/Android/app/src/main/res/mipmap-anydpi").exists(), "the emptied folder goes");
+            assert_eq!(read(&root, icon), app_icon, "the app's file is untouched");
+            assert!(baseline_path(&root, Path::new("iOS/Sources/Render.swift")).exists(), "other baselines stay");
+            assert!(upgrade_at(&root, apply).unwrap().unbaselined.is_empty(), "once");
+            let _ = fs::remove_dir_all(&root);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_seed_baseline_is_never_removed_through_a_linked_folder() {
+        // A linked folder under .mobiler/base must not let the baseline removal reach outside it (fsguard).
+        let root = skeleton();
+        upgrade_at(&root, true).unwrap();
+        let outside = root.with_extension("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("ic_launcher.xml"), b"keep me").unwrap();
+        let linked = root.join(".mobiler/base/Android/app/src/main/res/mipmap-anydpi");
+        let _ = fs::remove_dir_all(&linked);
+        fs::create_dir_all(linked.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &linked).unwrap();
+        let _ = upgrade_at(&root, false);
+        assert_eq!(fs::read(outside.join("ic_launcher.xml")).unwrap(), b"keep me", "nothing removed through the link");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "mobiler"
-version = "0.74.0"
+version = "0.75.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -23,7 +23,7 @@ anyhow.workspace = true
 clap = { version = "4", features = ["derive"] }
 diffy = "0.4"
 # [splash] logo resizing (PNG only).
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 include_dir = "0.7"
 notify = "8"
 notify-debouncer-full = "0.7"

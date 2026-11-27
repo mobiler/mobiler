@@ -91,12 +91,19 @@ change.)
 
 ## 4. A real icon
 
-The scaffold gave us a placeholder icon; Saldo ships a teal **"S" monogram**. iOS takes a single
-1024² source (`Assets.xcassets/AppIcon.appiconset/icon-1024.png`) and `actool` derives the rest; Android
-uses an **adaptive icon** — a teal background vector plus the white "S" as the foreground layer — with the
-legacy `mipmap` rasters regenerated to match for pre-adaptive devices. The icon files are the app's own
-resources, so `mobiler upgrade` keeps them. Give the foreground PNG its own name (Saldo's is
-`saldo_launcher_foreground`) so it never collides with the template's vector `ic_launcher_foreground`.
+The scaffold gave us a placeholder icon; Saldo ships a teal **"S" monogram**. We don't draw a size per
+platform: `mobiler.toml` declares the brand foreground and the teal background, and the CLI generates every
+size from them.
+
+```toml
+[icon]
+foreground = "brand/icon-foreground.png"
+background = "#0e9f8e"
+```
+
+That is an Android adaptive icon (and the legacy images for older phones), iOS's single 1024² image and
+a web favicon, regenerated on every `mobiler build`. The source lives in `brand/`, outside the assets
+folder, so it doesn't ship twice. Commit what the CLI writes, and `.mobiler/icon.json` with it.
 
 ## What we built — and the whole app
 

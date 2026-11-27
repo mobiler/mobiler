@@ -99,6 +99,8 @@ pub fn run() -> ExitCode {
     if let Some(root) = env::current_dir().ok().filter(|r| r.join("mobiler.toml").exists()) {
         println!("  {}", crate::fonts::doctor_line(&root));
         println!("  {}", crate::splash::doctor_line(&root));
+        println!("  {}", crate::icon::doctor_line(&root));
+        println!("  {}", crate::assets::doctor_line(&root));
     }
     framework_crates(&mut warnings);
 
