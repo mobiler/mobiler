@@ -25,6 +25,8 @@ targets:
     sources:
       - Sources                       # App.swift, Core.swift, Render.swift
       - generated/shared.swift         # uniffi Swift wrapper (generated)
+      # mobiler:assets-sources-begin
+      # mobiler:assets-sources-end
     dependencies:
       - package: SharedTypes
       # mobiler:spm-dependencies — `mobiler plugin add` inserts SwiftPM product deps above this line
@@ -71,6 +73,8 @@ targets:
         # off: NSAppTransportSecurity:
           # off: NSAllowsLocalNetworking: true
         # mobiler:local-network-end
+        # mobiler:assets-info-begin
+        # mobiler:assets-info-end
         # Opt-in: uncomment to enable the camera capability (cx.capture_photo). iOS
         # requires this usage string to access the camera; the App Store flags apps that
         # ship it without using the camera, so it's left off by default.
