@@ -567,7 +567,10 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     };
 
     let mut files = BTreeMap::new();
-    let units = units(root, &icon, &ledger, &mut files, &mut report);
+    // A platform left out (a foreign file, a web block that can't be filled) keeps its old files: the
+    // final ledger then records no `input`, so the next sync regenerates instead of skipping.
+    let mut skipped = false;
+    let units = units(root, &icon, &ledger, &mut files, &mut skipped, &mut report);
 
     // Order matters if a write fails part-way: images before the files that refer to them, those
     // before the removals, the ledger last. The ledger is also written first, naming both what each
@@ -593,6 +596,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
                 pron(foreign.len()),
             ));
             files.extend(ledger.under(unit.prefix));
+            skipped = true;
             continue;
         }
         for (rel, bytes) in unit.assets.iter().chain(&unit.refs) {
@@ -622,14 +626,21 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     changes.extend(assets);
     changes.extend(refs);
     changes.extend(removes);
-    changes.push(Change::Write(LEDGER.into(), ledger_json(&Ledger { active: true, input, files })?));
+    changes.push(Change::Write(LEDGER.into(), ledger_json(&Ledger { active: true, input: input.filter(|_| !skipped), files })?));
     apply(root, changes, &mut report)?;
     Ok(report)
 }
 
 /// The platforms this app has, each with what `[icon]` writes there. A web page whose block can't be
 /// filled is left out with a warning, its ledger entries carried into `files`.
-fn units(root: &Path, icon: &Icon, ledger: &Ledger, files: &mut BTreeMap<String, Vec<String>>, report: &mut SyncReport) -> Vec<Unit> {
+fn units(
+    root: &Path,
+    icon: &Icon,
+    ledger: &Ledger,
+    files: &mut BTreeMap<String, Vec<String>>,
+    skipped: &mut bool,
+    report: &mut SyncReport,
+) -> Vec<Unit> {
     let mut units = Vec::new();
     if root.join("Android").is_dir() {
         units.push(android_unit(icon));
@@ -655,6 +666,7 @@ fn units(root: &Path, icon: &Icon, ledger: &Ledger, files: &mut BTreeMap<String,
             Err(e) => {
                 report.warnings.push(format!("{WEB_INDEX}: {e} — web icon not synced"));
                 files.extend(ledger.under("web/"));
+                *skipped = true;
             }
         }
     }
@@ -1600,6 +1612,43 @@ mod tests {
         put(&root, WEB_INDEX, PAGE.as_bytes());
         let r = sync(&root).unwrap();
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_skipped_web_unit_is_not_up_to_date_after_repair() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let red = |root: &Path| image::open(root.join(web_png(32))).unwrap().to_rgba8().get_pixel(0, 0).0;
+        let before = red(&root);
+        let page = text(&root, WEB_INDEX);
+        put(&root, WEB_INDEX, page.replace(WEB_END, "").as_bytes());
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#123456").as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(WEB_INDEX)), "{:?}", r.warnings);
+        assert_eq!(red(&root), before, "web skipped");
+        put(&root, WEB_INDEX, page.as_bytes()); // repaired: the block is exactly as the sync wrote it
+        let r = sync(&root).unwrap();
+        assert!(r.written.contains(&web_png(32)), "{r:?}");
+        assert_eq!(red(&root), [0x12, 0x34, 0x56, 255], "the web icon is in the new colour");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_skipped_platform_is_not_up_to_date_after_restore() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let webp_rel = mipmap("hdpi", "ic_launcher.webp");
+        let generated = read(&root, &webp_rel);
+        put(&root, &webp_rel, b"mine");
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#123456").as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(&webp_rel)), "{:?}", r.warnings);
+        put(&root, &webp_rel, &generated); // back to what the sync wrote for the old colour
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        assert!(text(&root, COLORS).contains("#123456"), "Android regenerated: {r:?}");
+        assert_ne!(read(&root, &webp_rel), generated);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
