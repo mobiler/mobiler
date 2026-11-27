@@ -1,11 +1,11 @@
-# ADR-0070: `mobiler.toml` `[assets]` ships one app folder inside every shell by pointing each build at it — a Gradle `Sync` into `build/`, an XcodeGen folder reference plus `MobilerAssetsFolder`, a trunk `copy-dir` — filled into marker blocks the CLI never inserts in template files; nothing is copied into the shells' trees, and the sync never writes under the folder
+# ADR-0070: `mobiler.toml` `[assets]` ships one app folder inside every shell by pointing each build at it — a Gradle `Sync` into `build/`, an XcodeGen folder reference plus `MobilerAssetsFolder`, a trunk `copy-dir` — filled into marker blocks the CLI never inserts in template files; nothing is copied into the shells' trees, and `dir` may not be a path the CLI writes (a template top-level entry, `web`, `.mobiler`, `target`, `mobiler.toml`), so no sync and no `upgrade` writes under it
 
 Status:        Accepted
 Date decided:  2026-11-27
 Deciding PRs:  the CLI PR of the `[icon]` / `[assets]` release (CLI 0.75.0)
 Supersedes:    none
 Code anchor:   mobiler/src/assets.rs (clean_dir, validate, yaml_string, the generators, sync, fill, source_overlap_warnings, symlink_warnings, watch_paths, doctor_line), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/build.gradle.kts and mobiler/templates/iOS/project.yml (the marker blocks), the template's MainActivity.kt and Render.swift (the ADR-0069 resolvers)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0070_asset_markers, xtask/tests/adr_conformance.rs::adr_0069_asset_resolvers_follow_one_rule, mobiler/src/assets.rs::generated_blocks_match_barbershop, mobiler/src/assets.rs::fills_template_blocks_and_inserts_web_block, mobiler/src/assets.rs::missing_markers_warn_and_never_edit, mobiler/src/assets.rs::removing_section_empties_blocks_and_keeps_dir, mobiler/src/assets.rs::rejects_dir_outside_root, mobiler/src/assets.rs::folder_names_yaml_would_retype_are_quoted, mobiler/src/assets.rs::symlink_inside_dir_warns, mobiler/src/assets.rs::fonts_or_splash_source_under_dir_warns, mobiler/src/assets.rs::icon_source_inside_assets_dir_warns, mobiler/src/assets.rs::upgrade_never_touches_dir
+Conformance:   xtask/tests/adr_conformance.rs::adr_0070_asset_markers, xtask/tests/adr_conformance.rs::adr_0069_asset_resolvers_follow_one_rule, mobiler/src/assets.rs::generated_blocks_match_barbershop, mobiler/src/assets.rs::fills_template_blocks_and_inserts_web_block, mobiler/src/assets.rs::missing_markers_warn_and_never_edit, mobiler/src/assets.rs::missing_dir_warns_but_writes_blocks, mobiler/src/assets.rs::removing_section_empties_blocks_and_keeps_dir, mobiler/src/assets.rs::rejects_dir_outside_root, mobiler/src/assets.rs::folder_names_yaml_would_retype_are_quoted, mobiler/src/assets.rs::symlink_inside_dir_warns, mobiler/src/assets.rs::fonts_or_splash_source_under_dir_warns, mobiler/src/assets.rs::icon_source_inside_assets_dir_warns, mobiler/src/assets.rs::upgrade_never_touches_dir
 
 ## 1. Context (The Problem)
 
@@ -47,6 +47,10 @@ The rules:
 - **`dir`** is checked before anything is written; an invalid one is a warning, `failed`, and no write. It must:
   - be non-empty and relative (no leading `/`), a trailing `/` being dropped;
   - have no empty, `.` or `..` segment, and resolve to normal path components inside the app root;
+  - not start with a path the CLI writes: a top-level entry of the template (`Android`, `iOS`, `shared`,
+    `Cargo.toml`, `rust-toolchain.toml`, `.gitignore`, read from the embedded template, `.tmpl` dropped), `web`,
+    `.mobiler`, `target` or `mobiler.toml`, compared ignoring ASCII case (a case-insensitive file system makes
+    `android` the same folder). So `web`, `web/img` or `Android/x` is refused, and `webby` or `my/web` is not;
   - have no symlinked component on the way, the folder itself included (`fsguard`, as every CLI write);
   - be a folder if it exists (a missing folder is only a warning, and the blocks are still written);
   - use, in each segment, only characters from an **allow-list**: Unicode letters and digits (Rust's
@@ -63,8 +67,10 @@ The rules:
   with one of its pairs gets that one filled. With no section, a missing pair says nothing.
 - **`web/index.html`** follows the `[fonts]`/`[splash]` precedent: the block is inserted before `</head>` when
   missing and replaced afterwards. Without the section and without a block, the page is left alone.
-- **Removing `[assets]`** empties every block and never touches the folder. The sync never writes, moves or
-  deletes anything under `dir`, and `mobiler upgrade` never writes under it either (it isn't a template path).
+- **Removing `[assets]`** empties every block and never touches the folder. The `[assets]` sync never writes,
+  moves or deletes anything under `dir`. Nothing else the CLI writes lies there either: `dir` can't start with a
+  CLI-written top-level path (above), so `new`, `upgrade` and the other syncs (all of which write only under those
+  paths) can't reach it, and the template has no files under `assets/`, the default `dir`.
 - **Warnings that don't stop the sync:**
   - a `[fonts]`, `[splash]` or `[icon]` source file under `dir` (compared by path segment), since it would also
     ship inside the app;
@@ -89,15 +95,25 @@ The rules:
   hand-filled blocks, which build on every shell in CI.
   - **Validation Metric:** `generated_blocks_match_barbershop`.
 - **Condition 4 — template files are filled, never inserted into; the web block is inserted.**
-  - **Validation Metric:** `fills_template_blocks_and_inserts_web_block`, `missing_markers_warn_and_never_edit`.
-- **Condition 5 — removing the section empties the blocks and keeps the folder; `upgrade` never writes under it.**
-  - **Validation Metric:** `removing_section_empties_blocks_and_keeps_dir`, `upgrade_never_touches_dir`.
-- **Condition 6 — no `dir` outside the app, through a symlink, or with a character outside the allow-list.**
+  - **Validation Metric:** `fills_template_blocks_and_inserts_web_block`, `missing_markers_warn_and_never_edit`,
+    `missing_dir_warns_but_writes_blocks` (a missing folder still gets its blocks).
+- **Condition 5 — removing the section empties the blocks and keeps the folder.**
+  - **Validation Metric:** `removing_section_empties_blocks_and_keeps_dir`.
+- **Condition 6 — nothing the CLI writes lies under `dir`.** The real guards are structural: `validate` refuses a
+  `dir` starting with a CLI-written top-level path, and the template has no `assets/` folder.
+  `upgrade_never_touches_dir` adds a behavioural check on one app (default `dir`, files under it named like
+  template paths): an upgrade run, review or `--apply`, plans nothing under `dir`, leaves it byte for byte and
+  mtime for mtime, and treats the filled marker blocks as no pending change. It does **not** guard against a
+  future template file under `dir`, or a `dir` placed over a CLI path: in that test the scaffold would write the
+  file too, and a three-way merge leaves the app's copy alone while the template is unchanged.
+  - **Validation Metric:** `rejects_dir_outside_root` (the CLI-path cases), `adr_0070_asset_markers` (no
+    `mobiler/templates/assets`), `upgrade_never_touches_dir`.
+- **Condition 7 — no `dir` outside the app, through a symlink, or with a character outside the allow-list.**
   - **Validation Metric:** `rejects_dir_outside_root`, `folder_names_yaml_would_retype_are_quoted`.
-- **Condition 7 — the warnings.**
+- **Condition 8 — the warnings.**
   - **Validation Metric:** `symlink_inside_dir_warns`, `fonts_or_splash_source_under_dir_warns`,
     `icon_source_inside_assets_dir_warns`.
-- **Condition 8 (runtime):** an `asset:` image, avatar and poster load on an Android emulator, the iOS device and
+- **Condition 9 (runtime):** an `asset:` image, avatar and poster load on an Android emulator, the iOS device and
   a trunk build of the web page; a missing one shows the failed-load placeholder. Checked in the release's device
   pass.
 
@@ -160,7 +176,12 @@ Follow-up asked; ADR-0069 itself is unchanged.
 - Making `upgrade` (not the scaffold) target `rust-toolchain.toml` at `assets/rust-toolchain.toml`, a template
   path under the default folder, failed `upgrade_never_touches_dir` ("apply=false: ["assets/rust-toolchain.toml",
   …]"). Adding a template file under `assets/` alone doesn't fail it: the scaffold writes it, and a three-way
-  merge leaves an app's edit of an unchanged template file alone.
+  merge leaves an app's edit of an unchanged template file alone. That case is what the structural guards cover:
+  - adding `mobiler/templates/assets/x.txt` failed `adr_0070_asset_markers` ("the template has files under
+    assets/, the default [assets] dir");
+  - dropping the CLI-path check from `validate` failed `rejects_dir_outside_root` (`"web" accepted`).
+- Moving the Gradle pair inside the `dependencies {}` block failed `adr_0070_asset_markers` ("the mobiler:assets
+  markers must sit at the top level of build.gradle.kts").
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)

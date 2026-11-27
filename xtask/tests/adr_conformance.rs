@@ -1494,8 +1494,10 @@ fn adr_0070_asset_markers() {
     let gradle = read("mobiler/templates/Android/app/build.gradle.kts");
     let (begin, _) = one_empty_pair(&gradle, "// mobiler:assets-begin", "// mobiler:assets-end", "app/build.gradle.kts");
     let android = gradle.find("\nandroid {").expect("ADR-0070: build.gradle.kts has no `android {` block") + 1;
+    let open = android + gradle[android..].find('{').expect("the android block opens");
     let block = fn_body(&gradle[android..], "android {").expect("the android block closes");
-    assert!(android + block.len() < begin, "ADR-0070: the mobiler:assets markers must sit after the `android {{}}` block");
+    assert!(open + block.len() <= begin, "ADR-0070: the mobiler:assets markers must sit after the `android {{}}` block");
+    assert_eq!(brace_depth(&gradle[..begin]), 0, "ADR-0070: the mobiler:assets markers must sit at the top level of build.gradle.kts");
 
     let yml = read("mobiler/templates/iOS/project.yml");
     let target = yaml_section(&yml, 0, "targets").expect("targets in project.yml");
@@ -1527,6 +1529,55 @@ fn adr_0070_asset_markers() {
     assert!(sync.contains(r#"layout.buildDirectory.dir("generated/mobiler-assets/mobiler-assets")"#), "ADR-0070: the Gradle copy must land in build/generated");
     let ignore = read("mobiler/templates/.gitignore");
     assert!(ignore.lines().any(|l| l.trim() == "/Android/**/build/"), "ADR-0070: the template must ignore Android build folders");
+    // The default `dir` is `assets`: no template file may live there, or `new` and `upgrade` would write
+    // inside an app's bundled folder (`validate` refuses the CLI's own top-level paths as `dir`).
+    assert!(!root().join("mobiler/templates/assets").exists(), "ADR-0070: the template has files under assets/, the default [assets] dir");
+}
+
+/// The `{`/`}` nesting depth at the end of Kotlin `code`: `//` comment lines and string literals ignored.
+fn brace_depth(code: &str) -> i64 {
+    let mut depth = 0;
+    for line in code.lines().map(kotlin_code) {
+        let mut in_str = false;
+        let mut prev = ' ';
+        for c in line.chars() {
+            match c {
+                '"' if prev != '\\' => in_str = !in_str,
+                '{' if !in_str => depth += 1,
+                '}' if !in_str => depth -= 1,
+                _ => {}
+            }
+            prev = c;
+        }
+    }
+    depth
+}
+
+#[test]
+fn brace_depth_ignores_strings_and_comments() {
+    assert_eq!(brace_depth("android {\n  x = \"{{P}}\"\n  // {\n"), 1);
+    assert_eq!(brace_depth("android {\n}\n"), 0);
+}
+
+/// Whether a `.gitignore` line would ignore `.mobiler/icon.json` (the simple forms; negations skipped).
+fn ignores_icon_ledger(line: &str) -> bool {
+    let l = line.trim();
+    if l.is_empty() || l.starts_with('#') || l.starts_with('!') {
+        return false;
+    }
+    let l = l.trim_start_matches('/').trim_end_matches('/');
+    [".mobiler", ".mobiler/*", ".mobiler/**", ".mobiler/icon.json", ".mobiler/*.json", "*.json", "icon.json", "**/icon.json", "**/.mobiler", "**/.mobiler/*"]
+        .contains(&l)
+}
+
+#[test]
+fn ignores_icon_ledger_matches_the_simple_forms() {
+    for l in [".mobiler", "/.mobiler", ".mobiler/", ".mobiler/*", ".mobiler/**", "/.mobiler/icon.json", "*.json"] {
+        assert!(ignores_icon_ledger(l), "{l}");
+    }
+    for l in [".mobiler/backup/", ".mobiler/new/", "# .mobiler/", "!.mobiler/icon.json", "*.mobiler-new"] {
+        assert!(!ignores_icon_ledger(l), "{l}");
+    }
 }
 
 /// ADR-0071: the two adaptive launcher XMLs the `[icon]` sync writes are upgrade seeds (extending ADR-0042's
@@ -1544,7 +1595,7 @@ fn adr_0071_icon_seeds_and_marker() {
         let rel = format!("Android/app/src/main/res/mipmap-anydpi/{name}");
         assert!(seeds.contains(&format!("\"{rel}\"")), "ADR-0071: {rel} is written by the [icon] sync but isn't a seed");
         let xml = read(&format!("{res}/mipmap-anydpi/{name}"));
-        assert!(xml.contains("<monochrome "), "ADR-0071: the template's {name} lost its <monochrome> layer");
+        assert!(xml_without_comments(&xml).contains("<monochrome "), "ADR-0071: the template's {name} lost its <monochrome> layer");
     }
 
     let icon = live_code(&read("mobiler/src/icon.rs"));
@@ -1563,7 +1614,7 @@ fn adr_0071_icon_seeds_and_marker() {
         }
     }
     let ignore = read("mobiler/templates/.gitignore");
-    for pattern in [".mobiler", ".mobiler/", "/.mobiler/", ".mobiler/icon.json", "/.mobiler/icon.json", "*.json"] {
-        assert!(!ignore.lines().any(|l| l.trim() == pattern), "ADR-0071: the template ignores `{pattern}`; .mobiler/icon.json must be committed");
+    if let Some(line) = ignore.lines().find(|l| ignores_icon_ledger(l)) {
+        panic!("ADR-0071: the template's .gitignore has `{}`, which ignores .mobiler/icon.json; it must be committed", line.trim());
     }
 }

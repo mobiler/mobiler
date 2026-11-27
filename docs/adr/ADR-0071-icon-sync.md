@@ -5,7 +5,7 @@ Date decided:  2026-11-27
 Deciding PRs:  the CLI PR of the `[icon]` / `[assets]` release (CLI 0.75.0)
 Supersedes:    none
 Code anchor:   mobiler/src/icon.rs (validate, check_header, working_copy, layer, composite, ios_png, webp, the XML and web generators, Ledger, owned, targets, input_fingerprint, up_to_date, sync, units, android_unit, undo, apply), mobiler/src/upgrade.rs (SEED_PATHS), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/mipmap-* (the stock icon)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files
+Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::foreign_file_in_web_icon_survives, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files
 
 ## 1. Context (The Problem)
 
@@ -77,11 +77,12 @@ fights the sync or an app's own adaptive icon. (They were merged Shell-class fil
 survived only because the template hadn't changed.) The other files are binaries, `Own`-class already, or not
 template files.
 
-**The ledger** `.mobiler/icon.json`: `active`, `files` (path → one hash, or a list while a sync is in flight) and
+**The ledger** `.mobiler/icon.json`: `active`, `files` (path → one hash, or a list: while a sync is in flight, or carried over for a skipped unit) and
 `input`, the fingerprint of the generator's version, the source images' bytes, the background and the padding.
 - **Before the first write**, an interim ledger is written, giving each file both its old hash and its new one and
   no `input`. A sync that stops part-way still owns every file it touched, and the next one never skips.
-- **The final ledger is written last**, with one hash per file.
+- **The final ledger is written last**, with one hash per file it wrote (a skipped unit's carried entries may
+  stay lists).
 - **The unchanged-input skip:** when the ledger is active, its `input` equals the current fingerprint, every target
   file still hashes to its entry and the web block is already filled, the sync returns without decoding an image.
   The final ledger **omits `input` whenever any unit was skipped**, so a platform skipped for a foreign file (or a
@@ -115,7 +116,8 @@ Without `[icon]` and without a ledger the sync touches nothing, and writes no le
     `interrupted_sync_is_retried_and_owns_its_files`, `a_skipped_platform_is_not_up_to_date_after_restore`,
     `a_skipped_web_unit_is_not_up_to_date_after_repair`, `unchanged_inputs_skip_decoding`.
 - **Condition 6 — undo restores stock only for owned files.**
-  - **Validation Metric:** `removing_icon_restores_stock`, `undo_keeps_a_hand_edited_sync_file`.
+  - **Validation Metric:** `removing_icon_restores_stock`, `undo_keeps_a_hand_edited_sync_file`,
+    `foreign_file_in_web_icon_survives` (an app's file in the shared `web/icon/` stays).
 - **Condition 7 (runtime):** the adaptive icon, the themed icon on Android 13+ and a legacy raster on an Android
   emulator; the home-screen icon on the maintainer's iPhone; the favicon in a trunk build. Checked in the release's
   device pass.
@@ -149,7 +151,9 @@ the unchanged-input skip makes a build with an unchanged icon decode nothing.
   `upgrade_reports_nothing_for_icon_files` ("… is an upgrade seed").
 - Removing `<monochrome>` from the template's `ic_launcher.xml` failed `adr_0071_icon_seeds_and_marker` ("the
   template's ic_launcher.xml lost its <monochrome> layer").
-- Adding `.mobiler/` to the template's `.gitignore` failed it ("the template ignores `.mobiler/`").
+- Commenting out the template's `<monochrome>` (`<!--<monochrome … /> -->`) failed it too.
+- Adding `.mobiler/` to the template's `.gitignore` failed it ("the template ignores `.mobiler/`"); so did adding
+  `.mobiler/*` ("the template's .gitignore has `.mobiler/*`, which ignores .mobiler/icon.json").
 - Writing the legacy icon as `ic_launcher.png` (PNG bytes) failed `adr_0071_icon_seeds_and_marker` ("icon.rs
   writes "ic_launcher.png", a twin of the template's .webp") and `no_png_beside_webp` ("mipmap-xxxhdpi:
   ic_launcher is both .png and .webp"), with `writes_every_platform` and `unchanged_inputs_skip_decoding`.

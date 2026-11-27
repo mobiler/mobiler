@@ -75,10 +75,33 @@ fn clean_dir(dir: &str) -> Result<&str, String> {
     Ok(d)
 }
 
-/// Check `[assets] dir` and return the folder's path: inside the app root, no symlink on the way (or the
-/// folder itself), and a folder if it exists. A missing folder is fine here (the sync warns).
+/// The app's top-level names the CLI writes or manages: every top-level entry of the template (as `new`
+/// and `upgrade` name it in the app, `.tmpl` dropped), plus the web shell, the CLI's own state, the
+/// build output and the config.
+fn managed_top_level() -> Vec<String> {
+    let mut names: Vec<String> = crate::upgrade::TEMPLATES
+        .entries()
+        .iter()
+        .filter_map(|e| e.path().file_name().and_then(|n| n.to_str()))
+        .map(|n| n.strip_suffix(".tmpl").unwrap_or(n).to_string())
+        .collect();
+    names.extend(["web", ".mobiler", "target", "mobiler.toml"].map(String::from));
+    names
+}
+
+/// Check `[assets] dir` and return the folder's path: inside the app root, not in a path the CLI writes
+/// (so neither a sync nor `upgrade` ever writes under it), no symlink on the way (or the folder itself),
+/// and a folder if it exists. A missing folder is fine here (the sync warns).
 pub fn validate(root: &Path, spec: &AssetsSpec) -> Result<PathBuf, String> {
     let d = clean_dir(&spec.dir)?;
+    let first = d.split('/').next().unwrap_or(d);
+    // Compared ignoring ASCII case: on a case-insensitive file system `android` is `Android`.
+    if let Some(name) = managed_top_level().into_iter().find(|n| n.eq_ignore_ascii_case(first)) {
+        return Err(format!(
+            "[assets] dir {:?}: {name} is managed by mobiler (its files are written by the CLI) — use a folder of your own, e.g. \"assets\"",
+            spec.dir
+        ));
+    }
     let path = root.join(d);
     if !path.components().skip(root.components().count()).all(|c| matches!(c, Component::Normal(_))) {
         return Err(format!("[assets] dir {:?}: must be a folder inside the app", spec.dir));
@@ -602,6 +625,8 @@ mod tests {
     #[test]
     fn rejects_dir_outside_root() {
         let mut bad = vec!["../x", "/abs", "a/../b", "./assets", "a//b", "", "a\\b", "a\"b", "$x", "C:/x", " a"];
+        // Paths the CLI writes: a sync or `upgrade` would write inside the folder.
+        bad.extend(["web", "web/img", "Android/x", "android", "iOS", "shared", ".mobiler", "target", "mobiler.toml", "Cargo.toml", "rust-toolchain.toml"]);
         let root = app("");
         #[cfg(unix)]
         {
@@ -620,6 +645,12 @@ mod tests {
             assert_eq!(read(&root, GRADLE), GRADLE_T, "{dir:?}: nothing written");
             assert_eq!(read(&root, PROJECT_YML), PROJECT_T);
             assert_eq!(read(&root, WEB_INDEX), WEB_T);
+        }
+        let e = validate(&root, &AssetsSpec { dir: "web/img".into() }).unwrap_err();
+        assert!(e.contains("web is managed by mobiler"), "{e}");
+        // The default, barbershop's `assets/bundled`, and names that only start like a managed one.
+        for ok in ["assets", "assets/bundled", "webby", "my/web", "Androids"] {
+            assert!(validate(&root, &AssetsSpec { dir: ok.into() }).is_ok(), "{ok:?} rejected");
         }
         fs::create_dir_all(root.join("real/ok")).unwrap();
         assert_eq!(validate(&root, &AssetsSpec { dir: "real/ok".into() }).unwrap(), root.join("real/ok"));
