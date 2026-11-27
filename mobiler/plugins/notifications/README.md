@@ -117,8 +117,9 @@ what restores reminders after an Android force-stop.
   Snooze runs in the background without bringing the app forward. Notification categories (one per
   distinct action set) are registered at launch and **only grow**.
 - **Daylight saving:** an `at` inside a spring-forward gap fires at the transition instant; one in a
-  fall-back overlap fires at the earlier instant. After a later time-zone change iOS keeps that
-  instant; Android re-computes it from the wall-clock time.
+  fall-back overlap fires at the earlier instant. After a later time-zone change iOS fires at the
+  resolved local time (03:00 for a gap time) in the new zone; Android re-computes from the requested
+  wall-clock time.
 - **Web:** not available (the shell answers "plugin not available").
 
 ## Notes
