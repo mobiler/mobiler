@@ -23,6 +23,9 @@ pub const WEB_SIZES: [u32; 2] = [32, 180];
 pub const DEFAULT_PADDING: u32 = 18;
 const MIN_PX: u32 = 1024;
 const MAX_PX: u32 = 16_384;
+/// The working copy's largest side: well above the largest output content box (655 px at 1024), so the
+/// ~20 resizes per sync start from this, never from a source of up to 16384 px.
+const WORK_PX: u32 = 2048;
 
 /// `[icon]` as written in mobiler.toml.
 #[derive(Deserialize, Debug, Clone)]
@@ -34,10 +37,13 @@ pub struct IconSpec {
     pub padding: Option<u32>,
 }
 
-/// A validated `[icon]`: the decoded sources (RGBA8) and the settings.
+/// A validated `[icon]`: the sources as premultiplied RGBA8 working copies (at most `WORK_PX` per
+/// side; see [`working_copy`]) and the settings.
 #[derive(Debug, Clone)]
 pub struct Icon {
+    /// Premultiplied working copy of the foreground.
     pub fg: RgbaImage,
+    /// Premultiplied working copy of the monochrome image.
     pub mono: Option<RgbaImage>,
     pub bg: [u8; 3],
     /// % of the visible icon's side left clear on each side, 0..=40.
@@ -61,16 +67,21 @@ pub fn validate(root: &Path, spec: &IconSpec) -> Result<Icon, String> {
     Ok(Icon { fg, mono, bg: [c.r, c.g, c.b], padding })
 }
 
-/// A square PNG, 1024..=16384 px, decoded to RGBA8 (palette, grayscale and 16-bit inputs included).
-/// The size is checked from the header first, so an oversized file is never decoded.
+/// A square PNG, 1024..=16384 px, decoded once to RGBA8 (palette, grayscale and 16-bit inputs
+/// included) and turned into its working copy. The size is checked from the header first, so an
+/// oversized file is never decoded.
 fn load(root: &Path, field: &str, rel: &str) -> Result<RgbaImage, String> {
     use std::io::Read;
     let path = root.join(rel);
     let err = |why: String| format!("[icon] {field} {rel:?}: {why}");
     let mut head = [0u8; 24];
     let mut f = std::fs::File::open(&path).map_err(|e| err(format!("can't read it ({e})")))?;
-    let n = f.read(&mut head).map_err(|e| err(format!("can't read it ({e})")))?;
-    if n < 24 || &head[..8] != b"\x89PNG\r\n\x1a\n" {
+    match f.read_exact(&mut head) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Err(err("not a PNG".into())),
+        Err(e) => return Err(err(format!("can't read it ({e})"))),
+    }
+    if &head[..8] != b"\x89PNG\r\n\x1a\n" {
         return Err(err("not a PNG".into()));
     }
     if &head[12..16] != b"IHDR" {
@@ -95,7 +106,24 @@ fn load(root: &Path, field: &str, rel: &str) -> Result<RgbaImage, String> {
     limits.max_alloc = None; // a 16384 px RGBA source is 1 GiB; the side limit bounds it
     reader.limits(limits);
     let img = reader.decode().map_err(|e| err(format!("not a readable PNG ({e})")))?;
-    Ok(img.to_rgba8())
+    Ok(working_copy(img.into_rgba8()))
+}
+
+/// `img` premultiplied (so transparent pixels never bleed their colour into an edge when resampled)
+/// and, when larger than `WORK_PX`, downsized once (Lanczos3) to `WORK_PX`. Never upscaled.
+pub fn working_copy(mut img: RgbaImage) -> RgbaImage {
+    for p in img.pixels_mut() {
+        let a = u16::from(p.0[3]);
+        for c in &mut p.0[..3] {
+            *c = premul(*c, a);
+        }
+    }
+    let (w, h) = img.dimensions();
+    if w.max(h) <= WORK_PX {
+        return img;
+    }
+    let (nw, nh) = crate::splash::fit(w, h, WORK_PX);
+    image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3)
 }
 
 /// The content box's side: `px * visible * (1 - 2 * padding / 100)`, at least 1.
@@ -105,17 +133,9 @@ fn content_side(px: u32, visible: f64, padding: u32) -> u32 {
     (side.round() as u32).clamp(1, px)
 }
 
-/// `img` resized (Lanczos3) to `side`², premultiplied, so transparent pixels never bleed their colour
-/// into the edge.
-fn resized_premultiplied(img: &RgbaImage, side: u32) -> RgbaImage {
-    let mut pre = img.clone();
-    for p in pre.pixels_mut() {
-        let a = u16::from(p.0[3]);
-        for c in &mut p.0[..3] {
-            *c = premul(*c, a);
-        }
-    }
-    image::imageops::resize(&pre, side, side, image::imageops::FilterType::Lanczos3)
+/// A premultiplied working copy resized (Lanczos3) to `side`²; still premultiplied.
+fn resized(work: &RgbaImage, side: u32) -> RgbaImage {
+    image::imageops::resize(work, side, side, image::imageops::FilterType::Lanczos3)
 }
 
 #[allow(clippy::cast_possible_truncation)] // ≤ 255
@@ -131,11 +151,11 @@ fn unpremul(c: u8, a: u8) -> u8 {
     ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
 }
 
-/// The Android 108 dp adaptive layer at `px`: transparent, with `img` centred in the 72 dp visible
-/// area at the icon's padding.
+/// The Android 108 dp adaptive layer at `px`: transparent, with `img` (a premultiplied working copy:
+/// `icon.fg` or `icon.mono`) centred in the 72 dp visible area at the icon's padding.
 pub fn layer(icon: &Icon, img: &RgbaImage, px: u32) -> RgbaImage {
     let side = content_side(px, 72.0 / 108.0, icon.padding);
-    let fitted = resized_premultiplied(img, side);
+    let fitted = resized(img, side);
     let off = (px - side) / 2;
     let mut out = RgbaImage::new(px, px);
     for (x, y, p) in fitted.enumerate_pixels() {
@@ -149,7 +169,7 @@ pub fn layer(icon: &Icon, img: &RgbaImage, px: u32) -> RgbaImage {
 /// visible area is the whole square). `round` masks it to a circle with an anti-aliased edge.
 pub fn composite(icon: &Icon, px: u32, round: bool) -> RgbaImage {
     let side = content_side(px, 1.0, icon.padding);
-    let fitted = resized_premultiplied(&icon.fg, side);
+    let fitted = resized(&icon.fg, side);
     let off = (px - side) / 2;
     let [br, bgc, bb] = icon.bg;
     let mut out = RgbaImage::from_pixel(px, px, image::Rgba([br, bgc, bb, 255]));
@@ -272,7 +292,7 @@ mod tests {
     }
 
     fn icon(fg: RgbaImage, padding: u32) -> Icon {
-        Icon { fg, mono: None, bg: [10, 20, 30], padding }
+        Icon { fg: working_copy(fg), mono: None, bg: [10, 20, 30], padding }
     }
 
     /// A PNG whose header claims `w`×`h` but holds no image data: only the header is ever read.
@@ -354,12 +374,8 @@ mod tests {
         (x0, y0, x1, y1)
     }
 
-    fn assert_centred_box(b: (u32, u32, u32, u32), canvas: u32, side: u32) {
-        let (w, h) = (b.2 - b.0 + 1, b.3 - b.1 + 1);
-        assert!(w.abs_diff(side) <= 1 && h.abs_diff(side) <= 1, "box {w}×{h}, want {side}");
-        let (left, right) = (b.0, canvas - 1 - b.2);
-        let (top, bottom) = (b.1, canvas - 1 - b.3);
-        assert!(left.abs_diff(right) <= 1 && top.abs_diff(bottom) <= 1, "not centred: {b:?} in {canvas}");
+    fn assert_box(b: (u32, u32, u32, u32), off: u32, side: u32) {
+        assert_eq!(b, (off, off, off + side - 1, off + side - 1), "want {side}² at offset {off}");
     }
 
     #[test]
@@ -406,11 +422,11 @@ mod tests {
         ImageBuffer::<Luma<u8>, Vec<u8>>::from_pixel(1024, 1024, Luma([128])).save(root.join("gray.png")).unwrap();
         // Indexed (palette) colour with a tRNS chunk ("image" can't write one): hand-built.
         std::fs::write(root.join("palette.png"), palette_png(1024)).unwrap();
-        for (rel, want) in [("deep.png", [255, 0, 0, 255]), ("gray.png", [128, 128, 128, 255]), ("palette.png", [0, 0, 255, 0])] {
+        for (rel, want) in [("deep.png", [255, 0, 0, 255]), ("gray.png", [128, 128, 128, 255]), ("palette.png", [0, 0, 0, 0])] {
             let icon = validate(&root, &IconSpec { monochrome: Some(rel.into()), ..spec(rel) })
                 .unwrap_or_else(|e| panic!("{rel}: {e}"));
             assert_eq!(icon.fg.dimensions(), (1024, 1024), "{rel}");
-            assert_eq!(icon.fg.get_pixel(0, 0).0, want, "{rel} decodes to RGBA8");
+            assert_eq!(icon.fg.get_pixel(0, 0).0, want, "{rel} decodes to premultiplied RGBA8");
             assert!(icon.mono.is_some(), "{rel}");
             assert_eq!(icon.bg, [0x0E, 0x9F, 0x8E]);
             assert_eq!(icon.padding, DEFAULT_PADDING);
@@ -422,12 +438,12 @@ mod tests {
     fn layer_content_box_at_default_padding() {
         let fg = RgbaImage::from_pixel(1024, 1024, Rgba([255, 255, 255, 255]));
         let icon = icon(fg.clone(), DEFAULT_PADDING);
-        let out = layer(&icon, &fg, 432);
+        let out = layer(&icon, &icon.fg, 432);
         assert_eq!(out.dimensions(), (432, 432));
         assert_eq!(out.get_pixel(0, 0).0[3], 0, "the layer is transparent outside the content");
-        assert_centred_box(bbox(&out, |p| p.0[3] == 255), 432, 184);
+        assert_box(bbox(&out, |p| p.0[3] == 255), 124, 184);
         for (_, px) in LAYER_SIZES {
-            assert_eq!(layer(&icon, &fg, px).dimensions(), (px, px));
+            assert_eq!(layer(&icon, &icon.fg, px).dimensions(), (px, px));
         }
     }
 
@@ -439,10 +455,25 @@ mod tests {
         assert_eq!(out.dimensions(), (1024, 1024));
         assert_eq!(out.get_pixel(0, 0).0, [10, 20, 30, 255], "background fills the square");
         assert!(out.pixels().all(|p| p.0[3] == 255), "a square composite is opaque");
-        assert_centred_box(bbox(&out, |p| p.0 == [250, 250, 250, 255]), 1024, 655);
+        assert_box(bbox(&out, |p| p.0 == [250, 250, 250, 255]), 184, 655);
         // Padding 0: the foreground fills the whole square.
         let full = composite(&Icon { padding: 0, ..icon.clone() }, 192, false);
-        assert_centred_box(bbox(&full, |p| p.0 == [250, 250, 250, 255]), 192, 192);
+        assert_box(bbox(&full, |p| p.0 == [250, 250, 250, 255]), 0, 192);
+    }
+
+    #[test]
+    fn large_source_gives_the_same_composite_box() {
+        let root = tmp();
+        RgbaImage::from_pixel(4096, 4096, Rgba([250, 250, 250, 255])).save(root.join("big.png")).unwrap();
+        RgbaImage::from_pixel(1024, 1024, Rgba([250, 250, 250, 255])).save(root.join("small.png")).unwrap();
+        let big = validate(&root, &spec("big.png")).unwrap();
+        let small = validate(&root, &spec("small.png")).unwrap();
+        assert_eq!(big.fg.dimensions(), (WORK_PX, WORK_PX), "a large source is downsized once");
+        assert_eq!(small.fg.dimensions(), (1024, 1024), "a small source is never upscaled");
+        let white = |p: &Rgba<u8>| p.0 == [250, 250, 250, 255];
+        assert_box(bbox(&composite(&big, 1024, false), white), 184, 655);
+        assert_box(bbox(&composite(&small, 1024, false), white), 184, 655);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
