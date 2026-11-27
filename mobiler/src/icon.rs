@@ -59,6 +59,14 @@ impl Icon {
 /// Check `[icon]` and decode its images. Every failure names the field and the reason; nothing is
 /// written by the caller unless this succeeds.
 pub fn validate(root: &Path, spec: &IconSpec) -> Result<Icon, String> {
+    let (bg, padding) = check_settings(spec)?;
+    let fg = load(root, "foreground", &spec.foreground)?;
+    let mono = spec.monochrome.as_deref().map(|rel| load(root, "monochrome", rel)).transpose()?;
+    Ok(Icon::new(fg, mono, bg, padding))
+}
+
+/// `[icon]`'s settings (no image read): the background as RGB and the padding.
+fn check_settings(spec: &IconSpec) -> Result<([u8; 3], u32), String> {
     let padding = spec.padding.unwrap_or(DEFAULT_PADDING);
     if padding > 40 {
         return Err(format!("[icon] padding {padding}: must be in 0..=40 (% left clear on each side)"));
@@ -68,9 +76,7 @@ pub fn validate(root: &Path, spec: &IconSpec) -> Result<Icon, String> {
         return Err(bad_bg());
     }
     let c = crate::splash::Rgba::parse(&spec.background).map_err(|_| bad_bg())?;
-    let fg = load(root, "foreground", &spec.foreground)?;
-    let mono = spec.monochrome.as_deref().map(|rel| load(root, "monochrome", rel)).transpose()?;
-    Ok(Icon::new(fg, mono, [c.r, c.g, c.b], padding))
+    Ok(([c.r, c.g, c.b], padding))
 }
 
 /// A square PNG, 1024..=16384 px, decoded once to straight-alpha RGBA8 (palette, grayscale and 16-bit
@@ -357,25 +363,57 @@ struct Manifest {
 
 /// The ledger: whether `[icon]` was active at the last sync, the inputs it synced from, and what it
 /// last wrote to each file. Kept (inactive) when the section is removed.
+///
+/// A file normally has one hash. While a sync writes, each file has two (what it held, what it gets):
+/// that ledger is written first, so a sync that stops part-way still owns every file it touched, and
+/// the next one finishes the job. It has no `input`, so that next sync never skips.
 #[derive(Default)]
 struct Ledger {
     active: bool,
     input: Option<String>,
-    files: BTreeMap<String, String>,
+    files: BTreeMap<String, Vec<String>>,
+}
+
+impl Ledger {
+    /// The sync wrote these exact bytes to `rel`.
+    fn holds(&self, rel: &str, bytes: &[u8]) -> bool {
+        self.files.get(rel).is_some_and(|hs| hs.contains(&fnv1a64_hex(bytes)))
+    }
+
+    /// This ledger's entries for the files under `prefix`.
+    fn under<'a>(&'a self, prefix: &'a str) -> impl Iterator<Item = (String, Vec<String>)> + 'a {
+        self.files.iter().filter(move |(k, _)| k.starts_with(prefix)).map(|(k, v)| (k.clone(), v.clone()))
+    }
 }
 
 fn read_ledger(root: &Path) -> Option<Ledger> {
     let text = fs::read_to_string(root.join(LEDGER)).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let files = v["files"]
-        .as_object()
-        .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
-        .unwrap_or_default();
+    let hashes = |v: &serde_json::Value| -> Vec<String> {
+        match v {
+            serde_json::Value::String(s) => vec![s.clone()],
+            serde_json::Value::Array(a) => a.iter().filter_map(|h| h.as_str().map(str::to_string)).collect(),
+            _ => Vec::new(),
+        }
+    };
+    let files = v["files"].as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), hashes(v))).collect()).unwrap_or_default();
     Some(Ledger { active: v["active"].as_bool().unwrap_or(true), input: v["input"].as_str().map(str::to_string), files })
 }
 
+/// One hash is written as a string (the usual form), several as an array.
 fn ledger_json(l: &Ledger) -> anyhow::Result<Vec<u8>> {
-    let mut v = serde_json::json!({ "active": l.active, "files": l.files });
+    let files: serde_json::Map<String, serde_json::Value> = l
+        .files
+        .iter()
+        .map(|(k, hs)| {
+            let v = match hs.as_slice() {
+                [h] => serde_json::Value::String(h.clone()),
+                _ => serde_json::Value::Array(hs.iter().cloned().map(serde_json::Value::String).collect()),
+            };
+            (k.clone(), v)
+        })
+        .collect();
+    let mut v = serde_json::json!({ "active": l.active, "files": files });
     if let Some(input) = &l.input {
         v["input"] = serde_json::Value::String(input.clone());
     }
@@ -395,6 +433,10 @@ fn stock(rel: &str) -> Option<&'static [u8]> {
     crate::upgrade::TEMPLATES.get_file(rel).map(include_dir::File::contents)
 }
 
+fn pron(n: usize) -> &'static str {
+    if n == 1 { "it" } else { "them" }
+}
+
 /// XML can carry the sync's header; the images can't.
 fn is_xml(rel: &str) -> bool {
     Path::new(rel).extension().is_some_and(|e| e.eq_ignore_ascii_case("xml"))
@@ -402,7 +444,7 @@ fn is_xml(rel: &str) -> bool {
 
 /// The sync may write (or remove) `rel`: it is missing, the template's stock content (a text file read
 /// CRLF-tolerant), an XML file carrying the sync's header, or exactly what the ledger recorded.
-fn owned(root: &Path, rel: &str, ledger: &BTreeMap<String, String>) -> bool {
+fn owned(root: &Path, rel: &str, ledger: &Ledger) -> bool {
     let path = root.join(rel);
     if path.symlink_metadata().is_err() {
         return true;
@@ -417,7 +459,7 @@ fn owned(root: &Path, rel: &str, ledger: &BTreeMap<String, String>) -> bool {
     });
     is_stock
         || (is_xml(rel) && String::from_utf8_lossy(&bytes).contains(HEADER))
-        || ledger.get(rel).is_some_and(|h| *h == fnv1a64_hex(&bytes))
+        || ledger.holds(rel, &bytes)
 }
 
 /// One platform's share of the sync: one ownership unit.
@@ -487,7 +529,7 @@ fn up_to_date(root: &Path, ledger: &Ledger, input: &str, has_mono: bool) -> bool
     ledger.active
         && ledger.input.as_deref() == Some(input)
         && targets(root, has_mono).iter().all(|rel| {
-            ledger.files.get(rel).is_some_and(|h| fs::read(root.join(rel)).is_ok_and(|b| fnv1a64_hex(&b) == *h))
+            fs::read(root.join(rel)).is_ok_and(|b| ledger.holds(rel, &b))
         })
         && fs::read_to_string(root.join(WEB_INDEX)).map_or(true, |html| web_page(&html, true).is_ok_and(|t| t == html))
 }
@@ -500,7 +542,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     let spec = match read_spec(root) {
         Ok(s) => s,
         Err(e) => {
-            report.warnings.push(format!("mobiler.toml [icon] doesn't parse: {e}"));
+            report.warnings.push(format!("mobiler.toml {e}"));
             return Ok(report);
         }
     };
@@ -524,35 +566,13 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
         }
     };
 
-    let mut units = Vec::new();
-    if root.join("Android").is_dir() {
-        units.push(android_unit(&icon));
-    }
-    if root.join("iOS").is_dir() {
-        units.push(Unit {
-            name: "iOS",
-            prefix: "iOS/",
-            assets: vec![(IOS_PNG.into(), ios_png(&icon))],
-            refs: Vec::new(),
-            removes: Vec::new(),
-        });
-    }
-    if let Ok(html) = fs::read_to_string(root.join(WEB_INDEX)) {
-        match web_page(&html, true) {
-            Ok(page) => units.push(Unit {
-                name: "web",
-                prefix: "web/",
-                assets: WEB_SIZES.iter().map(|&px| (web_png(px), png(&composite(&icon, px, false)))).collect(),
-                refs: vec![(WEB_INDEX.into(), page.into_bytes())],
-                removes: Vec::new(),
-            }),
-            Err(e) => report.warnings.push(format!("{WEB_INDEX}: {e} — web icon not synced")),
-        }
-    }
+    let mut files = BTreeMap::new();
+    let units = units(root, &icon, &ledger, &mut files, &mut report);
 
     // Order matters if a write fails part-way: images before the files that refer to them, those
-    // before the removals, the ledger last.
-    let mut files = BTreeMap::new();
+    // before the removals, the ledger last. The ledger is also written first, naming both what each
+    // file held and what it gets, so a sync that stops part-way still owns what it wrote.
+    let mut pending = BTreeMap::new();
     let (mut assets, mut refs, mut removes) = (Vec::new(), Vec::new(), Vec::new());
     for unit in units {
         let foreign: Vec<&str> = unit
@@ -562,7 +582,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             .map(|(rel, _)| rel.as_str())
             .filter(|rel| *rel != WEB_INDEX)
             .chain(unit.removes.iter().map(String::as_str))
-            .filter(|rel| !owned(root, rel, &ledger.files))
+            .filter(|rel| !owned(root, rel, &ledger))
             .collect();
         if !foreign.is_empty() {
             report.warnings.push(format!(
@@ -570,26 +590,75 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
                 foreign.join(", "),
                 if foreign.len() == 1 { "was" } else { "were" },
                 unit.name,
-                if foreign.len() == 1 { "it" } else { "them" },
+                pron(foreign.len()),
             ));
-            files.extend(ledger.files.iter().filter(|(k, _)| k.starts_with(unit.prefix)).map(|(k, v)| (k.clone(), v.clone())));
+            files.extend(ledger.under(unit.prefix));
             continue;
         }
         for (rel, bytes) in unit.assets.iter().chain(&unit.refs) {
             if rel != WEB_INDEX {
-                files.insert(rel.clone(), fnv1a64_hex(bytes));
+                let new = fnv1a64_hex(bytes);
+                // What it holds now (if the ledger is how the sync owns it) and what it gets.
+                let mut both = ledger.files.get(rel).cloned().unwrap_or_default();
+                if !both.contains(&new) {
+                    both.push(new.clone());
+                }
+                pending.insert(rel.clone(), both);
+                files.insert(rel.clone(), vec![new]);
+            }
+        }
+        for rel in &unit.removes {
+            if let Some(old) = ledger.files.get(rel) {
+                pending.insert(rel.clone(), old.clone());
             }
         }
         assets.extend(unit.assets.into_iter().map(|(r, b)| Change::Write(r, b)));
         refs.extend(unit.refs.into_iter().map(|(r, b)| Change::Write(r, b)));
         removes.extend(unit.removes.into_iter().map(Change::Remove));
     }
-    let mut changes = assets;
+    let mut interim = Ledger { active: true, input: None, files: files.clone() };
+    interim.files.extend(pending);
+    let mut changes = vec![Change::Write(LEDGER.into(), ledger_json(&interim)?)];
+    changes.extend(assets);
     changes.extend(refs);
     changes.extend(removes);
     changes.push(Change::Write(LEDGER.into(), ledger_json(&Ledger { active: true, input, files })?));
     apply(root, changes, &mut report)?;
     Ok(report)
+}
+
+/// The platforms this app has, each with what `[icon]` writes there. A web page whose block can't be
+/// filled is left out with a warning, its ledger entries carried into `files`.
+fn units(root: &Path, icon: &Icon, ledger: &Ledger, files: &mut BTreeMap<String, Vec<String>>, report: &mut SyncReport) -> Vec<Unit> {
+    let mut units = Vec::new();
+    if root.join("Android").is_dir() {
+        units.push(android_unit(icon));
+    }
+    if root.join("iOS").is_dir() {
+        units.push(Unit {
+            name: "iOS",
+            prefix: "iOS/",
+            assets: vec![(IOS_PNG.into(), ios_png(icon))],
+            refs: Vec::new(),
+            removes: Vec::new(),
+        });
+    }
+    if let Ok(html) = fs::read_to_string(root.join(WEB_INDEX)) {
+        match web_page(&html, true) {
+            Ok(page) => units.push(Unit {
+                name: "web",
+                prefix: "web/",
+                assets: WEB_SIZES.iter().map(|&px| (web_png(px), png(&composite(icon, px, false)))).collect(),
+                refs: vec![(WEB_INDEX.into(), page.into_bytes())],
+                removes: Vec::new(),
+            }),
+            Err(e) => {
+                report.warnings.push(format!("{WEB_INDEX}: {e} — web icon not synced"));
+                files.extend(ledger.under("web/"));
+            }
+        }
+    }
+    units
 }
 
 /// Android: the adaptive layers and the legacy rasters, then the colour and the adaptive icon XML that
@@ -623,10 +692,8 @@ fn android_unit(icon: &Icon) -> Unit {
 fn undo(root: &Path, ledger: &Ledger, report: &mut SyncReport) -> anyhow::Result<()> {
     let mut files = ledger.files.clone();
     let as_written = |rel: &str| {
-        fs::read(root.join(rel)).is_ok_and(|b| {
-            ledger.files.get(rel).is_some_and(|h| *h == fnv1a64_hex(&b))
-                || (is_xml(rel) && String::from_utf8_lossy(&b).contains(HEADER))
-        })
+        fs::read(root.join(rel))
+            .is_ok_and(|b| ledger.holds(rel, &b) || (is_xml(rel) && String::from_utf8_lossy(&b).contains(HEADER)))
     };
     let mut changes = Vec::new();
     let mut android_still_used = None;
@@ -672,9 +739,25 @@ fn undo(root: &Path, ledger: &Ledger, report: &mut SyncReport) -> anyhow::Result
             own.push(mipmap(d, "mobiler_icon_monochrome.png"));
         }
     }
+    // Only what is still as the sync wrote it: a layer retouched by hand stays, and says so.
+    let mut kept = Vec::new();
     for rel in own {
-        files.remove(&rel);
-        changes.push(Change::Remove(rel));
+        if owned(root, &rel, ledger) {
+            files.remove(&rel);
+            changes.push(Change::Remove(rel));
+        } else {
+            kept.push(rel);
+        }
+    }
+    if !kept.is_empty() {
+        report.warnings.push(format!(
+            "{} {} edited by hand, so [icon] leaves {} in place — delete {} once nothing uses {}",
+            kept.join(", "),
+            if kept.len() == 1 { "was" } else { "were" },
+            pron(kept.len()),
+            pron(kept.len()),
+            pron(kept.len()),
+        ));
     }
     changes.push(Change::RemoveDirIfEmpty(WEB_DIR.into()));
     changes.push(Change::Write(LEDGER.into(), ledger_json(&Ledger { active: false, input: None, files })?));
@@ -694,6 +777,10 @@ fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::
                 let path = root.join(&rel);
                 if fs::read(&path).is_ok_and(|old| old == bytes) {
                     continue;
+                }
+                #[cfg(test)]
+                if rel != LEDGER && tests::FAIL_AFTER.with(|n| n.get() == Some(report.written.len())) {
+                    anyhow::bail!("injected failure before writing {rel}");
                 }
                 crate::fsguard::write(root, &path, bytes)?;
                 if rel != LEDGER {
@@ -720,7 +807,7 @@ fn apply(root: &Path, changes: Vec<Change>, report: &mut SyncReport) -> anyhow::
 /// `Ok(None)`: no mobiler.toml or no `[icon]`.
 fn read_spec(root: &Path) -> Result<Option<IconSpec>, String> {
     let Ok(text) = fs::read_to_string(root.join("mobiler.toml")) else { return Ok(None) };
-    toml::from_str::<Manifest>(&text).map(|m| m.icon).map_err(|e| e.message().to_string())
+    toml::from_str::<Manifest>(&text).map(|m| m.icon).map_err(|e| format!("[icon] doesn't parse: {}", e.message()))
 }
 
 /// `mobiler icon sync` — run the sync from the app root and print what happened.
@@ -775,13 +862,7 @@ pub fn watch_paths(root: &Path) -> (Vec<std::path::PathBuf>, Vec<std::path::Path
 pub fn doctor_line(root: &Path) -> String {
     let checked = read_spec(root).and_then(|spec| {
         let Some(spec) = spec else { return Ok(None) };
-        let padding = spec.padding.unwrap_or(DEFAULT_PADDING);
-        if padding > 40 {
-            return Err(format!("padding {padding}: must be in 0..=40"));
-        }
-        if spec.background.len() != 7 || crate::splash::Rgba::parse(&spec.background).is_err() {
-            return Err(format!("background {:?}: a colour is #RRGGBB", spec.background));
-        }
+        let (_, padding) = check_settings(&spec)?;
         let side = check_header(root, "foreground", &spec.foreground)?;
         if let Some(m) = &spec.monochrome {
             check_header(root, "monochrome", m)?;
@@ -794,7 +875,7 @@ pub fn doctor_line(root: &Path) -> String {
             let mono = if spec.monochrome.is_some() { ", monochrome" } else { "" };
             format!("icon: {} ({side} px) on {}, padding {padding}%{mono}", spec.foreground, spec.background.to_ascii_uppercase())
         }
-        Err(e) => format!("icon: mobiler.toml [icon] invalid: {e}"),
+        Err(e) => format!("icon: mobiler.toml {e}"),
     }
 }
 
@@ -1098,6 +1179,8 @@ mod tests {
     thread_local! {
         /// How many source images this thread decoded (the unchanged-input skip must decode none).
         pub(super) static DECODES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        /// `Some(n)`: the sync's writes fail after `n` files (a full disk, a killed process).
+        pub(super) static FAIL_AFTER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     }
 
     const ICON_TOML: &str = "[icon]\nforeground = \"brand/fg.png\"\nbackground = \"#0E9F8E\"\n";
@@ -1217,7 +1300,7 @@ mod tests {
         let ledger = read_ledger(&root).unwrap();
         assert!(ledger.active && ledger.input.is_some());
         for rel in targets(&root, false) {
-            assert_eq!(ledger.files.get(&rel), Some(&fnv1a64_hex(&read(&root, &rel))), "{rel} in the ledger");
+            assert_eq!(ledger.files.get(&rel), Some(&vec![fnv1a64_hex(&read(&root, &rel))]), "{rel} in the ledger");
         }
         // A monochrome image adds its layers and the XML names them; dropping it removes them again.
         glyph_png(&root, "brand/mono.png", 1024);
@@ -1438,10 +1521,85 @@ mod tests {
         assert_eq!(files, [root.join("mobiler.toml")]);
         assert_eq!(doctor_line(&root), "icon: brand/fg.png (1024 px) on #0E9F8E, padding 18%, monochrome");
         put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "teal").as_bytes());
-        assert!(doctor_line(&root).starts_with("icon: mobiler.toml [icon] invalid: "), "{}", doctor_line(&root));
+        assert_eq!(doctor_line(&root), "icon: mobiler.toml [icon] background \"teal\": a colour is #RRGGBB");
         put(&root, "mobiler.toml", b"");
         assert_eq!(doctor_line(&root), "icon: not set (template launcher icon)");
         assert!(watch_paths(&root).0.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn undo_keeps_a_hand_edited_sync_file() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let layer = mipmap("xxxhdpi", "mobiler_icon_foreground.png");
+        glyph_png(&root, &layer, 432); // retouched by hand
+        let mine = read(&root, &layer);
+        put(&root, "mobiler.toml", b"");
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(&layer) && w.contains("edited by hand")), "{:?}", r.warnings);
+        assert_eq!(read(&root, &layer), mine, "the retouched layer survives");
+        assert!(!root.join(mipmap("mdpi", "mobiler_icon_foreground.png")).exists(), "the untouched ones go");
+        assert!(read_ledger(&root).unwrap().files.contains_key(&layer), "its ledger entry is kept");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hand_edited_webp_is_left_alone() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let webp_rel = mipmap("hdpi", "ic_launcher.webp");
+        let mine = webp(&RgbaImage::from_pixel(72, 72, Rgba([1, 2, 3, 255])));
+        put(&root, &webp_rel, &mine);
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#123456").as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(&webp_rel) && w.contains("Android")), "{:?}", r.warnings);
+        assert_eq!(read(&root, &webp_rel), mine, "byte-identical");
+        assert!(text(&root, COLORS).contains("#0E9F8E"), "nothing of Android's rewritten");
+        assert!(r.written.contains(&IOS_PNG.to_string()) && r.written.contains(&web_png(32)), "{r:?}");
+        put(&root, "mobiler.toml", b"");
+        sync(&root).unwrap();
+        assert_eq!(read(&root, &webp_rel), mine, "undo leaves it too");
+        assert_eq!(read(&root, IOS_PNG), template(IOS_PNG));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn interrupted_sync_is_retried_and_owns_its_files() {
+        for first in [true, false] {
+            let root = app(ICON_TOML);
+            if !first {
+                sync(&root).unwrap();
+            }
+            put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#123456").as_bytes());
+            FAIL_AFTER.with(|n| n.set(Some(7)));
+            let err = sync(&root).expect_err("the injected failure");
+            FAIL_AFTER.with(|n| n.set(None));
+            assert!(format!("{err:#}").contains("injected"), "{err:#}");
+            let r = sync(&root).unwrap();
+            assert!(r.warnings.is_empty(), "first={first}: {:?}", r.warnings);
+            assert!(text(&root, COLORS).contains("#123456"));
+            let ledger = text(&root, LEDGER);
+            assert!(!ledger.contains('['), "the final ledger has one hash per file: {ledger}");
+            assert!(sync(&root).unwrap().written.is_empty(), "and then it is up to date");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
+    fn a_broken_web_block_keeps_its_ledger_entries() {
+        let root = app(ICON_TOML);
+        sync(&root).unwrap();
+        let html = text(&root, WEB_INDEX).replace(WEB_END, "");
+        put(&root, WEB_INDEX, html.as_bytes());
+        put(&root, "mobiler.toml", ICON_TOML.replace("#0E9F8E", "#123456").as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains(WEB_INDEX)), "{:?}", r.warnings);
+        assert!(read_ledger(&root).unwrap().files.contains_key(&web_png(32)), "web entries carried forward");
+        // Fixed again: the sync still owns its web images.
+        put(&root, WEB_INDEX, PAGE.as_bytes());
+        let r = sync(&root).unwrap();
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
