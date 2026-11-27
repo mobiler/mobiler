@@ -224,10 +224,12 @@ final class PushBridge {
 // stays the only UNUserNotificationCenterDelegate (a plugin swapping the delegate would silently break
 // push, or be broken by it); it sends every response on a marked notification here. The plugin attaches
 // its handler at launch (its `mobiler:app-launch` bootstrap), so a snooze pressed while the app was dead
-// is handled natively without the core. Responses that arrive before a handler attaches are buffered
-// WITH their completion handlers and replayed in order on attach. Each completion handler is called
-// exactly once: by the handler that receives it, or here when the buffer overflows. App.swift references
-// nothing from the plugin, so this compiles and stays dormant in apps without it.
+// is handled natively without the core. Because the plugin attaches in didFinishLaunching, before iOS
+// delivers any response, a response with no handler is an edge case (no plugin, or a detach). Then the
+// completion is called AT ONCE (iOS needs it promptly: holding it keeps a background action launch's
+// time open, possibly forever in an app without the plugin) and only the response is buffered, replayed
+// in order on attach with a no-op completion. App.swift references nothing from the plugin, so this
+// compiles and stays dormant in apps without it.
 @MainActor
 final class LocalNotificationBridge {
     static let shared = LocalNotificationBridge()
@@ -236,7 +238,7 @@ final class LocalNotificationBridge {
     nonisolated static let markerKey = "mobiler_local"
 
     private var handler: ((UNNotificationResponse, @escaping () -> Void) -> Void)?
-    private var buffer: [(response: UNNotificationResponse, completion: () -> Void)] = []
+    private var buffer: [UNNotificationResponse] = []
     // Responses are user actions, so a handful is plenty; the bound only guards against a runaway backlog.
     private let maxBuffered = 32
 
@@ -248,13 +250,14 @@ final class LocalNotificationBridge {
     // --- called by the notifications plugin ---
 
     /// Installs the handler (a later attach replaces it) and replays the buffered responses in arrival
-    /// order. The handler owns each completion and must call it exactly once.
+    /// order. The handler owns each live completion and must call it exactly once; replayed responses
+    /// get a no-op completion, since theirs was already called when they were buffered.
     func attach(_ handler: @escaping (UNNotificationResponse, @escaping () -> Void) -> Void) {
         self.handler = handler
         // Take the buffer before replaying, so a re-entrant didReceive can't be replayed twice.
         let pending = buffer
         buffer.removeAll()
-        for item in pending { handler(item.response, item.completion) }
+        for response in pending { handler(response, {}) }
     }
 
     /// Back to dormant: later responses buffer until the next attach.
@@ -267,12 +270,10 @@ final class LocalNotificationBridge {
             handler(response, completion)
             return
         }
-        if buffer.count >= maxBuffered {
-            // Dropped: release iOS's wait on it now, since no handler will ever see it.
-            let dropped = buffer.removeFirst()
-            dropped.completion()
-        }
-        buffer.append((response: response, completion: completion))
+        // No handler: release iOS's wait now rather than hold it for an attach that may never come.
+        completion()
+        if buffer.count >= maxBuffered { buffer.removeFirst() }
+        buffer.append(response)
     }
 }
 
