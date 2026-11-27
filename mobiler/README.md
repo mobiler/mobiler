@@ -220,7 +220,7 @@ every size for Android, iOS and the web:
 foreground = "brand/icon-foreground.png"   # PNG, square, 1024-16384 px, transparent background
 background = "#0E9F8E"                     # #RRGGBB
 monochrome = "brand/icon-mono.png"         # optional; the Android 13+ themed-icon layer, same size rules
-padding    = 18                            # optional; 0-40, % of the icon kept clear on each side
+padding    = 18                            # optional; 0-40, default 18: % of the icon kept clear on each side
 ```
 
 `mobiler build`, `dev` and `watch` sync it; `mobiler icon sync` does it on demand and prints what it
