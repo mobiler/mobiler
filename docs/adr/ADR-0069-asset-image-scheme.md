@@ -2,7 +2,7 @@
 
 Status:        Accepted
 Date decided:  2026-11-27
-Deciding PRs:  the libs PR of the `[icon]` / `[assets]` release (mobiler-web 0.51.0); the template copies follow in the CLI PR (CLI 0.75.0, ADR-0009)
+Deciding PRs:  #322 (mobiler-web 0.51.0); the template copies follow in the CLI PR (CLI 0.75.0, ADR-0009)
 Supersedes:    none
 Code anchor:   mobiler-web/src/lib.rs (`image_src`), demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/MainActivity.kt (`assetModel`, `assetPath`), demos/barbershop/iOS/Sources/Render.swift (`assetURL`, `isAssetSource`)
 Conformance:   mobiler-web/src/lib.rs::non_asset_sources_pass_through, mobiler-web/src/lib.rs::asset_paths_resolve_under_mobiler_assets, mobiler-web/src/lib.rs::invalid_asset_paths_render_as_failed_load, xtask/tests/adr_conformance.rs::adr_0069_asset_resolvers_follow_one_rule
