@@ -204,19 +204,22 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
             return Ok(report);
         }
     };
-    let dir = match &spec {
-        None => None,
+    // `exists`: trunk's `copy-dir` and an Xcode folder reference fail the build on a missing folder, so
+    // the web and iOS blocks stay empty until it exists; Gradle's `Sync` copies nothing from one.
+    let (dir, exists) = match &spec {
+        None => (None, false),
         Some(spec) => match validate(root, spec) {
             Ok(path) => {
-                if !path.exists() {
+                let exists = path.is_dir();
+                if !exists {
                     report.warnings.push(format!(
-                        "[assets] dir {:?} doesn't exist yet — the shells are set up for it; add your files there",
+                        "[assets] dir {:?} doesn't exist yet — Android is set up for it; web and iOS will include it once it does (run a build or `mobiler assets sync` after creating it)",
                         spec.dir
                     ));
                 }
                 source_overlap_warnings(root, &spec.dir, &mut report);
                 report.warnings.extend(symlink_warnings(root, &path));
-                Some(clean_dir(&spec.dir).expect("validated").to_string())
+                (Some(clean_dir(&spec.dir).expect("validated").to_string()), exists)
             }
             Err(e) => {
                 report.warnings.push(format!("{e} — nothing synced"));
@@ -226,6 +229,7 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
         },
     };
     let dir = dir.as_deref();
+    let bundled = dir.filter(|_| exists);
 
     let mut writes: Vec<(&str, String)> = Vec::new();
     if let Some(text) = read_if_exists(root, GRADLE, &mut report)? {
@@ -236,8 +240,8 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     }
     if let Some(text) = read_if_exists(root, PROJECT_YML, &mut report)? {
         let pairs = [
-            (SOURCES_BEGIN, SOURCES_END, "assets-sources", yml_source_lines(dir)),
-            (INFO_BEGIN, INFO_END, "assets-info", yml_info_lines(dir)),
+            (SOURCES_BEGIN, SOURCES_END, "assets-sources", yml_source_lines(bundled)),
+            (INFO_BEGIN, INFO_END, "assets-info", yml_info_lines(bundled)),
         ];
         if let Some(t) = fill(PROJECT_YML, &text, &pairs, &mut report) {
             writes.push((PROJECT_YML, t));
@@ -246,9 +250,9 @@ pub fn sync(root: &Path) -> anyhow::Result<SyncReport> {
     // web/index.html isn't a template file (no web shell is scaffolded): the block is inserted before
     // `</head>` when missing, like the fonts and splash blocks. No section and no block: left alone.
     if let Some(html) = read_if_exists(root, WEB_INDEX, &mut report)?
-        && (dir.is_some() || html.contains(WEB_BEGIN))
+        && (bundled.is_some() || html.contains(WEB_BEGIN))
     {
-        let lines = web_lines(dir);
+        let lines = web_lines(bundled);
         match crate::fonts::replace_block(&html, WEB_BEGIN, WEB_END, "</head>", |indent| {
             lines.iter().map(|l| format!("{indent}{l}")).collect()
         }) {
@@ -665,15 +669,34 @@ mod tests {
     }
 
     #[test]
-    fn missing_dir_warns_but_writes_blocks() {
+    fn missing_dir_fills_only_the_gradle_block() {
+        // trunk's `copy-dir` and an Xcode folder reference both fail the build on a missing folder;
+        // Gradle's `Sync` copies nothing from one. So only Gradle's block is filled until it exists.
         let root = app("[assets]\ndir = \"media/bundled\"\n");
         let r = sync(&root).unwrap();
         assert!(!r.failed, "{r:?}");
-        assert!(r.warnings.iter().any(|w| w.contains("media/bundled") && w.contains("doesn't exist")), "{:?}", r.warnings);
+        assert!(
+            r.warnings.iter().any(|w| w.contains("media/bundled")
+                && w.contains("doesn't exist yet")
+                && w.contains("web and iOS")
+                && w.contains("mobiler assets sync")),
+            "{:?}",
+            r.warnings
+        );
         assert!(read(&root, GRADLE).contains("../media/bundled"));
-        assert!(read(&root, PROJECT_YML).contains("MobilerAssetsFolder: bundled"));
-        assert!(read(&root, WEB_INDEX).contains("href=\"../media/bundled\""));
+        assert_eq!(read(&root, PROJECT_YML), PROJECT_T, "both iOS blocks stay empty");
+        assert_eq!(read(&root, WEB_INDEX), WEB_T, "no web block without the folder");
         assert!(!root.join("media").exists(), "the sync never creates the folder");
+        // A block already filled (the folder was deleted, or git didn't check out an empty one): emptied.
+        fs::create_dir_all(root.join("media/bundled")).unwrap();
+        sync(&root).unwrap();
+        assert!(read(&root, WEB_INDEX).contains("href=\"../media/bundled\""));
+        assert!(read(&root, PROJECT_YML).contains("MobilerAssetsFolder: bundled"));
+        fs::remove_dir_all(root.join("media")).unwrap();
+        sync(&root).unwrap();
+        assert!(block(&read(&root, WEB_INDEX), WEB_BEGIN, WEB_END).is_empty());
+        assert_eq!(read(&root, PROJECT_YML), PROJECT_T);
+        assert!(read(&root, GRADLE).contains("../media/bundled"));
         let _ = fs::remove_dir_all(&root);
     }
 

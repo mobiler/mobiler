@@ -273,6 +273,9 @@ reports problems.
 - **Warnings** (the sync goes on): a `[fonts]`, `[splash]` or `[icon]` source file under `dir` (it would
   ship in the app too), a symlink inside `dir` (the builds follow it and ship its target), a `dir` that
   doesn't exist yet. `mobiler doctor` repeats them.
+- **A `dir` that doesn't exist yet** (or an empty folder git didn't check out) gets only the Android copy
+  task: the web and iOS builds fail on a missing folder, so their blocks stay empty until it exists, and
+  `asset:` images show as failed loads there. Create the folder, then build or run `mobiler assets sync`.
 - **Apps made before CLI 0.75** need `mobiler upgrade --apply` once: it adds the markers in
   `Android/app/build.gradle.kts` and `iOS/project.yml` that the sync fills. Without them the sync warns
   and edits nothing.

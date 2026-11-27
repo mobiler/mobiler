@@ -5,7 +5,7 @@ Date decided:  2026-11-27
 Deciding PRs:  the CLI PR of the `[icon]` / `[assets]` release (CLI 0.75.0)
 Supersedes:    none
 Code anchor:   mobiler/src/assets.rs (clean_dir, validate, yaml_string, the generators, sync, fill, source_overlap_warnings, symlink_warnings, watch_paths, doctor_line), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/build.gradle.kts and mobiler/templates/iOS/project.yml (the marker blocks), the template's MainActivity.kt and Render.swift (the ADR-0069 resolvers)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0070_asset_markers, xtask/tests/adr_conformance.rs::adr_0069_asset_resolvers_follow_one_rule, mobiler/src/assets.rs::generated_blocks_match_barbershop, mobiler/src/assets.rs::fills_template_blocks_and_inserts_web_block, mobiler/src/assets.rs::missing_markers_warn_and_never_edit, mobiler/src/assets.rs::missing_dir_warns_but_writes_blocks, mobiler/src/assets.rs::removing_section_empties_blocks_and_keeps_dir, mobiler/src/assets.rs::rejects_dir_outside_root, mobiler/src/assets.rs::folder_names_yaml_would_retype_are_quoted, mobiler/src/assets.rs::symlink_inside_dir_warns, mobiler/src/assets.rs::fonts_or_splash_source_under_dir_warns, mobiler/src/assets.rs::icon_source_inside_assets_dir_warns, mobiler/src/assets.rs::upgrade_never_touches_dir
+Conformance:   xtask/tests/adr_conformance.rs::adr_0070_asset_markers, xtask/tests/adr_conformance.rs::adr_0069_asset_resolvers_follow_one_rule, mobiler/src/assets.rs::generated_blocks_match_barbershop, mobiler/src/assets.rs::fills_template_blocks_and_inserts_web_block, mobiler/src/assets.rs::missing_markers_warn_and_never_edit, mobiler/src/assets.rs::missing_dir_fills_only_the_gradle_block, mobiler/src/assets.rs::removing_section_empties_blocks_and_keeps_dir, mobiler/src/assets.rs::rejects_dir_outside_root, mobiler/src/assets.rs::folder_names_yaml_would_retype_are_quoted, mobiler/src/assets.rs::symlink_inside_dir_warns, mobiler/src/assets.rs::fonts_or_splash_source_under_dir_warns, mobiler/src/assets.rs::icon_source_inside_assets_dir_warns, mobiler/src/assets.rs::upgrade_never_touches_dir
 
 ## 1. Context (The Problem)
 
@@ -52,7 +52,14 @@ The rules:
     `.mobiler`, `target` or `mobiler.toml`, compared ignoring ASCII case (a case-insensitive file system makes
     `android` the same folder). So `web`, `web/img` or `Android/x` is refused, and `webby` or `my/web` is not;
   - have no symlinked component on the way, the folder itself included (`fsguard`, as every CLI write);
-  - be a folder if it exists (a missing folder is only a warning, and the blocks are still written);
+  - be a folder if it exists. A missing folder is only a warning (it says web and iOS include the folder once
+    it exists, after a build or `mobiler assets sync`), and only the Gradle block is filled: trunk's `copy-dir`
+    fails the web build on a missing folder (`error taking canonical path of directory`, trunk 0.21.14), and an
+    Xcode folder reference to a missing path either fails XcodeGen or, with XcodeGen's `optional: true` (which
+    only disables its missing-path check), leaves a reference Xcode can't copy. So both `project.yml` blocks and
+    the web block stay empty (a filled one is emptied) until the folder exists; Gradle's `Sync` copies nothing
+    from a missing `from`. iOS then has no `MobilerAssetsFolder`, so every `asset:` shows the failed-load
+    placeholder, as for a missing file;
   - use, in each segment, only characters from an **allow-list**: Unicode letters and digits (Rust's
     `char::is_alphanumeric`), space (not first or last in a segment), `-`, `_`, `.` and `+`. The value lands in a
     Kotlin string, a YAML scalar and an HTML attribute, each unescaped by its reader; an allow-list keeps `"`,
@@ -97,7 +104,8 @@ The rules:
   - **Validation Metric:** `generated_blocks_match_barbershop`.
 - **Condition 4 — template files are filled, never inserted into; the web block is inserted.**
   - **Validation Metric:** `fills_template_blocks_and_inserts_web_block`, `missing_markers_warn_and_never_edit`,
-    `missing_dir_warns_but_writes_blocks` (a missing folder still gets its blocks).
+    `missing_dir_fills_only_the_gradle_block` (a missing folder gets only the Gradle block, and the web and iOS
+    blocks once it exists).
 - **Condition 5 — removing the section empties the blocks and keeps the folder.**
   - **Validation Metric:** `removing_section_empties_blocks_and_keeps_dir`.
 - **Condition 6 — nothing the CLI writes lies under `dir`.** The real guards are structural: `validate` refuses a
@@ -162,7 +170,10 @@ Follow-up asked; ADR-0069 itself is unchanged.
 - In `assets.rs`:
   - never warning about a missing pair in `fill` failed `missing_markers_warn_and_never_edit`;
   - not inserting the web block when the page has none failed `fills_template_blocks_and_inserts_web_block` (and
-    `missing_dir_warns_but_writes_blocks`, `removing_section_empties_blocks_and_keeps_dir`);
+    `missing_dir_fills_only_the_gradle_block`, `removing_section_empties_blocks_and_keeps_dir`);
+  - filling the web and iOS blocks whether or not the folder exists (the first version) failed
+    `missing_dir_fills_only_the_gradle_block` (the warning didn't name web and iOS; then "both iOS blocks stay
+    empty");
   - returning early when the section is gone (blocks kept) failed `removing_section_empties_blocks_and_keeps_dir`
     ("the gradle block is empty again");
   - dropping the `fsguard` check from `validate` failed `rejects_dir_outside_root` (`"linked" accepted`);
