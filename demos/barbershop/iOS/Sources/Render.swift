@@ -28,7 +28,7 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // via UIImage — AsyncImage doesn't reliably fetch `file://`; remote URLs use
         // AsyncImage.
         let fill: AnyView
-        if source.hasPrefix("asset:") {
+        if isAssetSource(source) {
             // A bundled image (`[assets]` in mobiler.toml): a file in the app bundle. An invalid
             // `asset:` path gets a URL that never loads, so it shows the same placeholder.
             fill = AnyView(FileImageView(url: assetURL(source) ?? invalidAssetURL))
@@ -784,7 +784,7 @@ private struct AvatarView: View {
         let img: AnyView
         if let initials, source.isEmpty {
             img = AnyView(initialsView(initials, d))
-        } else if source.hasPrefix("asset:") {
+        } else if isAssetSource(source) {
             // A bundled image; an invalid `asset:` path never loads, so it shows the initials.
             img = AnyView(FileImageView(url: assetURL(source) ?? invalidAssetURL, fallback: initials.map { AnyView(initialsView($0, d)) }))
         } else if source.hasPrefix("file:"), let url = URL(string: source) {
@@ -2385,16 +2385,31 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
     }
 }
 
+/// Whether `source` names a bundled image (`asset:`). Tested per Unicode scalar, as `assetURL` does:
+/// `hasPrefix` compares grapheme clusters, so a combining mark after the `:` would hide the prefix.
+fileprivate func isAssetSource(_ source: String) -> Bool {
+    source.unicodeScalars.starts(with: "asset:".unicodeScalars)
+}
+
 /// The bundled file for a valid `asset:<path>` source (`[assets]` in mobiler.toml), else nil. The
 /// rule (same in every shell): the path is non-empty, has no leading `/`, no `\`, and no segment that
 /// is empty, `.` or `..`. The folder is copied into the bundle under its own name, which
 /// `MobilerAssetsFolder` in Info.plist carries.
+///
+/// Every check works on Unicode scalars, never on grapheme clusters (ADR-0069). String's `hasPrefix`,
+/// `split` and `==` join a combining mark onto the character before it, so `asset:../\u{0301}x` would
+/// be the single segment `../́x`, pass, and resolve one folder above the assets. Split per scalar, it
+/// is `..` and `́x`, and is rejected, as Rust (per byte) and Kotlin (per UTF-16 unit) reject it.
 fileprivate func assetURL(_ source: String) -> URL? {
-    guard source.hasPrefix("asset:") else { return nil }
-    let path = String(source.dropFirst("asset:".count))
-    if path.isEmpty || path.hasPrefix("/") || path.contains(Character("\\")) { return nil }
-    let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+    guard isAssetSource(source) else { return nil }
+    let scalars = source.unicodeScalars.dropFirst("asset:".unicodeScalars.count)
+    let slash: Unicode.Scalar = "/"
+    let backslash: Unicode.Scalar = "\\"
+    if scalars.isEmpty || scalars.first == slash || scalars.contains(backslash) { return nil }
+    let segments = scalars.split(separator: slash, omittingEmptySubsequences: false)
+        .map { String(String.UnicodeScalarView($0)) }
     if segments.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) { return nil }
+    let path = String(String.UnicodeScalarView(scalars))
     guard let folder = Bundle.main.infoDictionary?["MobilerAssetsFolder"] as? String, !folder.isEmpty,
           let base = Bundle.main.resourceURL else { return nil }
     return base.appendingPathComponent(folder, isDirectory: true).appendingPathComponent(path)
@@ -2777,7 +2792,7 @@ final class VideoSession {
     // image is cached on the session so a recreated VC shows it instantly.
     func attachPoster(to vc: AVPlayerViewController, poster: String?) {
         // A bundled `asset:` poster is a file in the app bundle; an invalid one shows no poster.
-        let isAsset = poster?.hasPrefix("asset:") ?? false
+        let isAsset = poster.map(isAssetSource) ?? false
         guard let poster, let url = isAsset ? assetURL(poster) : URL(string: poster), let overlay = vc.contentOverlayView else { return }
         if let existing = posterView, existing.superview === overlay {
             if player.timeControlStatus == .playing { existing.isHidden = true }
