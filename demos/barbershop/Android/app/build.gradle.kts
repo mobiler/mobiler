@@ -55,7 +55,7 @@ android {
 
 // mobiler:assets-begin
 val mobilerAssets = tasks.register<Sync>("mobilerAssets") {
-    from(rootProject.file("../assets"))
+    from(rootProject.file("../assets/bundled"))
     into(layout.buildDirectory.dir("generated/mobiler-assets/mobiler-assets"))
 }
 android.sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/mobiler-assets"))

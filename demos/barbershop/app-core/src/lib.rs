@@ -2141,20 +2141,21 @@ fn feed_screen(model: &Model) -> Widget {
     column(vec![caption("Pull to refresh · scroll for more"), with_fill(list)])
 }
 
-/// The "Bundled images" card — files under `assets/` (`[assets]` in mobiler.toml) ship inside every
+/// The "Bundled images" card — files under `assets/bundled/` (`[assets]` in mobiler.toml) ship inside every
 /// shell and load by `asset:<path>`, offline. A missing file renders as a failed load: the image
 /// placeholder, or an avatar's initials.
 fn bundled_images_card() -> Widget {
     card(
         column(vec![
             emphasis("Bundled images"),
-            caption("Shipped in the app from assets/ ([assets] in mobiler.toml), loaded by asset:<path>. The right tile is a missing file."),
+            caption("Shipped in the app from assets/bundled/ ([assets] in mobiler.toml), loaded by asset:<path>. Middle: a file named \"odd #1%.png\". Right: a missing file."),
             with_columns(
                 grid(vec![
                     image("asset:demo/hello.png", ImageShape::Rounded, ImageRatio::Square),
+                    image("asset:demo/odd #1%.png", ImageShape::Rounded, ImageRatio::Square),
                     image("asset:demo/missing.png", ImageShape::Rounded, ImageRatio::Square),
                 ]),
-                2,
+                3,
             ),
             row(vec![
                 with_avatar_size(avatar("asset:demo/photo 1.jpg"), 56),

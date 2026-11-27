@@ -635,10 +635,26 @@ private fun assetPath(source: String): String? {
 /**
  * An image source as Coil's model: a valid `asset:<path>` → the APK's `mobiler-assets/<path>`
  * (`[assets]` in mobiler.toml); an invalid `asset:` → "" (a failed load); anything else unchanged.
+ * Each segment is percent-encoded (as mobiler-web does: RFC 3986 unreserved bytes kept, every other
+ * UTF-8 byte → %XX) so a name with `#`, `?`, `%` or a space survives Coil's URI parse.
  */
 fun assetModel(source: String): String {
     if (!source.startsWith("asset:")) return source
-    return assetPath(source)?.let { "file:///android_asset/mobiler-assets/$it" } ?: ""
+    val path = assetPath(source) ?: return ""
+    val encoded = path.split('/').joinToString("/") { seg ->
+        buildString {
+            for (b in seg.toByteArray(Charsets.UTF_8)) {
+                val c = b.toInt() and 0xFF
+                if (c in 'A'.code..'Z'.code || c in 'a'.code..'z'.code || c in '0'.code..'9'.code ||
+                    c == '-'.code || c == '.'.code || c == '_'.code || c == '~'.code) {
+                    append(c.toChar())
+                } else {
+                    append('%').append("%02X".format(c))
+                }
+            }
+        }
+    }
+    return "file:///android_asset/mobiler-assets/$encoded"
 }
 
 /**

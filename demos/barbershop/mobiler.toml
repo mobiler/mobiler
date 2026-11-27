@@ -12,5 +12,7 @@ logo = "assets/splash/logo.png"
 logo_dark = "assets/splash/logo-dark.png"
 logo_size = 120
 
-# Bundled images: everything under assets/ ships inside every shell; `image("asset:<path>", …)` shows it.
+# Bundled images: everything under assets/bundled/ ships inside every shell; `image("asset:<path>", …)`
+# shows it. (Not the whole assets/ folder: that also holds the font and splash sources above.)
 [assets]
+dir = "assets/bundled"

@@ -26,7 +26,7 @@ targets:
       - Sources                       # App.swift, Core.swift, Render.swift
       - generated/shared.swift         # uniffi Swift wrapper (generated)
       # mobiler:assets-sources-begin
-      - path: ../assets
+      - path: ../assets/bundled
         type: folder
         buildPhase: resources
       # mobiler:assets-sources-end
@@ -106,7 +106,7 @@ targets:
         # mobiler:fonts-end
         NSPhotoLibraryAddUsageDescription: "Save images to your photo library."
         # mobiler:assets-info-begin
-        MobilerAssetsFolder: assets
+        MobilerAssetsFolder: bundled
         # mobiler:assets-info-end
         # mobiler:info-plist — `mobiler plugin add` inserts Info.plist keys above this line
     settings:

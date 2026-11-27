@@ -70,8 +70,8 @@ via `with_error(..)` (a bad email and a too-short password show errors live).
 `mobiler_core::format` (`format_currency` / `format_date_long`) — Swiss `CHF 1'234.50`, German
 `1.234,50 €`, US `$1,234.50`, Serbian `din.`/`дин.` — pure synchronous Rust in the core.
 
-…and a **"Bundled images"** card: files under `assets/` ship inside every shell (`[assets]` in
-`mobiler.toml`) and load offline by `image("asset:demo/hello.png", …)` / `avatar("asset:demo/photo 1.jpg")`;
+…and a **"Bundled images"** card: files under `assets/bundled/` ship inside every shell (`[assets] dir = "assets/bundled"`
+in `mobiler.toml`) and load offline by `image("asset:demo/hello.png", …)` / `avatar("asset:demo/photo 1.jpg")`;
 a missing file renders as a failed load (an avatar falls back to its initials).
 
 ## Run (web)
