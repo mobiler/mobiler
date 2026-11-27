@@ -34,7 +34,7 @@ manifest_application = [
 ]
 
 [ios]
-sources = ["ios/NotificationsPlugin.swift", "ios/NotificationsEvents.swift"]
+sources = ["ios/NotificationsPlugin.swift", "ios/NotificationsEvents.swift", "ios/NotificationsInput.swift"]
 register = 'case "notifications": return await NotificationsPlugin.handle(op: op, input: input)'
 register_stream = 'case "notifications": await NotificationsPlugin.subscribe(op: op, input: input, emit: emit)'
 # Attaches the response handler to App.swift's LocalNotificationBridge inside didFinishLaunching, before iOS

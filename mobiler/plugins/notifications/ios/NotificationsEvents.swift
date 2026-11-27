@@ -1,10 +1,10 @@
 import Foundation
-import SharedTypes
 import UserNotifications
 
 // The notifications plugin's `events` stream (spec §4.5), the handler for the responses App.swift routes
 // to LocalNotificationBridge (taps, action buttons, dismissals), the native snooze, and the categories.
-//   {"type":"opened"|"action"|"snoozed"|"dismissed","id":7,"action_id"?:"…","payload"?:"…","at":"YYYY-MM-DD HH:MM:SS"}
+//   {"type":"opened"|"snoozed"|"dismissed","id":7,"action_id"?:"…","payload"?:"…","at":"YYYY-MM-DD HH:MM:SS"}
+// (spec §4.5 also reserves "action" for future action kinds; it is never emitted today.)
 // Every event is first written to a persisted, ordered buffer (UserDefaults "mobiler.notifications.events",
 // at most 100, oldest dropped), then flushed in order into the attached sink; each event is removed only
 // after the sink returned, so a crash mid-flush re-delivers rather than loses (at-least-once into the
@@ -193,6 +193,13 @@ extension NotificationsPlugin {
     /// or in the tray (from its stored actions JSON), and `extra` (canonical actions JSON). It must be the
     /// union: setNotificationCategories REPLACES the whole set. Runs inside NotificationsLane.
     static func registerCategories(pending given: [UNNotificationRequest]?, adding extra: [String]) async {
+        // A schedule whose category this process already registered changes nothing: skip the reads and the
+        // set, so a re-plan of 40 reminders with one action set does at most one set. Bootstrap (given nil,
+        // nothing to add) always runs. Whenever a set happens below, it is the full union.
+        if given != nil && !extra.isEmpty
+            && extra.allSatisfy({ NotificationCategories.registered[NotificationCategories.identifier($0)] != nil }) {
+            return
+        }
         let center = UNUserNotificationCenter.current()
         let pending: [UNNotificationRequest]
         if let given {
@@ -253,10 +260,10 @@ enum NotificationCategories {
 }
 
 enum NotifJSON {
-    /// A JSON string literal (quotes and escapes) via JSONSerialization, never by concatenation: encode
-    /// `[s]` and strip the brackets (as bytes, so a leading combining mark can't merge with the quote).
+    /// A JSON string literal (quotes and escapes, `/` as `\/` like Android's org.json) via
+    /// JSONSerialization, never by concatenation: encode `[s]` and strip the brackets (as bytes, so a leading combining mark can't merge with the quote).
     static func string(_ s: String) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: [s], options: [.withoutEscapingSlashes]),
+        guard let data = try? JSONSerialization.data(withJSONObject: [s]),
               data.count >= 2 else { return "\"\"" }
         return String(decoding: data.dropFirst().dropLast(), as: UTF8.self)
     }
