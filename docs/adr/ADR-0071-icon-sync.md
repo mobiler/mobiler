@@ -4,8 +4,8 @@ Status:        Accepted
 Date decided:  2026-11-27
 Deciding PRs:  the CLI PR of the `[icon]` / `[assets]` release (CLI 0.75.0)
 Supersedes:    none
-Code anchor:   mobiler/src/icon.rs (validate, check_header, decode_limits, working_copy, layer, composite, ios_png, webp, the XML and web generators, Ledger, owned, rivals, targets, input_fingerprint, up_to_date, sync, units, android_unit, undo, apply), mobiler/src/upgrade.rs (SEED_PATHS), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/mipmap-* (the stock icon)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::fifo_source_is_refused_without_hanging, mobiler/src/icon.rs::oversized_source_is_refused_unread, mobiler/src/icon.rs::iccp_bomb_is_bounded, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::png_sibling_makes_android_foreign, mobiler/src/icon.rs::anydpi_v26_icon_makes_android_foreign, mobiler/src/icon.rs::ios_contents_json_without_our_png_makes_ios_foreign, mobiler/src/icon.rs::an_icon_added_after_a_sync_is_still_seen, mobiler/src/icon.rs::foreign_file_in_web_icon_survives, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files
+Code anchor:   mobiler/src/icon.rs (validate, check_header, decode_limits, working_copy, layer, composite, ios_png, webp, the XML and web generators, Ledger, owned, rivals, targets, input_fingerprint, up_to_date, sync, units, android_unit, undo, apply), mobiler/src/upgrade.rs (SEED_PATHS, sync_file's seed branch), mobiler/src/build.rs + dev.rs + watch.rs + doctor.rs (the hooks), mobiler/templates/Android/app/src/main/res/mipmap-* (the stock icon)
+Conformance:   xtask/tests/adr_conformance.rs::adr_0071_icon_seeds_and_marker, mobiler/src/icon.rs::validate_rejects, mobiler/src/icon.rs::fifo_source_is_refused_without_hanging, mobiler/src/icon.rs::oversized_source_is_refused_unread, mobiler/src/icon.rs::iccp_bomb_is_bounded, mobiler/src/icon.rs::writes_every_platform, mobiler/src/icon.rs::hand_edited_launcher_xml_skips_android_only, mobiler/src/icon.rs::hand_edited_webp_is_left_alone, mobiler/src/icon.rs::png_sibling_makes_android_foreign, mobiler/src/icon.rs::anydpi_v26_icon_makes_android_foreign, mobiler/src/icon.rs::ios_contents_json_without_our_png_makes_ios_foreign, mobiler/src/icon.rs::an_icon_added_after_a_sync_is_still_seen, mobiler/src/icon.rs::foreign_file_in_web_icon_survives, mobiler/src/icon.rs::broken_foreground_writes_nothing, mobiler/src/icon.rs::removing_icon_restores_stock, mobiler/src/icon.rs::removed_and_added_back_still_owns_its_files, mobiler/src/icon.rs::undo_keeps_a_hand_edited_sync_file, mobiler/src/icon.rs::interrupted_sync_is_retried_and_owns_its_files, mobiler/src/icon.rs::a_skipped_platform_is_not_up_to_date_after_restore, mobiler/src/icon.rs::a_skipped_web_unit_is_not_up_to_date_after_repair, mobiler/src/icon.rs::unchanged_inputs_skip_decoding, mobiler/src/icon.rs::no_png_beside_webp, mobiler/src/icon.rs::upgrade_reports_nothing_for_icon_files, mobiler/src/upgrade.rs::stale_baseline_at_a_seed_path_is_removed
 
 ## 1. Context (The Problem)
 
@@ -94,7 +94,9 @@ A skipped unit keeps its ledger entries. Files only the sync creates (`mobiler_i
 seed list the way ADR-0048 did: `mobiler upgrade` creates them when missing and never merges them, so it never
 fights the sync or an app's own adaptive icon. (They were merged Shell-class files before; Saldo's hand-made one
 survived only because the template hadn't changed.) The other files are binaries, `Own`-class already, or not
-template files.
+template files. An app made before 0.75 still has a baseline for both under `.mobiler/base/`, against ADR-0042's
+"never baselined": `upgrade` removes a baseline it finds at any seed path, and lists it
+(`- baseline <path> (… its old baseline was removed)`).
 
 **The ledger** `.mobiler/icon.json`: `active`, `files` (path → one hash, or a list: while a sync is in flight, or carried over for a skipped unit) and
 `input`, the fingerprint of the generator's version, the source images' bytes, the background and the padding.
@@ -123,7 +125,8 @@ Without `[icon]` and without a ledger the sync touches nothing, and writes no le
 ### 2.1. Refutation Conditions
 
 - **Condition 1 — the seeds, the stock monochrome layer, `.webp` only, and a committable ledger.**
-  - **Validation Metric:** `adr_0071_icon_seeds_and_marker`, `upgrade_reports_nothing_for_icon_files`.
+  - **Validation Metric:** `adr_0071_icon_seeds_and_marker`, `upgrade_reports_nothing_for_icon_files`,
+    `stale_baseline_at_a_seed_path_is_removed` (an older app's baseline at a seed path is removed).
 - **Condition 2 — validation before any write.**
   - **Validation Metric:** `validate_rejects`, `broken_foreground_writes_nothing`,
     `fifo_source_is_refused_without_hanging`, `oversized_source_is_refused_unread`, `iccp_bomb_is_bounded`.
@@ -207,6 +210,8 @@ the unchanged-input skip makes a build with an unchanged icon decode nothing.
   source is never fingerprinted").
 - With `max_alloc = None` (the first version), `iccp_bomb_is_bounded` failed ("the iCCP chunk inflated past the
   limit": a 1.7 MB file's iCCP chunk inflated to 283 MB).
+- Before `upgrade` removed a baseline at a seed path, `stale_baseline_at_a_seed_path_is_removed` failed
+  ("apply=false: …/mipmap-anydpi/ic_launcher.xml's stale baseline removed").
 - Reverting restored green.
 
 ## 5. Consequences (Positive and Negative Predictions)
