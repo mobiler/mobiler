@@ -229,3 +229,8 @@ the unchanged-input skip makes a build with an unchanged icon decode nothing.
 - **Negative:** as seeds, the adaptive XMLs no longer receive template changes through `upgrade`; a future change
   to the stock adaptive icon reaches new apps only.
 - **Negative:** the CLI's `image` dependency gains the `webp` feature.
+- **Negative:** `foreground` and `monochrome` aren't confined to the app, as `[splash]`'s logos aren't: an absolute
+  path, a `../` path and a symlink are all followed, for reading only. The sync never writes through a source
+  path, and what it reads is checked (a regular file, at most 256 MB, a PNG header) before a byte is decoded, so
+  the reach is limited to the CLI user's own readable files ending up in their own app's icon. `watch` then
+  watches that outside folder too.
