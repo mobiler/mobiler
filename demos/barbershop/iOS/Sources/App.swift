@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Must complete before this method returns (BGTaskScheduler throws otherwise).
         GeofencePlugin.bootstrap()
         BackgroundFetchPlugin.bootstrap()
+        NotificationsPlugin.bootstrap()
         // mobiler:app-launch
         return true
     }

@@ -34,7 +34,12 @@ manifest_application = [
 ]
 
 [ios]
-sources = ["ios/NotificationsPlugin.swift"]
+sources = ["ios/NotificationsPlugin.swift", "ios/NotificationsEvents.swift"]
 register = 'case "notifications": return await NotificationsPlugin.handle(op: op, input: input)'
+register_stream = 'case "notifications": await NotificationsPlugin.subscribe(op: op, input: input, emit: emit)'
+# Attaches the response handler to App.swift's LocalNotificationBridge inside didFinishLaunching, before iOS
+# delivers the response that launched the app (a snooze pressed while it was dead), and re-registers the
+# reminders' notification categories.
+app_launch = ["NotificationsPlugin.bootstrap()"]
 # iOS asks for notification authorization at runtime (requestPermission op) — no Info.plist key
 # required for local notifications.

@@ -301,6 +301,7 @@ enum Plugins {
         case "background-fetch": await BackgroundFetchPlugin.subscribe(op: op, input: input, emit: emit)
         case "bluetooth": await BluetoothPlugin.subscribe(op: op, input: input, emit: emit)
         case "transfer": await TransferPlugin.subscribe(op: op, input: input, emit: emit)
+        case "notifications": await NotificationsPlugin.subscribe(op: op, input: input, emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break
         }
