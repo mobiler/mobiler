@@ -28,7 +28,11 @@ func render(_ widget: SharedTypes.Widget, _ send: @escaping (Action) -> Void) ->
         // via UIImage — AsyncImage doesn't reliably fetch `file://`; remote URLs use
         // AsyncImage.
         let fill: AnyView
-        if source.hasPrefix("file:"), let url = URL(string: source) {
+        if source.hasPrefix("asset:") {
+            // A bundled image (`[assets]` in mobiler.toml): a file in the app bundle. An invalid
+            // `asset:` path gets a URL that never loads, so it shows the same placeholder.
+            fill = AnyView(FileImageView(url: assetURL(source) ?? invalidAssetURL))
+        } else if source.hasPrefix("file:"), let url = URL(string: source) {
             // Decode local images (a full-res camera/picked photo) OFF the main thread —
             // decoding a many-megapixel file inline in `render` (which runs on every update)
             // can stall the UI. FileImageView loads + downsamples asynchronously and caches.
@@ -780,6 +784,9 @@ private struct AvatarView: View {
         let img: AnyView
         if let initials, source.isEmpty {
             img = AnyView(initialsView(initials, d))
+        } else if source.hasPrefix("asset:") {
+            // A bundled image; an invalid `asset:` path never loads, so it shows the initials.
+            img = AnyView(FileImageView(url: assetURL(source) ?? invalidAssetURL, fallback: initials.map { AnyView(initialsView($0, d)) }))
         } else if source.hasPrefix("file:"), let url = URL(string: source) {
             img = AnyView(FileImageView(url: url, fallback: initials.map { AnyView(initialsView($0, d)) }))
         } else if let initials, URL(string: source) == nil {
@@ -2378,6 +2385,24 @@ private func boxAlign(_ a: BoxAlign) -> Alignment {
     }
 }
 
+/// The bundled file for a valid `asset:<path>` source (`[assets]` in mobiler.toml), else nil. The
+/// rule (same in every shell): the path is non-empty, has no leading `/`, no `\`, and no segment that
+/// is empty, `.` or `..`. The folder is copied into the bundle under its own name, which
+/// `MobilerAssetsFolder` in Info.plist carries.
+fileprivate func assetURL(_ source: String) -> URL? {
+    guard source.hasPrefix("asset:") else { return nil }
+    let path = String(source.dropFirst("asset:".count))
+    if path.isEmpty || path.hasPrefix("/") || path.contains(Character("\\")) { return nil }
+    let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+    if segments.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) { return nil }
+    guard let folder = Bundle.main.infoDictionary?["MobilerAssetsFolder"] as? String, !folder.isEmpty,
+          let base = Bundle.main.resourceURL else { return nil }
+    return base.appendingPathComponent(folder, isDirectory: true).appendingPathComponent(path)
+}
+
+/// Where an invalid `asset:` source points: a file that never exists, so it renders as a failed load.
+fileprivate let invalidAssetURL = URL(fileURLWithPath: "/mobiler-invalid-asset")
+
 /// Renders a local file image, decoding it OFF the main thread (downsample + cache) with a
 /// neutral placeholder until ready — so a large photo never blocks `render` (which runs on
 /// every state update). A perf safeguard for many-megapixel camera/picked photos.
@@ -2751,7 +2776,9 @@ final class VideoSession {
     // re-render (see #127), so re-attach to the CURRENT overlay if ours isn't in it; the fetched
     // image is cached on the session so a recreated VC shows it instantly.
     func attachPoster(to vc: AVPlayerViewController, poster: String?) {
-        guard let poster, let url = URL(string: poster), let overlay = vc.contentOverlayView else { return }
+        // A bundled `asset:` poster is a file in the app bundle; an invalid one shows no poster.
+        let isAsset = poster?.hasPrefix("asset:") ?? false
+        guard let poster, let url = isAsset ? assetURL(poster) : URL(string: poster), let overlay = vc.contentOverlayView else { return }
         if let existing = posterView, existing.superview === overlay {
             if player.timeControlStatus == .playing { existing.isHidden = true }
             return
@@ -2771,7 +2798,14 @@ final class VideoSession {
         posterView = iv
         if posterImage == nil {
             Task { @MainActor in
-                if let (data, _) = try? await URLSession.shared.data(from: url), let img = UIImage(data: data) {
+                let data: Data?
+                if isAsset {
+                    // Read the bundled file off the main thread; nothing to fetch.
+                    data = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: url) }.value
+                } else {
+                    data = try? await URLSession.shared.data(from: url).0
+                }
+                if let data, let img = UIImage(data: data) {
                     self.posterImage = img
                     self.posterView?.image = img
                 }

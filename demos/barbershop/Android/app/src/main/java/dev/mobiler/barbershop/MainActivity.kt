@@ -621,6 +621,27 @@ private fun bodyFillIndex(body: Widget): Int? = when {
 }
 
 /**
+ * The path inside the bundled assets for a valid `asset:<path>` source, else null. The rule (same in
+ * every shell): non-empty, no leading `/`, no `\`, no empty, `.` or `..` segment.
+ */
+private fun assetPath(source: String): String? {
+    if (!source.startsWith("asset:")) return null
+    val path = source.removePrefix("asset:")
+    if (path.isEmpty() || path.startsWith("/") || path.contains('\\')) return null
+    if (path.split('/').any { it == "" || it == "." || it == ".." }) return null
+    return path
+}
+
+/**
+ * An image source as Coil's model: a valid `asset:<path>` → the APK's `mobiler-assets/<path>`
+ * (`[assets]` in mobiler.toml); an invalid `asset:` → "" (a failed load); anything else unchanged.
+ */
+fun assetModel(source: String): String {
+    if (!source.startsWith("asset:")) return source
+    return assetPath(source)?.let { "file:///android_asset/mobiler-assets/$it" } ?: ""
+}
+
+/**
  * The ENTIRE shell. It knows only the fixed Mobiler ABI — `Widget` (what to
  * draw) + `Action` (what to send back). No app-specific types; this exact code
  * renders any Mobiler app. Style *intent* (TextStyle, Tone, …) is decided in
@@ -645,7 +666,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
         is Widget.Map -> MapWidget(widget.id, widget.centerLat, widget.centerLng, widget.zoom, widget.markers, widget.styleUrl, widget.interactive, send)
 
         is Widget.Image -> AsyncImage(
-            model = widget.source,
+            model = assetModel(widget.source),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxWidth().aspectRatio(ratioFor(widget.ratio)).clip(shapeFor(widget.shape)),
@@ -678,7 +699,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             val initials = widget.initials
             if (initials == null) {
                 AsyncImage(
-                    model = widget.source,
+                    model = assetModel(widget.source),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.size(d).clip(CircleShape),
@@ -688,7 +709,7 @@ fun Render(widget: Widget, send: (Action) -> Unit) {
             } else {
                 // with_initials: drawn when the image fails to load; a loaded image wins.
                 SubcomposeAsyncImage(
-                    model = widget.source,
+                    model = assetModel(widget.source),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.size(d).clip(CircleShape),
@@ -2323,7 +2344,13 @@ private fun VideoWidget(url: String, id: String, playing: Boolean, seekToMs: Lon
         if (poster != null) {
             posterDrawable.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
-                    java.net.URL(poster).openStream().use {
+                    // A bundled `asset:` poster reads from the APK (java.net.URL can't open android_asset).
+                    val stream = if (poster.startsWith("asset:")) {
+                        assetPath(poster)?.let { context.assets.open("mobiler-assets/$it") }
+                    } else {
+                        java.net.URL(poster).openStream()
+                    }
+                    stream?.use {
                         android.graphics.drawable.BitmapDrawable(context.resources, android.graphics.BitmapFactory.decodeStream(it))
                     }
                 } catch (e: Exception) { null }

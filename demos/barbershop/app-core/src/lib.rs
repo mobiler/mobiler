@@ -2141,6 +2141,31 @@ fn feed_screen(model: &Model) -> Widget {
     column(vec![caption("Pull to refresh · scroll for more"), with_fill(list)])
 }
 
+/// The "Bundled images" card — files under `assets/` (`[assets]` in mobiler.toml) ship inside every
+/// shell and load by `asset:<path>`, offline. A missing file renders as a failed load: the image
+/// placeholder, or an avatar's initials.
+fn bundled_images_card() -> Widget {
+    card(
+        column(vec![
+            emphasis("Bundled images"),
+            caption("Shipped in the app from assets/ ([assets] in mobiler.toml), loaded by asset:<path>. The right tile is a missing file."),
+            with_columns(
+                grid(vec![
+                    image("asset:demo/hello.png", ImageShape::Rounded, ImageRatio::Square),
+                    image("asset:demo/missing.png", ImageShape::Rounded, ImageRatio::Square),
+                ]),
+                2,
+            ),
+            row(vec![
+                with_avatar_size(avatar("asset:demo/photo 1.jpg"), 56),
+                with_avatar_size(with_initials(avatar("asset:demo/missing.png"), "NA"), 56),
+                caption("A bundled photo; a missing one falls back to initials."),
+            ]),
+        ]),
+        CardStyle::Outlined,
+    )
+}
+
 fn format_card(device_locale: &str) -> Widget {
     let amount = 1234.5;
     let row_for = |label: &str, value: String| {
@@ -2340,6 +2365,7 @@ fn profile_screen(model: &Model) -> Widget {
         // Locale-aware formatting showcase — the same amount/date rendered per locale
         // (mobiler_core::format; pure Rust, synchronous, runs in the core).
         format_card(&model.device_locale),
+        bundled_images_card(),
         // In-app PDF viewer (Widget::PdfView) — display a backend-generated report.
         card(
             column(vec![

@@ -11,3 +11,6 @@ background_dark = "#231F20"
 logo = "assets/splash/logo.png"
 logo_dark = "assets/splash/logo-dark.png"
 logo_size = 120
+
+# Bundled images: everything under assets/ ships inside every shell; `image("asset:<path>", …)` shows it.
+[assets]
