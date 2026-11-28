@@ -2,7 +2,7 @@
 
 Status:        Accepted
 Date decided:  2026-11-27
-Deciding PRs:  #TBD (the notifications CLI PR, CLI 0.76.0)
+Deciding PRs:  #324 (CLI 0.76.0)
 Supersedes:    none
 Code anchor:   mobiler/plugins/notifications/android/ReminderRegistry.kt (`parseSchedule`, `resolveWall`, `rearmDecision`, `receiverShouldPost`, `snoozeEntry`, `ReminderRegistry`), mobiler/plugins/notifications/android/NotificationReceivers.kt (`LocalNotif`, `alarmIntent`, `armAlarm`, `cancelAlarm`, `postReminder`, `rearmAll`, `NotificationReceiver`, `NotificationRearmReceiver`, `NotificationActionReceiver`), mobiler/plugins/notifications/android/NotificationsPlugin.kt, mobiler/plugins/notifications/android/ReminderEvents.kt (`EventBuffer`), mobiler/plugins/notifications/ios/NotificationsPlugin.swift, mobiler/plugins/notifications/ios/NotificationsInput.swift (`ReminderInput`, `WallTime`), mobiler/plugins/notifications/ios/NotificationsEvents.swift (`NotificationEvents`, `NotificationCategories`, `snooze`), mobiler/plugins/notifications/mobiler-plugin.toml, mobiler/templates/iOS/Sources/Core.swift (`Plugins.inOrder`), mobiler/src/plugin.rs (`check_local_bridge`, `in_order_names`), demos/barbershop (the same plugin and shell, ADR-0015)
 Conformance:   xtask/tests/adr_conformance.rs::adr_0073_plugin_declares_rearm_and_marks_every_request, mobiler/src/plugin.rs::add_notifications_inserts_receivers_boot_permission_and_app_launch, mobiler/src/plugin.rs::add_notifications_refuses_on_old_core_swift

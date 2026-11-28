@@ -2,7 +2,7 @@
 
 Status:        Accepted
 Date decided:  2026-11-27
-Deciding PRs:  #TBD (the notifications CLI PR, CLI 0.76.0)
+Deciding PRs:  #324 (CLI 0.76.0)
 Supersedes:    none
 Code anchor:   mobiler/templates/iOS/Sources/App.swift (`AppDelegate.userNotificationCenter(_:willPresent:…)`, `userNotificationCenter(_:didReceive:…)`, `LocalNotificationBridge`), mobiler/plugins/notifications/ios/NotificationsPlugin.swift (`bootstrap`), mobiler/plugins/notifications/ios/NotificationsEvents.swift (`NotificationResponses`), mobiler/plugins/notifications/android/NotificationReceivers.kt (`LocalNotif`, `reminderLaunchIntent`, `postReminder`, `openIntent`), mobiler/plugins/notifications/android/ReminderEvents.kt (`LocalOpens`), mobiler/plugins/notifications/mobiler-plugin.toml (`app_launch`), mobiler/src/plugin.rs (`check_local_bridge`), demos/barbershop (the same App.swift router and plugin, ADR-0015)
 Conformance:   xtask/tests/adr_conformance.rs::adr_0072_local_notifications_never_reach_push, mobiler/src/plugin.rs::add_notifications_refuses_on_old_app_swift, mobiler/src/plugin.rs::add_notifications_inserts_receivers_boot_permission_and_app_launch, mobiler/src/plugin.rs::add_push_still_works_beside_notifications
