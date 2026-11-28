@@ -125,8 +125,9 @@ what restores reminders after an Android force-stop.
 ## Notes
 
 - **Re-scheduled ids:** `cancel` of an id you have re-scheduled removes the current one only. A snooze
-  pressed on a stale tray entry of a cancelled or replaced reminder just clears that entry; it does not
-  bring the reminder back.
+  pressed on a stale tray entry of a replaced reminder just clears that entry; it does not bring the
+  reminder back. `cancel` and `cancelAll` remove the tray entry itself; only a snooze pressed at the
+  very moment the app cancels that reminder can still bring it back once, as a snooze.
 - **Legacy alarms:** reminders set by the plugin before 0.76 still fire once after an upgrade (so none
   are lost), but `cancelAll` does not reach them. Re-plan to replace them.
 

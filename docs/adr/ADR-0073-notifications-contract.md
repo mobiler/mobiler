@@ -152,9 +152,14 @@ answers the current status. `permissionStatus` never prompts.
   - **Validation Metric:** `adr_0073_plugin_declares_rearm_and_marks_every_request`,
     `add_notifications_inserts_receivers_boot_permission_and_app_launch` (`plugin add` writes them).
 - **Condition 2 — everything the plugin creates is marked.**
-  Every `UNNotificationRequest(identifier:` in the iOS plugin is built in a function that sets the marked
-  `userInfo` and the `requestIdentifier` name; on Android AlarmManager is called only in `armAlarm`, whose intent
-  carries the three markers.
+  iOS, per request, on the live code with every `//` comment removed and string contents blanked (so neither a
+  comment nor a string can satisfy it): each use of `UNNotificationRequest` is either a construction
+  (`UNNotificationRequest(` or `.init(`, with any spacing or line break) or a type use, else the test fails. For
+  each construction, in its enclosing `func` and before it: its `content:` is a `let C =
+  UNMutableNotificationContent()`; `C.userInfo` is assigned exactly once in the func, before the request, to an
+  `[AnyHashable: Any]` literal variable that contains `LocalNotificationBridge.markerKey:` and is never reassigned,
+  cleared or given a new marker; its `identifier:` is a `let … = requestIdentifier(…)`. Android: AlarmManager is
+  called only in `armAlarm`, whose intent carries the three markers.
   - **Validation Metric:** `adr_0073_plugin_declares_rearm_and_marks_every_request`.
 - **Condition 3 — iOS calls keep issue order.**
   - **Validation Metric:** `adr_0073_plugin_declares_rearm_and_marks_every_request` (`Plugins.inOrder` in the
@@ -214,13 +219,24 @@ change does to a gap time. Those differences are in the plugin README.
 - Removing the `BOOT_COMPLETED` `<action>` from the re-arm receiver failed it ("the re-arm receiver doesn't filter
   BOOT_COMPLETED").
 - Removing `LocalNotificationBridge.markerKey: r.id,` from the snooze request (`NotificationsEvents.swift`) failed
-  it ("…/NotificationsEvents.swift: a UNNotificationRequest is built without the mobiler_local marker"); so did
-  commenting that line out with `//`.
+  it ("…/NotificationsEvents.swift: a UNNotificationRequest is built without the mobiler_local marker (`info` lacks
+  it)"); so did commenting that line out with `//`.
+- Moving that marker into a trailing comment (`ReminderKeys.payload: "", // LocalNotificationBridge.markerKey:
+  r.id,`) failed it the same way. The first version of the test, which kept trailing comments, would have passed.
 - Removing `LocalNotificationBridge.markerKey: spec.id,` from the `schedule` request failed it
-  ("…/NotificationsPlugin.swift: a UNNotificationRequest is built without the mobiler_local marker").
-- Adding a function that builds an unmarked `UNNotificationRequest(identifier: "x", …)` to
-  `NotificationsInput.swift` failed it ("…/NotificationsInput.swift: a UNNotificationRequest is built without the
-  mobiler_local marker").
+  ("…/NotificationsPlugin.swift: a UNNotificationRequest is built without the mobiler_local marker (`info` lacks
+  it)").
+- Adding a function to `NotificationsInput.swift` that builds an unmarked request with the call broken over two
+  lines (`UNNotificationRequest(` then `identifier: "x", content: content, …`) failed it ("…/NotificationsInput.swift:
+  a UNNotificationRequest's content `content` must get its userInfo exactly once, before the request"). The first
+  version of the test skipped that call.
+- Adding a second, unmarked `UNNotificationRequest.init(identifier: identifier, content: plain, …)` inside
+  `schedule`, after the marked one, failed it ("… content `plain` must get its userInfo exactly once, before the
+  request"). The first version, which checked per function, would have passed.
+- Adding `content.userInfo = [:]` after the marked assignment in `snooze` failed it ("… content `content` must get
+  its userInfo exactly once, before the request").
+- The scan's own unit test `swift_requests_are_marked_per_request` covers these shapes, a marker inside a string
+  literal, a cleared `info`, and an unknown use (`UNNotificationRequest.self`).
 - Removing `putExtra(LocalNotif.EXTRA_V2, true)` from `alarmIntent` failed it ("the alarm intent doesn't
   `putExtra(LocalNotif.EXTRA_V2, true)`").
 - Arming the alarm directly in `NotificationsPlugin.schedule` (`setAndAllowWhileIdle` with an unmarked

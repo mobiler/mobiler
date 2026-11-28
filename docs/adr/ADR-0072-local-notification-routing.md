@@ -27,7 +27,7 @@ plugin, a push reaches only the `push` plugin, and neither plugin needs to know 
 
 **The markers:**
 - **iOS:** every request the plugin adds carries `userInfo["mobiler_local"] = <id>` (ADR-0073 checks every
-  `UNNotificationRequest(` in the plugin). `LocalNotificationBridge.isLocal` is `userInfo["mobiler_local"] != nil`.
+  `UNNotificationRequest` the plugin builds, one request at a time). `LocalNotificationBridge.isLocal` is `userInfo["mobiler_local"] != nil`.
 - **Android:** every tray tap (the body, and each `open` button) opens the launcher activity through
   `reminderLaunchIntent`, which adds the category `mobiler.local`, with the extras `mobiler_local_id`,
   `mobiler_local_action` (`""` for a body tap, the action id for a button) and `mobiler_local_payload` when the
@@ -157,8 +157,9 @@ template change; the category was added in review, once the tap PendingIntent wa
   `mobiler plugin add notifications` again for the new plugin body, since upgrade never rewrites a plugin
   (ADR-0011). The install guard makes the order explicit, but an app that skips the re-add keeps the old plugin.
 - **Negative:** the key `mobiler_local` is reserved in a notification's `userInfo`. A server push whose payload
-  carries it would be routed to the `notifications` plugin on iOS (and, with an integer value of 1 or more, become
-  an event there). Nothing stops a server sending it.
+  carries it would be routed to the `notifications` plugin on iOS. When the value is a number whose `intValue` is 1
+  or more (`reminderId` reads any `NSNumber`, so `true` and `1.5` count too), it becomes an event there. Nothing
+  stops a server sending it.
 - **Negative:** an iOS reminder scheduled by the pre-marker plugin and still pending across the update is unmarked:
   its tap still takes the push path, as before, until it fires or is replaced. `cancelAll` does reach it
   (identifier `mobiler.<digits>`, ADR-0073).

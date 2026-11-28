@@ -1732,11 +1732,218 @@ fn adr_0072_local_notifications_never_reach_push() {
     }
 }
 
+/// `src` with every `// …` comment removed, also one trailing code on a line. A `//` inside a string literal (`"…"`,
+/// escapes honoured) is kept. Swift block comments and whole-line comments are `live_code`'s job.
+fn strip_line_comments(src: &str) -> String {
+    let mut out = String::new();
+    for line in src.lines() {
+        let (mut in_str, mut escaped, mut cut) = (false, false, line.len());
+        for (i, c) in line.char_indices() {
+            if in_str {
+                match c {
+                    _ if escaped => escaped = false,
+                    '\\' => escaped = true,
+                    '"' => in_str = false,
+                    _ => {}
+                }
+            } else if c == '"' {
+                in_str = true;
+            } else if line[i..].starts_with("//") {
+                cut = i;
+                break;
+            }
+        }
+        out.push_str(&line[..cut]);
+        out.push('\n');
+    }
+    out
+}
+
+/// `src` with the text inside every `"…"` string literal replaced by `_`, so a needle can't match inside a string.
+fn blank_strings(src: &str) -> String {
+    let (mut out, mut in_str, mut escaped) = (String::new(), false, false);
+    for c in src.chars() {
+        if in_str {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_str = false,
+                _ => {}
+            }
+            out.push(if in_str { '_' } else { c });
+        } else {
+            in_str = c == '"';
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// From an opening `open` at the start of `s` to its matching `close`, inclusive (strings blanked first by the caller).
+fn balanced(s: &str, open: char, close: char) -> Option<&str> {
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(&s[..=i]);
+            }
+        }
+        if depth == 0 {
+            return None;
+        }
+    }
+    None
+}
+
+fn is_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// The value of the top-level argument `label:` in a call's argument text `args` (the parentheses included), when it
+/// is a plain identifier.
+fn ident_arg<'a>(args: &'a str, label: &str) -> Option<&'a str> {
+    let inner = &args[1..args.len() - 1];
+    let (mut depth, mut from, mut parts) = (0i32, 0usize, Vec::new());
+    for (i, c) in inner.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&inner[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&inner[from..]);
+    let value = parts.iter().find_map(|p| p.trim().strip_prefix(&format!("{label}:")))?.trim();
+    (!value.is_empty() && value.chars().all(is_ident_char)).then_some(value)
+}
+
+/// Whether `word` occurs in `code` as a whole identifier immediately followed by `after` (no `.x` or `x` before it).
+fn word_then(code: &str, word: &str, after: &str) -> usize {
+    code.match_indices(&format!("{word}{after}"))
+        .filter(|(i, _)| !code[..*i].ends_with(|c: char| is_ident_char(c) || c == '.'))
+        .count()
+}
+
+/// ADR-0073's rule for every `UNNotificationRequest` the iOS plugin builds, checked per request on the live code with
+/// every `//` comment removed, whitespace squashed and string contents blanked (a comment or a string can't satisfy
+/// it). Each occurrence of the type name is either a construction (`UNNotificationRequest(` or
+/// `UNNotificationRequest.init(`, any spacing or line break) or a type use (after `:`, `[`, `<`, `,`, `->`, `as`,
+/// `is`, and followed by `)`, `]`, `>`, `?`, `!`, `,`, `{` or `=`); anything else fails. For a construction, in its
+/// enclosing `func`, before it:
+/// - its `content:` argument is an identifier `C` declared `let C = UNMutableNotificationContent()`;
+/// - `C.userInfo =` is assigned exactly once in the func, before the request, to an identifier `I`;
+/// - `I` is declared `…I: [AnyHashable: Any] = [ … ]` with `LocalNotificationBridge.markerKey:` in that literal, and is
+///   never reassigned (`I = `), cleared (`I.remove…`) or has the marker key set (`I[LocalNotificationBridge.markerKey]`);
+/// - its `identifier:` argument is an identifier declared `let … = requestIdentifier(` in the func.
+///
+/// Returns the number of constructions.
+fn swift_requests_are_marked(code: &str) -> Result<usize, String> {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let sq = squash(&blank_strings(&strip_line_comments(code)));
+    let ty = "UNNotificationRequest";
+    let mut built = 0;
+    for (at, _) in sq.match_indices(ty) {
+        if sq[..at].ends_with(|c: char| is_ident_char(c)) || sq[at + ty.len()..].starts_with(|c: char| is_ident_char(c)) {
+            continue; // part of a longer name
+        }
+        let rest = sq[at + ty.len()..].trim_start();
+        let rest = rest.strip_prefix(".init").map_or(rest, str::trim_start);
+        if !rest.starts_with('(') {
+            let before = sq[..at].trim_end();
+            let type_use = [":", "[", "<", ",", "->", " as", " as?", " as!", " is"].iter().any(|p| before.ends_with(p))
+                && rest.starts_with([')', ']', '>', '?', '!', ',', '{', '=']);
+            if type_use {
+                continue;
+            }
+            return Err(format!("a use of {ty} that is neither a construction nor a type: `…{}`", &sq[at..(at + 60).min(sq.len())]));
+        }
+        built += 1;
+        let args = balanced(rest, '(', ')').ok_or_else(|| format!("unbalanced {ty}( call"))?;
+        let func = sq[..at].rfind("func ").ok_or_else(|| format!("a {ty} built outside any func"))?;
+        let body = fn_body(&sq[func..], "func ").ok_or("no body for the enclosing func")?;
+        let open = func + sq[func..].find(body).expect("body inside sq");
+        if open + body.len() <= at {
+            return Err(format!("the {ty} at {at} isn't inside the func before it"));
+        }
+        let before = &sq[open..at];
+        let content = ident_arg(args, "content").ok_or_else(|| format!("a {ty} whose `content:` isn't a plain identifier: {args}"))?;
+        if !before.contains(&format!("let {content} = UNMutableNotificationContent()")) {
+            return Err(format!("a {ty}'s content `{content}` isn't a UNMutableNotificationContent built in the func"));
+        }
+        let assign = format!("{content}.userInfo = ");
+        if body.matches(&assign).count() != 1 || before.matches(&assign).count() != 1 {
+            return Err(format!("a {ty}'s content `{content}` must get its userInfo exactly once, before the request"));
+        }
+        let info: String = before[before.find(&assign).expect("assigned") + assign.len()..].chars().take_while(|&c| is_ident_char(c)).collect();
+        if info.is_empty() {
+            return Err(format!("`{assign}` isn't given a plain identifier"));
+        }
+        let decl = format!("{info}: [AnyHashable: Any] = ");
+        let literal = before
+            .find(&decl)
+            .and_then(|d| balanced(&before[d + decl.len()..], '[', ']'))
+            .ok_or_else(|| format!("`{info}` isn't declared as a [AnyHashable: Any] literal before the request"))?;
+        if !literal.contains("LocalNotificationBridge.markerKey: ") {
+            return Err(format!("a UNNotificationRequest is built without the mobiler_local marker (`{info}` lacks it)"));
+        }
+        for (what, n) in [
+            ("reassigned", word_then(body, &info, " = ")),
+            ("cleared", word_then(body, &info, ".remove")),
+            ("given a new marker", word_then(body, &info, "[LocalNotificationBridge.markerKey]")),
+        ] {
+            if n != 0 {
+                return Err(format!("`{info}` (the marked userInfo) is {what} in the func"));
+            }
+        }
+        let id = ident_arg(args, "identifier").ok_or_else(|| format!("a {ty} whose `identifier:` isn't a plain identifier: {args}"))?;
+        if !before.contains(&format!("let {id} = requestIdentifier(")) {
+            return Err(format!("a {ty} isn't named by requestIdentifier (`{id}`)"));
+        }
+    }
+    Ok(built)
+}
+
+#[test]
+fn swift_requests_are_marked_per_request() {
+    let marked = "func a() { let identifier = requestIdentifier(1) let content = UNMutableNotificationContent() \
+                  var info: [AnyHashable: Any] = [LocalNotificationBridge.markerKey: 1] content.userInfo = info \
+                  center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) }\n";
+    assert_eq!(swift_requests_are_marked(marked), Ok(1));
+    // A second, unmarked request in the same func, split over lines and via `.init`.
+    let second = marked.replace(
+        "trigger: nil)) }",
+        "trigger: nil)) let c2 = UNMutableNotificationContent() center.add(UNNotificationRequest.init(\n identifier: identifier, content: c2, trigger: nil)) }",
+    );
+    assert!(swift_requests_are_marked(&second).is_err());
+    // The marker only in a trailing comment, or only in a string.
+    let comment = marked.replace("[LocalNotificationBridge.markerKey: 1]", "[\"k\": 1] // LocalNotificationBridge.markerKey: 1\n");
+    assert!(swift_requests_are_marked(&comment).is_err());
+    let string = marked.replace("[LocalNotificationBridge.markerKey: 1]", "[\"LocalNotificationBridge.markerKey: 1\": 1]");
+    assert!(swift_requests_are_marked(&string).is_err());
+    // Type uses are fine; an unknown use is not.
+    assert_eq!(swift_requests_are_marked("func f(_ r: UNNotificationRequest) -> [UNNotificationRequest]? { }\n"), Ok(0));
+    assert!(swift_requests_are_marked("func f() { let t = UNNotificationRequest.self }\n").is_err());
+    // The marked userInfo emptied after it was built.
+    let cleared = marked.replace("content.userInfo = info", "info = [:] content.userInfo = info");
+    assert!(swift_requests_are_marked(&cleared).is_err());
+}
+
+#[test]
+fn strip_line_comments_keeps_slashes_in_strings() {
+    assert_eq!(strip_line_comments("a // b\n\"x // y\" // z\n\"q\\\"//\" w\n"), "a \n\"x // y\" \n\"q\\\"//\" w\n");
+}
+
 /// ADR-0073: the plugin manifest declares what the re-arm needs (the `RECEIVE_BOOT_COMPLETED` permission, the re-arm
 /// receiver exported for the four system broadcasts it handles, the alarm and action receivers not exported), and the
-/// plugin marks everything it creates. iOS: every `UNNotificationRequest(` in the plugin is built in a function that
-/// puts `LocalNotificationBridge.markerKey` into the `userInfo` it sets, under the identifier `requestIdentifier`
-/// makes (`mobiler.<id>`). Android: AlarmManager is called in one place, `armAlarm`, whose PendingIntent comes from
+/// plugin marks everything it creates. iOS: every `UNNotificationRequest` the plugin builds, checked one request at a
+/// time by `swift_requests_are_marked`, gets content whose only `userInfo` is a literal holding
+/// `LocalNotificationBridge.markerKey`, under the identifier `requestIdentifier` makes (`mobiler.<id>`). Android: AlarmManager is called in one place, `armAlarm`, whose PendingIntent comes from
 /// `alarmIntent`, the only intent aimed at `NotificationReceiver`, which carries `mobiler_v2`, `mobiler_local_id` and
 /// `mobiler_local_action`. `Plugins.inOrder` names the plugin in the template and barbershop (ADR-0065's mechanism).
 #[test]
@@ -1775,7 +1982,7 @@ fn adr_0073_plugin_declares_rearm_and_marks_every_request() {
     }
     assert!(on_rearm.contains("-> rearmAll(context, System.currentTimeMillis())"), "ADR-0073: NotificationRearmReceiver doesn't call rearmAll");
 
-    // iOS: every request carries the marker and the `mobiler.<id>` identifier.
+    // iOS: every request carries the marker and the `mobiler.<id>` identifier, checked per request (swift_requests).
     let mut requests = 0;
     for (path, code) in plugin_sources("mobiler/plugins/notifications/ios", "swift") {
         if code.contains("func requestIdentifier(") {
@@ -1784,24 +1991,7 @@ fn adr_0073_plugin_declares_rearm_and_marks_every_request() {
                 "ADR-0073: {path}'s requestIdentifier isn't `mobiler.<id>`"
             );
         }
-        for (at, _) in code.match_indices("UNNotificationRequest(") {
-            if code[at..].starts_with("UNNotificationRequest(identifier:") {
-                requests += 1;
-            } else {
-                continue; // a type annotation, e.g. `(_ r: UNNotificationRequest)`
-            }
-            let func = code[..at].rfind("func ").unwrap_or_else(|| panic!("ADR-0073: {path}: a request outside any func"));
-            let body = fn_body(&code[func..], "func ").expect("the enclosing func's body");
-            assert!(func + body.len() > at, "ADR-0073: {path}: the request at byte {at} isn't inside the func before it");
-            let body = squash(body);
-            assert!(body.contains("LocalNotificationBridge.markerKey: "), "ADR-0073: {path}: a UNNotificationRequest is built without the mobiler_local marker");
-            assert!(body.contains("content.userInfo = info"), "ADR-0073: {path}: a UNNotificationRequest's content doesn't get the marked userInfo");
-            assert!(body.contains("let identifier = requestIdentifier("), "ADR-0073: {path}: a UNNotificationRequest isn't named by requestIdentifier");
-            assert!(
-                body.contains("UNNotificationRequest(identifier: identifier, content: content,"),
-                "ADR-0073: {path}: a UNNotificationRequest doesn't use the marked content and the mobiler.<id> identifier"
-            );
-        }
+        requests += swift_requests_are_marked(&code).unwrap_or_else(|e| panic!("ADR-0073: {path}: {e}"));
     }
     assert!(requests >= 2, "ADR-0073: expected the schedule and snooze requests, found {requests}");
 
