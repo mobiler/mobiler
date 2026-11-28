@@ -18,7 +18,7 @@ code had to change, which changes three sentences of that record:
   `commit()`ed SharedPreferences writes and as many AlarmManager and NotificationManager binder calls on the main
   thread. While plugin init's re-arm thread held the registry lock, the main thread also waited on that lock.
   ADR-0065 had already named this risk for `sqlite` ("which also blocked the UI on every query") and solved it with
-  a lane. `securestore` (CLI 0.66.1) uses the same lane.
+  a lane. `securestore` (CLI 0.66.1) uses the same kind of lane.
 - **The install guard read only a one-line `inOrder`.** `in_order_names` looked for a single line holding both
   `static let inOrder` and `"notifications"`. An app that had reformatted the set across several lines was refused,
   even though it named the plugin.
@@ -53,7 +53,7 @@ Replaced by:
   thread runs the calls one at a time, each to completion without suspending.
 - The ops, the firing receiver, the snooze and the re-arm still hold `synchronized(ReminderRegistry)` around their
   registry and alarm work. `cancelAll` followed by 40 `schedule`s still leaves exactly those 40.
-- `NonCancellable`: a call already queued still runs when the screen's scope is cancelled, so a re-plan isn't cut
+- `NonCancellable`: a call already queued still runs when the ViewModel's scope is cancelled, so a re-plan isn't cut
   off halfway.
 - `requestPermission`, `permissionStatus` and `openSettings` need the activity, or only read the permission state,
   and touch no registry, alarm or tray state. They stay on the main dispatcher where the shell calls them.
@@ -81,6 +81,8 @@ Replaced by: `mobiler plugin add notifications` refuses, writing nothing, while 
 It still says to run `mobiler upgrade --apply` first.
 - "Live" means after removing `//` line comments and `/* */` block comments (nested, as Swift allows) in
   `swift_without_comments`. A string literal is copied unchanged, so a `//` inside one is not a comment.
+- "Declaration" means the name `inOrder` itself: a longer identifier that starts with it (`static let inOrderX`)
+  is another declaration and doesn't count.
 - "Naming" means a whole string literal equal to `notifications` between the declaration's `[` and its matching
   `]` (`swift_array_strings`). A name only in a comment, only after the `]`, or only as part of a longer literal
   doesn't count.
@@ -97,7 +99,7 @@ That `.filter` no longer exists. The current mutation proofs of the guard, in §
 - **Condition 1 — the Android registry ops run on the lane.**
   The following hold on live code (whole-line, block and trailing `//` comments removed):
   - `handle` sends each of `schedule`, `cancel`, `cancelAll`, `listPending` and `removeDelivered` through
-    `ReminderLane.run { … }`, and keeps `requestPermission` and `openSettings` off it;
+    `ReminderLane.run { … }`, and keeps `requestPermission`, `permissionStatus` and `openSettings` off it;
   - `ReminderLane` is one `newSingleThreadExecutor`, with no pool or shared dispatcher, and `run` enters it with
     `withContext(NonCancellable + dispatcher)`;
   - plugin init queues `rearmAll` with `ReminderLane.post`, and NotificationsPlugin.kt starts no `Thread(`;
@@ -125,8 +127,10 @@ That `.filter` no longer exists. The current mutation proofs of the guard, in §
   Rejected. It races the app's first calls for the lock: which one runs first depends on thread scheduling. On the
   lane it always runs first, and one thread fewer exists.
 - **Option D — receivers on the lane too** `[reconstructed]`
-  Rejected. A receiver runs with no app UI, often in a process the system just started, under `goAsync`'s deadline.
-  Queuing it behind a re-plan would add delay for no ordering gain, because the lock already orders it.
+  Rejected. Each receiver does its work synchronously in `onReceive`, on the main thread, often in a process the
+  system just started. Putting that work on the lane would mean either blocking `onReceive` until every queued op
+  has run, or adding `goAsync` and an asynchronous hand-off that none of them has today. Either way it adds delay
+  and code for no ordering gain, because the registry lock already orders the receivers against the lane.
 - **Option E — require the one-line `inOrder` and document it** `[reconstructed]`
   Rejected. The guard exists to catch a Core.swift that doesn't run the plugin in order, not one whose formatting
   differs from the template's.
@@ -154,6 +158,10 @@ lane's re-arm set all 40 alarms again.
   `add_notifications_refuses_on_old_core_swift` and
   `add_notifications_refuses_a_multi_line_in_order_naming_it_in_a_comment`. This replaces ADR-0073's
   `.filter(|_l| true)` note.
+- Routing `permissionStatus` through `ReminderLane.run { … }` failed it ("permissionStatus must stay on the main
+  dispatcher").
+- Disabling the word-boundary check after `static let inOrder` in `in_order_names` (`if false && …`) failed
+  `in_order_names_reads_the_declaration_only` (a `static let inOrderX` declaration naming the plugin was accepted).
 - The pre-change one-line `in_order_names` refuses `add_notifications_accepts_a_multi_line_in_order`'s fixture by
   construction: no single line there holds both `static let inOrder` and `"notifications"`.
 - (JVM, by hand) Dropping `NonCancellable` failed `aQueuedCallStillRunsWhenTheScopeIsCancelled`. A 4-thread pool
@@ -161,8 +169,9 @@ lane's re-arm set all 40 alarms again.
 
 ## 5. Consequences (Positive and Negative Predictions)
 
-- **Positive:** a re-plan no longer does disk or binder work on Android's main thread, and the main thread never
-  waits on the registry lock for the init re-arm.
+- **Positive:** a re-plan no longer does disk or binder work on Android's main thread, and no plugin op waits on
+  the main thread for the registry lock. A receiver still can: the receivers take the lock in `onReceive` on the
+  main thread, so in a live process one may wait while the lane holds it (during the init re-arm or a re-plan).
 - **Positive:** the init re-arm runs before the app's first calls every time, instead of racing them.
 - **Positive:** an app whose `inOrder` is formatted across lines can install the plugin.
 - **Negative:** every registry op costs a thread hop and back, and one slow op (a binder call stalled by the
@@ -172,8 +181,10 @@ lane's re-arm set all 40 alarms again.
   arrive before those of lane ops issued earlier. They share no state with those ops, and the core matches answers
   by request id, so no result changes. Only the order the answers arrive in differs.
 - **Negative:** the force-stop burst that ADR-0073 §5 describes no longer races the re-plan: it always happens first.
-  Every missed reminder within `late_minutes` is posted before the app's re-plan can cancel it. The README's advice
-  to lower `late_minutes` stands.
+  Every missed reminder within `late_minutes` is posted before the app's re-plan can cancel it.
+- **Guidance:** an app that re-plans on launch should pass a small `late_minutes` (0, or about 30), so that the
+  force-stop catch-up doesn't post a burst of reminders that the re-plan then clears. The plugin README says the
+  same.
 - **Negative:** the lane thread lives for the process and is never shut down.
 - **Negative:** the guard's Swift scanner knows ordinary `"…"` literals, `//` and nested `/* */`, not raw (`#"…"#`)
   or multi-line (`"""…"""`) string literals. Such a literal before the declaration that contains `/*` can hide the

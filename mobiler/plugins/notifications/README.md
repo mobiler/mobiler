@@ -128,7 +128,8 @@ what restores reminders after an Android force-stop.
   init then re-arms them, which is why you re-plan on launch. That re-arm posts, with sound, every
   reminder missed while stopped that is within `late_minutes` (by default up to a day's worth), just
   before your re-plan runs (don't clear them with `cancelAll`: that would also drop snoozes; `cancel` the ids you are
-  replacing instead). Set a smaller `late_minutes` (e.g. 30) to avoid the burst.
+  replacing instead). An app that re-plans on launch should pass a small `late_minutes` (0, or about
+  30) so this catch-up doesn't post a burst that the re-plan then clears.
 - **iOS:** `UNUserNotificationCenter`. The OS holds the requests and **delivers missed notifications
   itself** after power-on, so `late_minutes` has no effect there. No Info.plist key is needed.
   Snooze runs in the background without bringing the app forward. Notification categories (one per

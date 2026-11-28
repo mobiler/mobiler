@@ -562,6 +562,10 @@ fn in_order_names(core_swift: &str, plugin: &str) -> bool {
     while let Some(at) = code[from..].find(decl) {
         let start = from + at + decl.len();
         from = start;
+        // A whole name: `static let inOrderX` is another declaration.
+        if code[start..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
         // The value follows the `=`; the type annotation (`: Set<String>`) holds no `[`.
         let Some(eq) = code[start..].find('=') else { break };
         let rest = &code[start + eq + 1..];
@@ -1166,6 +1170,10 @@ mod test {
         // A commented-out declaration doesn't count, nor does one inside a block comment.
         assert!(!in_order_names("// static let inOrder: Set<String> = [\"notifications\"]\nstatic let inOrder: Set<String> = []", "notifications"));
         assert!(!in_order_names("/*\nstatic let inOrder: Set<String> = [\"notifications\"]\n*/", "notifications"));
+        // Only the `inOrder` name itself: a longer identifier with that prefix is another declaration.
+        assert!(!in_order_names("static let inOrderX: Set<String> = [\"notifications\"]", "notifications"));
+        assert!(!in_order_names("static let inOrder_old: Set<String> = [\"notifications\"]\nstatic let inOrder: Set<String> = [\"sqlite\"]", "notifications"));
+        assert!(in_order_names("static let inOrderX: Set<String> = []\nstatic let inOrder: Set<String> = [\"notifications\"]", "notifications"));
     }
 
     #[test]

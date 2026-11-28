@@ -218,7 +218,7 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
     private fun listPending(): PluginResponse {
         val zone = ZoneId.systemDefault()
         val out = JSONArray()
-        // Under the registry lock: the receivers' re-arm and snooze run on their own threads.
+        // Under the registry lock: the receivers (firing, snooze, re-arm) run on the main thread, outside the lane.
         val all = synchronized(ReminderRegistry) { ReminderRegistry.all(application) }
         all.sortedWith(compareBy({ it.fireAtMs }, { it.id })).forEach {
             out.put(

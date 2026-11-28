@@ -295,7 +295,7 @@ object ReminderLane {
     private val dispatcher = executor.asCoroutineDispatcher()
 
     /** Runs [block] on the lane and answers its result. NonCancellable: a call already queued still runs
-     *  when the screen's scope is cancelled, so a `schedule` the core issued is never dropped half-way
+     *  when the ViewModel's scope is cancelled, so a `schedule` the core issued is never dropped half-way
      *  through a re-plan. */
     suspend fun <T> run(block: () -> T): T = withContext(NonCancellable + dispatcher) { block() }
 

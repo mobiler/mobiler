@@ -2081,6 +2081,10 @@ fn adr_0074_android_registry_ops_run_on_the_lane() {
     }
     assert!(handle.contains("\"requestPermission\" -> requestPermission()"), "ADR-0074: requestPermission must stay on the main dispatcher");
     assert!(handle.contains("\"openSettings\" -> openSettings()"), "ADR-0074: openSettings must stay on the main dispatcher");
+    assert!(
+        handle.contains("\"permissionStatus\" -> PluginResponse(true, permissionStatus())"),
+        "ADR-0074: permissionStatus must stay on the main dispatcher"
+    );
 
     // Plugin init queues the re-arm on the lane; there is no second thread.
     let init = squash(between(&plugin, "    init {", "\n    }\n", "NotificationsPlugin init"));

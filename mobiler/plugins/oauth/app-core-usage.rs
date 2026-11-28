@@ -64,6 +64,7 @@ impl MyApp {
                     model.verifier
                 );
                 // Form-encoded token exchange (adjust to your provider's expectations).
+                // Every value in a form body must be percent-encoded (code, verifier, redirect_uri).
                 cx.request("POST", TOKEN_ENDPOINT)
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .body(body)
