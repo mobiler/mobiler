@@ -2,7 +2,7 @@
 
 Status:        Accepted
 Date decided:  2026-11-28
-Deciding PRs:  #TBD (CLI 0.76.1)
+Deciding PRs:  #326 (CLI 0.76.1)
 Supersedes:    ADR-0073
 Code anchor:   mobiler/plugins/notifications/android/ReminderRegistry.kt (`ReminderLane`), mobiler/plugins/notifications/android/NotificationsPlugin.kt (`handle`, `init`), mobiler/src/plugin.rs (`check_local_bridge`, `in_order_names`, `swift_without_comments`, `swift_array_strings`), demos/barbershop (the same plugin, ADR-0015); everything else as listed in ADR-0073's `Code anchor:`
 Conformance:   xtask/tests/adr_conformance.rs::adr_0074_android_registry_ops_run_on_the_lane, mobiler/src/plugin.rs::add_notifications_refuses_on_old_core_swift, mobiler/src/plugin.rs::add_notifications_accepts_a_multi_line_in_order, mobiler/src/plugin.rs::add_notifications_refuses_a_multi_line_in_order_naming_it_in_a_comment, mobiler/src/plugin.rs::in_order_names_reads_the_declaration_only, xtask/tests/adr_conformance.rs::adr_0073_plugin_declares_rearm_and_marks_every_request, mobiler/src/plugin.rs::add_notifications_inserts_receivers_boot_permission_and_app_launch
