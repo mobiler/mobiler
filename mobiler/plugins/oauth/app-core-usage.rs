@@ -50,10 +50,10 @@ impl MyApp {
             //    POST it to the token endpoint via http.
             Msg::LoggedIn(r) => {
                 if !r.ok {
-                    model.status = Some(format!("Login cancelled/failed: {}", r.output));
+                    model.status = Some(format!("Login cancelled/failed: {}", r.as_text().unwrap_or_default()));
                     return;
                 }
-                let Some(code) = query_param(&r.output, "code") else {
+                let Some(code) = query_param(r.as_text().unwrap_or_default(), "code") else {
                     model.status = Some("No authorization code in redirect.".into());
                     return;
                 };
@@ -70,16 +70,16 @@ impl MyApp {
             // 3. Persist the tokens securely (Keychain / Keystore).
             Msg::Exchanged(r) => {
                 if !r.ok {
-                    model.status = Some(format!("Token exchange failed: {}", r.output));
+                    model.status = Some(format!("Token exchange failed: {}", r.as_text().unwrap_or_default()));
                     return;
                 }
                 // r.output is the token JSON; store it (or just the access/refresh tokens).
-                let input = serde_json::json!({ "key": "oauth_tokens", "value": r.output }).to_string();
+                let input = serde_json::json!({ "key": "oauth_tokens", "value": r.as_text().unwrap_or_default() }).to_string();
                 cx.plugin("securestore", "set", input, Msg::Stored);
             }
             Msg::Stored(r) => {
                 model.signed_in = r.ok;
-                model.status = Some(if r.ok { "Signed in ✓".into() } else { format!("Save failed: {}", r.output) });
+                model.status = Some(if r.ok { "Signed in ✓".into() } else { format!("Save failed: {}", r.as_text().unwrap_or_default()) });
             }
         }
     }

@@ -23,7 +23,7 @@ impl MyApp {
             // r.output = "lat,lng" (e.g. "47.3769,8.5417"); r.ok = false on denial / no Play Services.
             Msg::GotLocation(r) => {
                 if r.ok {
-                    model.location = r.output.clone();
+                    model.location = r.as_text().unwrap_or_default().to_string();
                 }
             }
         }

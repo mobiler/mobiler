@@ -37,7 +37,7 @@ impl MyApp {
             // {"type":"geofence","id":"shop","event":"enter"|"exit"} or {"type":"location","lat":..,"lng":..}
             Msg::GeoEvent(r) => {
                 if r.ok {
-                    model.last_event = Some(r.output.clone());
+                    model.last_event = Some(r.as_text().unwrap_or_default().to_string());
                 }
             }
             Msg::Noop(_r) => {}

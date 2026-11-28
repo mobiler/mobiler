@@ -35,8 +35,8 @@ impl MyApp {
             // register → {"token":"…","platform":"apns"|"fcm"}. POST it (with your tenant) to the backend.
             Msg::PushToken(r) => {
                 if r.ok {
-                    model.token = Some(r.output.clone());
-                    cx.post("https://api.example.com/devices", r.output, Msg::Posted);
+                    model.token = Some(r.as_text().unwrap_or_default().to_string());
+                    cx.post("https://api.example.com/devices", r.as_text().unwrap_or_default().to_string(), Msg::Posted);
                 }
             }
             // A tagged notification event, or {"type":"token_refresh","token":"…"} on rotation.

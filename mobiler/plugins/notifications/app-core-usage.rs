@@ -59,7 +59,7 @@ impl MyApp {
             }
             Msg::Replan(resp) => {
                 // [{"id":7,"fire_at":"…","snoozed":false}]. Keep snoozes; cancel the rest per id.
-                let pending: Vec<serde_json::Value> = serde_json::from_str(&resp.output).unwrap_or_default();
+                let pending: Vec<serde_json::Value> = serde_json::from_slice(&resp.output).unwrap_or_default();
                 let snoozed: HashSet<i64> = pending.iter()
                     .filter(|p| p["snoozed"] == true)
                     .filter_map(|p| p["id"].as_i64())
@@ -84,7 +84,7 @@ impl MyApp {
             // Failures are "<code>" or "<code>: <detail>": invalid_input, past, pending_limit,
             // unsupported, failed.
             Msg::Replanned(resp) => {
-                if !resp.ok && resp.output.starts_with("pending_limit") {
+                if !resp.ok && resp.as_text().unwrap_or_default().starts_with("pending_limit") {
                     // Plan fewer days ahead.
                 }
             }
@@ -97,13 +97,13 @@ impl MyApp {
             Msg::ShowPending => cx.plugin("notifications", "listPending", "", Msg::Pending),
             Msg::Pending(resp) => {
                 // [{"id":7,"fire_at":"2026-12-01 09:45:00","snoozed":false}]
-                model.pending_json = resp.output;
+                model.pending_json = resp.as_text().unwrap_or_default().to_string();
             }
 
             Msg::NotifEvent(resp) => {
                 // {"type":"opened"|"snoozed"|"dismissed"|"action","id":7,"action_id"?:"open",
                 //  "payload"?:"...","at":"2026-12-01 09:45:12"}. At-least-once: handle repeats.
-                if let Ok(ev) = serde_json::from_str::<serde_json::Value>(&resp.output) {
+                if let Ok(ev) = serde_json::from_slice::<serde_json::Value>(&resp.output) {
                     if ev["type"] == "opened" {
                         // The payload is untrusted (another app can launch yours with crafted
                         // extras): look the appointment up in your own data, never trust it blindly.
