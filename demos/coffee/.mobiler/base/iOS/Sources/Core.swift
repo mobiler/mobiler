@@ -286,8 +286,9 @@ enum AppearanceStream {
 enum Plugins {
     /// Plugins whose request/response and notify calls run one at a time, each starting once the one
     /// before it has answered, in the order the core issued them (ADR-0065). Naming a plugin that
-    /// isn't installed costs nothing.
-    static let inOrder: Set<String> = ["sqlite"]
+    /// isn't installed costs nothing. `notifications`: an app's re-plan (cancelAll, then a schedule per
+    /// reminder) must reach the plugin in issue order, or a late cancelAll removes the new reminders.
+    static let inOrder: Set<String> = ["sqlite", "notifications"]
 
     /// Streaming dispatch (cx.subscribe): start a long-lived source that calls `emit`
     /// per event until cancelled. Streaming-capable capabilities are matched here.

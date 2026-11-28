@@ -209,6 +209,24 @@ pub enum Msg {
     /// An inbound push payload (tagged `"mobiler_push":"received"|"opened"`) or a `{"type":"token_refresh",…}` event.
     PushEvent(PluginResponse),
 
+    /// --- Profile "Reminders" card: local scheduled notifications (`notifications` plugin) ---
+    /// Ask for notification permission (Android 13+ / iOS prompt).
+    ReminderRequestPermission,
+    /// Read the permission state without prompting.
+    ReminderStatus,
+    /// Schedule a reminder 2 minutes from now: first read the local clock (`cx.now`) …
+    ReminderIn2Min,
+    /// … then schedule at that wall-clock time + 2 min (`after_seconds` when the shell has no clock).
+    ReminderNow(PluginResponse),
+    /// List the pending reminders (JSON).
+    ReminderListPending,
+    /// Cancel every reminder this plugin created.
+    ReminderCancelAll,
+    /// The reply of a one-shot op: shown on the card's status line, prefixed with the op name.
+    ReminderAck(String, PluginResponse),
+    /// One emission of the `events` stream (opened / snoozed / dismissed / action).
+    ReminderEvent(PluginResponse),
+
     /// --- Profile "Analytics" card: product analytics + crash reporting (`analytics` plugin) ---
     /// Log a sample analytics event (+ set a user property).
     SendTestEvent,
@@ -378,6 +396,13 @@ pub struct Model {
     /// "Analytics" card (`analytics` plugin): last status line. Needs `mobiler plugin add analytics` +
     /// a Firebase config to actually report; without it the ops degrade to "unavailable".
     analytics_status: String,
+    /// "Reminders" card (`notifications` plugin): the last op's reply, the last `listPending`
+    /// output, and the last 10 `events` emissions (newest first).
+    reminders_status: String,
+    reminders_pending: String,
+    reminders_log: Vec<String>,
+    /// Fallback reminder ids when the shell has no clock (1, 2, 3, … per launch).
+    reminders_seq: u32,
     /// "Store" card — in-app purchase (`iap` plugin): the loaded products JSON + the last transaction.
     /// Needs `mobiler plugin add iap` + store products (or an iOS `.storekit` file) to actually transact.
     store_products: String,
@@ -490,6 +515,10 @@ impl Default for Model {
             push_token: String::new(),
             push_last: String::new(),
             analytics_status: String::new(),
+            reminders_status: String::new(),
+            reminders_pending: String::new(),
+            reminders_log: Vec::new(),
+            reminders_seq: 0,
             store_products: String::new(),
             store_last: String::new(),
             video_playing: false,
@@ -1054,6 +1083,65 @@ impl MobilerApp for FadeHouse {
                     format!("unavailable: {} (run `mobiler plugin add analytics`)", resp.as_text().unwrap_or_default())
                 };
             }
+            // Reminders: local notifications that fire while the app is closed. Every op degrades
+            // gracefully ("plugin not available" on web or before `mobiler plugin add notifications`).
+            Msg::ReminderRequestPermission => {
+                cx.plugin("notifications", "requestPermission", "", |r| Msg::ReminderAck("permission".into(), r))
+            }
+            Msg::ReminderStatus => {
+                cx.plugin("notifications", "permissionStatus", "", |r| Msg::ReminderAck("status".into(), r))
+            }
+            // The core can't read the clock, so ask the shell for local wall time first (`cx.now`).
+            Msg::ReminderIn2Min => cx.now(Msg::ReminderNow),
+            Msg::ReminderNow(resp) => {
+                let now = resp.as_text().unwrap_or_default().to_string();
+                let (id, when) = match (resp.ok, wall_plus_seconds(&now, 120), reminder_id(&now)) {
+                    (true, Some(at), Some(id)) => (id, When::At(at)),
+                    // A shell without the `now` op: fall back
+                    // to a relative time and a per-launch counter id.
+                    _ => {
+                        model.reminders_seq += 1;
+                        (model.reminders_seq, When::AfterSeconds(120))
+                    }
+                };
+                let label = match &when {
+                    When::At(at) => format!("schedule #{id} at {at}"),
+                    When::AfterSeconds(s) => format!("schedule #{id} in {s} s"),
+                };
+                cx.plugin("notifications", "schedule", reminder_input(id, &when), move |r| Msg::ReminderAck(label, r));
+            }
+            Msg::ReminderListPending => {
+                cx.plugin("notifications", "listPending", "", |r| Msg::ReminderAck("pending".into(), r))
+            }
+            Msg::ReminderCancelAll => {
+                cx.plugin("notifications", "cancelAll", "", |r| Msg::ReminderAck("cancel all".into(), r))
+            }
+            Msg::ReminderAck(what, resp) => {
+                let mut text = resp.as_text().unwrap_or_default().to_string();
+                if what == "pending" && resp.ok {
+                    // Keep the card short: the count on the status line, the JSON cut at ~160 chars.
+                    let count = serde_json::from_str::<Vec<serde_json::Value>>(&text).map(|v| v.len()).unwrap_or(0);
+                    model.reminders_pending = match text.char_indices().nth(160) {
+                        Some((cut, _)) => format!("{}…", &text[..cut]),
+                        None => text.clone(),
+                    };
+                    text = count.to_string();
+                }
+                model.reminders_status = match (resp.ok, text.is_empty()) {
+                    (true, true) => format!("{what} ✓"),
+                    (true, false) => format!("{what}: {text}"),
+                    (false, _) => format!("{what} failed: {text}"),
+                };
+            }
+            Msg::ReminderEvent(resp) => {
+                let line = if resp.ok {
+                    reminder_event_line(resp.as_text().unwrap_or_default())
+                } else {
+                    format!("stream: {}", resp.as_text().unwrap_or_default())
+                };
+                model.reminders_log.insert(0, line);
+                model.reminders_log.truncate(10);
+            }
             Msg::BuyProduct(id) => cx.plugin("iap", "purchase", &id, Msg::StoreStarted),
             Msg::RestorePurchases => cx.plugin("iap", "restore", "", Msg::StoreStarted),
             Msg::StoreProducts(resp) => {
@@ -1236,6 +1324,9 @@ impl MobilerApp for FadeHouse {
         // Built-in `system` stream: deep-link URLs + app lifecycle (foreground/background). A
         // launch deep-link is buffered and arrives as the first event on subscribe.
         cx.subscribe("system", "system", "events", "", Msg::SystemEvent);
+        // Local reminders (`notifications` plugin): subscribe at startup so the tap that launched
+        // the app (buffered natively) and snoozes/dismissals made while it was closed arrive.
+        cx.subscribe("notifications", "notifications", "events", "", Msg::ReminderEvent);
         cx.plugin("iap", "products", r#"["com.fadehouse.tip","com.fadehouse.pro","com.fadehouse.premium"]"#, Msg::StoreProducts);
     }
 
@@ -1907,6 +1998,117 @@ fn push_card(model: &Model) -> Widget {
     )
 }
 
+/// The "Reminders" card — local scheduled notifications (`notifications` plugin): ask permission,
+/// read its status, schedule a reminder 2 minutes out (Snooze 1 min + Open actions, a payload),
+/// list or cancel the pending ones, and the last 10 `events` (opened / snoozed / dismissed).
+/// Degrades to the shell's error text on web or before `mobiler plugin add notifications`.
+fn reminders_card(model: &Model) -> Widget {
+    let mut items = vec![
+        emphasis("Reminders"),
+        caption("Local notifications that fire while the app is closed (notifications plugin)."),
+        caption(if model.reminders_status.is_empty() { "Ask permission, then schedule one.".to_string() } else { model.reminders_status.clone() }),
+        row(vec![
+            button("Request permission", ButtonStyle::Outlined, Msg::ReminderRequestPermission),
+            button("Status", ButtonStyle::Text, Msg::ReminderStatus),
+        ]),
+        button("Remind me in 2 min", ButtonStyle::Filled, Msg::ReminderIn2Min),
+        row(vec![
+            button("List pending", ButtonStyle::Outlined, Msg::ReminderListPending),
+            button("Cancel all", ButtonStyle::Text, Msg::ReminderCancelAll),
+        ]),
+    ];
+    if !model.reminders_pending.is_empty() {
+        items.push(caption(format!("Pending: {}", model.reminders_pending)));
+    }
+    items.push(caption(if model.reminders_log.is_empty() { "Events appear here.".to_string() } else { "Events (newest first):".to_string() }));
+    items.extend(model.reminders_log.iter().map(|l| caption(l.clone())));
+    card(column(items), CardStyle::Outlined)
+}
+
+/// When the demo reminder fires: a local wall-clock `at`, or `after_seconds` when there is no clock.
+enum When {
+    At(String),
+    AfterSeconds(u32),
+}
+
+/// The `schedule` input for the demo reminder. serde_json does the escaping; never build it by hand.
+fn reminder_input(id: u32, when: &When) -> String {
+    let mut input = serde_json::json!({
+        "id": id,
+        "title": "Fade House",
+        "body": "Your reminder from the barbershop demo",
+        "payload": "barbershop-demo",
+        "actions": [
+            {"id": "snooze", "label": "Snooze 1 min", "kind": "snooze", "snooze_minutes": 1},
+            {"id": "open", "label": "Open", "kind": "open"}
+        ]
+    });
+    match when {
+        When::At(at) => input["at"] = at.as_str().into(),
+        When::AfterSeconds(s) => input["after_seconds"] = (*s).into(),
+    }
+    input.to_string()
+}
+
+/// A reminder id from the local time `YYYY-MM-DD HH:MM:SS` as the number DDHHMMSS (at most 31235959,
+/// inside the plugin's 1..=2147483647). Each tap gets its own id, so repeated taps add reminders
+/// instead of replacing one, and unlike a model counter it does not restart at 1 after a relaunch.
+fn reminder_id(now: &str) -> Option<u32> {
+    let digits: String = now.get(8..19)?.chars().filter(char::is_ascii_digit).collect();
+    if digits.len() != 8 {
+        return None;
+    }
+    digits.parse().ok().filter(|&id| id > 0)
+}
+
+/// Local wall time `YYYY-MM-DD HH:MM:SS` plus `secs` seconds, carried across minutes, hours, days,
+/// months and years (leap years included). Wall-clock arithmetic: a DST change in between is the
+/// plugin's to resolve (a gap fires right after it).
+fn wall_plus_seconds(now: &str, secs: u32) -> Option<String> {
+    let num = |r: std::ops::Range<usize>| now.get(r)?.parse::<u32>().ok();
+    let (mut y, mut mo, mut d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, s) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    if now.len() != 19 || !(1..=12).contains(&mo) || d == 0 || h > 23 || mi > 59 || s > 59 {
+        return None;
+    }
+    let days_in = |y: u32, mo: u32| match mo {
+        2 if (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    let total = h * 3600 + mi * 60 + s + secs;
+    let (mut carry, rest) = (total / 86_400, total % 86_400);
+    while carry > 0 {
+        carry -= 1;
+        d += 1;
+        if d > days_in(y, mo) {
+            d = 1;
+            mo += 1;
+            if mo > 12 {
+                mo = 1;
+                y += 1;
+            }
+        }
+    }
+    Some(format!("{y:04}-{mo:02}-{d:02} {:02}:{:02}:{:02}", rest / 3600, rest % 3600 / 60, rest % 60))
+}
+
+/// One `events` emission as a log line: `12:01:30 snoozed #27120030 · barbershop-demo`.
+fn reminder_event_line(json: &str) -> String {
+    let Ok(ev) = serde_json::from_str::<serde_json::Value>(json) else { return json.to_string() };
+    let field = |k: &str| ev.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let at = field("at");
+    let mut line = format!("{} {} #{}", at.get(11..).unwrap_or(&at), field("type"), ev.get("id").map(|v| v.to_string()).unwrap_or_default());
+    for k in ["action_id", "payload"] {
+        let v = field(k);
+        if !v.is_empty() {
+            line.push_str(&format!(" · {v}"));
+        }
+    }
+    line
+}
+
 /// The "Analytics" card — product analytics + crash reporting (`analytics` plugin): logs a sample
 /// event / sets a user property, and a Test crash button (verifies Crashlytics). Degrades to
 /// "unavailable" without `mobiler plugin add analytics` + a Firebase config (the call returns ok:false).
@@ -2380,6 +2582,7 @@ fn profile_screen(model: &Model) -> Widget {
         // pushes N events over time into update(), each re-rendering this card.
         live_card(model),
         push_card(model),
+        reminders_card(model),
         analytics_card(model),
         store_card(model),
         system_card(model),
@@ -2900,5 +3103,64 @@ mod test {
             }
             other => panic!("expected a scaffold, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reminder_time_carries_across_minute_day_month_and_leap_year() {
+        assert_eq!(wall_plus_seconds("2026-11-27 14:05:33", 120).as_deref(), Some("2026-11-27 14:07:33"));
+        assert_eq!(wall_plus_seconds("2026-11-30 23:59:00", 120).as_deref(), Some("2026-12-01 00:01:00"));
+        assert_eq!(wall_plus_seconds("2026-12-31 23:58:30", 120).as_deref(), Some("2027-01-01 00:00:30"));
+        assert_eq!(wall_plus_seconds("2028-02-28 23:59:59", 120).as_deref(), Some("2028-02-29 00:01:59"));
+        assert_eq!(wall_plus_seconds("2027-02-28 23:59:59", 120).as_deref(), Some("2027-03-01 00:01:59"));
+        assert_eq!(wall_plus_seconds("not a time", 120), None);
+        assert_eq!(reminder_id("2026-11-27 14:05:33"), Some(27_140_533));
+        assert_eq!(reminder_id("garbage"), None);
+    }
+
+    #[test]
+    fn remind_in_two_minutes_schedules_at_now_plus_two_with_snooze_and_open() {
+        let calls = dialog_inputs(Msg::ReminderNow(PluginResponse::text(true, "2026-11-27 14:05:33")));
+        assert_eq!(calls.len(), 1);
+        let (plugin, op, input) = &calls[0];
+        assert_eq!((plugin.as_str(), op.as_str()), ("notifications", "schedule"));
+        assert_eq!(input["id"], 27_140_533);
+        assert_eq!(input["at"], "2026-11-27 14:07:33");
+        assert_eq!(input["payload"], "barbershop-demo");
+        assert_eq!(input["actions"][0]["kind"], "snooze");
+        assert_eq!(input["actions"][0]["snooze_minutes"], 1);
+        assert_eq!(input["actions"][1]["kind"], "open");
+        assert!(input.get("after_seconds").is_none());
+        // A shell without the clock (`unknown op 'now'`) falls back to after_seconds and a counter id.
+        let calls = dialog_inputs(Msg::ReminderNow(PluginResponse::text(false, "unknown op 'now'")));
+        assert_eq!(calls.len(), 1);
+        let (_, op, input) = &calls[0];
+        assert_eq!(op, "schedule");
+        assert_eq!((input["id"].as_u64(), input["after_seconds"].as_u64()), (Some(1), Some(120)));
+        assert!(input.get("at").is_none());
+        assert_eq!(input["actions"][0]["snooze_minutes"], 1);
+    }
+
+    #[test]
+    fn reminder_events_log_keeps_the_last_ten_newest_first_and_errors_show() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        for i in 0..12 {
+            let ev = format!(r#"{{"type":"snoozed","id":{i},"payload":"barbershop-demo","at":"2026-11-27 14:0{}:00"}}"#, i % 10);
+            app.update(Msg::ReminderEvent(PluginResponse::text(true, ev)), &mut model, &mut cx);
+        }
+        assert_eq!(model.reminders_log.len(), 10);
+        assert_eq!(model.reminders_log[0], "14:01:00 snoozed #11 · barbershop-demo");
+        let opened = r#"{"type":"opened","id":7,"action_id":"open","at":"2026-11-27 14:09:00"}"#;
+        app.update(Msg::ReminderEvent(PluginResponse::text(true, opened)), &mut model, &mut cx);
+        assert_eq!(model.reminders_log[0], "14:09:00 opened #7 · open");
+        // Web: the shell answers "plugin not available"; the card shows it instead of failing.
+        app.update(Msg::ReminderAck("status".into(), PluginResponse::text(false, "plugin not available")), &mut model, &mut cx);
+        assert_eq!(model.reminders_status, "status failed: plugin not available");
+        app.update(Msg::ReminderAck("pending".into(), PluginResponse::text(true, "[]")), &mut model, &mut cx);
+        assert_eq!((model.reminders_pending.as_str(), model.reminders_status.as_str()), ("[]", "pending: 0"));
+        let many = format!("[{}]", vec![r#"{"id":1,"fire_at":"2026-11-27 14:07:33","snoozed":false}"#; 40].join(","));
+        app.update(Msg::ReminderAck("pending".into(), PluginResponse::text(true, many)), &mut model, &mut cx);
+        assert_eq!(model.reminders_status, "pending: 40");
+        assert!(model.reminders_pending.ends_with('…') && model.reminders_pending.chars().count() == 161);
     }
 }

@@ -94,4 +94,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     // mobiler:gradle-deps — `mobiler plugin add` inserts plugin Gradle dependencies above this line
     debugImplementation(libs.androidx.compose.ui.tooling)
+    // JVM unit tests for the plugins' pure logic (the notifications plugin's ReminderRegistry). The
+    // real org.json, because android.jar's copy is stubs on the plain JVM.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

@@ -1618,3 +1618,421 @@ fn adr_0071_icon_seeds_and_marker() {
         panic!("ADR-0071: the template's .gitignore has `{}`, which ignores .mobiler/icon.json; it must be committed", line.trim());
     }
 }
+
+/// The live code of every file with extension `ext` directly in `dir`, as (path, code).
+fn plugin_sources(dir: &str, ext: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = std::fs::read_dir(root().join(dir))
+        .unwrap_or_else(|e| panic!("{dir}: {e}"))
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == ext))
+        .map(|p| {
+            let rel = p.strip_prefix(root()).expect("under the repo").display().to_string();
+            let code = live_code(&std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{rel}: {e}")));
+            (rel, code)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// ADR-0072: a local notification never reaches the push path, and a push never reaches the notifications plugin's
+/// tap path. iOS: in the template's and barbershop's App.swift, both delegate methods test the `mobiler_local` marker
+/// before any `PushBridge` call and return from the marked branch without touching `PushBridge`; the marked
+/// `didReceive` goes to `LocalNotificationBridge`, which (with no handler) calls the completion at once and buffers at
+/// most 32 responses; `PushBridge` is called from nowhere else. Android: the launch intent every reminder tap opens
+/// carries the `mobiler.local` category (so its PendingIntent can't be push's), and `LocalOpens` acts only on the
+/// `mobiler_local_id` extra. Neither plugin names the other's bridge, bus or markers.
+#[test]
+fn adr_0072_local_notifications_never_reach_push() {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut bridges = Vec::new();
+    for path in ["mobiler/templates/iOS/Sources/App.swift", "demos/barbershop/iOS/Sources/App.swift"] {
+        let code = live_code(&read(path));
+        let mut push_calls_checked = 0;
+        for (method, sig, local_call) in [
+            ("willPresent", "willPresent notification: UNNotification,", "completionHandler([.banner, .sound])"),
+            ("didReceive", "didReceive response: UNNotificationResponse,", "LocalNotificationBridge.shared.didReceive(response, completion: completionHandler)"),
+        ] {
+            let body = fn_body(&code, sig).unwrap_or_else(|| panic!("ADR-0072: {path} has no {method} delegate method"));
+            let test = body.find("if LocalNotificationBridge.isLocal(").unwrap_or_else(|| panic!("ADR-0072: {path}'s {method} doesn't test isLocal"));
+            let first_push = body.find("PushBridge.").unwrap_or_else(|| panic!("ADR-0072: {path}'s {method} no longer forwards to PushBridge"));
+            assert!(test < first_push, "ADR-0072: {path}'s {method} calls PushBridge before it tests isLocal");
+            let branch = fn_body(&body[test..], "if LocalNotificationBridge.isLocal(").expect("the isLocal branch");
+            assert!(squash(branch).contains(&squash(local_call)), "ADR-0072: {path}'s {method} marked branch doesn't do `{local_call}`");
+            assert!(branch.contains("return"), "ADR-0072: {path}'s {method} marked branch falls through to the push path");
+            assert!(!branch.contains("PushBridge"), "ADR-0072: {path}'s {method} marked branch touches PushBridge");
+            push_calls_checked += body.matches("PushBridge.shared.didReceive(").count();
+        }
+        assert_eq!(
+            code.matches("PushBridge.shared.didReceive(").count(),
+            push_calls_checked,
+            "ADR-0072: {path} forwards a notification to PushBridge outside the two delegate methods"
+        );
+        assert!(code.contains("nonisolated static let markerKey = \"mobiler_local\""), "ADR-0072: {path}'s marker key isn't `mobiler_local`");
+        assert!(squash(&code).contains("userInfo[markerKey] != nil"), "ADR-0072: {path}'s isLocal doesn't test the marker");
+        let bridge = between(&code, "final class LocalNotificationBridge {", "\n}\n", path);
+        let did_receive = squash(fn_body(bridge, "func didReceive(").expect("LocalNotificationBridge.didReceive"));
+        assert!(
+            did_receive.contains("if let handler { handler(response, completion) return } completion()"),
+            "ADR-0072: {path}'s LocalNotificationBridge must hand the completion to the handler, or call it at once"
+        );
+        assert!(bridge.contains("private let maxBuffered = 32"), "ADR-0072: {path}'s LocalNotificationBridge buffer isn't bounded at 32");
+        bridges.push(squash(bridge));
+    }
+    assert_eq!(bridges[0], bridges[1], "ADR-0072: the template's LocalNotificationBridge differs from barbershop's");
+
+    // The plugin attaches its handler inside didFinishLaunching.
+    let manifest: toml::Value = toml::from_str(&read("mobiler/plugins/notifications/mobiler-plugin.toml")).expect("manifest parses");
+    let launch = manifest["ios"]["app_launch"].as_array().expect("[ios] app_launch");
+    assert!(launch.iter().any(|v| v.as_str() == Some("NotificationsPlugin.bootstrap()")), "ADR-0072: the plugin no longer bootstraps at app launch");
+
+    // Android: the tap intents.
+    let receivers = live_code(&read("mobiler/plugins/notifications/android/NotificationReceivers.kt"));
+    assert!(receivers.contains("const val CATEGORY = \"mobiler.local\""), "ADR-0072: the Android launch category isn't `mobiler.local`");
+    let launch_intent = squash(between(&receivers, "fun reminderLaunchIntent(", "\n\n", "NotificationReceivers.kt"));
+    assert!(
+        launch_intent.contains("getLaunchIntentForPackage(ctx.packageName)?.addCategory(LocalNotif.CATEGORY)"),
+        "ADR-0072: the reminder launch intent must carry the mobiler.local category"
+    );
+    assert_eq!(receivers.matches("reminderLaunchIntent(ctx)").count(), 1, "ADR-0072: a reminder launch intent is built outside openIntent");
+    let open = fn_body(&receivers, "private fun openIntent(").expect("openIntent");
+    assert!(open.contains("reminderLaunchIntent(ctx)"), "ADR-0072: openIntent doesn't start from the reminder launch intent");
+    for (path, code) in plugin_sources("mobiler/plugins/notifications/android", "kt") {
+        for (at, _) in code.match_indices("PendingIntent.getActivity(") {
+            let call = &code[at..at + code[at..].find('\n').unwrap_or(code.len() - at)];
+            assert!(call.contains("it, flags)"), "ADR-0072: {path} opens an activity without an openIntent: `{call}`");
+            let line_start = code[..at].rfind('\n').map_or(0, |i| i + 1);
+            assert!(code[line_start..at].contains("openIntent("), "ADR-0072: {path} opens an activity without an openIntent: `{call}`");
+        }
+    }
+    let events = live_code(&read("mobiler/plugins/notifications/android/ReminderEvents.kt"));
+    let consume = squash(fn_body(&events, "private fun consume(").expect("LocalOpens.consume"));
+    assert!(
+        consume.starts_with("{ if (intent == null || !intent.hasExtra(LocalNotif.EXTRA_ID)) return"),
+        "ADR-0072: LocalOpens must act only on an intent carrying mobiler_local_id"
+    );
+
+    // Neither plugin reaches into the other.
+    for (dir, ext) in [("mobiler/plugins/notifications/ios", "swift"), ("mobiler/plugins/notifications/android", "kt")] {
+        for (path, code) in plugin_sources(dir, ext) {
+            for foreign in ["PushBridge", "PushBus", "PushOpens", "mobiler_push"] {
+                assert!(!code.contains(foreign), "ADR-0072: {path} names the push plugin's `{foreign}`");
+            }
+        }
+    }
+    for push in ["push", "push-firebase-only"] {
+        for (dir, ext) in [(format!("mobiler/plugins/{push}/ios"), "swift"), (format!("mobiler/plugins/{push}/android"), "kt")] {
+            for (path, code) in plugin_sources(&dir, ext) {
+                for foreign in ["LocalNotificationBridge", "mobiler_local", "LocalOpens", "ReminderEvents"] {
+                    assert!(!code.contains(foreign), "ADR-0072: {path} names the notifications plugin's `{foreign}`");
+                }
+            }
+        }
+    }
+}
+
+/// `src` with every `// …` comment removed, also one trailing code on a line. A `//` inside a string literal (`"…"`,
+/// escapes honoured) is kept. Swift block comments and whole-line comments are `live_code`'s job.
+fn strip_line_comments(src: &str) -> String {
+    let mut out = String::new();
+    for line in src.lines() {
+        let (mut in_str, mut escaped, mut cut) = (false, false, line.len());
+        for (i, c) in line.char_indices() {
+            if in_str {
+                match c {
+                    _ if escaped => escaped = false,
+                    '\\' => escaped = true,
+                    '"' => in_str = false,
+                    _ => {}
+                }
+            } else if c == '"' {
+                in_str = true;
+            } else if line[i..].starts_with("//") {
+                cut = i;
+                break;
+            }
+        }
+        out.push_str(&line[..cut]);
+        out.push('\n');
+    }
+    out
+}
+
+/// `src` with the text inside every `"…"` string literal replaced by `_`, so a needle can't match inside a string.
+fn blank_strings(src: &str) -> String {
+    let (mut out, mut in_str, mut escaped) = (String::new(), false, false);
+    for c in src.chars() {
+        if in_str {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_str = false,
+                _ => {}
+            }
+            out.push(if in_str { '_' } else { c });
+        } else {
+            in_str = c == '"';
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// From an opening `open` at the start of `s` to its matching `close`, inclusive (strings blanked first by the caller).
+fn balanced(s: &str, open: char, close: char) -> Option<&str> {
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(&s[..=i]);
+            }
+        }
+        if depth == 0 {
+            return None;
+        }
+    }
+    None
+}
+
+fn is_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// The value of the top-level argument `label:` in a call's argument text `args` (the parentheses included), when it
+/// is a plain identifier.
+fn ident_arg<'a>(args: &'a str, label: &str) -> Option<&'a str> {
+    let inner = &args[1..args.len() - 1];
+    let (mut depth, mut from, mut parts) = (0i32, 0usize, Vec::new());
+    for (i, c) in inner.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&inner[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&inner[from..]);
+    let value = parts.iter().find_map(|p| p.trim().strip_prefix(&format!("{label}:")))?.trim();
+    (!value.is_empty() && value.chars().all(is_ident_char)).then_some(value)
+}
+
+/// Whether `word` occurs in `code` as a whole identifier immediately followed by `after` (no `.x` or `x` before it).
+fn word_then(code: &str, word: &str, after: &str) -> usize {
+    code.match_indices(&format!("{word}{after}"))
+        .filter(|(i, _)| !code[..*i].ends_with(|c: char| is_ident_char(c) || c == '.'))
+        .count()
+}
+
+/// ADR-0073's rule for every `UNNotificationRequest` the iOS plugin builds, checked per request on the live code with
+/// every `//` comment removed, whitespace squashed and string contents blanked (a comment or a string can't satisfy
+/// it). Each occurrence of the type name is either a construction (`UNNotificationRequest(` or
+/// `UNNotificationRequest.init(`, any spacing or line break) or a type use (after `:`, `[`, `<`, `,`, `->`, `as`,
+/// `is`, and followed by `)`, `]`, `>`, `?`, `!`, `,`, `{` or `=`); anything else fails. For a construction, in its
+/// enclosing `func`, before it:
+/// - its `content:` argument is an identifier `C` declared `let C = UNMutableNotificationContent()`;
+/// - `C.userInfo =` is assigned exactly once in the func, before the request, to an identifier `I`;
+/// - `I` is declared `…I: [AnyHashable: Any] = [ … ]` with `LocalNotificationBridge.markerKey:` in that literal, and is
+///   never reassigned (`I = `), cleared (`I.remove…`) or has the marker key set (`I[LocalNotificationBridge.markerKey]`);
+/// - its `identifier:` argument is an identifier declared `let … = requestIdentifier(` in the func.
+///
+/// Returns the number of constructions.
+fn swift_requests_are_marked(code: &str) -> Result<usize, String> {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let sq = squash(&blank_strings(&strip_line_comments(code)));
+    let ty = "UNNotificationRequest";
+    let mut built = 0;
+    for (at, _) in sq.match_indices(ty) {
+        if sq[..at].ends_with(|c: char| is_ident_char(c)) || sq[at + ty.len()..].starts_with(|c: char| is_ident_char(c)) {
+            continue; // part of a longer name
+        }
+        let rest = sq[at + ty.len()..].trim_start();
+        let rest = rest.strip_prefix(".init").map_or(rest, str::trim_start);
+        if !rest.starts_with('(') {
+            let before = sq[..at].trim_end();
+            let type_use = [":", "[", "<", ",", "->", " as", " as?", " as!", " is"].iter().any(|p| before.ends_with(p))
+                && rest.starts_with([')', ']', '>', '?', '!', ',', '{', '=']);
+            if type_use {
+                continue;
+            }
+            return Err(format!("a use of {ty} that is neither a construction nor a type: `…{}`", &sq[at..(at + 60).min(sq.len())]));
+        }
+        built += 1;
+        let args = balanced(rest, '(', ')').ok_or_else(|| format!("unbalanced {ty}( call"))?;
+        let func = sq[..at].rfind("func ").ok_or_else(|| format!("a {ty} built outside any func"))?;
+        let body = fn_body(&sq[func..], "func ").ok_or("no body for the enclosing func")?;
+        let open = func + sq[func..].find(body).expect("body inside sq");
+        if open + body.len() <= at {
+            return Err(format!("the {ty} at {at} isn't inside the func before it"));
+        }
+        let before = &sq[open..at];
+        let content = ident_arg(args, "content").ok_or_else(|| format!("a {ty} whose `content:` isn't a plain identifier: {args}"))?;
+        if !before.contains(&format!("let {content} = UNMutableNotificationContent()")) {
+            return Err(format!("a {ty}'s content `{content}` isn't a UNMutableNotificationContent built in the func"));
+        }
+        let assign = format!("{content}.userInfo = ");
+        if body.matches(&assign).count() != 1 || before.matches(&assign).count() != 1 {
+            return Err(format!("a {ty}'s content `{content}` must get its userInfo exactly once, before the request"));
+        }
+        let info: String = before[before.find(&assign).expect("assigned") + assign.len()..].chars().take_while(|&c| is_ident_char(c)).collect();
+        if info.is_empty() {
+            return Err(format!("`{assign}` isn't given a plain identifier"));
+        }
+        let decl = format!("{info}: [AnyHashable: Any] = ");
+        let literal = before
+            .find(&decl)
+            .and_then(|d| balanced(&before[d + decl.len()..], '[', ']'))
+            .ok_or_else(|| format!("`{info}` isn't declared as a [AnyHashable: Any] literal before the request"))?;
+        if !literal.contains("LocalNotificationBridge.markerKey: ") {
+            return Err(format!("a UNNotificationRequest is built without the mobiler_local marker (`{info}` lacks it)"));
+        }
+        for (what, n) in [
+            ("reassigned", word_then(body, &info, " = ")),
+            ("cleared", word_then(body, &info, ".remove")),
+            ("given a new marker", word_then(body, &info, "[LocalNotificationBridge.markerKey]")),
+        ] {
+            if n != 0 {
+                return Err(format!("`{info}` (the marked userInfo) is {what} in the func"));
+            }
+        }
+        let id = ident_arg(args, "identifier").ok_or_else(|| format!("a {ty} whose `identifier:` isn't a plain identifier: {args}"))?;
+        if !before.contains(&format!("let {id} = requestIdentifier(")) {
+            return Err(format!("a {ty} isn't named by requestIdentifier (`{id}`)"));
+        }
+    }
+    Ok(built)
+}
+
+#[test]
+fn swift_requests_are_marked_per_request() {
+    let marked = "func a() { let identifier = requestIdentifier(1) let content = UNMutableNotificationContent() \
+                  var info: [AnyHashable: Any] = [LocalNotificationBridge.markerKey: 1] content.userInfo = info \
+                  center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) }\n";
+    assert_eq!(swift_requests_are_marked(marked), Ok(1));
+    // A second, unmarked request in the same func, split over lines and via `.init`.
+    let second = marked.replace(
+        "trigger: nil)) }",
+        "trigger: nil)) let c2 = UNMutableNotificationContent() center.add(UNNotificationRequest.init(\n identifier: identifier, content: c2, trigger: nil)) }",
+    );
+    assert!(swift_requests_are_marked(&second).is_err());
+    // The marker only in a trailing comment, or only in a string.
+    let comment = marked.replace("[LocalNotificationBridge.markerKey: 1]", "[\"k\": 1] // LocalNotificationBridge.markerKey: 1\n");
+    assert!(swift_requests_are_marked(&comment).is_err());
+    let string = marked.replace("[LocalNotificationBridge.markerKey: 1]", "[\"LocalNotificationBridge.markerKey: 1\": 1]");
+    assert!(swift_requests_are_marked(&string).is_err());
+    // Type uses are fine; an unknown use is not.
+    assert_eq!(swift_requests_are_marked("func f(_ r: UNNotificationRequest) -> [UNNotificationRequest]? { }\n"), Ok(0));
+    assert!(swift_requests_are_marked("func f() { let t = UNNotificationRequest.self }\n").is_err());
+    // The marked userInfo emptied after it was built.
+    let cleared = marked.replace("content.userInfo = info", "info = [:] content.userInfo = info");
+    assert!(swift_requests_are_marked(&cleared).is_err());
+}
+
+#[test]
+fn strip_line_comments_keeps_slashes_in_strings() {
+    assert_eq!(strip_line_comments("a // b\n\"x // y\" // z\n\"q\\\"//\" w\n"), "a \n\"x // y\" \n\"q\\\"//\" w\n");
+}
+
+/// ADR-0073: the plugin manifest declares what the re-arm needs (the `RECEIVE_BOOT_COMPLETED` permission, the re-arm
+/// receiver exported for the four system broadcasts it handles, the alarm and action receivers not exported), and the
+/// plugin marks everything it creates. iOS: every `UNNotificationRequest` the plugin builds, checked one request at a
+/// time by `swift_requests_are_marked`, gets content whose only `userInfo` is a literal holding
+/// `LocalNotificationBridge.markerKey`, under the identifier `requestIdentifier` makes (`mobiler.<id>`). Android: AlarmManager is called in one place, `armAlarm`, whose PendingIntent comes from
+/// `alarmIntent`, the only intent aimed at `NotificationReceiver`, which carries `mobiler_v2`, `mobiler_local_id` and
+/// `mobiler_local_action`. `Plugins.inOrder` names the plugin in the template and barbershop (ADR-0065's mechanism).
+#[test]
+fn adr_0073_plugin_declares_rearm_and_marks_every_request() {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let manifest: toml::Value = toml::from_str(&read("mobiler/plugins/notifications/mobiler-plugin.toml")).expect("manifest parses");
+    let android = &manifest["android"];
+    let perms: Vec<&str> = android["permissions"].as_array().expect("permissions").iter().filter_map(|v| v.as_str()).collect();
+    assert!(perms.contains(&"android.permission.RECEIVE_BOOT_COMPLETED"), "ADR-0073: the manifest lost RECEIVE_BOOT_COMPLETED");
+    let app: Vec<String> = android["manifest_application"]
+        .as_array()
+        .expect("manifest_application")
+        .iter()
+        .filter_map(|v| v.as_str().map(xml_without_comments))
+        .collect();
+    let receiver = |name: &str| -> &String {
+        app.iter()
+            .find(|l| l.contains(&format!("<receiver android:name=\".{name}\"")))
+            .unwrap_or_else(|| panic!("ADR-0073: the manifest doesn't declare {name}"))
+    };
+    let rearm = receiver("NotificationRearmReceiver");
+    assert!(rearm.contains("android:exported=\"true\""), "ADR-0073: the re-arm receiver must be exported for system broadcasts");
+    for action in ["BOOT_COMPLETED", "MY_PACKAGE_REPLACED", "TIMEZONE_CHANGED", "TIME_SET"] {
+        assert!(
+            rearm.contains(&format!("<action android:name=\"android.intent.action.{action}\"/>")),
+            "ADR-0073: the re-arm receiver doesn't filter {action}"
+        );
+    }
+    for name in ["NotificationReceiver", "NotificationActionReceiver"] {
+        assert!(receiver(name).contains("android:exported=\"false\""), "ADR-0073: {name} must not be exported");
+    }
+    let receivers = live_code(&read("mobiler/plugins/notifications/android/NotificationReceivers.kt"));
+    let on_rearm = squash(fn_body(&receivers, "class NotificationRearmReceiver").expect("NotificationRearmReceiver"));
+    for action in ["ACTION_BOOT_COMPLETED", "ACTION_MY_PACKAGE_REPLACED", "ACTION_TIMEZONE_CHANGED", "ACTION_TIME_CHANGED"] {
+        assert!(on_rearm.contains(&format!("Intent.{action}")), "ADR-0073: NotificationRearmReceiver doesn't re-arm on {action}");
+    }
+    assert!(on_rearm.contains("-> rearmAll(context, System.currentTimeMillis())"), "ADR-0073: NotificationRearmReceiver doesn't call rearmAll");
+
+    // iOS: every request carries the marker and the `mobiler.<id>` identifier, checked per request (swift_requests).
+    let mut requests = 0;
+    for (path, code) in plugin_sources("mobiler/plugins/notifications/ios", "swift") {
+        if code.contains("func requestIdentifier(") {
+            assert!(
+                code.contains("static func requestIdentifier(_ id: Int) -> String { \"mobiler.\\(id)\" }"),
+                "ADR-0073: {path}'s requestIdentifier isn't `mobiler.<id>`"
+            );
+        }
+        requests += swift_requests_are_marked(&code).unwrap_or_else(|e| panic!("ADR-0073: {path}: {e}"));
+    }
+    assert!(requests >= 2, "ADR-0073: expected the schedule and snooze requests, found {requests}");
+
+    // Android: one place arms an alarm, and its intent carries the markers.
+    for (constant, value) in [("EXTRA_V2", "mobiler_v2"), ("EXTRA_ID", "mobiler_local_id"), ("EXTRA_ACTION", "mobiler_local_action")] {
+        assert!(receivers.contains(&format!("const val {constant} = \"{value}\"")), "ADR-0073: LocalNotif.{constant} isn't `{value}`");
+    }
+    let mut alarm_calls = 0;
+    for (path, code) in plugin_sources("mobiler/plugins/notifications/android", "kt") {
+        for setter in ["setAndAllowWhileIdle(", ".set(", "setExact", "setAlarmClock(", "setWindow(", "setInexactRepeating(", "setRepeating("] {
+            let n = code.matches(setter).count();
+            if setter == "setAndAllowWhileIdle(" && path.ends_with("NotificationReceivers.kt") {
+                alarm_calls += n;
+            } else {
+                assert_eq!(n, 0, "ADR-0073: {path} sets an alarm with `{setter}` outside armAlarm");
+            }
+        }
+        if !path.ends_with("NotificationReceivers.kt") {
+            assert!(!code.contains("NotificationReceiver::class"), "ADR-0073: {path} builds an intent for NotificationReceiver outside alarmIntent");
+        }
+    }
+    assert_eq!(alarm_calls, 1, "ADR-0073: AlarmManager must be called in one place, armAlarm");
+    let arm = squash(fn_body(&receivers, "fun armAlarm(").expect("armAlarm"));
+    assert!(
+        arm.contains("alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, r.fireAtMs, alarmPendingIntent(ctx, r.id))"),
+        "ADR-0073: armAlarm must set the inexact alarm with alarmPendingIntent"
+    );
+    assert_eq!(receivers.matches("NotificationReceiver::class").count(), 1, "ADR-0073: an intent for NotificationReceiver is built outside alarmIntent");
+    // An expression body (`= PendingIntent.getBroadcast(…)`): up to the blank line after it.
+    let alarm_pi = squash(between(&receivers, "private fun alarmPendingIntent(", "\n\n", "alarmPendingIntent"));
+    assert!(alarm_pi.contains("alarmIntent(ctx, id)"), "ADR-0073: alarmPendingIntent doesn't use alarmIntent");
+    let intent = squash(between(&receivers, "private fun alarmIntent(", "\n}\n", "alarmIntent"));
+    assert!(intent.contains("Intent(ctx, NotificationReceiver::class.java)"), "ADR-0073: alarmIntent isn't aimed at NotificationReceiver");
+    for put in ["putExtra(LocalNotif.EXTRA_V2, true)", "putExtra(LocalNotif.EXTRA_ID, id)", "putExtra(LocalNotif.EXTRA_ACTION, \"\")"] {
+        assert!(intent.contains(put), "ADR-0073: the alarm intent doesn't `{put}`");
+    }
+
+    // iOS calls reach the plugin in issue order (cancelAll then N schedules).
+    for path in ["mobiler/templates/iOS/Sources/Core.swift", "demos/barbershop/iOS/Sources/Core.swift"] {
+        let code = live_code(&read(path));
+        let set = between(&code, "static let inOrder: Set<String> = [", "]", path);
+        assert!(set.contains("\"notifications\""), "ADR-0073: {path}'s Plugins.inOrder doesn't name notifications");
+    }
+}

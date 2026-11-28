@@ -286,8 +286,9 @@ enum AppearanceStream {
 enum Plugins {
     /// Plugins whose request/response and notify calls run one at a time, each starting once the one
     /// before it has answered, in the order the core issued them (ADR-0065). Naming a plugin that
-    /// isn't installed costs nothing.
-    static let inOrder: Set<String> = ["sqlite"]
+    /// isn't installed costs nothing. `notifications`: an app's re-plan (cancelAll, then a schedule per
+    /// reminder) must reach the plugin in issue order, or a late cancelAll removes the new reminders.
+    static let inOrder: Set<String> = ["sqlite", "notifications"]
 
     /// Streaming dispatch (cx.subscribe): start a long-lived source that calls `emit`
     /// per event until cancelled. Streaming-capable capabilities are matched here.
@@ -301,6 +302,7 @@ enum Plugins {
         case "background-fetch": await BackgroundFetchPlugin.subscribe(op: op, input: input, emit: emit)
         case "bluetooth": await BluetoothPlugin.subscribe(op: op, input: input, emit: emit)
         case "transfer": await TransferPlugin.subscribe(op: op, input: input, emit: emit)
+        case "notifications": await NotificationsPlugin.subscribe(op: op, input: input, emit: emit)
         // mobiler:plugins-stream — streaming plugins inserted above this line
         default: break
         }
@@ -343,6 +345,7 @@ enum Plugins {
         case "background-fetch": return await BackgroundFetchPlugin.handle(op: op, input: input)
         case "transfer": return await TransferPlugin.handle(op: op, input: input)
         case "saveimage": return await SaveImagePlugin.handle(op: op, input: input)
+        case "notifications": return await NotificationsPlugin.handle(op: op, input: input)
         // mobiler:plugins — `mobiler plugin add` inserts plugin cases above this line
         default:
             return PluginResponse(ok: false, output: "plugin '\(plugin)' not available in this build")
@@ -791,12 +794,20 @@ enum DialogPlugin {
     }
 }
 
-/// Native date / time picker — request/response. `op` is "date" (→ ISO "YYYY-MM-DD")
-/// or "time" (→ 24-hour "HH:MM"); `ok=false` on cancel. Presents a UIDatePicker in an
-/// action sheet and resolves via a continuation once the user taps Done.
+/// Native date / time capability — request/response. `op`:
+///   "now"  → the current local date-time as "yyyy-MM-dd HH:mm:ss" (no UI, resolves immediately),
+///   "date" → a picker returning ISO "YYYY-MM-DD", "time" → a picker returning 24-hour "HH:MM".
+/// Pickers resolve `ok=false` on cancel. The pickers present a UIDatePicker in an action sheet.
 @MainActor
 enum DateTimePlugin {
     static func handle(op: String, input: String) async -> PluginResponse {
+        // "now" needs no UI — stamp the current local date-time and return at once.
+        if op == "now" {
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return PluginResponse(ok: true, output: fmt.string(from: Date()))
+        }
         let mode: UIDatePicker.Mode
         switch op {
         case "date": mode = .date
