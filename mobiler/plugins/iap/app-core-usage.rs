@@ -34,7 +34,7 @@ impl MyApp {
             }
             Msg::Products(r) => {
                 if r.ok {
-                    model.products_json = r.output; // JSON array: [{id,title,price,type,…}]
+                    model.products_json = r.as_text().unwrap_or_default().to_string(); // JSON array: [{id,title,price,type,…}]
                 }
             }
             // Launches the native purchase sheet; the result arrives on the transactions stream.
@@ -45,7 +45,7 @@ impl MyApp {
                 if r.ok {
                     // 1) parse r.output → {productId, transactionId, state, payload, …}
                     // 2) POST `payload` (the signed receipt) to your backend for validation:
-                    cx.post("https://api.example.com/iap/validate", r.output.clone(), Msg::Validated);
+                    cx.post("https://api.example.com/iap/validate", r.as_text().unwrap_or_default().to_string(), Msg::Validated);
                 }
             }
             Msg::Validated(r) => {
@@ -53,7 +53,7 @@ impl MyApp {
                     // backend confirmed → grant entitlement, then finish the transaction:
                     // (use the transactionId from the txn; prefix "consume:" + purchaseToken for
                     //  Android consumables)
-                    let txn_id = r.output.clone();
+                    let txn_id = r.as_text().unwrap_or_default().to_string();
                     cx.plugin("iap", "finish", &txn_id, Msg::Finished);
                 }
             }

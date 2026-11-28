@@ -70,7 +70,12 @@ via `with_error(..)` (a bad email and a too-short password show errors live).
 permission and read its status, schedule a reminder 2 minutes out (a wall-clock `at` from `cx.now`, or
 `after_seconds` on a shell without the clock) with *Snooze 1 min* and *Open* buttons and a payload, list or cancel the pending ones, and a
 log of the last 10 `events` (`opened` / `snoozed` / `dismissed`), subscribed at startup so a tap that
-launched the app still arrives. On the web it shows the shell's "plugin not available".
+launched the app still arrives. A small **Device checks** group drives the real plugin on a phone and
+shows each outcome on the card: *Payload* (a payload with quotes, a newline, `\/` and an emoji must come
+back unchanged in the `opened` log line, marked `payload OK` or `payload MISMATCH`), *Fill to 64* (the
+65th reminder must fail with `pending_limit`), *Re-plan 40* (`cancelAll` then 40 schedules, no
+`pending_limit`), *Overlap hour* (02:30 on the 2027-10-31 fall-back night, which must fire at the first
+02:30) and *Clear*. On the web it shows the shell's "plugin not available".
 
 …and a **"Locale formatting"** card rendering the same amount + date across locales with
 `mobiler_core::format` (`format_currency` / `format_date_long`) — Swiss `CHF 1'234.50`, German

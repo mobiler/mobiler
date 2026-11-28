@@ -25,7 +25,7 @@ impl MyApp {
             Msg::Scanned(resp) => {
                 if resp.ok {
                     // resp.output == "qr:https://example.com" or "ean13:9781234567897", etc.
-                    match resp.output.split_once(':') {
+                    match resp.as_text().unwrap_or_default().split_once(':') {
                         Some(("ean13", code)) | Some(("ean8", code)) | Some(("upca", code)) => {
                             // a product barcode → look it up
                             model.last_code = Some(code.to_string());
@@ -35,11 +35,11 @@ impl MyApp {
                             model.last_code = Some(payload.to_string());
                         }
                         Some((_, value)) => model.last_code = Some(value.to_string()),
-                        None => model.last_code = Some(resp.output.clone()),
+                        None => model.last_code = Some(resp.as_text().unwrap_or_default().to_string()),
                     }
                 } else {
                     // cancelled / no camera (e.g. simulator) / permission denied
-                    model.banner = Some(format!("Scan didn't complete: {}", resp.output));
+                    model.banner = Some(format!("Scan didn't complete: {}", resp.as_text().unwrap_or_default()));
                 }
             }
         }

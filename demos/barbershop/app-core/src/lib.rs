@@ -226,6 +226,24 @@ pub enum Msg {
     ReminderAck(String, PluginResponse),
     /// One emission of the `events` stream (opened / snoozed / dismissed / action).
     ReminderEvent(PluginResponse),
+    /// "Device checks" group (needs a real phone): each drives the plugin and reports on the card.
+    /// Payload round-trip: schedule in 20 s with a payload full of quotes, a newline, `\/` and an emoji.
+    ReminderCheckPayload,
+    /// `cancelAll`, then 64 far-future reminders and a 65th that must fail with `pending_limit`.
+    ReminderCheckFill,
+    /// `cancelAll` immediately followed by 40 schedules: none may hit `pending_limit`.
+    ReminderCheckReplan,
+    /// Schedule 02:30 on the fall-back night (2027-10-31, Europe/Belgrade has two 02:30s).
+    ReminderCheckOverlap,
+    /// `cancelAll` and forget the last check.
+    ReminderCheckClear,
+    /// One reply of a running check: its run number, then the reminder id it was for (0 = the
+    /// leading `cancelAll`). A reply of an earlier run is ignored.
+    ReminderCheckStep(u32, u32, PluginResponse),
+    /// The `listPending` before a check's `cancelAll` (run number, reply).
+    ReminderCheckBefore(u32, PluginResponse),
+    /// The closing `listPending` of a check (run number, reply).
+    ReminderCheckListed(u32, PluginResponse),
 
     /// --- Profile "Analytics" card: product analytics + crash reporting (`analytics` plugin) ---
     /// Log a sample analytics event (+ set a user property).
@@ -403,6 +421,10 @@ pub struct Model {
     reminders_log: Vec<String>,
     /// Fallback reminder ids when the shell has no clock (1, 2, 3, … per launch).
     reminders_seq: u32,
+    /// The running "Device checks" tally.
+    reminders_check: Check,
+    /// The run number of the latest check; replies carry it so an older run's replies are dropped.
+    reminders_gen: u32,
     /// "Store" card — in-app purchase (`iap` plugin): the loaded products JSON + the last transaction.
     /// Needs `mobiler plugin add iap` + store products (or an iOS `.storekit` file) to actually transact.
     store_products: String,
@@ -519,6 +541,8 @@ impl Default for Model {
             reminders_pending: String::new(),
             reminders_log: Vec::new(),
             reminders_seq: 0,
+            reminders_check: Check::default(),
+            reminders_gen: 0,
             store_products: String::new(),
             store_last: String::new(),
             video_playing: false,
@@ -1133,6 +1157,67 @@ impl MobilerApp for FadeHouse {
                     (false, _) => format!("{what} failed: {text}"),
                 };
             }
+            Msg::ReminderCheckPayload => {
+                // The Ack's label keeps the instructions on the status line (it appends " ✓" or the error).
+                cx.plugin("notifications", "schedule", payload_check_input(), |r| {
+                    Msg::ReminderAck(format!("payload check #{PAYLOAD_CHECK_ID} in 20 s: background the app"), r)
+                });
+            }
+            Msg::ReminderCheckFill => {
+                let gen = model.start_check("fill to 64", 65, Some(FILL_BASE + 65));
+                cancel_all_step(cx, gen);
+                (1..=65).for_each(|i| schedule_far(cx, gen, FILL_BASE, i));
+            }
+            Msg::ReminderCheckReplan => {
+                let gen = model.start_check("re-plan 40", 40, None);
+                // In order: how many are pending now (the near-limit condition), cancelAll, 40 schedules.
+                cx.plugin("notifications", "listPending", "", move |r| Msg::ReminderCheckBefore(gen, r));
+                cancel_all_step(cx, gen);
+                (1..=40).for_each(|i| schedule_far(cx, gen, REPLAN_BASE, i));
+            }
+            Msg::ReminderCheckOverlap => {
+                let gen = model.start_check("overlap hour", 1, None);
+                let input = serde_json::json!({
+                    "id": OVERLAP_ID, "title": "Overlap hour", "body": "02:30 on the fall-back night",
+                    "at": OVERLAP_AT, "payload": "overlap-check"
+                });
+                cx.plugin("notifications", "schedule", input.to_string(), move |r| Msg::ReminderCheckStep(gen, OVERLAP_ID, r));
+            }
+            Msg::ReminderCheckClear => {
+                model.reminders_gen += 1;
+                model.reminders_check = Check::default();
+                cx.plugin("notifications", "cancelAll", "", |r| Msg::ReminderAck("clear checks".into(), r));
+            }
+            Msg::ReminderCheckStep(gen, id, resp) if gen == model.reminders_check.gen => {
+                let text = resp.as_text().unwrap_or_default();
+                let was_done = model.reminders_check.left == 0;
+                if model.reminders_check.record(id, resp.ok, text) {
+                    cx.plugin("notifications", "listPending", "", move |r| Msg::ReminderCheckListed(gen, r));
+                } else if id == 0 && !resp.ok && was_done {
+                    // The cancelAll reply came after the last schedule reply: add it to the shown result.
+                    model.reminders_status.push_str(&format!("; cancelAll failed: {text}"));
+                }
+            }
+            Msg::ReminderCheckBefore(gen, resp) if gen == model.reminders_check.gen => {
+                let listed = serde_json::from_slice::<Vec<serde_json::Value>>(&resp.output).ok();
+                model.reminders_check.before = Some(listed.filter(|_| resp.ok).map_or("?".to_string(), |v| v.len().to_string()));
+            }
+            Msg::ReminderCheckListed(gen, resp) if gen == model.reminders_check.gen => {
+                let text = resp.as_text().unwrap_or_default();
+                let entries = serde_json::from_str::<Vec<serde_json::Value>>(text).ok();
+                let check = &model.reminders_check;
+                let tail = match (&entries, resp.ok) {
+                    (Some(v), true) if check.name == "overlap hour" => {
+                        let entry = v.iter().find(|e| e["id"] == OVERLAP_ID);
+                        format!("pending entry {}", entry.map_or("MISSING".to_string(), |e| e.to_string()))
+                    }
+                    (Some(v), true) => format!("pending: {}", v.len()),
+                    _ => format!("listPending failed: {text}"),
+                };
+                model.reminders_status = format!("{}: {}; {tail}", check.name, check.summary());
+            }
+            // A reply of an earlier check run: ignore.
+            Msg::ReminderCheckStep(..) | Msg::ReminderCheckBefore(..) | Msg::ReminderCheckListed(..) => {}
             Msg::ReminderEvent(resp) => {
                 let line = if resp.ok {
                     reminder_event_line(resp.as_text().unwrap_or_default())
@@ -2016,6 +2101,16 @@ fn reminders_card(model: &Model) -> Widget {
             button("List pending", ButtonStyle::Outlined, Msg::ReminderListPending),
             button("Cancel all", ButtonStyle::Text, Msg::ReminderCancelAll),
         ]),
+        caption("Device checks"),
+        row(vec![
+            button("Payload", ButtonStyle::Outlined, Msg::ReminderCheckPayload),
+            button("Overlap hour", ButtonStyle::Outlined, Msg::ReminderCheckOverlap),
+        ]),
+        row(vec![
+            button("Fill to 64", ButtonStyle::Outlined, Msg::ReminderCheckFill),
+            button("Re-plan 40", ButtonStyle::Outlined, Msg::ReminderCheckReplan),
+            button("Clear", ButtonStyle::Text, Msg::ReminderCheckClear),
+        ]),
     ];
     if !model.reminders_pending.is_empty() {
         items.push(caption(format!("Pending: {}", model.reminders_pending)));
@@ -2094,12 +2189,135 @@ fn wall_plus_seconds(now: &str, secs: u32) -> Option<String> {
     Some(format!("{y:04}-{mo:02}-{d:02} {:02}:{:02}:{:02}", rest / 3600, rest % 3600 / 60, rest % 60))
 }
 
+/// The payload round-trip check: an id of its own, and a payload with quotes, a real newline, a
+/// backslash-slash and an emoji, i.e. everything a JSON or plist hop could mangle.
+const PAYLOAD_CHECK_ID: u32 = 5001;
+const PAYLOAD_CHECK: &str = "he said \"hi\"\nline2 🙂 \\/ end";
+const FILL_BASE: u32 = 2000;
+const REPLAN_BASE: u32 = 3000;
+const OVERLAP_ID: u32 = 4001;
+/// Fall-back night 2027-10-31 in Europe/Belgrade: 02:30 happens twice (CEST, then CET).
+const OVERLAP_AT: &str = "2027-10-31 02:30";
+
+/// The `schedule` input of the payload check: 20 s out, a title with a quote and an emoji, a body
+/// with a newline, and [`PAYLOAD_CHECK`] as the payload.
+fn payload_check_input() -> String {
+    serde_json::json!({
+        "id": PAYLOAD_CHECK_ID,
+        "title": "Quote \" test 🙂",
+        "body": "line1\nline2",
+        "after_seconds": 20,
+        "payload": PAYLOAD_CHECK
+    })
+    .to_string()
+}
+
+/// The `schedule` input for reminder `base + i`, due a day and `i` seconds out: far enough never to
+/// fire during a check, distinct enough to sort.
+fn far_future_input(base: u32, i: u32) -> String {
+    serde_json::json!({
+        "id": base + i, "title": "Device check", "body": format!("#{}", base + i), "after_seconds": 86_400 + i
+    })
+    .to_string()
+}
+
+/// Schedule reminder `base + i` for check run `gen`; the reply comes back as `ReminderCheckStep(gen, base + i, _)`.
+fn schedule_far(cx: &mut Cx<Msg>, gen: u32, base: u32, i: u32) {
+    cx.plugin("notifications", "schedule", far_future_input(base, i), move |r| Msg::ReminderCheckStep(gen, base + i, r));
+}
+
+/// The leading `cancelAll` of a check run (reply `ReminderCheckStep(gen, 0, _)`).
+fn cancel_all_step(cx: &mut Cx<Msg>, gen: u32) {
+    cx.plugin("notifications", "cancelAll", "", move |r| Msg::ReminderCheckStep(gen, 0, r));
+}
+
+/// The tally of one running device check: how many `schedule` replies are still due, how many
+/// succeeded or failed, and the one reply (`extra`) the check wants to see by itself.
+#[derive(Default, Clone)]
+struct Check {
+    /// The run this tally belongs to (0 = none).
+    gen: u32,
+    name: &'static str,
+    /// Replies still to come (the `cancelAll` counts as none).
+    left: u32,
+    ok: u32,
+    failed: u32,
+    /// The id whose reply is shown on its own (the 65th reminder), and that reply.
+    extra_id: Option<u32>,
+    extra: String,
+    /// The first failure of the leading `cancelAll`, if any.
+    cancel_error: String,
+    /// How many reminders were pending before the check's `cancelAll` (`"?"` if unreadable).
+    before: Option<String>,
+}
+
+impl Model {
+    /// Begin a device check: a new run number and a fresh tally. Returns the run number.
+    fn start_check(&mut self, name: &'static str, expected: u32, extra_id: Option<u32>) -> u32 {
+        self.reminders_gen += 1;
+        self.reminders_check = Check::new(self.reminders_gen, name, expected, extra_id);
+        self.reminders_gen
+    }
+}
+
+impl Check {
+    fn new(gen: u32, name: &'static str, expected: u32, extra_id: Option<u32>) -> Self {
+        Self { gen, name, left: expected, extra_id, ..Self::default() }
+    }
+
+    /// Record one reply; `true` when it was the last one due (time to `listPending`).
+    fn record(&mut self, id: u32, ok: bool, text: &str) -> bool {
+        if id == 0 {
+            // The `cancelAll` reply may come before or after the last schedule reply.
+            if !ok {
+                self.cancel_error = format!("cancelAll failed: {text}");
+            }
+            return false;
+        }
+        if self.left == 0 {
+            return false; // a stray reply of a finished or cleared check
+        }
+        if Some(id) == self.extra_id {
+            self.extra = if ok { "ok".to_string() } else { text.to_string() };
+        } else if ok {
+            self.ok += 1;
+        } else {
+            self.failed += 1;
+            if self.extra.is_empty() {
+                self.extra = text.to_string();
+            }
+        }
+        self.left -= 1;
+        self.left == 0
+    }
+
+    fn summary(&self) -> String {
+        let mut s = match &self.before {
+            Some(n) => format!("before {n} \u{2192} {} ok, {} failed", self.ok, self.failed),
+            None => format!("{} ok, {} failed", self.ok, self.failed),
+        };
+        if let Some(id) = self.extra_id {
+            s.push_str(&format!("; #{id}: {}", self.extra));
+        } else if self.failed > 0 {
+            s.push_str(&format!(" ({})", self.extra));
+        }
+        if !self.cancel_error.is_empty() {
+            s.push_str(&format!("; {}", self.cancel_error));
+        }
+        s
+    }
+}
+
 /// One `events` emission as a log line: `12:01:30 snoozed #27120030 · barbershop-demo`.
 fn reminder_event_line(json: &str) -> String {
     let Ok(ev) = serde_json::from_str::<serde_json::Value>(json) else { return json.to_string() };
     let field = |k: &str| ev.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
     let at = field("at");
     let mut line = format!("{} {} #{}", at.get(11..).unwrap_or(&at), field("type"), ev.get("id").map(|v| v.to_string()).unwrap_or_default());
+    if field("type") == "opened" && ev.get("id").and_then(|v| v.as_u64()) == Some(u64::from(PAYLOAD_CHECK_ID)) {
+        line.push_str(&payload_check_line(ev.get("payload").and_then(|v| v.as_str())));
+        return line;
+    }
     for k in ["action_id", "payload"] {
         let v = field(k);
         if !v.is_empty() {
@@ -2107,6 +2325,13 @@ fn reminder_event_line(json: &str) -> String {
         }
     }
     line
+}
+
+/// The payload of a payload-check event, escaped (`{:?}`) so a lost newline or backslash shows,
+/// and whether it equals what was sent.
+fn payload_check_line(received: Option<&str>) -> String {
+    let verdict = if received == Some(PAYLOAD_CHECK) { "payload OK" } else { "payload MISMATCH" };
+    format!(" · {verdict} {:?}", received.unwrap_or("<none>"))
 }
 
 /// The "Analytics" card — product analytics + crash reporting (`analytics` plugin): logs a sample
@@ -3162,5 +3387,138 @@ mod test {
         app.update(Msg::ReminderAck("pending".into(), PluginResponse::text(true, many)), &mut model, &mut cx);
         assert_eq!(model.reminders_status, "pending: 40");
         assert!(model.reminders_pending.ends_with('…') && model.reminders_pending.chars().count() == 161);
+    }
+
+    #[test]
+    fn payload_check_input_carries_the_exact_strings() {
+        let v: serde_json::Value = serde_json::from_str(&payload_check_input()).unwrap();
+        assert_eq!((v["id"].as_u64(), v["after_seconds"].as_u64()), (Some(5001), Some(20)));
+        assert_eq!(v["title"], "Quote \" test 🙂");
+        assert_eq!(v["body"], "line1\nline2");
+        assert_eq!(v["payload"].as_str(), Some("he said \"hi\"\nline2 🙂 \\/ end"));
+        assert!(v["payload"].as_str().unwrap().contains('\n') && v.get("at").is_none());
+    }
+
+    #[test]
+    fn payload_check_event_line_says_ok_or_mismatch_with_the_escaped_payload() {
+        let event = |p: &str| {
+            let ev = serde_json::json!({"type": "opened", "id": 5001, "payload": p, "at": "2026-11-27 14:09:00"});
+            reminder_event_line(&ev.to_string())
+        };
+        let ok = event(PAYLOAD_CHECK);
+        assert_eq!(ok, r#"14:09:00 opened #5001 · payload OK "he said \"hi\"\nline2 🙂 \\/ end""#);
+        // A lost newline, or a stripped backslash, is a mismatch and shows in the escaped text.
+        assert!(event("he said \"hi\" line2 🙂 \\/ end").contains("payload MISMATCH"));
+        assert!(event("he said \"hi\"\nline2 🙂 / end").contains("payload MISMATCH"));
+        let none = reminder_event_line(r#"{"type":"opened","id":5001,"at":"2026-11-27 14:09:00"}"#);
+        assert!(none.contains("payload MISMATCH") && none.contains("<none>"));
+        // Only an `opened` event gets a verdict; a dismissal or snooze of the check shows plainly.
+        let dismissed = reminder_event_line(r#"{"type":"dismissed","id":5001,"at":"2026-11-27 14:09:00"}"#);
+        assert_eq!(dismissed, "14:09:00 dismissed #5001");
+        // Other reminders keep the plain format.
+        assert_eq!(reminder_event_line(r#"{"type":"opened","id":7,"payload":"x","at":"2026-11-27 14:09:00"}"#), "14:09:00 opened #7 · x");
+    }
+
+    #[test]
+    fn far_future_input_is_a_day_plus_i_seconds_out() {
+        let v: serde_json::Value = serde_json::from_str(&far_future_input(2000, 64)).unwrap();
+        assert_eq!((v["id"].as_u64(), v["after_seconds"].as_u64()), (Some(2064), Some(86_464)));
+    }
+
+    #[test]
+    fn fill_check_sends_cancel_all_then_65_schedules_and_counts_the_replies() {
+        let calls = dialog_inputs(Msg::ReminderCheckFill);
+        assert_eq!(calls.len(), 66);
+        assert_eq!(calls[0].1, "cancelAll");
+        assert_eq!((calls[1].2["id"].as_u64(), calls[64].2["id"].as_u64(), calls[65].2["id"].as_u64()), (Some(2001), Some(2064), Some(2065)));
+        let mut c = Check::new(1, "fill to 64", 65, Some(2065));
+        assert!(!c.record(0, true, ""));
+        for id in 2001..=2064 {
+            assert!(!c.record(id, true, ""));
+        }
+        assert!(c.record(2065, false, "pending_limit: 64 pending notifications on iOS"));
+        assert_eq!(c.summary(), "64 ok, 0 failed; #2065: pending_limit: 64 pending notifications on iOS");
+        assert!(!c.record(2066, true, ""), "a stale reply after the end is ignored");
+    }
+
+    #[test]
+    fn replan_check_lists_pending_first_then_cancels_all_then_40_schedules() {
+        let calls = dialog_inputs(Msg::ReminderCheckReplan);
+        assert_eq!(calls.len(), 42);
+        assert_eq!((calls[0].1.as_str(), calls[1].1.as_str()), ("listPending", "cancelAll"));
+        assert_eq!((calls[2].2["id"].as_u64(), calls[41].2["id"].as_u64()), (Some(3001), Some(3040)));
+        let mut c = Check::new(1, "re-plan 40", 40, None);
+        c.before = Some("64".into());
+        assert!((1..=39).all(|i| !c.record(3000 + i, true, "")));
+        assert!(c.record(3040, false, "pending_limit: 64 pending notifications on iOS"));
+        assert_eq!(c.summary(), "before 64 \u{2192} 39 ok, 1 failed (pending_limit: 64 pending notifications on iOS)");
+    }
+
+    #[test]
+    fn a_failed_cancel_all_is_reported_even_after_the_last_schedule_reply() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::ReminderCheckOverlap, &mut model, &mut cx);
+        let gen = model.reminders_gen;
+        app.update(Msg::ReminderCheckStep(gen, 4001, PluginResponse::text(true, "")), &mut model, &mut cx);
+        app.update(Msg::ReminderCheckListed(gen, PluginResponse::text(true, "[]")), &mut model, &mut cx);
+        app.update(Msg::ReminderCheckStep(gen, 0, PluginResponse::text(false, "failed")), &mut model, &mut cx);
+        assert!(model.reminders_status.ends_with("; cancelAll failed: failed"), "{}", model.reminders_status);
+        let mut c = Check::new(1, "x", 1, None);
+        assert!(c.record(1, true, ""));
+        c.record(0, false, "failed");
+        assert!(c.summary().ends_with("cancelAll failed: failed"));
+    }
+
+    #[test]
+    fn replies_of_an_earlier_check_run_are_ignored() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::ReminderCheckFill, &mut model, &mut cx);
+        let old = model.reminders_gen;
+        app.update(Msg::ReminderCheckReplan, &mut model, &mut cx);
+        assert_ne!(old, model.reminders_gen);
+        let before = (model.reminders_check.ok, model.reminders_check.failed, model.reminders_check.left);
+        app.update(Msg::ReminderCheckStep(old, 2001, PluginResponse::text(true, "")), &mut model, &mut cx);
+        app.update(Msg::ReminderCheckStep(old, 3001, PluginResponse::text(false, "pending_limit")), &mut model, &mut cx);
+        app.update(Msg::ReminderCheckBefore(old, PluginResponse::text(true, "[]")), &mut model, &mut cx);
+        app.update(Msg::ReminderCheckListed(old, PluginResponse::text(true, "[]")), &mut model, &mut cx);
+        assert_eq!((model.reminders_check.ok, model.reminders_check.failed, model.reminders_check.left), before);
+        assert!(model.reminders_check.before.is_none() && model.reminders_status.is_empty());
+        // The current run's reply counts.
+        app.update(Msg::ReminderCheckStep(model.reminders_gen, 3001, PluginResponse::text(true, "")), &mut model, &mut cx);
+        assert_eq!(model.reminders_check.ok, 1);
+    }
+
+    #[test]
+    fn replan_result_line_shows_the_pending_count_before() {
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::ReminderCheckReplan, &mut model, &mut cx);
+        let gen = model.reminders_gen;
+        let sixty_four = format!("[{}]", vec![r#"{"id":1,"fire_at":"x","snoozed":false}"#; 64].join(","));
+        app.update(Msg::ReminderCheckBefore(gen, PluginResponse::text(true, sixty_four)), &mut model, &mut cx);
+        for i in 1..=40 {
+            app.update(Msg::ReminderCheckStep(gen, 3000 + i, PluginResponse::text(true, "")), &mut model, &mut cx);
+        }
+        let forty = format!("[{}]", vec![r#"{"id":1,"fire_at":"x","snoozed":false}"#; 40].join(","));
+        app.update(Msg::ReminderCheckListed(gen, PluginResponse::text(true, forty)), &mut model, &mut cx);
+        assert_eq!(model.reminders_status, "re-plan 40: before 64 \u{2192} 40 ok, 0 failed; pending: 40");
+    }
+
+    #[test]
+    fn overlap_check_schedules_the_fall_back_half_past_two_and_lists_its_entry() {
+        let calls = dialog_inputs(Msg::ReminderCheckOverlap);
+        assert_eq!(calls.len(), 1);
+        assert_eq!((calls[0].2["id"].as_u64(), calls[0].2["at"].as_str()), (Some(4001), Some("2027-10-31 02:30")));
+        let (app, mut model) = app();
+        let mut cx = Cx::<Msg>::default();
+        app.update(Msg::ReminderCheckOverlap, &mut model, &mut cx);
+        let gen = model.reminders_gen;
+        app.update(Msg::ReminderCheckStep(gen, 4001, PluginResponse::text(true, "")), &mut model, &mut cx);
+        let list = r#"[{"id":4001,"fire_at":"2027-10-31 02:30:00","snoozed":false}]"#;
+        app.update(Msg::ReminderCheckListed(gen, PluginResponse::text(true, list)), &mut model, &mut cx);
+        assert!(model.reminders_status.starts_with("overlap hour: 1 ok, 0 failed; pending entry {"), "{}", model.reminders_status);
+        assert!(model.reminders_status.contains("2027-10-31 02:30:00"));
     }
 }

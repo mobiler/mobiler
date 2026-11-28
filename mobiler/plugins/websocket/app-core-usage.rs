@@ -31,7 +31,7 @@ impl MyApp {
             }
             Msg::Frame(resp) => {
                 if resp.ok {
-                    model.log.push(format!("recv: {}", resp.output));
+                    model.log.push(format!("recv: {}", resp.as_text().unwrap_or_default()));
                 } else {
                     // output == "closed" → the socket dropped.
                     model.connected = false;

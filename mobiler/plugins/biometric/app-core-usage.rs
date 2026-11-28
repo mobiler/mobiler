@@ -31,12 +31,12 @@ impl MyApp {
                     model.unlocked = true;
                     cx.plugin("securestore", "get", r#"{"key":"auth_token"}"#, Msg::GotToken);
                 } else {
-                    model.status = Some(format!("Auth failed: {}", resp.output));
+                    model.status = Some(format!("Auth failed: {}", resp.as_text().unwrap_or_default()));
                 }
             }
             Msg::GotToken(resp) => {
                 if resp.ok && !resp.output.is_empty() {
-                    model.token = Some(resp.output);
+                    model.token = Some(resp.as_text().unwrap_or_default().to_string());
                 } else {
                     model.status = Some("No token stored yet — log in once.".into());
                 }
@@ -48,7 +48,7 @@ impl MyApp {
                 cx.plugin("securestore", "set", input, Msg::Stored);
             }
             Msg::Stored(resp) => {
-                model.status = Some(if resp.ok { "Saved securely ✓".into() } else { format!("Save failed: {}", resp.output) });
+                model.status = Some(if resp.ok { "Saved securely ✓".into() } else { format!("Save failed: {}", resp.as_text().unwrap_or_default()) });
             }
         }
     }
