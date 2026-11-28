@@ -117,8 +117,9 @@ what restores reminders after an Android force-stop.
 - **Android:** `AlarmManager` (`setAndAllowWhileIdle`, inexact, no exact-alarm permission) fires a
   statically declared receiver, so it works with no live process. Reminders are stored in a registry
   (SharedPreferences `mobiler_notifications`) and **re-armed after a reboot, an app update, a time or
-  time-zone change, and plugin init**. Overdue ones are posted if they are within `late_minutes` of
-  their time and dropped otherwise; that includes `at` reminders a time-zone change moved into the past
+  time-zone change, and plugin init**. `schedule`, `cancel`, `cancelAll`, `listPending` and
+  `removeDelivered` run off the main thread, one at a time in the order the core issued them. Overdue
+  ones are posted if they are within `late_minutes` of their time and dropped otherwise; that includes `at` reminders a time-zone change moved into the past
   (fly east with an afternoon of reminders and only those within `late_minutes` are posted, at once).
   The one exception is an overdue reminder whose alarm is still set and whose time did not move: it is
   merely late (Doze) and fires as soon as the system allows. Needs `POST_NOTIFICATIONS` (API 33+) and
