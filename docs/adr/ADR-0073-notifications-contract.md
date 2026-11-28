@@ -1,6 +1,6 @@
 # ADR-0073: The `notifications` plugin answers its ops with stable failure codes, keeps every Android reminder in a persisted registry that is re-armed after a reboot, an update, a time or time-zone change and plugin init, applies `late_minutes` only to such re-arms, marks everything it creates, and reports what the user did through a buffered `events` stream delivered at least once into the stream
 
-Status:        Accepted
+Status:        Superseded by ADR-0074
 Date decided:  2026-11-27
 Deciding PRs:  #324 (CLI 0.76.0)
 Supersedes:    none

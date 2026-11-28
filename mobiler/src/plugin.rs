@@ -552,14 +552,115 @@ fn check_local_bridge(root: &Path, src: &Source, manifest: &Manifest) -> Result<
     Ok(())
 }
 
-/// Whether a live (not `//`-commented) `static let inOrder` line in Core.swift names `plugin`.
+/// Whether a live `static let inOrder` declaration in Core.swift names `plugin`: the string literals
+/// from the declaration's `[` to its matching `]`, which may span lines. `//` and (nested) `/* */`
+/// comments are skipped, so a name, or a whole declaration, that is only in a comment doesn't count.
 fn in_order_names(core_swift: &str, plugin: &str) -> bool {
-    let quoted = format!("\"{plugin}\"");
-    core_swift
-        .lines()
-        .map(str::trim_start)
-        .filter(|l| !l.starts_with("//"))
-        .any(|l| l.contains("static let inOrder") && l.contains(&quoted))
+    let code = swift_without_comments(core_swift);
+    let decl = "static let inOrder";
+    let mut from = 0;
+    while let Some(at) = code[from..].find(decl) {
+        let start = from + at + decl.len();
+        from = start;
+        // A whole name: `static let inOrderX` is another declaration.
+        if code[start..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        // The value follows the `=`; the type annotation (`: Set<String>`) holds no `[`.
+        let Some(eq) = code[start..].find('=') else { break };
+        let rest = &code[start + eq + 1..];
+        let Some(open) = rest.find('[') else { continue };
+        if !rest[..open].trim().is_empty() {
+            continue; // not an array literal (e.g. a computed value)
+        }
+        if swift_array_strings(&rest[open..]).iter().any(|s| s == plugin) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Swift source with `//` line comments and `/* */` block comments (which nest in Swift) replaced
+/// by spaces, newlines kept. String literals are copied as they are, so a `//` inside one stays.
+fn swift_without_comments(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    let mut depth = 0usize; // block-comment nesting
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        if depth > 0 {
+            if c == '/' && chars.peek() == Some(&'*') {
+                chars.next();
+                depth += 1;
+            } else if c == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                depth -= 1;
+            }
+            out.push(if c == '\n' { '\n' } else { ' ' });
+        } else if in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(n) = chars.next() {
+                    out.push(n);
+                }
+            } else if c == '"' || c == '\n' {
+                in_string = false;
+            }
+        } else if c == '"' {
+            in_string = true;
+            out.push(c);
+        } else if c == '/' && chars.peek() == Some(&'/') {
+            for n in chars.by_ref() {
+                if n == '\n' {
+                    out.push('\n');
+                    break;
+                }
+            }
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            depth = 1;
+            out.push_str("  ");
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The string literals in a comment-free Swift array literal that starts at `[`, up to its matching
+/// `]` (nested brackets count).
+fn swift_array_strings(code: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut depth = 0usize;
+    let mut chars = code.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            '"' => {
+                let mut lit = String::new();
+                while let Some(n) = chars.next() {
+                    match n {
+                        '"' | '\n' => break,
+                        '\\' => {
+                            if let Some(e) = chars.next() {
+                                lit.push(e);
+                            }
+                        }
+                        _ => lit.push(n),
+                    }
+                }
+                found.push(lit);
+            }
+            _ => {}
+        }
+    }
+    found
 }
 
 /// A manifest `permissions` entry as its name and `<uses-permission>` line. An entry may carry a
@@ -1015,6 +1116,64 @@ mod test {
         assert!(!root.join("iOS/Sources/NotificationsPlugin.swift").exists(), "nothing written");
         assert!(!read(&root, "Android/app/src/main/AndroidManifest.xml").contains("NotificationReceiver"));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// An app that reformatted `inOrder` across lines still installs the plugin.
+    #[test]
+    fn add_notifications_accepts_a_multi_line_in_order() {
+        let root = skeleton();
+        with_local_bridge(&root);
+        let core = root.join("iOS/Sources/Core.swift");
+        let text = fs::read_to_string(&core).unwrap().replace(
+            "    static let inOrder: Set<String> = [\"sqlite\", \"notifications\"]\n",
+            "    static let inOrder: Set<String> = [\n        \"sqlite\", // the database\n        /* reminders: */ \"notifications\",\n    ]\n",
+        );
+        assert!(text.contains("        /* reminders: */ \"notifications\",\n"), "fixture changed");
+        fs::write(&core, text).unwrap();
+        add_at(&root, "notifications").expect("a multi-line inOrder naming notifications must pass");
+        assert!(root.join("iOS/Sources/NotificationsPlugin.swift").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A multi-line `inOrder` that names the plugin only inside a comment doesn't count.
+    #[test]
+    fn add_notifications_refuses_a_multi_line_in_order_naming_it_in_a_comment() {
+        for value in [
+            "[\n        \"sqlite\",\n        // \"notifications\",\n    ]",
+            "[\n        \"sqlite\" /* , \"notifications\"\n        */,\n    ]",
+            "[\n        \"sqlite\", /* outer /* \"notifications\" */ still a comment */\n    ]",
+        ] {
+            let root = skeleton();
+            with_local_bridge(&root);
+            let core = root.join("iOS/Sources/Core.swift");
+            let text = fs::read_to_string(&core).unwrap().replace(
+                "    static let inOrder: Set<String> = [\"sqlite\", \"notifications\"]\n",
+                &format!("    static let inOrder: Set<String> = {value}\n"),
+            );
+            assert!(text.contains(value), "fixture changed");
+            fs::write(&core, text).unwrap();
+            let err = format!("{:#}", add_at(&root, "notifications").expect_err(value));
+            assert!(err.contains("Plugins.inOrder"), "{err}");
+            assert!(!root.join("iOS/Sources/NotificationsPlugin.swift").exists(), "nothing written");
+            let _ = fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
+    fn in_order_names_reads_the_declaration_only() {
+        assert!(in_order_names("static let inOrder: Set<String> = [\"sqlite\", \"notifications\"]", "notifications"));
+        // A `//` inside a string is not a comment; the name must be a whole literal.
+        assert!(in_order_names("let url = \"https://x\"\nstatic let inOrder: Set<String> = [\"notifications\"]", "notifications"));
+        assert!(!in_order_names("static let inOrder: Set<String> = [\"notifications-extra\"]", "notifications"));
+        // A name after the closing `]` (another declaration) doesn't count.
+        assert!(!in_order_names("static let inOrder: Set<String> = [\"sqlite\"]\nstatic let other = [\"notifications\"]", "notifications"));
+        // A commented-out declaration doesn't count, nor does one inside a block comment.
+        assert!(!in_order_names("// static let inOrder: Set<String> = [\"notifications\"]\nstatic let inOrder: Set<String> = []", "notifications"));
+        assert!(!in_order_names("/*\nstatic let inOrder: Set<String> = [\"notifications\"]\n*/", "notifications"));
+        // Only the `inOrder` name itself: a longer identifier with that prefix is another declaration.
+        assert!(!in_order_names("static let inOrderX: Set<String> = [\"notifications\"]", "notifications"));
+        assert!(!in_order_names("static let inOrder_old: Set<String> = [\"notifications\"]\nstatic let inOrder: Set<String> = [\"sqlite\"]", "notifications"));
+        assert!(in_order_names("static let inOrderX: Set<String> = []\nstatic let inOrder: Set<String> = [\"notifications\"]", "notifications"));
     }
 
     #[test]

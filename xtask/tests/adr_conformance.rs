@@ -2036,3 +2036,71 @@ fn adr_0073_plugin_declares_rearm_and_marks_every_request() {
         assert!(set.contains("\"notifications\""), "ADR-0073: {path}'s Plugins.inOrder doesn't name notifications");
     }
 }
+
+/// ADR-0074 (superseding ADR-0073's in-order clause): the Android `notifications` plugin hands every op that touches
+/// the registry, the alarms or the tray to `ReminderLane`, one single-thread executor entered with
+/// `withContext(NonCancellable + …)`, so the ops run off the main thread in the order the shell started them; plugin
+/// init queues its re-arm on the same lane. Checked on live code (whole-line, block and trailing `//` comments
+/// removed). Barbershop (ADR-0015) carries the same files.
+#[test]
+fn adr_0074_android_registry_ops_run_on_the_lane() {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let code = |path: &str| strip_line_comments(&live_code(&read(path)));
+    let plugin = code("mobiler/plugins/notifications/android/NotificationsPlugin.kt");
+    let registry = code("mobiler/plugins/notifications/android/ReminderRegistry.kt");
+
+    // The lane: one thread, entered NonCancellable so a queued op is never dropped.
+    let lane = squash(between(&registry, "object ReminderLane {", "\n}\n", "ReminderLane"));
+    assert!(
+        lane.contains("private val executor = Executors.newSingleThreadExecutor {"),
+        "ADR-0074: ReminderLane must be one single-thread executor"
+    );
+    assert!(lane.contains("private val dispatcher = executor.asCoroutineDispatcher()"), "ADR-0074: ReminderLane's dispatcher must be its executor");
+    assert!(
+        lane.contains("suspend fun <T> run(block: () -> T): T = withContext(NonCancellable + dispatcher) { block() }"),
+        "ADR-0074: ReminderLane.run must enter the lane NonCancellable"
+    );
+    assert!(lane.contains("fun post(block: () -> Unit) = executor.execute(block)"), "ADR-0074: ReminderLane.post must queue on the lane");
+    for other in ["newFixedThreadPool", "newCachedThreadPool", "newWorkStealingPool", "Dispatchers.IO", "Dispatchers.Default"] {
+        assert!(!lane.contains(other), "ADR-0074: ReminderLane uses `{other}`");
+    }
+
+    // Every registry/alarm/tray op is dispatched through the lane; the activity ops are not.
+    let handle = squash(between(&plugin, "override suspend fun handle(", "else ->", "NotificationsPlugin.handle"));
+    for (op, call) in [
+        ("schedule", "schedule(input)"),
+        ("cancel", "cancel(input)"),
+        ("cancelAll", "cancelAll()"),
+        ("listPending", "listPending()"),
+        ("removeDelivered", "removeDelivered(input)"),
+    ] {
+        assert!(
+            handle.contains(&format!("\"{op}\" -> ReminderLane.run {{ {call} }}")),
+            "ADR-0074: NotificationsPlugin.handle doesn't run `{op}` on ReminderLane"
+        );
+    }
+    assert!(handle.contains("\"requestPermission\" -> requestPermission()"), "ADR-0074: requestPermission must stay on the main dispatcher");
+    assert!(handle.contains("\"openSettings\" -> openSettings()"), "ADR-0074: openSettings must stay on the main dispatcher");
+    assert!(
+        handle.contains("\"permissionStatus\" -> PluginResponse(true, permissionStatus())"),
+        "ADR-0074: permissionStatus must stay on the main dispatcher"
+    );
+
+    // Plugin init queues the re-arm on the lane; there is no second thread.
+    let init = squash(between(&plugin, "    init {", "\n    }\n", "NotificationsPlugin init"));
+    assert!(
+        init.contains("ReminderLane.post { runCatching { rearmAll(application, System.currentTimeMillis()) } }"),
+        "ADR-0074: plugin init must queue rearmAll on ReminderLane"
+    );
+    assert!(!plugin.contains("Thread("), "ADR-0074: NotificationsPlugin.kt starts a thread of its own");
+
+    // Barbershop carries the same two files.
+    let render = |raw: String| raw.replace("{{PACKAGE_SHARED_TYPES}}", "dev.mobiler.barbershop.shared.types").replace("{{PACKAGE}}", "dev.mobiler.barbershop");
+    for name in ["NotificationsPlugin.kt", "ReminderRegistry.kt"] {
+        assert_eq!(
+            read(&format!("demos/barbershop/Android/app/src/main/java/dev/mobiler/barbershop/{name}")),
+            render(read(&format!("mobiler/plugins/notifications/android/{name}"))),
+            "ADR-0074: barbershop's {name} differs from the bundled plugin: re-run `mobiler plugin add notifications`"
+        );
+    }
+}

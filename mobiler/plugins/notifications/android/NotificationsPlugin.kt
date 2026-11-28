@@ -50,21 +50,25 @@ import org.json.JSONObject
 // LocalOpens; every event is buffered (persisted) until the core subscribes.
 class NotificationsPlugin(private val application: android.app.Application) : MobilerPlugin {
     init {
-        // Alarms are gone after a force-stop (and a reboot the app missed): re-arm on every launch, off
-        // the main thread (disk + binder work); rearmAll holds the registry lock, so ops just wait for it.
-        Thread({ runCatching { rearmAll(application, System.currentTimeMillis()) } }, "mobiler-notif-rearm").start()
+        // Alarms are gone after a force-stop (and a reboot the app missed): re-arm on every launch, on the
+        // lane (disk + binder work, off the main thread). Queued before any op can be, so the app's first
+        // calls (a re-plan) run after it; rearmAll holds the registry lock against the receivers.
+        ReminderLane.post { runCatching { rearmAll(application, System.currentTimeMillis()) } }
         LocalOpens.install(application)
     }
 
+    // The ops that touch the registry, the alarms or the tray run on ReminderLane, one at a time in the
+    // order the shell started them. The permission and settings ops need the activity and touch none of
+    // that, so they stay on the main dispatcher where the shell calls them.
     override suspend fun handle(op: String, input: String): PluginResponse = when (op) {
         "requestPermission" -> requestPermission()
         "permissionStatus" -> PluginResponse(true, permissionStatus())
         "openSettings" -> openSettings()
-        "schedule" -> schedule(input)
-        "cancel" -> cancel(input)
-        "cancelAll" -> cancelAll()
-        "listPending" -> listPending()
-        "removeDelivered" -> removeDelivered(input)
+        "schedule" -> ReminderLane.run { schedule(input) }
+        "cancel" -> ReminderLane.run { cancel(input) }
+        "cancelAll" -> ReminderLane.run { cancelAll() }
+        "listPending" -> ReminderLane.run { listPending() }
+        "removeDelivered" -> ReminderLane.run { removeDelivered(input) }
         else -> PluginResponse(false, "unsupported: unknown op '$op'")
     }
 
@@ -161,9 +165,9 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
         return PluginResponse(false, "failed: no settings page could be opened")
     }
 
-    // Every op runs to completion on the caller's thread without suspending, so calls keep the order
-    // the core issued them in (a cancelAll then 40 schedules leaves exactly those 40). The registry
-    // lock also orders them against the receivers.
+    // Every registry op runs to completion on ReminderLane without suspending, and the lane runs them in
+    // the order the core issued them (a cancelAll then 40 schedules leaves exactly those 40). The
+    // registry lock also orders them against the receivers.
     private fun schedule(input: String): PluginResponse {
         val r = parseSchedule(input, System.currentTimeMillis(), ZoneId.systemDefault())
             .getOrElse { return PluginResponse(false, it.message ?: "invalid_input") }
@@ -214,7 +218,7 @@ class NotificationsPlugin(private val application: android.app.Application) : Mo
     private fun listPending(): PluginResponse {
         val zone = ZoneId.systemDefault()
         val out = JSONArray()
-        // Under the registry lock: the re-arm (plugin init) runs off the main thread.
+        // Under the registry lock: the receivers (firing, snooze, re-arm) run on the main thread, outside the lane.
         val all = synchronized(ReminderRegistry) { ReminderRegistry.all(application) }
         all.sortedWith(compareBy({ it.fireAtMs }, { it.id })).forEach {
             out.put(

@@ -6,6 +6,10 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
+import java.util.concurrent.Executors
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -275,4 +279,26 @@ object ReminderRegistry {
         p.all.keys.filter { it.startsWith(PREFIX) }.forEach { e.remove(it) }
         e.commit()
     }
+}
+
+/**
+ * The one thread the plugin's registry, alarm and tray work runs on (`schedule`, `cancel`, `cancelAll`,
+ * `listPending`, `removeDelivered` and the init re-arm), off the main thread: a re-plan is ~40
+ * `commit()`ed writes plus AlarmManager and NotificationManager calls. One thread, so the calls keep the
+ * order they were submitted in: Core.kt starts each plugin call on the main dispatcher in the order the
+ * core issued it (ADR-0065), and each call queues here before it first suspends. One per process, so a
+ * relaunched activity's new plugin queues behind the old one's calls. The receivers don't use it; the
+ * registry lock (`synchronized(ReminderRegistry)`) orders them against it.
+ */
+object ReminderLane {
+    private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "mobiler-notifications") }
+    private val dispatcher = executor.asCoroutineDispatcher()
+
+    /** Runs [block] on the lane and answers its result. NonCancellable: a call already queued still runs
+     *  when the ViewModel's scope is cancelled, so a `schedule` the core issued is never dropped half-way
+     *  through a re-plan. */
+    suspend fun <T> run(block: () -> T): T = withContext(NonCancellable + dispatcher) { block() }
+
+    /** Queues [block] on the lane without waiting (plugin init's re-arm). */
+    fun post(block: () -> Unit) = executor.execute(block)
 }
