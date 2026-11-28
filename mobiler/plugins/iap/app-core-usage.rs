@@ -13,7 +13,7 @@ pub enum Msg {
     Started(PluginResponse),
     Txn(PluginResponse),
     Restore,
-    Validated(PluginResponse),
+    Validated(HttpOutcome), // cx.post delivers the HTTP outcome, not a PluginResponse
     Finished(PluginResponse),
 }
 
@@ -48,12 +48,14 @@ impl MyApp {
                     cx.post("https://api.example.com/iap/validate", r.as_text().unwrap_or_default().to_string(), Msg::Validated);
                 }
             }
-            Msg::Validated(r) => {
-                if r.ok {
+            Msg::Validated(outcome) => {
+                // A 2xx means the backend confirmed it; any other status, or none (offline), leaves the
+                // transaction unfinished, so the store re-delivers it on the stream later.
+                if outcome.is_success() {
                     // backend confirmed → grant entitlement, then finish the transaction:
-                    // (use the transactionId from the txn; prefix "consume:" + purchaseToken for
-                    //  Android consumables)
-                    let txn_id = r.as_text().unwrap_or_default().to_string();
+                    // (use the transactionId from the txn — here the backend echoes it as its body;
+                    //  prefix "consume:" + purchaseToken for Android consumables)
+                    let txn_id = outcome.text().unwrap_or_default().to_string();
                     cx.plugin("iap", "finish", &txn_id, Msg::Finished);
                 }
             }

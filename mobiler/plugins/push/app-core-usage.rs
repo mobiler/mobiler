@@ -14,7 +14,7 @@ pub enum Msg {
     EnablePush,
     PushToken(PluginResponse),
     PushEvent(PluginResponse),
-    Posted(PluginResponse),
+    Posted(HttpOutcome), // cx.post delivers the HTTP outcome, not a PluginResponse
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -56,7 +56,10 @@ impl MyApp {
                     _ => {}
                 }
             }
-            Msg::Posted(_) => {}
+            // A 2xx means the backend stored the token; anything else (or `None` status: offline), retry later.
+            Msg::Posted(outcome) => {
+                if !outcome.is_success() { /* e.g. keep model.token and re-POST on the next launch */ }
+            }
         }
     }
 }

@@ -16,7 +16,7 @@ const SCHEME: &str = "dev.test.smoke"; // = your app's bundle/application id; re
 pub enum Msg {
     LoginPressed,
     LoggedIn(PluginResponse), // oauth result: output = redirect URL
-    Exchanged(PluginResponse), // http token-exchange result: output = token JSON
+    Exchanged(HttpOutcome), // http token-exchange result: the HTTP outcome, body = token JSON
     Stored(PluginResponse),
 }
 
@@ -64,17 +64,25 @@ impl MyApp {
                     model.verifier
                 );
                 // Form-encoded token exchange (adjust to your provider's expectations).
-                cx.post(TOKEN_ENDPOINT, body, Msg::Exchanged);
+                cx.request("POST", TOKEN_ENDPOINT)
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .body(body)
+                    .send(Msg::Exchanged);
             }
 
             // 3. Persist the tokens securely (Keychain / Keystore).
-            Msg::Exchanged(r) => {
-                if !r.ok {
-                    model.status = Some(format!("Token exchange failed: {}", r.as_text().unwrap_or_default()));
+            Msg::Exchanged(outcome) => {
+                if !outcome.is_success() {
+                    model.status = Some(match &outcome {
+                        HttpOutcome::TransportError { message } => format!("Token exchange failed: {message}"),
+                        HttpOutcome::Response { status, .. } => {
+                            format!("Token exchange failed ({status}): {}", outcome.text().unwrap_or_default())
+                        }
+                    });
                     return;
                 }
-                // r.output is the token JSON; store it (or just the access/refresh tokens).
-                let input = serde_json::json!({ "key": "oauth_tokens", "value": r.as_text().unwrap_or_default() }).to_string();
+                // The body is the token JSON; store it (or just the access/refresh tokens).
+                let input = serde_json::json!({ "key": "oauth_tokens", "value": outcome.text().unwrap_or_default() }).to_string();
                 cx.plugin("securestore", "set", input, Msg::Stored);
             }
             Msg::Stored(r) => {
