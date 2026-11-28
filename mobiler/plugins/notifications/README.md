@@ -9,9 +9,10 @@ alerts, habit nudges. It supports wall-clock times, action buttons (snooze, open
 cancel and list, and an events stream that tells the app what the user did with a reminder.
 
 **Existing apps:** the iOS side needs the notification router in `iOS/Sources/App.swift`
-(`LocalNotificationBridge`). Run `mobiler upgrade --apply` first, then `mobiler plugin add notifications`
-again: upgrade reports a stale plugin body but never rewrites a plugin (ADR-0011). `plugin add` refuses,
-and writes nothing, until `App.swift` has the router.
+(`LocalNotificationBridge`) and `notifications` in `Plugins.inOrder` in `iOS/Sources/Core.swift`. Run
+`mobiler upgrade --apply` first, then `mobiler plugin add notifications` again: upgrade reports a stale
+plugin body but never rewrites a plugin (ADR-0011). `plugin add` refuses, and writes nothing, until
+`App.swift` has the router and `Core.swift`'s `inOrder` names `notifications`.
 
 ## Ops
 
@@ -51,14 +52,16 @@ behind), `pending_limit` (iOS only, see below), `unsupported` (an op or stream t
 - **`actions`**: at most 3. `kind` is `open` (opens the app) or `snooze` (needs `snooze_minutes`,
   1..=1440; re-posts the reminder after that long without opening the app). Action ids are unique,
   non-empty and at most 64 bytes; labels are non-empty.
+- **`title`** and **`body`**: strings of at most 256 and 2048 UTF-8 bytes; longer is `invalid_input`.
 - **`payload`**: an opaque string of at most 1024 UTF-8 bytes, returned in events. Put an id or a short
   JSON object in it, not data.
 - **`late_minutes`**: 0..=10080, default 1440. How late a reminder found overdue during a **re-arm** may
   still be posted (see Android below). It never applies when the alarm itself fires, so a delayed alarm
   is never dropped.
 - A tap on the notification body always opens the app, with or without an `open` action.
-- With no `actions`, `payload` or `late_minutes` the request is the original reminder, so existing
-  callers are unchanged.
+- With no `actions`, `payload` or `late_minutes` the request is the original reminder. Two inputs the
+  old plugin accepted are now `invalid_input`: an `id` given as a string (`"7"`), and a request with
+  neither `at` nor `after_seconds` (it used to fire at once).
 
 ## Events
 
@@ -88,16 +91,23 @@ Each emission is `ok:true` with output:
 
 ## Re-plan pattern
 
-Don't try to keep a long schedule alive. On launch and whenever the plan changes, replace it:
+Don't try to keep a long schedule alive. On launch and whenever the plan changes, replace it. Read
+`listPending` first, and keep the snoozes:
 
 ```rust
-cx.plugin("notifications", "cancelAll", "", Msg::Noop);
-// then, for the next few days of reminders:
-cx.plugin("notifications", "schedule", input, Msg::Noop);
+cx.plugin("notifications", "listPending", "", Msg::Replan);
+// in Msg::Replan(resp): for each pending entry with "snoozed": false, `cancel` {"id": ..};
+// then `schedule` the next few days of reminders, skipping the ids that are snoozed.
 ```
 
-`cancelAll` then ~40 `schedule` calls leaves exactly the new set pending; calls are applied in
-order. iOS holds at most **64** pending notifications, so plan about 10 a day for a few days. A new id
+`cancelAll` would also remove every pending **snooze** and every reminder still in the **tray**: a
+user who pressed "Snooze 10 min" and opened the app five minutes later would lose it. On iOS a snooze
+pressed while the app is dead launches it in the background, so a re-plan run there can follow the
+snooze at once. Use `cancelAll` only when you mean all of that (e.g. the user turned reminders off).
+`app-core-usage.rs` has the full sketch.
+
+The calls are applied in order, so the cancels then ~40 `schedule` calls leave exactly the new set
+pending. iOS holds at most **64** pending notifications, so plan about 10 a day for a few days. A new id
 over the limit fails with `pending_limit: 64 pending notifications on iOS` and adds nothing;
 replacing an id or a snooze never counts as new. Android has no limit. Re-planning on launch is also
 what restores reminders after an Android force-stop.
@@ -108,10 +118,16 @@ what restores reminders after an Android force-stop.
   statically declared receiver, so it works with no live process. Reminders are stored in a registry
   (SharedPreferences `mobiler_notifications`) and **re-armed after a reboot, an app update, a time or
   time-zone change, and plugin init**. Overdue ones are posted if they are within `late_minutes` of
-  their time and dropped otherwise. Needs `POST_NOTIFICATIONS` (API 33+) and
+  their time and dropped otherwise; that includes `at` reminders a time-zone change moved into the past
+  (fly east with an afternoon of reminders and only those within `late_minutes` are posted, at once).
+  The one exception is an overdue reminder whose alarm is still set and whose time did not move: it is
+  merely late (Doze) and fires as soon as the system allows. Needs `POST_NOTIFICATIONS` (API 33+) and
   `RECEIVE_BOOT_COMPLETED`; the plugin adds both and the three receivers.
   **Force-stop** cancels every alarm and blocks the receivers until the user opens the app again; plugin
-  init then re-arms them, which is why you re-plan on launch.
+  init then re-arms them, which is why you re-plan on launch. That re-arm posts, with sound, every
+  reminder missed while stopped that is within `late_minutes` (by default up to a day's worth), just
+  before your re-plan runs (a `cancelAll` there removes them again). Set a smaller `late_minutes` (e.g. 30) to avoid
+  the burst.
 - **iOS:** `UNUserNotificationCenter`. The OS holds the requests and **delivers missed notifications
   itself** after power-on, so `late_minutes` has no effect there. No Info.plist key is needed.
   Snooze runs in the background without bringing the app forward. Notification categories (one per

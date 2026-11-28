@@ -37,6 +37,8 @@ enum ReminderInput {
     static let maxActions = 3
     static let maxActionIdBytes = 64
     static let maxPayloadBytes = 1024
+    static let maxTitleBytes = 256
+    static let maxBodyBytes = 2048
     static let maxLateMinutes: Int64 = 10080
     static let defaultLateMinutes = 1440
 
@@ -51,6 +53,9 @@ enum ReminderInput {
         let id = try intField(o, "id", 1, Int64(Int32.max)).map { Int($0) } ?? 1
         let title = present(o, "title").map { text($0) } ?? ""
         let body = present(o, "body").map { text($0) } ?? ""
+        // Capped as on Android, where both travel in the snooze button's PendingIntent extra.
+        if title.utf8.count > maxTitleBytes { throw invalid("`title` is over \(maxTitleBytes) bytes") }
+        if body.utf8.count > maxBodyBytes { throw invalid("`body` is over \(maxBodyBytes) bytes") }
 
         let atValue = present(o, "at")
         let afterValue = present(o, "after_seconds")

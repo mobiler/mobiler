@@ -53,7 +53,8 @@ plugin, a push reaches only the `push` plugin, and neither plugin needs to know 
   natively. The buffer covers an app without the plugin, or a detach.
 - **Install guard:** `mobiler plugin add notifications` refuses, writing nothing, while the app's `App.swift`
   lacks `final class LocalNotificationBridge` (`check_local_bridge`, beside `check_push_bridge`); the message says
-  to run `mobiler upgrade --apply` first.
+  to run `mobiler upgrade --apply` first. The same check also requires `Core.swift`'s `Plugins.inOrder` to name the
+  plugin (ADR-0073).
 
 **Android: the plugin handles its own taps; no template change.**
 - `LocalOpens` follows `push`'s `PushOpens`: `ActivityLifecycleCallbacks` read the resumed activity's intent. It
@@ -149,7 +150,7 @@ template change; the category was added in review, once the tap PendingIntent wa
 ## 5. Consequences (Positive and Negative Predictions)
 
 - **Positive:** a reminder tap no longer surfaces as a push `opened` on iOS, and a push tap never becomes a reminder
-  event on either platform.
+  event unless the app's own push sender puts `mobiler_local` in it (iOS only, see the Negative below).
 - **Positive:** push-less and notifications-less apps compile and behave as before; the bridge costs one dormant
   object.
 - **Positive:** a snooze or dismissal while the app is dead is handled natively on both platforms (ADR-0036).
@@ -159,7 +160,8 @@ template change; the category was added in review, once the tap PendingIntent wa
 - **Negative:** the key `mobiler_local` is reserved in a notification's `userInfo`. A server push whose payload
   carries it would be routed to the `notifications` plugin on iOS. When the value is a number whose `intValue` is 1
   or more (`reminderId` reads any `NSNumber`, so `true` and `1.5` count too), it becomes an event there. Nothing
-  stops a server sending it.
+  stops a server sending it. Such a push that also carries a registered category and `actions` can drive a
+  snooze too. Only the app's own push sender can do this; another app can't send to it.
 - **Negative:** an iOS reminder scheduled by the pre-marker plugin and still pending across the update is unmarked:
   its tap still takes the push path, as before, until it fires or is replaced. `cancelAll` does reach it
   (identifier `mobiler.<digits>`, ADR-0073).

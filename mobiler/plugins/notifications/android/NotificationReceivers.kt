@@ -167,8 +167,9 @@ fun removeDeliveredReminders(ctx: Context, ids: Collection<Int>?) {
 
 /**
  * Re-arms every registry entry (boot, app update, time / zone change, plugin init): wall-clock ones
- * are re-computed in the current zone, future ones armed, ones late within `late_minutes` posted now,
- * older ones dropped.
+ * are re-computed in the current zone, future ones and unmoved live overdue ones armed, other overdue
+ * ones posted now when late within `late_minutes`, older ones dropped (see rearmDecision). A posted or
+ * dropped entry's alarm is cancelled, alive or not.
  */
 fun rearmAll(ctx: Context, nowMs: Long) {
     val zone = ZoneId.systemDefault()

@@ -3,12 +3,14 @@
 
 use mobiler_core::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Msg {
     AppStarted,
     EnableReminders,
     NotifAllowed(PluginResponse),
+    Replan(PluginResponse),
     Replanned(PluginResponse),
     CancelReminder(i64),
     ShowPending,
@@ -38,7 +40,7 @@ fn schedule_input(r: &Reminder) -> String {
             {"id": "snooze", "label": "Snooze 10 min", "kind": "snooze", "snooze_minutes": 10},
             {"id": "open", "label": "Open", "kind": "open"}
         ],
-        "late_minutes": 30                  // a re-arm after reboot skips reminders older than 30 min
+        "late_minutes": 30                  // a re-arm (reboot, zone change) skips ones over 30 min late
     })
     .to_string()
 }
@@ -50,11 +52,23 @@ impl MyApp {
                 // Listen first so a tap that launched the app is delivered (it is buffered natively).
                 cx.subscribe("notif", "notifications", "events", "", Msg::NotifEvent);
 
-                // Re-plan on every launch: replace the whole schedule with the next few days. This
-                // also restores reminders after an Android force-stop. iOS holds at most 64 pending,
-                // so plan ~10 a day for a few days. Calls are applied in order.
-                cx.plugin("notifications", "cancelAll", "", Msg::Noop);
-                for r in model.upcoming_reminders() {
+                // Re-plan on every launch (this also restores reminders after an Android
+                // force-stop), but read what is pending first: `cancelAll` would also drop a snooze
+                // the user just pressed and clear the tray.
+                cx.plugin("notifications", "listPending", "", Msg::Replan);
+            }
+            Msg::Replan(resp) => {
+                // [{"id":7,"fire_at":"…","snoozed":false}]. Keep snoozes; cancel the rest per id.
+                let pending: Vec<serde_json::Value> = serde_json::from_str(&resp.output).unwrap_or_default();
+                let snoozed: HashSet<i64> = pending.iter()
+                    .filter(|p| p["snoozed"] == true)
+                    .filter_map(|p| p["id"].as_i64())
+                    .collect();
+                for id in pending.iter().filter_map(|p| p["id"].as_i64()).filter(|id| !snoozed.contains(id)) {
+                    cx.plugin("notifications", "cancel", format!(r#"{{"id":{id}}}"#), Msg::Noop);
+                }
+                // The next few days; iOS holds at most 64 pending, so ~10 a day. Calls apply in order.
+                for r in model.upcoming_reminders().into_iter().filter(|r| !snoozed.contains(&r.id)) {
                     cx.plugin("notifications", "schedule", schedule_input(&r), Msg::Replanned);
                 }
             }

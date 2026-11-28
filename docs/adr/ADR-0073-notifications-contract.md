@@ -4,8 +4,8 @@ Status:        Accepted
 Date decided:  2026-11-27
 Deciding PRs:  #TBD (the notifications CLI PR, CLI 0.76.0)
 Supersedes:    none
-Code anchor:   mobiler/plugins/notifications/android/ReminderRegistry.kt (`parseSchedule`, `resolveWall`, `rearmDecision`, `receiverShouldPost`, `snoozeEntry`, `ReminderRegistry`), mobiler/plugins/notifications/android/NotificationReceivers.kt (`LocalNotif`, `alarmIntent`, `armAlarm`, `cancelAlarm`, `postReminder`, `rearmAll`, `NotificationReceiver`, `NotificationRearmReceiver`, `NotificationActionReceiver`), mobiler/plugins/notifications/android/NotificationsPlugin.kt, mobiler/plugins/notifications/android/ReminderEvents.kt (`EventBuffer`), mobiler/plugins/notifications/ios/NotificationsPlugin.swift, mobiler/plugins/notifications/ios/NotificationsInput.swift (`ReminderInput`, `WallTime`), mobiler/plugins/notifications/ios/NotificationsEvents.swift (`NotificationEvents`, `NotificationCategories`, `snooze`), mobiler/plugins/notifications/mobiler-plugin.toml, mobiler/templates/iOS/Sources/Core.swift (`Plugins.inOrder`), demos/barbershop (the same plugin and shell, ADR-0015)
-Conformance:   xtask/tests/adr_conformance.rs::adr_0073_plugin_declares_rearm_and_marks_every_request, mobiler/src/plugin.rs::add_notifications_inserts_receivers_boot_permission_and_app_launch
+Code anchor:   mobiler/plugins/notifications/android/ReminderRegistry.kt (`parseSchedule`, `resolveWall`, `rearmDecision`, `receiverShouldPost`, `snoozeEntry`, `ReminderRegistry`), mobiler/plugins/notifications/android/NotificationReceivers.kt (`LocalNotif`, `alarmIntent`, `armAlarm`, `cancelAlarm`, `postReminder`, `rearmAll`, `NotificationReceiver`, `NotificationRearmReceiver`, `NotificationActionReceiver`), mobiler/plugins/notifications/android/NotificationsPlugin.kt, mobiler/plugins/notifications/android/ReminderEvents.kt (`EventBuffer`), mobiler/plugins/notifications/ios/NotificationsPlugin.swift, mobiler/plugins/notifications/ios/NotificationsInput.swift (`ReminderInput`, `WallTime`), mobiler/plugins/notifications/ios/NotificationsEvents.swift (`NotificationEvents`, `NotificationCategories`, `snooze`), mobiler/plugins/notifications/mobiler-plugin.toml, mobiler/templates/iOS/Sources/Core.swift (`Plugins.inOrder`), mobiler/src/plugin.rs (`check_local_bridge`, `in_order_names`), demos/barbershop (the same plugin and shell, ADR-0015)
+Conformance:   xtask/tests/adr_conformance.rs::adr_0073_plugin_declares_rearm_and_marks_every_request, mobiler/src/plugin.rs::add_notifications_inserts_receivers_boot_permission_and_app_launch, mobiler/src/plugin.rs::add_notifications_refuses_on_old_core_swift
 
 ## 1. Context (The Problem)
 
@@ -23,7 +23,7 @@ codes apps match on, the stored registry an update must still read, the overdue 
 ## 2. Hypothesis
 
 If the plugin keeps the contract below on both platforms, then reminders survive what the platform throws at them
-(within the limits named in §5), existing calls keep working (§5 names the outputs that changed), and
+(within the limits named in §5), existing calls keep working (§5 names the inputs and outputs that changed), and
 the app learns of every interaction at least once, in order.
 
 **Ops and failures.** Input and output are JSON strings in the `{ok, output}` shape (ADR-0003). A failure is
@@ -41,6 +41,8 @@ contract. The ops: `requestPermission`, `permissionStatus`, `openSettings`, `sch
   old reading (a number or numeric string, truncated); below 1 it fires at once on Android and after 1 s on iOS.
 - `actions`: at most 3; kinds `open` and `snooze` (`snooze_minutes` 1..=1440); ids unique, non-empty, at most 64
   UTF-8 bytes; labels non-empty.
+- `title` at most 256 and `body` at most 2048 UTF-8 bytes (on Android both ride in the snooze button's
+  PendingIntent extra).
 - `payload`: a string of at most 1024 UTF-8 bytes. `late_minutes`: 0..=10080, default 1440.
 - Any violation is `invalid_input` and nothing is scheduled. A malformed `cancel` or `removeDelivered` input is
   `invalid_input` too.
@@ -88,10 +90,12 @@ contract. The ops: `requestPermission`, `permissionStatus`, `openSettings`, `sch
   current zone (`rearmDecision`):
   - due in the future → armed;
   - overdue while its alarm still exists (`FLAG_NO_CREATE` finds the PendingIntent: no reboot or force-stop
-    cleared it) → re-armed for its past time, so it fires as soon as the system allows; `late_minutes` doesn't
-    apply, it is merely late;
-  - overdue with its alarm gone → posted now if at most `late_minutes` late (measured from `fire_at_ms`), else
-    dropped.
+    cleared it) **and the re-compute left `fire_at_ms` unchanged** → re-armed for its past time, so it fires as
+    soon as the system allows; `late_minutes` doesn't apply, it is merely late;
+  - any other overdue one (its alarm is gone, or a time-zone change moved it into the past) → posted now if at
+    most `late_minutes` late (measured from the re-computed `fire_at_ms`), else dropped; either way its alarm is
+    cancelled. So flying Belgrade to Tokyo with reminders at 11:00–17:00 and `late_minutes: 30` drops the ones now
+    more than 30 minutes behind instead of firing them all at once.
 - `NotificationActionReceiver` (not exported) handles snooze (writes the snoozed entry, arms it, clears the tray
   entry, buffers `snoozed`) and the delete intent (buffers `dismissed`). Native only, with no core.
 - **Legacy alarms.** An alarm set by the pre-registry plugin has no `mobiler_v2` extra; the firing receiver still
@@ -115,7 +119,9 @@ contract. The ops: `requestPermission`, `permissionStatus`, `openSettings`, `sch
   process and what pending or delivered reminders need: the set only grows. `bootstrap()` re-registers at launch.
 - The ops that read or change the pending set run one at a time on `NotificationsLane`, and `Plugins.inOrder`
   names `notifications` (ADR-0065's mechanism) in the template and every demo, so calls reach the plugin in issue
-  order.
+  order. `mobiler plugin add notifications` refuses, writing nothing, while the app's `Core.swift` has no live
+  `static let inOrder` line naming `"notifications"` (`check_local_bridge`), and says to run
+  `mobiler upgrade --apply` first.
 - `cancelAll` (pending and delivered) and `removeDelivered ""` (delivered) take marked requests and pre-marker
   ones (identifier `mobiler.<digits>`), and nothing else.
 
@@ -163,12 +169,15 @@ answers the current status. `permissionStatus` never prompts.
   - **Validation Metric:** `adr_0073_plugin_declares_rearm_and_marks_every_request`.
 - **Condition 3 — iOS calls keep issue order.**
   - **Validation Metric:** `adr_0073_plugin_declares_rearm_and_marks_every_request` (`Plugins.inOrder` in the
-    template and barbershop; the CLI-managed demos equal the template by ADR-0063's test).
+    template and barbershop; the CLI-managed demos equal the template by ADR-0063's test),
+    `add_notifications_refuses_on_old_core_swift` (an app whose `inOrder` lacks the plugin, or names it only in a
+    comment, can't install it; nothing is written).
 - **Condition 4 — the input rules, wall-clock resolution, re-arm policy, snooze and event buffer.**
   Unit-tested in plain JVM tests in `demos/barbershop/Android/app/src/test/…/ReminderLogicTest.kt`
   (`missingIdDefaultsTo1`, `presentButBadIdIsInvalid`, `bothAtAndAfterIsInvalid`, `pastAtIsPast`,
-  `gapResolvesAfter`, `overlapResolvesEarlier`, `rearmRecomputesWallInNewZone`,
+  `titleAndBodyAreCapped`, `gapResolvesAfter`, `overlapResolvesEarlier`, `rearmRecomputesWallInNewZone`,
   `rearmPostsLateWithinWindowAndDropsTooLate`, `rearmLeavesALiveOverdueAlarmToFire`,
+  `rearmAppliesLateMinutesWhenAZoneChangeMovesALiveAlarmIntoThePast`,
   `receiverIgnoresAnEntryNotYetDue`, `snoozeLeavesANewerScheduleOfTheIdAlone`,
   `reminderJsonRoundTripsQuotesNewlinesNonAscii`, …) and `ReminderEventsTest.kt` (`bufferCapsAt100DropsOldest`,
   `flushInOrderThenEmpty`, `secondSubscriberReplacesFirst`, `crashMidFlushRedeliversRemainder`,
@@ -191,7 +200,8 @@ answers the current status. `permissionStatus` never prompts.
   app and fine to another.
 - **Option D — apply `late_minutes` whenever a reminder is late, also when its alarm fires** `[recorded: docs/superpowers/specs/2026-11-27-notifications-reminders-design.md §4.2]`
   Rejected: "An inexact alarm that Doze delays is on time by definition, so normal delays never drop a reminder."
-  The build extended this to a re-arm that finds the alarm still alive.
+  The build extended this to a re-arm that finds the alarm still alive, but only while the re-compute leaves its
+  time unchanged: a reminder that a time-zone change moved into the past was never delayed by Doze.
 - **Option E — drop a legacy alarm (no registry entry) when it fires** `[recorded: docs/superpowers/specs/2026-11-27-notifications-reminders-design.md §4.3]`
   Rejected: reminders pending across the update would be lost ("never silently disappears").
 - **Option F — end-to-end delivery with an app-side ack op** `[recorded: docs/superpowers/specs/2026-11-27-notifications-reminders-design.md §4.5]`
@@ -244,6 +254,18 @@ change does to a gap time. Those differences are in the plugin README.
   `setAndAllowWhileIdle(` outside armAlarm").
 - Taking `notifications` out of the template's `Plugins.inOrder` failed it ("…/Core.swift's Plugins.inOrder
   doesn't name notifications").
+- Disabling the `Core.swift` check in `check_local_bridge` (`if false && !in_order_names(…)`) failed
+  `add_notifications_refuses_on_old_core_swift` ("an old Core.swift must stop the install"); so did letting
+  `in_order_names` count `//`-commented lines (`.filter(|_l| true)`), since the fixture names `notifications` only
+  in a comment.
+- (JVM, by hand) Restoring the unconditional `alarmAlive -> ARM` in `rearmDecision` failed
+  `rearmAppliesLateMinutesWhenAZoneChangeMovesALiveAlarmIntoThePast` (expected DROP, got ARM). Removing the
+  `title` byte check from `parseSchedule` at first did **not** fail `titleAndBodyAreCapped`: the test's `error(…)`
+  helper called itself instead of `kotlin.error`, parsed its own message as input and "failed" with
+  `invalid_input`, so every negative input assertion passed vacuously. With the helper fixed, removing the
+  `title`, `body` or `payload` byte check, the `at`/`after_seconds` exclusivity check or the repeated-action-id
+  check each failed its test (`titleAndBodyAreCapped`, `payloadOver1024BytesInvalid`, `bothAtAndAfterIsInvalid`,
+  `duplicateActionIdInvalid`).
 
 ## 5. Consequences (Positive and Negative Predictions)
 
@@ -251,18 +273,28 @@ change does to a gap time. Those differences are in the plugin README.
   recovered the next time the app opens.
 - **Positive:** an app can re-plan on every open with `cancelAll` and a batch of `schedule`s and get exactly the new
   set, on both platforms.
-- **Positive:** existing callers of `schedule {after_seconds}` and `cancel` keep working with the same input and
-  the same success answers, and an Android body tap now opens the app.
+- **Positive:** existing callers of `schedule {after_seconds}` and `cancel` that pass a numeric `id` (or none), a
+  `title` and `body` within the caps and an `after_seconds` keep working with the same success answers, and an
+  Android body tap now opens the app.
 - **Negative:** failure outputs changed from free text (`invalid input JSON`) to the codes, and Android 13+'s
   `requestPermission` now waits for the user and answers `granted` or `denied` where it answered `requested`. An
   app that matched the old strings has to follow.
+- **Negative:** some inputs the old plugin accepted are now `invalid_input`: a string `id` (`"7"`, which the old
+  Android plugin read as 7 and the old iOS one as 1), a `schedule` with neither `at` nor `after_seconds` (it fired at once), and a `title`
+  over 256 or `body` over 2048 UTF-8 bytes.
 - **Negative:** delivery is at-least-once into the stream, not end-to-end: an app must tolerate a duplicate event
   after a crash mid-flush, and loses an event handed to the stream if the process dies or the subscription ends
   first.
 - **Negative:** a legacy Android alarm isn't reached by `cancelAll`; it fires once after the update unless its id
   is cancelled or re-scheduled.
 - **Negative:** a force-stop cancels every Android alarm and blocks the receivers until the app is opened again;
-  only re-planning on launch covers it.
+  only re-planning on launch covers it. The init re-arm then posts, with sound, every missed reminder within
+  `late_minutes` (up to a day's worth by default), racing the app's re-plan; the README says to lower
+  `late_minutes` to avoid the burst.
+- **Negative:** `cancelAll` removes pending snoozes and every delivered reminder, so a re-plan built on it loses a
+  snooze the user just pressed (on iOS a snooze with the app dead launches it in the background, where a re-plan
+  can follow at once). The README's re-plan reads `listPending` first, keeps snoozed ids and cancels the rest by
+  id.
 - **Negative:** `late_minutes` has no effect on iOS.
 - **Negative:** after a time-zone change, a gap-time reminder fires at the resolved 03:00 on iOS but at the
   requested 02:30 on Android when that time exists in the new zone.

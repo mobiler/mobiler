@@ -280,3 +280,15 @@ cx.subscribe("notif", "notifications", "events", "", |r| Msg::NotifEvent(r));
   the response (at most 32, oldest dropped); `attach` replays buffered responses in order with a no-op completion.
   The plugin attaches in `didFinishLaunching` (`app_launch`), before iOS delivers a launch response, so the
   buffer only covers an app without the plugin or a detach.
+
+## Amendment 2026-11-28 (final review)
+
+- **Re-arm:** an overdue reminder whose alarm is still alive skips `late_minutes` only when the re-compute did not
+  move its time. A time-zone change that moves an `at` reminder into the past (Belgrade to Tokyo) is subject to
+  `late_minutes` like any other overdue one, so a day of reminders doesn't fire at once.
+- **Input caps:** `title` at most 256 and `body` at most 2048 UTF-8 bytes, else `invalid_input`, on both
+  platforms. On Android both travel in the snooze button's PendingIntent extra.
+- **Re-plan guidance:** the README tells apps to read `listPending` first, keep snoozed ids and `cancel` the rest
+  per id, because `cancelAll` also drops pending snoozes and clears the tray.
+- **Install guard:** `plugin add notifications` also refuses while `iOS/Sources/Core.swift`'s `Plugins.inOrder`
+  doesn't name `notifications`.

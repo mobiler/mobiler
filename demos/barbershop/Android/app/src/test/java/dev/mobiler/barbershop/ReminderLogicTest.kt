@@ -19,7 +19,9 @@ class ReminderLogicTest {
 
     private fun parse(json: String) = parseSchedule(json, now, zone)
     private fun error(json: String): String =
-        parse(json).exceptionOrNull()?.message ?: error("expected a failure for $json")
+        // kotlin.error, not this helper: a bare error(…) here would parse its own message as input and
+        // "fail" with invalid_input, so every negative assertion would pass vacuously.
+        parse(json).exceptionOrNull()?.message ?: kotlin.error("expected a failure for $json")
 
     private fun actions(vararg a: String) = a.joinToString(",", "[", "]")
     private fun snooze(id: String, minutes: Int) =
@@ -105,6 +107,16 @@ class ReminderLogicTest {
         val tooLong = ok + "a" // 1025 bytes
         assertTrue(error("""{"id":3,"after_seconds":5,"payload":"$tooLong"}""").startsWith("invalid_input"))
         assertTrue(error("""{"id":3,"after_seconds":5,"payload":42}""").startsWith("invalid_input"))
+    }
+
+    @Test fun titleAndBodyAreCapped() {
+        // 256 / 2048 UTF-8 bytes pass; one byte more is invalid_input (they ride the snooze PendingIntent).
+        val title = "é".repeat(128) // 256 bytes
+        assertEquals(title, parse("""{"id":3,"after_seconds":5,"title":"$title"}""").getOrThrow().title)
+        assertTrue(error("""{"id":3,"after_seconds":5,"title":"${title}a"}""").startsWith("invalid_input"))
+        val body = "é".repeat(1024) // 2048 bytes
+        assertEquals(body, parse("""{"id":3,"after_seconds":5,"body":"$body"}""").getOrThrow().body)
+        assertTrue(error("""{"id":3,"after_seconds":5,"body":"${body}a"}""").startsWith("invalid_input"))
     }
 
     @Test fun lateMinutesDefault1440() {
@@ -209,6 +221,22 @@ class ReminderLogicTest {
         val (d, u) = rearmDecision(future, now, london, alarmAlive = true)
         assertEquals(RearmDecision.ARM, d)
         assertEquals(ZonedDateTime.of(2027, 1, 2, 9, 0, 0, 0, london).toInstant().toEpochMilli(), u.fireAtMs)
+    }
+
+    @Test fun rearmAppliesLateMinutesWhenAZoneChangeMovesALiveAlarmIntoThePast() {
+        // Belgrade → Tokyo (+8 h) at 12:00 Belgrade: the 13:00 reminder, an hour ahead, is now 13:00 in
+        // Tokyo, 7 h behind. Its alarm is alive, but the time moved, so late_minutes applies: dropped
+        // beyond the window, posted within it.
+        val tokyo = ZoneId.of("Asia/Tokyo")
+        val moved = wallReminder("2027-01-01 13:00:00", late = 30)
+        val (d, u) = rearmDecision(moved, now, tokyo, alarmAlive = true)
+        assertEquals(RearmDecision.DROP, d)
+        assertEquals(ZonedDateTime.of(2027, 1, 1, 13, 0, 0, 0, tokyo).toInstant().toEpochMilli(), u.fireAtMs)
+        val wide = wallReminder("2027-01-01 13:00:00", late = 480)
+        assertEquals(RearmDecision.POST, rearmDecision(wide, now, tokyo, alarmAlive = true).first)
+        // Unmoved (same zone): a live overdue alarm is merely late and still left to fire.
+        val unmoved = wallReminder("2027-01-01 11:00:00", late = 30) // 60 min late, same zone
+        assertEquals(RearmDecision.ARM, rearmDecision(unmoved, now, zone, alarmAlive = true).first)
     }
 
     @Test fun receiverIgnoresAnEntryNotYetDue() {

@@ -67,6 +67,8 @@ private const val MAX_LATE_MINUTES = 10080L
 private const val MAX_ACTIONS = 3
 private const val MAX_ACTION_ID_BYTES = 64
 private const val MAX_PAYLOAD_BYTES = 1024
+private const val MAX_TITLE_BYTES = 256
+private const val MAX_BODY_BYTES = 2048
 
 private class ScheduleError(message: String) : IllegalArgumentException(message)
 private fun invalid(detail: String): Nothing = throw ScheduleError("invalid_input: $detail")
@@ -88,6 +90,9 @@ private fun parseScheduleOrThrow(input: String, nowMs: Long, zone: ZoneId): Remi
     val id = intField(o, "id", 1L..Int.MAX_VALUE.toLong())?.toInt() ?: 1
     val title = if (o.isNull("title")) "" else o.optString("title")
     val body = if (o.isNull("body")) "" else o.optString("body")
+    // Capped: both travel in the snooze button's PendingIntent extra, which a huge body would overflow.
+    if (utf8Len(title) > MAX_TITLE_BYTES) invalid("`title` is over $MAX_TITLE_BYTES bytes")
+    if (utf8Len(body) > MAX_BODY_BYTES) invalid("`body` is over $MAX_BODY_BYTES bytes")
 
     val hasAt = !o.isNull("at")
     val hasAfter = !o.isNull("after_seconds")
@@ -201,9 +206,11 @@ enum class RearmDecision { ARM, POST, DROP }
  * What a re-arm (boot, app update, time or zone change, plugin init) does with one entry. A wall-clock
  * reminder (not a snooze) is re-computed in `zone` first. Then:
  * - a future one is armed;
- * - an overdue one whose alarm is still alive (no reboot or force-stop cleared it) is merely late, as
- *   an inexact alarm may be: it is re-armed and fires at once, and `late_minutes` never applies to it;
- * - an overdue one whose alarm is gone is posted now if late by at most `late_minutes`, else dropped.
+ * - an overdue one whose alarm is still alive (no reboot or force-stop cleared it) and whose time the
+ *   re-compute did not move is merely late, as an inexact alarm may be: it is re-armed and fires at
+ *   once, and `late_minutes` never applies to it;
+ * - any other overdue one (its alarm is gone, or a time-zone change moved it into the past) is posted
+ *   now if late by at most `late_minutes`, else dropped. The caller cancels the alarm of either.
  */
 fun rearmDecision(r: Reminder, nowMs: Long, zone: ZoneId, alarmAlive: Boolean): Pair<RearmDecision, Reminder> {
     val updated = if (r.wall != null && !r.snoozed) {
@@ -211,7 +218,9 @@ fun rearmDecision(r: Reminder, nowMs: Long, zone: ZoneId, alarmAlive: Boolean): 
     } else r
     val decision = when {
         updated.fireAtMs > nowMs -> RearmDecision.ARM
-        alarmAlive -> RearmDecision.ARM
+        // Only an unmoved time: after a zone change (Belgrade → Tokyo) a day of reminders now in the
+        // past would otherwise all fire at once, whatever their `late_minutes`.
+        alarmAlive && updated.fireAtMs == r.fireAtMs -> RearmDecision.ARM
         nowMs - updated.fireAtMs <= updated.lateMinutes * 60_000L -> RearmDecision.POST
         else -> RearmDecision.DROP
     }
