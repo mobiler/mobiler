@@ -519,21 +519,47 @@ fn check_push_bridge(root: &Path, src: &Source, manifest: &Manifest) -> Result<(
 }
 
 /// The notifications plugin's iOS sources route through `LocalNotificationBridge`, which lives in the
-/// app's App.swift (the notification-delegate router), not in the plugin. Checked before writing
-/// anything: an App.swift that predates it wouldn't compile.
+/// app's App.swift (the notification-delegate router), not in the plugin, and rely on the app's
+/// Core.swift running their calls in issue order (`Plugins.inOrder` names the plugin, ADR-0065).
+/// Checked before writing anything: an App.swift that predates the bridge wouldn't compile, and a
+/// Core.swift whose merge kept the old `inOrder` would compile but run a re-plan's `cancelAll` and
+/// `schedule`s in any order.
 fn check_local_bridge(root: &Path, src: &Source, manifest: &Manifest) -> Result<()> {
     if let Some(i) = &manifest.ios {
         let needs_bridge = i.sources.iter().any(|rel| src.read_text(rel).is_ok_and(|t| t.contains("LocalNotificationBridge")));
+        if !needs_bridge {
+            return Ok(());
+        }
         let app_swift = fs::read_to_string(root.join("iOS/Sources/App.swift")).unwrap_or_default();
-        if needs_bridge && !app_swift.contains("final class LocalNotificationBridge") {
+        if !app_swift.contains("final class LocalNotificationBridge") {
             bail!(
                 "`{}` needs a newer iOS/Sources/App.swift (LocalNotificationBridge). Run `mobiler upgrade --apply` first, then re-run `mobiler plugin add {}`.",
                 manifest.name,
                 manifest.name
             );
         }
+        let core_swift = fs::read_to_string(root.join("iOS/Sources/Core.swift")).unwrap_or_default();
+        if !in_order_names(&core_swift, &manifest.name) {
+            bail!(
+                "`{}` needs iOS/Sources/Core.swift's `Plugins.inOrder` to name \"{}\", so its calls run in the order the core issues them. Run `mobiler upgrade --apply` first (or add \"{}\" to `inOrder` by hand), then re-run `mobiler plugin add {}`.",
+                manifest.name,
+                manifest.name,
+                manifest.name,
+                manifest.name
+            );
+        }
     }
     Ok(())
+}
+
+/// Whether a live (not `//`-commented) `static let inOrder` line in Core.swift names `plugin`.
+fn in_order_names(core_swift: &str, plugin: &str) -> bool {
+    let quoted = format!("\"{plugin}\"");
+    core_swift
+        .lines()
+        .map(str::trim_start)
+        .filter(|l| !l.starts_with("//"))
+        .any(|l| l.contains("static let inOrder") && l.contains(&quoted))
 }
 
 /// A manifest `permissions` entry as its name and `<uses-permission>` line. An entry may carry a
@@ -916,7 +942,8 @@ mod test {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// An App.swift that carries the local-notification router (Task 7 puts the real one in the template).
+    /// An App.swift that carries the local-notification router (Task 7 puts the real one in the template),
+    /// and a Core.swift whose `Plugins.inOrder` names `notifications`, as the template's does.
     fn with_local_bridge(root: &Path) {
         let path = root.join("iOS/Sources/App.swift");
         let app = fs::read_to_string(&path).unwrap();
@@ -925,6 +952,9 @@ mod test {
             format!("final class LocalNotificationBridge {{\n    static let markerKey = \"mobiler_local\"\n}}\nfinal class PushBridge {{\n    func detach(_ id: Int) {{}}\n}}\n{app}"),
         )
         .unwrap();
+        let core = root.join("iOS/Sources/Core.swift");
+        let text = fs::read_to_string(&core).unwrap();
+        fs::write(&core, format!("{text}enum Plugins {{\n    static let inOrder: Set<String> = [\"sqlite\", \"notifications\"]\n}}\n")).unwrap();
     }
 
     #[test]
@@ -958,6 +988,28 @@ mod test {
         .unwrap();
         let err = format!("{:#}", add_at(&root, "notifications").expect_err("an old App.swift must stop the install"));
         assert!(err.contains("LocalNotificationBridge"), "{err}");
+        assert!(err.contains("mobiler upgrade --apply"), "{err}");
+        assert!(err.contains("mobiler plugin add notifications"), "{err}");
+        assert!(!root.join("iOS/Sources/NotificationsPlugin.swift").exists(), "nothing written");
+        assert!(!read(&root, "Android/app/src/main/AndroidManifest.xml").contains("NotificationReceiver"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// An app whose App.swift has the router but whose Core.swift merge kept the old `inOrder` (only
+    /// `sqlite`) would install fine and run iOS calls out of order: refused, nothing written. A
+    /// commented-out line naming the plugin doesn't count.
+    #[test]
+    fn add_notifications_refuses_on_old_core_swift() {
+        let root = skeleton();
+        with_local_bridge(&root);
+        let core = root.join("iOS/Sources/Core.swift");
+        let text = fs::read_to_string(&core).unwrap().replace(
+            "    static let inOrder: Set<String> = [\"sqlite\", \"notifications\"]\n",
+            "    // static let inOrder: Set<String> = [\"sqlite\", \"notifications\"]\n    static let inOrder: Set<String> = [\"sqlite\"]\n",
+        );
+        fs::write(&core, text).unwrap();
+        let err = format!("{:#}", add_at(&root, "notifications").expect_err("an old Core.swift must stop the install"));
+        assert!(err.contains("Plugins.inOrder"), "{err}");
         assert!(err.contains("mobiler upgrade --apply"), "{err}");
         assert!(err.contains("mobiler plugin add notifications"), "{err}");
         assert!(!root.join("iOS/Sources/NotificationsPlugin.swift").exists(), "nothing written");
